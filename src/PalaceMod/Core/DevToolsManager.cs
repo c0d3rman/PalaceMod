@@ -10,27 +10,39 @@ using UnityEngine.SceneManagement;
     Development hooks used by scripts/dev.py. Inactive unless the game was started with PALACEMOD_DEV=1.
     - Keeps the game running and rendering while its window is unfocused.
     - Captures a screenshot when dev.py drops a request file containing the output path.
-    - Runs commands from a request file so an agent can drive the game without a human:
-        scenes                 list the scenes in the build
-        menu | levelselect     go to the main menu or level select
-        level <scene>          load a level directly
-        run <h> <v> <seconds>  hold the movement stick (each axis -1..1) for a while
-        circle <seconds>       run in a circle, for testing camera motion
-        sprint <on|off>        hold sprint while running
-        stop                   release all fake input
-        settings               open the Settings screen on the Mods tab
-        ui [up|down|left|right|apply|close]   navigate the open menu like a controller; prints the selection
-        mute [off]           mute or unmute the game (dev launches start muted unless PALACEMOD_SOUND=1)
-        night                  start the next night (wave) now
-        timescale <x>          set Time.timeScale
-        resolutions            list the current and available display modes
-        setres <w> <h> <hz>    switch display mode (keeps the fullscreen mode)
-    Each command logs "Dev command done: <command>" or "Dev command failed: <command>: <reason>".
+    - Runs commands from a request file so an agent can drive the game without a human. `dev.py cmd help` lists them:
+      the built-ins in BuiltIns below plus everything features register with DevCommands.Register.
+    A request is "@<id>" followed by command lines. Each result goes to command-<id>.response ("ok" or "error" on the
+    first line, then the text), which dev.py prints, and to the log as "Dev command done/failed: <command>".
 */
 namespace PalaceMod
 {
+    [ManagerOrder(-100)]
     public class DevToolsManager : BaseManager
     {
+        private static readonly string[] BuiltIns =
+        [
+            "help                   list commands",
+            "scenes                 list the scenes in the build",
+            "menu | levelselect     go to the main menu or level select",
+            "level <scene>          load a level directly",
+            "run <h> <v> <seconds>  hold the movement stick (each axis -1..1) for a while",
+            "circle <seconds>       run in a circle, for testing camera motion",
+            "sprint <on|off>        hold sprint while running",
+            "stop                   release all fake input",
+            "settings               open the Settings screen on the Mods tab",
+            "ui [up|down|left|right|apply|close]   navigate the open menu like a controller; prints the selection",
+            "mute [off]             mute or unmute the game (dev launches start muted unless PALACEMOD_SOUND=1)",
+            "night                  start the next night (wave) now",
+            "timescale <x>          set Time.timeScale",
+            "resolutions            list the current and available display modes",
+            "setres <w> <h> <hz>    switch display mode (keeps the fullscreen mode)",
+        ];
+
+        internal static bool IsBuiltIn(string name) =>
+            BuiltIns.Any(usage => usage.Split(' ')[0].Equals(name, StringComparison.OrdinalIgnoreCase)) ||
+            name.Equals("levelselect", StringComparison.OrdinalIgnoreCase);
+
         private static readonly string DevDir = Path.Combine(Paths.BepInExRootPath, "PalaceMod-dev");
         private static readonly string ScreenshotRequest = Path.Combine(DevDir, "screenshot.request");
         private static readonly string CommandRequest = Path.Combine(DevDir, "command.request");
@@ -57,6 +69,8 @@ namespace PalaceMod
             Directory.CreateDirectory(DevDir);
             File.Delete(ScreenshotRequest);
             File.Delete(CommandRequest);
+            foreach (string stale in Directory.GetFiles(DevDir, "command-*.response*")) File.Delete(stale);
+            RegisterCommands();
             Plugin.Logger.LogInfo("Dev tools enabled");
         }
 
@@ -78,21 +92,61 @@ namespace PalaceMod
 
             if (File.Exists(CommandRequest))
             {
-                string[] commands = File.ReadAllLines(CommandRequest);
+                string[] lines = File.ReadAllLines(CommandRequest);
                 File.Delete(CommandRequest);
-                foreach (string command in commands.Select(c => c.Trim()).Where(c => c.Length > 0))
+                string id = null;
+                foreach (string line in lines.Select(c => c.Trim()).Where(c => c.Length > 0))
                 {
+                    if (line.StartsWith("@"))
+                    {
+                        id = line.Substring(1);
+                        continue;
+                    }
+                    bool ok;
+                    string text;
                     try
                     {
-                        string result = Run(command.Split([' '], StringSplitOptions.RemoveEmptyEntries));
-                        Plugin.Logger.LogInfo($"Dev command done: {command}{(string.IsNullOrEmpty(result) ? "" : $": {result}")}");
+                        text = Run(line.Split([' '], StringSplitOptions.RemoveEmptyEntries)) ?? "";
+                        ok = true;
+                        Plugin.Logger.LogInfo($"Dev command done: {line}{(text.Length == 0 ? "" : $": {text}")}");
                     }
                     catch (Exception e)
                     {
-                        Plugin.Logger.LogInfo($"Dev command failed: {command}: {e.Message}");
+                        text = e is ArgumentException or InvalidOperationException or FormatException ? e.Message : e.ToString();
+                        ok = false;
+                        Plugin.Logger.LogInfo($"Dev command failed: {line}: {text}");
                     }
+                    if (id != null) WriteResponse(id, ok, text);
                 }
             }
+        }
+
+        private static void WriteResponse(string id, bool ok, string text)
+        {
+            if (id.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return;
+            string path = Path.Combine(DevDir, $"command-{id}.response");
+            File.WriteAllText(path + ".tmp", $"{(ok ? "ok" : "error")}\n{text}");
+            File.Delete(path);
+            File.Move(path + ".tmp", path);
+        }
+
+        // Commands about the foundation APIs, registered through DevCommands like a feature's would be.
+        private void RegisterCommands()
+        {
+            DevCommands.Register("features", "features               list managers: enabled or not, and how many game methods they patch", _ =>
+                "\n" + string.Join("\n", Plugin.Managers.Select(m =>
+                    $"{m.GetType().Name}: {(m.FeatureSection == null ? "always on" : m.IsEnabled ? "enabled" : "disabled")}, {m.PatchedMethodCount} patched methods")));
+            DevCommands.Register("impact", "impact [mark <reason>] show (or record) this run's gameplay-impact reasons", args =>
+            {
+                if (args.Length >= 2 && args[0] == "mark") GameplayImpact.Mark(string.Join(" ", args.Skip(1)));
+                else if (args.Length > 0) throw new ArgumentException("usage: impact [mark <reason>]");
+                return GameplayImpact.Any ? string.Join(", ", GameplayImpact.Reasons) : "none";
+            });
+            DevCommands.Register("notify", "notify <text>          show a notification", args =>
+            {
+                Notify.Show(string.Join(" ", args), key: "dev-notify");
+                return "";
+            });
         }
 
         private string Run(string[] args)
@@ -171,8 +225,11 @@ namespace PalaceMod
                     Screen.SetResolution(int.Parse(args[1]), int.Parse(args[2]), Screen.fullScreenMode,
                         new RefreshRate { numerator = uint.Parse(args[3]), denominator = 1 });
                     return "";
+                case "help":
+                    return "\n" + string.Join("\n", BuiltIns.Concat(DevCommands.All.Select(c => c.Usage)));
                 default:
-                    throw new ArgumentException("unknown command");
+                    if (DevCommands.TryGet(args[0], out var command)) return command.Handler(args.Skip(1).ToArray());
+                    throw new ArgumentException("unknown command; `dev.py cmd help` lists them");
             }
         }
 

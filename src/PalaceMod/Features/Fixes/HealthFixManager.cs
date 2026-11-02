@@ -12,6 +12,9 @@ namespace PalaceMod
 {
     public class HealthFixManager : BaseManager
     {
+        public override string FeatureSection => "Unit health fix";
+        public override string FeatureDescription => "Restores full health to units with fractional max HP (such as berserkers) that a loaded save rounded down.";
+
         [HarmonyPatch(typeof(Hp), "Start")]
         private class Hp_Start_Patch
         {

@@ -10,17 +10,31 @@ python3 scripts/dev.py setup         # once per checkout/worktree: restores tool
 python3 scripts/dev.py run           # build -> stop game -> install -> launch -> wait for BepInEx -> print errors
 python3 scripts/dev.py logs --errors # unique errors with stack traces from the current game session
 python3 scripts/dev.py screenshot    # in-game frame capture (works while unfocused); prints the PNG path
-python3 scripts/dev.py stop          # quit the game and restore the player's display settings
+python3 scripts/dev.py stop          # quit the game, restore the player's display settings and config, release the lease
 python3 scripts/dev.py cmd "<command>"  # drive a dev launch: load levels, start nights, fake input, open/navigate menus
+python3 scripts/dev.py config get|set <Section>.<Key> [value]  # read/edit PalaceMod.cfg; the game reloads it live
+python3 scripts/dev.py land          # merge your branch into overhaul (see Landing)
 ```
 
 Dev launches are windowed, muted (`--sound` to keep audio) and hand focus back to the app that was in front (`--focus` lets the game keep it). Don't launch `--fullscreen` unless you need to: it switches the user to a new Space.
 
 A feature is not done until `run` reports `PalaceMod loaded: yes` and no PalaceMod errors. The one expected error is `HookGenPatcher ... Could not load file or assembly 'MonoMod'`, which comes from a BepInEx patcher and is harmless.
 
-Always finish with `dev.py stop`, so the game isn't left running and the player's fullscreen settings are restored.
+Always finish with `dev.py stop`, so the game isn't left running and the player's settings are restored.
 
-There is one game install, so only one session can test at a time. The checkout that launched the game owns it, and `run`, `stop` and `screenshot` refuse to act on a game another checkout launched. If you're refused, wait and retry. Use `--force` only if the other session is definitely gone.
+## The game lease
+
+Many agents share one game install (the game, the installed DLL, `BepInEx/config`), so it's leased to one checkout at a time.
+
+- `run` (also `launch`, `install`, `lease acquire`) takes the lease and you keep it through build, install, launch and testing until `stop` (or `lease release`). `cmd`, `screenshot` and `config` need the lease.
+- If another checkout holds it, `run` waits in a FIFO queue and prints your position. Run it in a background shell so you're woken when it finishes. `--wait SECONDS` caps the wait (default 1 h, `0` = don't wait). If the lease doesn't come free in time, `run` exits with code 75. `lease status` shows the holder, the queue and idle times.
+- Hold the game briefly. Batch your tests, then `stop` immediately; don't hold it while you write code. Every dev.py call you make refreshes the lease. After 10 min idle it expires: the next dev.py call from any checkout stops your game and frees it.
+- `BepInEx/config/PalaceMod.cfg` is also the player's real config. Taking the lease snapshots `BepInEx/config`, and `stop` or expiry puts it back exactly. Each `run` starts the game from default settings; use `--set "Section.Key=value"` (repeatable) to start with other values, or `--keep-config`. Never edit the cfg without the lease; use `dev.py config set`.
+- Use `--force` (on `stop` or `lease release`) only if the holder is definitely gone.
+
+## Landing
+
+When your feature is done and verified, commit, then run `python3 scripts/dev.py land` from your worktree. It refuses if you have uncommitted changes. It merges your branch into `overhaul` (`--no-ff`, in the `.claude/worktrees/overhaul` worktree, one lander at a time), builds there, and prints the new overhaul commit. If the merge conflicts or the build fails, it undoes the merge. Then run `git merge overhaul` in your worktree (or rebase onto it), fix the problem, commit and land again. Never commit in the overhaul worktree by hand.
 
 ## How the Mac setup works
 
@@ -33,7 +47,7 @@ There is one game install, so only one session can test at a time. The checkout 
 
 ## Verifying in-game behavior
 
-Drive the game yourself instead of asking the user to click through it. `dev.py cmd` sends commands to `Core/DevToolsManager.cs` (the full list is in its header comment), for example:
+Drive the game yourself instead of asking the user to click through it. `dev.py cmd` sends commands to the mod and prints the result. `dev.py cmd help` lists them. For example:
 
 ```sh
 python3 scripts/dev.py cmd scenes            # list scenes
@@ -46,18 +60,30 @@ python3 scripts/dev.py cmd "ui down"         # navigate the open menu like a con
 
 Then check the result with `dev.py logs` (log what features do with `Plugin.Logger.LogInfo`) and `dev.py screenshot`. `PerformanceManager` logs a frame-time summary (fps, percentiles, CPU work per frame, frame-rate cap and reason) every "Summary interval"; settings edited in `BepInEx/config/PalaceMod.cfg` are reloaded live within 2 s. Only ask the user to test what genuinely needs a human, like how motion looks.
 
-## Code layout and conventions
+## Adding a feature
 
-- Settings are BepInEx `ConfigEntry`s. `Features/UI/SettingsPaneManager.cs` generates the in-game Settings > Mods tab from them: bool = checkbox, enum or `AcceptableValueList` = selector, `AcceptableValueRange` = slider. Give every entry a description (shown beside the selected row) and, where useful, a `SettingTags` tag for units, a label for 0 and slider steps.
-- `src/PalaceMod/Plugin.cs` registers the managers. Harmony patches are applied only for registered managers and the patch classes nested inside them, so new patch classes go inside their manager.
-- Each feature is one `BaseManager` subclass under `Features/<Area>/`. Don't register managers from `Experimental/`.
-- `Plugin.Update` isolates managers from each other's exceptions, and each distinct error is logged once.
+- A feature is one `BaseManager` subclass in its own file under `src/PalaceMod/Features/<Area>/`. It's found automatically; never edit `Plugin.cs`. Harmony patch classes go nested inside the manager, and only those are applied. Managers in `Experimental/` (namespace `PalaceMod.Experimental`) are never loaded.
+- Override `FeatureSection` (its settings section, e.g. `"Formations"`) and `FeatureDescription`. That adds a `<Section>.Enabled` switch as the first row of its page in Settings > Mods. While the feature is disabled, `Update` isn't called and its patches are removed. `Awake` and `Start` always run. Undo anything visible in `OnFeatureDisabled()`; the hooks fire live when the setting changes. To keep patches applied, override `UnpatchWhenDisabled => false` and early-out with `if (!Feature<MyManager>.On) return;`. Use `Feature<T>.Instance` to reach a manager from static code. Infrastructure managers leave `FeatureSection` null.
+- Settings: bind `ConfigEntry`s in the feature's own section in `Awake`. Give every entry a real description, shown beside the selected row. Use bool, enum or `AcceptableValueList`, or `AcceptableValueRange` for sliders. Add a `SettingTags` for units, a label for 0, a slider step, or `Hidden`. A page shows 7 rows including `Enabled`; a longer section is split into pages, so keep it to 6 settings if you can.
+- Keys: `Keybinds.Register(FeatureSection, "id", "Display name", new KeyboardShortcut(KeyCode.X), "What it does")` returns a `Keybind`; poll `.Down`, `.Held` or `.Up`. These are inert while the feature is disabled, a menu is open (unless `KeybindFlags.AllowInMenus`), or a text field has focus. Never read raw `Input.GetKey` for a feature key.
+- Messages to the player: `Notify.Show(text, kind, seconds, key)`. A message with the same `key` replaces the previous one.
+- If the feature changes gameplay (cheats, undo, save states, beyond-vanilla options), call `GameplayImpact.Mark("Reason")` when the player uses it. It resets on a fresh run.
+- Test hooks: `DevCommands.Register("name", "name <args>   what it does", args => "result")` in `Awake`. Throw to report a failure. `dev.py cmd features` shows each manager's enabled state and patch count, and `dev.py cmd impact` shows the run's gameplay impact.
+- Logging: `Plugin.Logger.LogInfo`, which `dev.py logs` shows. `LogError` is for real bugs; `run` reports them.
+
+## Code conventions
+
+- `Plugin.Update` isolates managers from each other's exceptions, and each distinct error is logged once. A manager whose `Awake` or `Start` throws is dropped, along with its patches.
 - Game singletons such as `CommandUnits.instance` are null outside a level. Null-check them in `Update`.
 - `Plugin.Input` (the Rewired player) is null until Rewired initializes. Use `?.`.
 - To read game code: `python3 scripts/dev.py decompile --type <TypeName>` writes `.decompiled/<TypeName>.decompiled.cs`. Leave out `--type` to decompile everything into a project, which is the way to grep for things like PlayerPrefs keys.
 - The main menu is the scene `_StartMenu` (`SceneTransitionManager.mainMenuScene`). Use `SceneManager.GetActiveScene().name` to tell which screen you're on.
 - Never commit `lib/`, `.decompiled/` or anything else copied from the game; they're in `.gitignore`.
-- Builds target `netstandard2.1`. The 19 existing Harmony003 analyzer warnings predate this guide and aren't regressions.
+- Builds target `netstandard2.1`. The 18 existing Harmony003 analyzer warnings predate this guide and aren't regressions.
+
+## Keybind notes (for the keybind UI)
+
+The game reads input from Rewired: `ReInput.players.GetPlayer(0).GetButtonDown("<action>")`. `KeyRebinder` builds Controls > Keyboard by looping `ReInput.mapping.ActionsInCategory(category)` over the scene's `actionCategoriesToShow` and making a `ControlMapButton` for each `userAssignable` action. Labels come from the I2 term `Controls/<action name>`, so add the term or patch `ControlMapButton.SetData`. Remaps go through `InputMapper`s on each controller's category-0 map and are saved by `ControlConfigSaveLoad` to `ControlsConfig_v2.json` via `SaveServicesLocator`, with `AddDefaultMappingsForNewActions` on load. Rewired has no public API for adding actions at runtime: `InputAction` setters are internal, and `ReInput.mapping` is read-only. The likely route is a Harmony prefix on the `InputManager_Base` initialisation that calls `userData.AddAction(categoryId)`, sets the name, type and `userAssignable` by reflection, and adds default keyboard bindings. That's unverified, and mod action IDs would then end up in the player's controls file. Callers only use `Keybind.Down/Held/Up`, so a Rewired backend can replace `Keybinds.Backend` (`IKeybindBackend`) and use `Keybind.Entry` for migration without touching features. Menu focus is `UIFrameManager.instance.ActiveFrame != null`; the HUD isn't a frame, and the game has no text fields of its own. The game's cheat menu (`CheatMenuIMGUI` and `CheatSystem`) is still compiled in, but nothing opens it.
 
 ## Don't
 

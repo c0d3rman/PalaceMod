@@ -13,7 +13,9 @@ using Object = UnityEngine.Object;
     Adds a "Mods" tab to the game's own Settings screen, generated from PalaceMod's BepInEx config entries:
     bools become checkboxes, enums and value lists become the game's arrow selectors, numeric ranges become sliders.
     A section selector at the top switches between config sections (the game's tabs don't scroll), and a line under
-    the rows describes the selected setting.
+    the rows describes the selected setting. The sections in SectionOrder come first, the rest alphabetically; a
+    feature's Enabled switch is its section's first row, and a section with more than RowsPerPage rows is split into
+    pages ("Name (1/2)").
 
     Everything is cloned from the game's existing widgets, found through SettingsUIHelper's fields and by component
     type rather than by GameObject path, and the game's localisation and settings-binding components are stripped
@@ -22,6 +24,7 @@ using Object = UnityEngine.Object;
 */
 namespace PalaceMod
 {
+    [ManagerOrder(-40)]
     public class SettingsPaneManager : BaseManager
     {
         private const string TabLabel = "Mods";
@@ -35,6 +38,8 @@ namespace PalaceMod
         private TextMeshProUGUI description;
         private readonly Dictionary<GameObject, ConfigEntryBase> rowEntries = [];
         private List<string> sections = [];
+        private List<List<ConfigEntryBase>> pages = [];
+        private const int RowsPerPage = 7; // what fits under the section row without scrolling
         private int sectionIndex;
 
         public TFUITextButton TabButton => tab?.parentElement;
@@ -236,15 +241,30 @@ namespace PalaceMod
 
         // ---- Rows ---------------------------------------------------------------------------------------------
 
+        // Section labels for the selector; fills `pages` with the rows of each.
         private List<string> CollectSections()
         {
             var present = Plugin.Config.Keys.Select(d => d.Section).Distinct().Where(s => Entries(s).Any()).ToList();
-            return SectionOrder.Where(present.Contains).Concat(present.Except(SectionOrder).OrderBy(s => s)).ToList();
+            var ordered = SectionOrder.Where(present.Contains).Concat(present.Except(SectionOrder).OrderBy(s => s, StringComparer.OrdinalIgnoreCase));
+            var labels = new List<string>();
+            pages = [];
+            foreach (var section in ordered)
+            {
+                var entries = Entries(section).ToList();
+                int count = (entries.Count + RowsPerPage - 1) / RowsPerPage;
+                for (int i = 0; i < count; i++)
+                {
+                    labels.Add(count == 1 ? section : $"{section} ({i + 1}/{count})");
+                    pages.Add(entries.Skip(i * RowsPerPage).Take(RowsPerPage).ToList());
+                }
+            }
+            return labels;
         }
 
         private IEnumerable<ConfigEntryBase> Entries(string section) =>
             Plugin.Config.Keys.Where(d => d.Section == section).Select(d => Plugin.Config[d])
-                .Where(e => Tags(e)?.Hidden != true && Supported(e));
+                .Where(e => Tags(e)?.Hidden != true && Supported(e))
+                .OrderBy(e => e.Definition.Key == "Enabled" ? 0 : 1); // stable, so the rest keep their order
 
         private static SettingTags Tags(ConfigEntryBase entry) => entry.Description.Tags?.OfType<SettingTags>().FirstOrDefault();
 
@@ -286,7 +306,7 @@ namespace PalaceMod
                 if (child.gameObject != sectionRow) Object.DestroyImmediate(child.gameObject);
             }
             rowEntries.Clear();
-            foreach (var entry in Entries(sections[sectionIndex]))
+            foreach (var entry in pages[sectionIndex])
             {
                 var row = entry.SettingType == typeof(bool) ? BuildToggle(entry)
                     : entry.Description.AcceptableValues is AcceptableValueRange<int> or AcceptableValueRange<float> ? BuildSlider(entry)

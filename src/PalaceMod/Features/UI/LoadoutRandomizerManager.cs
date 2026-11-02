@@ -16,6 +16,10 @@ namespace PalaceMod
 {
     public class LoadoutRandomizerManager : BaseManager
     {
+        public override string FeatureSection => "Loadout randomizer";
+        public override string FeatureDescription => "Adds dice buttons to the loadout screen that pick a random weapon, perks or mutators from what you've unlocked.";
+        protected override void OnFeatureDisabled() => DestroyRandomizeButtons();
+
         private GameObject randomizeWeaponButton;
         private GameObject randomizePerksButton;
         private GameObject randomizeMutatorsButton;
