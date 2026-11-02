@@ -48,7 +48,7 @@ namespace PalaceMod
         {
             base.Awake(plugin);
             PauseMenu.AddButton("analytics", "Run Analytics", Open, order: 20, visible: () => IsEnabled && Rules.Available);
-            DevCommands.Register("analytics", "analytics [open|kill|dump|scenario <income> <fromNight> <faster> <spend%|avg>]   run analytics: summary, open the frame, end the night, scenario", Command);
+            DevCommands.Register("analytics", "analytics [open|kill|reload|dump|scenario <income> <fromNight> <faster> <spend%|avg>]   run analytics: summary, open the frame, end the night, scenario", Command);
         }
 
         protected override void OnFeatureDisabled()
@@ -266,6 +266,11 @@ namespace PalaceMod
                     GameplayImpact.Mark("Dev: killed all enemies");
                     Hp.KillAllEnemyUnits();
                     return $"enemies left {EnemySpawner.instance.NumberOfEnemiesOnTheMap}, spawning {EnemySpawner.instance.SpawningInProgress}";
+                case "reload":
+                    // Like quitting and continuing from level select: read the match save from disk and reload the level.
+                    MatchSaveLoadHandler.TryLoadRun(SceneManager.GetActiveScene().name);
+                    SceneTransitionManager.instance.RestartCurrentLevel();
+                    return "reloading from the save";
                 case "dump":
                     return "\n" + history.ToJson();
                 case "scenario":
