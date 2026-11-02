@@ -20,6 +20,7 @@ namespace PalaceMod.Builder
         private static ILevelOverlay overlay = new NullLevelOverlay();
         private static IAssetProvider assets = new NullAssetProvider();
         private static IShareCodec share = new NullShareCodec();
+        private static IPackArchive archives = new NullPackArchive();
 
         /// <summary>WP1 (installed by BuilderManager).</summary>
         public static IPackRepository Packs { get => packs; set => packs = value ?? throw new ArgumentNullException(nameof(value)); }
@@ -37,6 +38,8 @@ namespace PalaceMod.Builder
         public static IAssetProvider Assets { get => assets; set => assets = value ?? throw new ArgumentNullException(nameof(value)); }
         /// <summary>WP6. Stub: encoding/decoding report "not available".</summary>
         public static IShareCodec Share { get => share; set => share = value ?? throw new ArgumentNullException(nameof(value)); }
+        /// <summary>WP6. Stub: export throws, import reports "not available".</summary>
+        public static IPackArchive Archives { get => archives; set => archives = value ?? throw new ArgumentNullException(nameof(value)); }
 
         /// <summary>Whether a custom session is running (custom waves/units are live).</summary>
         public static bool InSession => sessions.Current != null;
@@ -80,6 +83,18 @@ namespace PalaceMod.Builder
         public Sprite GetSprite(PackEntry pack, string assetRef) => null;
         public AudioClip GetAudio(PackEntry pack, string assetRef) => null;
         public (Mesh mesh, Material[] materials)? GetMesh(PackEntry pack, string assetRef) => null;
+    }
+
+    internal sealed class NullPackArchive : IPackArchive
+    {
+        public string ExportFolder => null;
+        public string Export(PackEntry pack, string path = null) => throw new InvalidOperationException("pack files aren't available yet");
+        public PackEntry Import(string path, List<ValidationIssue> issues)
+        {
+            issues?.Add(new ValidationIssue(Severity.Error, "", "pack files aren't available yet"));
+            return null;
+        }
+        public string ExportThunderstore(PackEntry pack, string path = null) => throw new InvalidOperationException("pack files aren't available yet");
     }
 
     internal sealed class NullShareCodec : IShareCodec
