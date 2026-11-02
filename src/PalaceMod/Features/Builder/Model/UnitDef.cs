@@ -45,7 +45,7 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("tint")] public string Tint { get; set; }
         /// <summary>Uniform scale factor relative to the base prefab (1 = unchanged). Visual only.</summary>
         [JsonProperty("scale")] public float? Scale { get; set; }
-        /// <summary>Replacement body mesh, "asset:&lt;key&gt;" of an OBJ file. It's fitted to the base unit's height
+        /// <summary>Replacement body mesh, "asset:&lt;key&gt;" of an OBJ file. It's scaled to fit the base unit's size
         /// and stands where the base stood, rendered with the unit's own material (so tint and elites still work).</summary>
         [JsonProperty("mesh")] public string Mesh { get; set; }
         /// <summary>Scale for the imported mesh in its own units instead of fitting it to the base's height.</summary>

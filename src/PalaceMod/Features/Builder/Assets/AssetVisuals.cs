@@ -117,11 +117,13 @@ namespace PalaceMod.Builder.Assets
             var body = parts.Where(p => p.Renderer.sharedMaterials.Any(IsBodyMaterial)).OrderByDescending(p => Volume(p.RootBounds)).FirstOrDefault()
                 ?? parts.OrderByDescending(p => Volume(p.RootBounds)).First();
 
-            // Fit: mesh space -> root space. Height matches the model unless meshScale is given; the bottom centre
-            // lands on the model's bottom centre.
+            // Fit: mesh space -> root space. Unless meshScale is given, the mesh is scaled to fit inside the model's
+            // box (as tall as the model, or as wide if it's squat). The bottom centre lands on the model's bottom centre.
             var rotation = Quaternion.Euler(0, v.MeshRotY ?? 0, 0);
             var turned = Transform(source.bounds, Matrix4x4.Rotate(rotation));
-            float scale = v.MeshScale ?? (turned.size.y > 1e-4f ? model.size.y / turned.size.y : model.size.magnitude / Mathf.Max(turned.size.magnitude, 1e-4f));
+            float scale = v.MeshScale ?? Mathf.Min(
+                model.size.y / Mathf.Max(turned.size.y, 1e-4f),
+                Mathf.Max(model.size.x, model.size.z) / Mathf.Max(turned.size.x, turned.size.z, 1e-4f));
             var bottom = new Vector3(turned.center.x, turned.min.y, turned.center.z) * scale;
             var target = new Vector3(model.center.x, model.min.y, model.center.z);
             var fit = Matrix4x4.TRS(target - bottom, rotation, Vector3.one * scale);

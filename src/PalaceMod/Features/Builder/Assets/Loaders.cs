@@ -216,6 +216,50 @@ namespace PalaceMod.Builder.Assets
             int channels = head[packet + 11];
             int rate = BitConverter.ToInt32(head, packet + 12);
             if (channels < 1 || channels > 8 || rate < 8000 || rate > 192000) throw new AssetException("OGG has an unsupported channel count or sample rate");
+            CheckPages(head, length);
+        }
+
+        /// <summary>Walks every Ogg page and verifies its CRC, so a truncated or damaged file is refused here rather
+        /// than by Unity's decoder (which logs an FMOD error).</summary>
+        private static void CheckPages(byte[] b, int length)
+        {
+            int pos = 0, pages = 0;
+            while (pos < length)
+            {
+                if (pos + 27 > length || b[pos] != 'O' || b[pos + 1] != 'g' || b[pos + 2] != 'g' || b[pos + 3] != 'S' || b[pos + 4] != 0)
+                    throw new AssetException("OGG is damaged or truncated");
+                int segments = b[pos + 26];
+                if (pos + 27 + segments > length) throw new AssetException("OGG is truncated");
+                int body = 0;
+                for (int i = 0; i < segments; i++) body += b[pos + 27 + i];
+                int size = 27 + segments + body;
+                if (pos + size > length) throw new AssetException("OGG is truncated");
+                uint stored = BitConverter.ToUInt32(b, pos + 22);
+                uint crc = 0;
+                for (int i = 0; i < size; i++)
+                {
+                    byte x = i >= 22 && i < 26 ? (byte)0 : b[pos + i];
+                    crc = (crc << 8) ^ CrcTable[((crc >> 24) & 0xFF) ^ x];
+                }
+                if (crc != stored) throw new AssetException("OGG is damaged (checksum mismatch)");
+                pos += size;
+                pages++;
+            }
+            if (pages < 3) throw new AssetException("OGG is truncated");
+        }
+
+        private static readonly uint[] CrcTable = MakeCrcTable();
+
+        private static uint[] MakeCrcTable()
+        {
+            var t = new uint[256];
+            for (uint i = 0; i < 256; i++)
+            {
+                uint r = i << 24;
+                for (int k = 0; k < 8; k++) r = (r & 0x80000000) != 0 ? (r << 1) ^ 0x04C11DB7 : r << 1;
+                t[i] = r;
+            }
+            return t;
         }
     }
 

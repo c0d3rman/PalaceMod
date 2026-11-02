@@ -242,10 +242,8 @@ namespace PalaceMod.Builder.Assets
                     }
                     case AssetKind.Ogg:
                     {
-                        var head = new byte[4096];
-                        int n;
-                        using (var f = File.OpenRead(file)) n = f.Read(head, 0, head.Length);
-                        OggLoader.Check(head, n);
+                        var bytes = File.ReadAllBytes(file);
+                        OggLoader.Check(bytes, bytes.Length);
                         var request = UnityWebRequestMultimedia.GetAudioClip(new Uri(file).AbsoluteUri, AudioType.OGGVORBIS);
                         ((DownloadHandlerAudioClip)request.downloadHandler).streamAudio = false;
                         request.SendWebRequest();
