@@ -489,6 +489,15 @@ namespace PalaceMod
                 pending.Clear();
                 return $"stopped {n} patrolling units";
             });
+            DevCommands.Register("patrol-ko", "patrol-ko              knock out one patrolling unit (to test respawn)", _ =>
+            {
+                RequireLevel();
+                var unit = patrollers.Keys.FirstOrDefault(u => u != null && u.hp != null && !u.hp.KnockedOut)
+                    ?? throw new InvalidOperationException("no patrolling unit standing");
+                unit.hp.TakeDamage(unit.hp.HpValue + 1000f);
+                GameplayImpact.Mark("Dev: knocked out a unit");
+                return $"knocked out {unit.name}";
+            });
             DevCommands.Register("patrol-status", "patrol-status          routes, pending points and each patrolling unit's leg", _ => Status(RequireLevel()));
         }
 
