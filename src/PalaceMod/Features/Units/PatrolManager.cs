@@ -64,6 +64,10 @@ namespace PalaceMod
             public int Index;
             public int Direction = 1;
             public float LegTime;
+            /// <summary>Where the unit was placed. It stays there for the first moments, so a hold-position
+            /// command (holding the Command key, Ctrl-placing) still holds it at the spot the player chose.</summary>
+            public Vector3 PlacedHome;
+            public bool Started;
         }
 
         private readonly Dictionary<PathfindMovementPlayerunit, Patroller> patrollers = [];
@@ -186,6 +190,14 @@ namespace PalaceMod
             if (pending.Count == 0 || placed.Count == 0) return;
             var units = placed.Where(u => u != null).ToList();
             if (units.Count == 0) return;
+            if (units.All(u => u.HoldPosition))
+            {
+                // A hold-position placement is a different command: the units stay put.
+                pending.Clear();
+                Notify.Show("Holding position: patrol points dropped", key: "patrol");
+                return;
+            }
+            units.RemoveAll(u => u.HoldPosition);
 
             Vector3 center = Vector3.zero;
             foreach (var unit in units) center += unit.HomePosition;
@@ -210,10 +222,10 @@ namespace PalaceMod
                 if (offset.magnitude > MaxOffset) offset = offset.normalized * MaxOffset;
                 Remove(unit, keepPosition: false);
                 // Units start where they were dropped (the last point) and head back along the route.
-                var patroller = new Patroller { Route = route, Offset = offset, Index = route.Points.Count - 1 };
+                var patroller = new Patroller { Route = route, Offset = offset, Index = route.Points.Count - 1, PlacedHome = unit.HomePosition };
                 patrollers[unit] = patroller;
                 route.Units++;
-                Advance(unit, patroller);
+                unit.HasReachedHomePositionAlready = true;
             }
             GameplayImpact.Mark("Unit patrols");
             Notify.Show($"{units.Count} {(units.Count == 1 ? "unit" : "units")} patrolling {route.Points.Count} points", NotifyKind.Success, key: "patrol");
@@ -260,6 +272,20 @@ namespace PalaceMod
                 // Knocked out: the building revives it in place, and it walks back to its patrol point.
                 if (!unit.isActiveAndEnabled || unit.hp == null || unit.hp.KnockedOut) continue;
 
+                if (!p.Started)
+                {
+                    // Wait out the game's hold-to-hold-position window at the placed spot before setting off.
+                    p.LegTime += Time.deltaTime;
+                    unit.HomePosition = p.PlacedHome;
+                    float window = CommandUnits.instance != null ? CommandUnits.instance.holdToHoldPositionTime : 1f;
+                    if (p.LegTime > window + 0.25f)
+                    {
+                        p.Started = true;
+                        Advance(unit, p);
+                    }
+                    continue;
+                }
+
                 Vector3 target = Target(unit, p);
                 // Keep re-asserting the point: something else (the dawn reset, other mods) may have moved home.
                 unit.HomePosition = target;
@@ -268,9 +294,12 @@ namespace PalaceMod
 
                 p.LegTime += Time.deltaTime;
                 float distance = Flat(unit.transform.position - target).magnitude;
+                float leg = Flat(target - Previous(unit, p)).magnitude;
+                // On short legs the arrival circles of both ends must not overlap, or the unit would flip every frame.
+                float arrive = Mathf.Min(ArriveDistance, leg * 0.35f);
                 // Give up on a point the unit can't reach (blocked, crowded) after about twice the walk.
-                float patience = 6f + 2f * Flat(target - Previous(unit, p)).magnitude / Mathf.Max(0.5f, unit.movementSpeed);
-                if (distance < ArriveDistance || p.LegTime > patience) Advance(unit, p);
+                float patience = 6f + 2f * leg / Mathf.Max(0.5f, unit.movementSpeed);
+                if (distance < arrive || p.LegTime > patience) Advance(unit, p);
             }
             foreach (var unit in stale) Remove(unit, keepPosition: false);
         }
