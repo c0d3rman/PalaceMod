@@ -59,7 +59,7 @@ namespace PalaceMod
                 if (QualitySettings.vSyncCount != 0) QualitySettings.vSyncCount = 0;
                 if (Application.targetFrameRate != -1) Application.targetFrameRate = -1;
                 double refresh = DisplayRefreshRate();
-                float target = maxFrameRate.Value > 0 ? maxFrameRate.Value : (float)refresh;
+                float target = maxFrameRate.Value > 0 ? Math.Max(MinGameplayFps, maxFrameRate.Value) : (float)refresh;
                 pacer.TargetFps = cap > 0 ? Math.Min(target, cap) : target;
                 pacer.LockToDisplay = lockToDisplay.Value;
                 pacer.MaxSpinMs = saveCpu ? Math.Min(BatterySpinMs, maxSpinMs.Value) : maxSpinMs.Value;
@@ -80,9 +80,10 @@ namespace PalaceMod
             };
             if (QualitySettings.vSyncCount != vSyncCount) QualitySettings.vSyncCount = vSyncCount;
             // Without the pacer, apply caps through Unity's limiter (which also works on other platforms).
-            int limit = targetFrameRate.Value;
+            // 0 means no limit of our own; the game never sets the limiter, so "no limit" is Unity's default of -1.
+            int limit = targetFrameRate.Value > 0 ? Math.Max(MinGameplayFps, targetFrameRate.Value) : -1;
             if (cap > 0 && (limit <= 0 || limit > cap)) limit = (int)cap;
-            if (limit != 0 && Application.targetFrameRate != limit) Application.targetFrameRate = limit;
+            if (Application.targetFrameRate != limit) Application.targetFrameRate = limit;
         }
 
         // The lowest cap that applies right now, or 0 for none.
@@ -178,8 +179,12 @@ namespace PalaceMod
             if (wanted == MacActivity.Active) return;
             try
             {
-                if (wanted) MacActivity.Begin();
-                else MacActivity.End();
+                if (!wanted) MacActivity.End();
+                else if (!MacActivity.Begin())
+                {
+                    Plugin.Logger.LogWarning("Performance: macOS refused latency-critical mode; turning it off");
+                    latencyCritical.Value = Toggle.Off;
+                }
             }
             catch (Exception e)
             {

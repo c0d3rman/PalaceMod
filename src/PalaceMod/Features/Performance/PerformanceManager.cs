@@ -98,7 +98,7 @@ namespace PalaceMod
                 "Pace frames with the mod's own precise timer instead of VSync and Unity's frame limiter, which both " +
                 "oversleep by several frames on macOS and make the game stutter. Auto: on for macOS.");
             maxFrameRate = config.Bind(FrameRateSection, "Max frame rate", 0, new ConfigDescription(
-                "Frame rate cap while playing. 0 matches the display's refresh rate.", new AcceptableValueRange<int>(0, 240), new SettingTags { ZeroLabel = "Display", Unit = " fps", Step = 5 }));
+                "Frame rate cap while playing (at least 15). 0 matches the display's refresh rate.", new AcceptableValueRange<int>(0, 240), new SettingTags { ZeroLabel = "Display", Unit = " fps", Step = 5 }));
             raiseRefreshRate = config.Bind(FrameRateSection, "Raise refresh rate (Hz)", 120, new ConfigDescription(
                 "macOS: while the game runs, switch the display to the highest refresh rate up to this, e.g. 120 on a " +
                 "ProMotion screen set to 60 Hz. macOS restores your setting when the game quits. 0 leaves it alone. " +
@@ -156,8 +156,8 @@ namespace PalaceMod
             vSync = config.Bind(AdvancedSection, "VSync override", VSyncMode.GameDefault,
                 "Override the game's VSync setting. Ignored while precise frame pacing is on.");
             targetFrameRate = config.Bind(AdvancedSection, "Unity frame limiter", 0, new ConfigDescription(
-                "Unity's own frame cap when VSync is off. 0 keeps the game's setting, -1 is uncapped. Ignored while precise " +
-                "frame pacing is on.", new AcceptableValueRange<int>(-1, 240), new SettingTags { ZeroLabel = "Game default", Unit = " fps", Step = 5 }));
+                "Unity's own frame cap when VSync is off (at least 15); 0 for none. Ignored while precise frame pacing is on.",
+                new AcceptableValueRange<int>(0, 240), new SettingTags { ZeroLabel = "Off", Unit = " fps", Step = 5 }));
             renderScale = config.Bind(AdvancedSection, "Render scale override", 0f, new ConfigDescription(
                 "Resolution multiplier for 3D rendering (UI stays sharp). 0 keeps the game's setting.", new AcceptableValueRange<float>(0f, 2f), new SettingTags { ZeroLabel = "Game default", Unit = "x", Step = 0.05f }));
             msaa = config.Bind(AdvancedSection, "MSAA override", 0, new ConfigDescription(

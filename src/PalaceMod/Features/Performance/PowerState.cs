@@ -20,7 +20,9 @@ namespace PalaceMod
         [DllImport(IOKit)] private static extern IntPtr IOPSCopyPowerSourcesInfo();
         [DllImport(IOKit)] private static extern IntPtr IOPSGetProvidingPowerSourceType(IntPtr snapshot);
         [DllImport(CoreFoundation)] private static extern void CFRelease(IntPtr obj);
-        [DllImport(CoreFoundation)] private static extern bool CFStringGetCString(IntPtr str, byte[] buffer, IntPtr size, uint encoding);
+        [DllImport(CoreFoundation)]
+        [return: MarshalAs(UnmanagedType.U1)] // CoreFoundation's Boolean is one byte
+        private static extern bool CFStringGetCString(IntPtr str, byte[] buffer, IntPtr size, uint encoding);
         [DllImport(LibObjC)] private static extern IntPtr objc_getClass(string name);
         [DllImport(LibObjC)] private static extern IntPtr sel_registerName(string name);
         [DllImport(LibObjC, EntryPoint = "objc_msgSend")] private static extern IntPtr SendPtr(IntPtr receiver, IntPtr selector);

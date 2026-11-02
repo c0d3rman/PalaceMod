@@ -103,7 +103,7 @@ namespace PalaceMod
         }
 
         // PowerTowerPerk.Update calls GetComponentsInChildren twice per frame at night. Look the components up again
-        // whenever the game refreshes its closest tower (every 0.2 s) instead. Towers can't be rebuilt at night.
+        // whenever the game refreshes its closest tower (every 0.2 s), at nightfall, or when one of them is deactivated.
         [HarmonyPatch(typeof(PowerTowerPerk), "Update")]
         private class PowerTowerPerk_Update_Patch
         {
@@ -116,12 +116,26 @@ namespace PalaceMod
 
             private static readonly ConditionalWeakTable<PowerTowerPerk, TowerParts> Cache = new();
 
+            private static bool AllActive(MonoBehaviour[] behaviours)
+            {
+                if (behaviours == null) return false;
+                foreach (var behaviour in behaviours)
+                {
+                    if (behaviour == null || !behaviour.gameObject.activeInHierarchy) return false;
+                }
+                return true;
+            }
+
             private static bool Prefix(PowerTowerPerk __instance, TagManager ___tagManager, float ___attackSpeedBonus, ref float ___nextRefreshIn,
                 ref TaggedObject ___closestTower, List<TagManager.ETag> ___mustHaveTags, List<TagManager.ETag> ___mayNotHaveTags)
             {
                 if (!cachePowerTowerParts.Value) return true;
-                if (DayNightCycle.Instance.CurrentTimestate == DayNightCycle.Timestate.Day) return false;
                 var parts = Cache.GetOrCreateValue(__instance);
+                if (DayNightCycle.Instance.CurrentTimestate == DayNightCycle.Timestate.Day)
+                {
+                    parts.Tower = null; // towers can be upgraded during the day, so look again at nightfall
+                    return false;
+                }
                 ___nextRefreshIn -= Time.deltaTime;
                 if (___nextRefreshIn <= 0f)
                 {
@@ -130,7 +144,8 @@ namespace PalaceMod
                     parts.Tower = null; // re-read the components below
                 }
                 if (___closestTower == null) return false;
-                if (!ReferenceEquals(parts.Tower, ___closestTower))
+                // The original only finds components on active objects; a knocked-out tower deactivates its parts.
+                if (!ReferenceEquals(parts.Tower, ___closestTower) || !AllActive(parts.Attacks) || !AllActive(parts.HotOil))
                 {
                     parts.Tower = ___closestTower;
                     parts.Attacks = ___closestTower.GetComponentsInChildren<AutoAttack>();

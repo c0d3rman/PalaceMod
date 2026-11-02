@@ -49,10 +49,20 @@ namespace PalaceMod
             private static void Postfix(SettingsUIHelper __instance) => Plugin.Instance.GetManager<SettingsPaneManager>()?.TryInject(__instance);
         }
 
-        // Fallback in case the settings screen woke up before our patch was applied.
+        private const int MaxFallbackSearches = 30;
+        private int fallbackSearches;
+
         public override void Update()
         {
-            if (injected || Time.frameCount % 120 != 0) return;
+            // If the settings screen is ever rebuilt (its scene reloaded), add the tab to the new one.
+            if (injected && helper == null)
+            {
+                injected = false;
+                tab = null;
+            }
+            // Fallback in case the settings screen woke up before our patch was applied; gives up after a minute or so.
+            if (injected || fallbackSearches >= MaxFallbackSearches || Time.frameCount % 120 != 0) return;
+            fallbackSearches++;
             var existing = FindHelper();
             if (existing != null && Traverse.Create(existing).Field("tabs").GetValue<List<SettingsUIHelper.SettingsTab>>()?.Count > 0)
             {
@@ -63,50 +73,65 @@ namespace PalaceMod
         private void TryInject(SettingsUIHelper settings)
         {
             if (injected) return;
-            injected = true; // one attempt; a failure shouldn't be retried every frame
+            injected = true; // one attempt per settings screen; a failure shouldn't be retried every frame
+            helper = settings;
+            var created = new List<GameObject>();
             try
             {
-                Inject(settings);
+                Inject(created);
                 Plugin.Logger.LogInfo($"Settings pane: added \"{TabLabel}\" tab with {sections.Count} sections");
             }
             catch (Exception e)
             {
+                // Nothing has been hooked into the game's lists or navigation yet, so removing our clones undoes it.
+                foreach (var obj in created) if (obj != null) Object.Destroy(obj);
+                tab = null;
+                description = null;
                 Plugin.Logger.LogError($"Settings pane: couldn't add the settings tab, use the config file or F1 instead: {e}");
             }
         }
 
-        private void Inject(SettingsUIHelper settings)
+        // Builds everything first and only then hooks it into the game's tab lists and navigation, so a failure
+        // part-way leaves the settings screen untouched.
+        private void Inject(List<GameObject> created)
         {
-            helper = settings;
             FindTemplates();
 
-            // Tab button, cloned from the Video tab and appended to the tab row.
+            // Tab button, cloned from the Video tab; hidden until everything else is built.
             var sourceTab = helper.videoTab.parentElement;
             var tabObject = Object.Instantiate(sourceTab.gameObject, sourceTab.transform.parent);
+            created.Add(tabObject);
+            tabObject.SetActive(false);
             tabObject.name = "PalaceMod Tab";
             tabObject.transform.SetAsLastSibling();
             StripLocalization(tabObject);
             var tabButton = tabObject.GetComponent<TFUITextButton>();
             tabButton.SetOriginalString(TabLabel);
-            SpliceIntoTabRow(sourceTab, tabButton);
 
             // Content panel, cloned from the Video tab's and emptied.
             var sourceContent = helper.videoTab.contentParent;
             var content = Object.Instantiate(sourceContent, sourceContent.transform.parent);
+            created.Add(content);
             content.name = "PalaceMod Settings";
             content.SetActive(false);
             var container = Corresponding(sourceContent.transform, helper.videoTab.childContainer.transform, content.transform).GetComponent<VerticalLayoutGroup>();
             foreach (Transform child in container.transform.Cast<Transform>().ToList()) Object.DestroyImmediate(child.gameObject);
-
             tab = new SettingsUIHelper.SettingsTab { parentElement = tabButton, contentParent = content, childContainer = container };
-            Traverse.Create(helper).Field("allTabs").GetValue<Dictionary<ThronefallUIElement, SettingsUIHelper.SettingsTab>>().Add(tabButton, tab);
-            Traverse.Create(helper).Field("tabs").GetValue<List<SettingsUIHelper.SettingsTab>>().Add(tab);
 
             CreateDescription(content.transform, container.transform);
+            created.Add(description.gameObject);
             sections = CollectSections();
+            if (sections.Count == 0) throw new InvalidOperationException("no settings to show");
             BuildSectionRow();
             BuildRows();
+
+            // Hook into the game only once everything exists.
+            SpliceIntoTabRow(sourceTab, tabButton);
+            Traverse.Create(helper).Field("allTabs").GetValue<Dictionary<ThronefallUIElement, SettingsUIHelper.SettingsTab>>().Add(tabButton, tab);
+            Traverse.Create(helper).Field("tabs").GetValue<List<SettingsUIHelper.SettingsTab>>().Add(tab);
             helper.targetFrame.onNewSelection.AddListener(OnSelectionChanged);
+            tabObject.SetActive(true);
+            helper.targetFrame.RefetchManagedElements();
         }
 
         // ---- Templates ----------------------------------------------------------------------------------------
@@ -327,7 +352,13 @@ namespace PalaceMod
             }
             if (tags != null) SliderLabels.AddOrUpdate(slider, tags);
             slider.onChange.AddListener(() =>
-                entry.BoxedValue = isInt ? Mathf.RoundToInt(slider.value) : (object)(float)Math.Round(slider.value, 3));
+            {
+                // Keyboard steps add to the current value and clicks snap to multiples of the step from zero, so put
+                // the value back on the min + k * step grid.
+                float snapped = Mathf.Clamp(min + Mathf.Round((slider.value - min) / step) * step, min, max);
+                if (snapped != slider.value) slider.SetValue(snapped);
+                entry.BoxedValue = isInt ? Mathf.RoundToInt(snapped) : (object)(float)Math.Round(snapped, 3);
+            });
             Bind(row, entry, () => slider.SetValue(Convert.ToSingle(entry.BoxedValue)));
             return row;
         }
@@ -349,27 +380,40 @@ namespace PalaceMod
         private static void Bind(GameObject row, ConfigEntryBase entry, Action refresh)
         {
             refresh();
-            var binding = row.AddComponent<RowBinding>();
-            binding.Refresh = refresh;
-            binding.Entry = entry;
+            // AddComponent runs OnEnable immediately on a visible row, before fields could be set, so Init subscribes.
+            row.AddComponent<RowBinding>().Init(entry, refresh);
         }
 
         private class RowBinding : MonoBehaviour
         {
             public Action Refresh;
             public ConfigEntryBase Entry;
-            private ConfigFile config;
+            private bool subscribed;
+
+            public void Init(ConfigEntryBase entry, Action refresh)
+            {
+                Entry = entry;
+                Refresh = refresh;
+                if (isActiveAndEnabled) Subscribe();
+            }
 
             private void OnEnable()
             {
                 Refresh?.Invoke();
-                config = Entry?.ConfigFile;
-                if (config != null) config.SettingChanged += OnSettingChanged;
+                Subscribe();
             }
 
             private void OnDisable()
             {
-                if (config != null) config.SettingChanged -= OnSettingChanged;
+                if (subscribed) Entry.ConfigFile.SettingChanged -= OnSettingChanged;
+                subscribed = false;
+            }
+
+            private void Subscribe()
+            {
+                if (subscribed || Entry == null) return;
+                Entry.ConfigFile.SettingChanged += OnSettingChanged;
+                subscribed = true;
             }
 
             private void OnSettingChanged(object sender, SettingChangedEventArgs e)
