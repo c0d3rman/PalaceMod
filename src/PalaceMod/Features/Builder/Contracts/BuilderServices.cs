@@ -80,6 +80,9 @@ namespace PalaceMod.Builder
         public Sprite GetSprite(PackEntry pack, string assetRef) => null;
         public AudioClip GetAudio(PackEntry pack, string assetRef) => null;
         public (Mesh mesh, Material[] materials)? GetMesh(PackEntry pack, string assetRef) => null;
+        public Texture2D GetTexture(PackEntry pack, string assetRef) => null;
+        public AssetState GetState(PackEntry pack, string assetRef, string use, out string message) { message = "asset import isn't available"; return AssetState.Missing; }
+        public void Prefetch(PackEntry pack) { }
     }
 
     internal sealed class NullShareCodec : IShareCodec
