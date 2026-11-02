@@ -1,6 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Runtime.CompilerServices;
 using BepInEx.Configuration;
+using HarmonyLib;
+using Pathfinding;
 using UnityEngine;
 using UnityEngine.Profiling;
 using UnityEngine.SceneManagement;
@@ -11,6 +15,8 @@ using UnityEngine.Scripting;
     - Pre-grows the Mono (Boehm) heap at startup so the game doesn't stall on heap expansions mid-level.
     - Optionally widens the incremental GC time slice so collections finish before allocation forces a full stop-the-world pass.
     - Logs frame spikes with whether a GC ran during that frame, plus a periodic summary, so spikes can be attributed.
+    - Removes per-frame garbage in a few game hot paths, with results identical to the originals.
+    - Logs (and optionally overrides) the A* pathfinding thread settings for each level.
 */
 namespace PalaceMod
 {
@@ -23,6 +29,9 @@ namespace PalaceMod
         private ConfigEntry<bool> spikeLogging;
         private ConfigEntry<float> spikeThresholdMs;
         private ConfigEntry<float> summaryIntervalSeconds;
+        private ConfigEntry<PathfindingThreads> pathfindingThreads;
+
+        public enum PathfindingThreads { GameDefault, None, One, Two, Four, AutomaticLowLoad, AutomaticHighLoad }
 
         private readonly FrameStats stats = new();
         private int lastGcCount;
@@ -46,6 +55,10 @@ namespace PalaceMod
             summaryIntervalSeconds = config.Bind(Section, "Summary interval (s)", 60f,
                 "How often to log the frame-time summary.");
 
+            pathfindingThreads = config.Bind(Section, "Pathfinding threads", PathfindingThreads.GameDefault,
+                "Threads A* uses to compute paths, applied when a level loads. None computes paths on the main thread.");
+
+            AstarPath.OnAwakeSettings += ConfigurePathfinding;
             ReserveHeap(heapReserveMb.Value);
             ApplyGcTimeSlice();
             gcTimeSliceMs.SettingChanged += (_, _) => ApplyGcTimeSlice();
@@ -54,6 +67,25 @@ namespace PalaceMod
             Plugin.Logger.LogInfo($"Performance: GC mode {GarbageCollector.GCMode}, incremental {GarbageCollector.isIncremental}, " +
                 $"time slice {GarbageCollector.incrementalTimeSliceNanoseconds / 1e6:0.#} ms, heap {Profiler.GetMonoHeapSizeLong() / 1048576} MB, " +
                 $"vSync {QualitySettings.vSyncCount}, target fps {Application.targetFrameRate}, arch {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}");
+        }
+
+        public override void OnDestroy()
+        {
+            AstarPath.OnAwakeSettings -= ConfigurePathfinding;
+        }
+
+        // Runs inside AstarPath.OnEnable, just before its path threads start.
+        private void ConfigurePathfinding()
+        {
+            var astar = AstarPath.active;
+            if (astar == null) return;
+            var original = astar.threadCount;
+            if (pathfindingThreads.Value != PathfindingThreads.GameDefault)
+            {
+                astar.threadCount = (ThreadCount)Enum.Parse(typeof(ThreadCount), pathfindingThreads.Value.ToString());
+            }
+            Plugin.Logger.LogInfo($"Performance: A* threads {original}{(astar.threadCount != original ? $" -> {astar.threadCount}" : "")}, " +
+                $"max frame time {astar.maxFrameTime} ms, navmesh cut interval {astar.navmeshUpdates.updateInterval} s, graphs {astar.graphs?.Length ?? 0}");
         }
 
         private static void ReserveHeap(int megabytes)
@@ -112,6 +144,116 @@ namespace PalaceMod
         {
             var cycle = DayNightCycle.Instance;
             return cycle == null ? "no level" : cycle.CurrentTimestate.ToString().ToLowerInvariant();
+        }
+
+        // TagManager.PlayerUnits/EnemyUnits/Players wrap their list in a new ReadOnlyCollection on every access.
+        // A ReadOnlyCollection is a live view, so handing out one per list is equivalent.
+        private static class ReadOnlyViews
+        {
+            private static readonly ConditionalWeakTable<List<TaggedObject>, ReadOnlyCollection<TaggedObject>> Views = new();
+            private static readonly ConditionalWeakTable<List<TaggedObject>, ReadOnlyCollection<TaggedObject>>.CreateValueCallback Create = list => list.AsReadOnly();
+
+            public static IReadOnlyList<TaggedObject> For(List<TaggedObject> list) => list == null ? null : Views.GetValue(list, Create);
+        }
+
+        [HarmonyPatch(typeof(TagManager), nameof(TagManager.PlayerUnits), MethodType.Getter)]
+        private class TagManager_PlayerUnits_Patch
+        {
+            private static bool Prefix(List<TaggedObject> ___bufferedPlayerUnits, ref IReadOnlyList<TaggedObject> __result)
+            {
+                __result = ReadOnlyViews.For(___bufferedPlayerUnits);
+                return false;
+            }
+        }
+
+        [HarmonyPatch(typeof(TagManager), nameof(TagManager.EnemyUnits), MethodType.Getter)]
+        private class TagManager_EnemyUnits_Patch
+        {
+            private static bool Prefix(List<TaggedObject> ___bufferedEnemyUnits, ref IReadOnlyList<TaggedObject> __result)
+            {
+                __result = ReadOnlyViews.For(___bufferedEnemyUnits);
+                return false;
+            }
+        }
+
+        [HarmonyPatch(typeof(TagManager), nameof(TagManager.Players), MethodType.Getter)]
+        private class TagManager_Players_Patch
+        {
+            private static bool Prefix(List<TaggedObject> ___bufferedPlayers, ref IReadOnlyList<TaggedObject> __result)
+            {
+                __result = ReadOnlyViews.For(___bufferedPlayers);
+                return false;
+            }
+        }
+
+        // GPUInstancingManager.Update allocates a new Plane[6] every frame; fill one reused array instead.
+        [HarmonyPatch(typeof(GPUInstancingManager), "Update")]
+        private class GPUInstancingManager_Update_Patch
+        {
+            private static readonly Plane[] Planes = new Plane[6];
+
+            public static Plane[] CalculateFrustumPlanes(Camera camera)
+            {
+                GeometryUtility.CalculateFrustumPlanes(camera, Planes);
+                return Planes;
+            }
+
+            private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+            {
+                var original = AccessTools.Method(typeof(GeometryUtility), nameof(GeometryUtility.CalculateFrustumPlanes), [typeof(Camera)]);
+                var replacement = AccessTools.Method(typeof(GPUInstancingManager_Update_Patch), nameof(CalculateFrustumPlanes));
+                bool replaced = false;
+                foreach (var instruction in instructions)
+                {
+                    if (instruction.Calls(original))
+                    {
+                        instruction.operand = replacement;
+                        replaced = true;
+                    }
+                    yield return instruction;
+                }
+                if (!replaced) Plugin.Logger.LogWarning("Performance: GPUInstancingManager.Update no longer calls CalculateFrustumPlanes; patch skipped");
+            }
+        }
+
+        // PowerTowerPerk.Update calls GetComponentsInChildren twice per frame at night. Look the components up again
+        // whenever the game refreshes its closest tower (every 0.2 s) instead. Towers can't be rebuilt at night.
+        [HarmonyPatch(typeof(PowerTowerPerk), "Update")]
+        private class PowerTowerPerk_Update_Patch
+        {
+            private class TowerParts
+            {
+                public TaggedObject Tower;
+                public AutoAttack[] Attacks;
+                public HotOilTower[] HotOil;
+            }
+
+            private static readonly ConditionalWeakTable<PowerTowerPerk, TowerParts> Cache = new();
+
+            private static bool Prefix(PowerTowerPerk __instance, TagManager ___tagManager, float ___attackSpeedBonus, ref float ___nextRefreshIn,
+                ref TaggedObject ___closestTower, List<TagManager.ETag> ___mustHaveTags, List<TagManager.ETag> ___mayNotHaveTags)
+            {
+                if (DayNightCycle.Instance.CurrentTimestate == DayNightCycle.Timestate.Day) return false;
+                var parts = Cache.GetOrCreateValue(__instance);
+                ___nextRefreshIn -= Time.deltaTime;
+                if (___nextRefreshIn <= 0f)
+                {
+                    ___closestTower = ___tagManager.FindClosestTaggedObjectWithTags(__instance.transform.position, ___mustHaveTags, ___mayNotHaveTags);
+                    ___nextRefreshIn = 0.2f;
+                    parts.Tower = null; // re-read the components below
+                }
+                if (___closestTower == null) return false;
+                if (!ReferenceEquals(parts.Tower, ___closestTower))
+                {
+                    parts.Tower = ___closestTower;
+                    parts.Attacks = ___closestTower.GetComponentsInChildren<AutoAttack>();
+                    parts.HotOil = ___closestTower.GetComponentsInChildren<HotOilTower>();
+                }
+                float reduction = ___attackSpeedBonus * Time.deltaTime;
+                foreach (var attack in parts.Attacks) attack.ReduceCooldownBy(reduction);
+                foreach (var oil in parts.HotOil) oil.ReduceCooldownBy(reduction);
+                return false;
+            }
         }
 
         private class FrameStats
