@@ -58,7 +58,13 @@ namespace PalaceMod
             if (hp == null || !unitSlots.TryGetValue(hp, out var slot) || slot == null) return null;
             var taken = UpgradeInfo.Taken(slot);
             if (taken.Count == 0) return null;
-            var names = taken.Select(s => UpgradeInfo.StepText(slot, s)).Select(Shorten).Where(n => !string.IsNullOrEmpty(n)).ToList();
+            // "Lv 2, 3: More units, faster replenishment." rather than repeating the same text per level.
+            var names = taken
+                .Select(s => (s.Level, text: Shorten(UpgradeInfo.StepText(slot, s))))
+                .Where(t => !string.IsNullOrEmpty(t.text))
+                .GroupBy(t => t.text)
+                .Select(g => $"Lv {string.Join(", ", g.Select(t => t.Level))}: {g.Key}")
+                .ToList();
             return new UnitUpgrades
             {
                 Slot = slot,
@@ -121,7 +127,7 @@ namespace PalaceMod
             var rect = (RectTransform)row.transform;
             var iconRect = icon as RectTransform;
             float iconSize = iconRect != null ? Mathf.Max(iconRect.rect.width, iconRect.rect.height) : 1f;
-            float star = iconSize * (worldSpace ? 0.42f : 0.34f);
+            float star = iconSize * (worldSpace ? 0.55f : 0.36f);
             rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 1f);
             rect.pivot = new Vector2(0.5f, 0.5f);
             rect.anchoredPosition = new Vector2(0f, worldSpace ? star * 0.55f : -star * 0.05f);
@@ -209,8 +215,8 @@ namespace PalaceMod
         {
             var sb = new StringBuilder(description ?? "");
             if (sb.Length > 0) sb.Append("\n\n");
-            sb.Append("<b>Upgrades:</b> ");
-            sb.Append(u.Names.Count > 0 ? string.Join(", ", u.Names) : $"{u.Stars}");
+            sb.Append("<b>Upgrades:</b>");
+            foreach (var name in u.Names) sb.Append('\n').Append(name);
             return sb.ToString();
         }
 

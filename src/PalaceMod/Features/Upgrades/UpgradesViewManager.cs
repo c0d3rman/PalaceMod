@@ -137,6 +137,14 @@ namespace PalaceMod
                 forceUnitTypes = !(args.Length > 0 && args[0] == "off");
                 return forceUnitTypes ? "showing" : "hidden";
             });
+            DevCommands.Register("upgv.peek", "upgv.peek <dy>         shift the pause menu up by dy pixels to screenshot its bottom rows (0 resets)", args =>
+            {
+                var frame = GameWidgets.PauseFrame ?? throw new InvalidOperationException("no pause menu");
+                float dy = args.Length > 0 ? float.Parse(args[0], System.Globalization.CultureInfo.InvariantCulture) : 0f;
+                var p = frame.transform.localPosition;
+                frame.transform.localPosition = new Vector3(p.x, dy, p.z);
+                return $"pause menu at y={dy}";
+            });
             DevCommands.Register("upgv.goto", "upgv.goto <slot>       teleport the king next to a build slot", args =>
             {
                 var slot = FindSlot(args.Length > 0 ? string.Join(" ", args) : throw new ArgumentException("slot name needed"));

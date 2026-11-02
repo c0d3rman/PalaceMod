@@ -317,7 +317,7 @@ namespace PalaceMod
             holder.transform.SetParent(parent, false);
             var le = holder.GetComponent<LayoutElement>();
             le.preferredWidth = le.preferredHeight = le.minWidth = le.minHeight = size;
-            holder.GetComponent<CanvasGroup>().alpha = dim ? 0.5f : 1f;
+            holder.GetComponent<CanvasGroup>().alpha = dim ? 0.4f : 1f;
             holder.GetComponent<CanvasGroup>().blocksRaycasts = false;
             var holderRect = (RectTransform)holder.transform;
             holderRect.sizeDelta = new Vector2(size, size);
