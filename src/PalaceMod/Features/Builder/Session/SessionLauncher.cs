@@ -132,7 +132,8 @@ namespace PalaceMod.Builder
             // Re-read the pack: it may have been edited since it was picked.
             var request = armed.Request;
             var fresh = BuilderServices.Packs.Find(request.Pack.Id)?.Pack;
-            if (fresh != null) request = new SessionRequest { Pack = fresh, WaveSetId = request.WaveSetId, LevelId = request.LevelId };
+            if (fresh == null) { error = $"{request.Pack.Name ?? request.Pack.Id} was removed or can't be read any more"; return false; }
+            request = new SessionRequest { Pack = fresh, WaveSetId = request.WaveSetId, LevelId = request.LevelId };
             if (!Resolve(request, out var ws, out var lv, out error)) return false;
             if ((lv?.Host ?? ws.Host) != armed.Host) { error = "the design was changed to another map; pick it again"; return false; }
             return Start(request, out error);
