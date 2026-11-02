@@ -122,8 +122,11 @@ namespace PalaceMod
             private static readonly AccessTools.FieldRef<LoadoutUIHelper, List<TFUIEquippable>> perksOf =
                 AccessTools.FieldRefAccess<LoadoutUIHelper, List<TFUIEquippable>>("perks");
 
+            [HarmonyPriority(Priority.First)]
             private static void Prefix(LoadoutUIHelper __instance) => Restore(__instance.weaponsParent);
 
+            // After other postfixes (the randomizer's dice links), so it fixes up their result too.
+            [HarmonyPriority(Priority.Last)]
             private static void Postfix(LoadoutUIHelper __instance)
             {
                 var grid = __instance.weaponsParent;
@@ -142,15 +145,23 @@ namespace PalaceMod
                 grid.spacing = new Vector2(spacingX, spacing.y);
                 grid.constraintCount = n;
 
-                var perks = perksOf(__instance);
+                // The game linked weapon i to weapon i +/- columns as if there were two rows. Point those links where the
+                // row's ends point instead (the row above, and below: the perk under it, or whatever else is there, such
+                // as the randomizer's dice).
+                var perks = perksOf(__instance) ?? [];
+                var set = new HashSet<ThronefallUIElement>(weapons);
+                var above = weapons[0].topNav;
+                var below = weapons[n - 1].botNav;
+                bool belowIsPerk = below is TFUIEquippable p && perks.Contains(p);
                 for (int i = 0; i < n; i++)
                 {
-                    weapons[i].topNav = __instance.playButton;
-                    weapons[i].botNav = perks != null && perks.Count > 0 ? perks[Mathf.Min(i, perks.Count - 1)] : __instance.playButton;
+                    if (set.Contains(weapons[i].topNav)) weapons[i].topNav = above;
+                    if (set.Contains(weapons[i].botNav) || belowIsPerk)
+                        weapons[i].botNav = belowIsPerk ? perks[Mathf.Min(i, Mathf.Min(columns, perks.Count) - 1)] : below;
                 }
-                if (perks != null)
+                for (int j = 0; j < Mathf.Min(columns, perks.Count); j++)
                 {
-                    for (int j = 0; j < Mathf.Min(columns, perks.Count); j++) perks[j].topNav = weapons[Mathf.Min(j, n - 1)];
+                    if (set.Contains(perks[j].topNav)) perks[j].topNav = weapons[Mathf.Min(j, n - 1)];
                 }
             }
 
