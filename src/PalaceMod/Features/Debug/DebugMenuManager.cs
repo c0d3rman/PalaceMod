@@ -33,8 +33,6 @@ namespace PalaceMod
         private int goldIndex = 5;
         private int jumpTarget = -1;
         private static readonly float[] EnemyScales = [0.5f, 1f, 1.5f, 2f, 3f];
-        private Wave scaledWave;
-        private int scaleIndex = 1;
         private HashSet<Equippable> pendingLoadout;
 
         public override void Awake(Plugin plugin)
@@ -47,7 +45,6 @@ namespace PalaceMod
             SceneManager.sceneLoaded += (_, _) =>
             {
                 DebugActions.ForgetWaves();
-                scaledWave = null;
                 pendingLoadout = null;
                 jumpTarget = -1;
             };
@@ -197,11 +194,6 @@ namespace PalaceMod
                     : "The next night's wave can be changed during the day.");
                 return;
             }
-            if (scaledWave != wave)
-            {
-                scaledWave = wave;
-                scaleIndex = 1;
-            }
             bool modified = DebugActions.IsModified(wave);
             page.Header($"Night {DebugActions.CurrentNight}{(modified ? "  (changed)" : "")}");
             Stepper(page, "Difficulty", () => $"x{wave.difficultyMulti:0.0}",
@@ -209,10 +201,11 @@ namespace PalaceMod
                 "Night difficulty: scales enemy health, and enemy damage by half as much.");
             page.Row("All elite", OnOff(DebugActions.AllElite(wave)), "Makes every enemy of the night elite (much tougher).",
                 () => Run(() => DebugActions.SetAllElite(!DebugActions.AllElite(wave)), quiet: true));
-            Stepper(page, "Enemy count", () => $"x{EnemyScales[scaleIndex]:0.##}", d =>
+            Stepper(page, "Enemy count", () => $"x{DebugActions.EnemyScale(wave):0.##}", d =>
             {
-                scaleIndex = Mathf.Clamp(scaleIndex + d, 0, EnemyScales.Length - 1);
-                Run(() => DebugActions.ScaleEnemies(EnemyScales[scaleIndex]), quiet: true);
+                float scale = DebugActions.EnemyScale(wave);
+                int nearest = Array.IndexOf(EnemyScales, EnemyScales.OrderBy(s => Mathf.Abs(s - scale)).First());
+                Run(() => DebugActions.ScaleEnemies(EnemyScales[Mathf.Clamp(nearest + d, 0, EnemyScales.Length - 1)]), quiet: true);
             }, null, "Scales the number of every enemy type, relative to the original wave. The gold reward stays the same.");
 
             page.Header("Enemies");
@@ -374,6 +367,21 @@ namespace PalaceMod
                 if (args.FirstOrDefault() == "close") frame?.Close();
                 else Open();
                 return frame != null && frame.IsOpen ? "open" : IsEnabled ? "closed" : "closed (Debug Menu is disabled)";
+            });
+            // Dev launches load levels without the level select, which is what points the match save at the level;
+            // without it nothing is saved and "reload today" can't be tested.
+            DevCommands.Register("dbg.play", "dbg.play <level> [continue]   load a level like the level select does (fresh run unless continue)", args =>
+            {
+                if (args.Length == 0) throw new ArgumentException("usage: dbg.play <level> [continue]");
+                MatchSaveLoadHandler.TryLoadRun(args[0]);
+                MatchSaveLoadHandler.OverwriteCurrentSave = !(args.Length > 1 && args[1] == "continue");
+                if (MatchSaveLoadHandler.OverwriteCurrentSave && !PerkManager.instance.CurrentlyEquipped.Any(e => e is EquippableWeapon))
+                {
+                    var weapon = DebugActions.AllOf(DebugActions.Category.Weapon).FirstOrDefault();
+                    if (weapon != null) PerkManager.SetEquipped(weapon, true);
+                }
+                SceneTransitionManager.instance.TransitionFromNullToLevel(args[0]);
+                return MatchSaveLoadHandler.OverwriteCurrentSave ? "fresh run" : "continuing";
             });
             DevCommands.Register("dbg.state", "dbg.state              gold, night, speed and cheats", _ =>
             {

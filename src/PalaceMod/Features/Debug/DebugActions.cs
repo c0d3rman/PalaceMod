@@ -126,6 +126,7 @@ namespace PalaceMod
             public List<Spawn> Spawns;
             public Dictionary<Spawn, (int Count, bool Elite, int Gold)> Values;
             public float Difficulty;
+            public float Scale = 1f;
         }
 
         private static readonly Dictionary<Wave, WaveSnapshot> snapshots = [];
@@ -146,6 +147,9 @@ namespace PalaceMod
             RequireDay();
             return UpcomingWave ?? throw new InvalidOperationException("No night left to change");
         }
+
+        /// <summary>The enemy-count factor last applied to <paramref name="wave"/> (1 if none).</summary>
+        public static float EnemyScale(Wave wave) => wave != null && snapshots.TryGetValue(wave, out var snap) ? snap.Scale : 1f;
 
         public static bool IsModified(Wave wave) => wave != null && snapshots.ContainsKey(wave);
 
@@ -244,6 +248,7 @@ namespace PalaceMod
                 int baseCount = original.TryGetValue(s, out var v) ? v.Count : s.count;
                 s.count = Math.Max(1, Mathf.RoundToInt(baseCount * factor));
             }
+            snapshots[wave].Scale = factor;
             AfterWaveChange();
             return $"enemies x{factor:0.##}";
         }
