@@ -10,8 +10,8 @@ using UnityEngine;
 
     - Destroyed buildings replay destruction: a save (or "retry day") that has buildings at 0 HP (only possible with the
       God of Destruction mutator) re-activates their knocked-out visuals in Hp.Start, whose BuildingDestructionHandler
-      OnEnable shakes the camera and plays the debris particles and crash sound again. We skip that OnEnable while
-      LocalMatchSaveLoad is loading the match.
+      OnEnable shakes the camera and plays the collapse (debris, crash sound) again. While LocalMatchSaveLoad is loading
+      the match, we place the rubble in its settled state instead.
     - Shrine particles on load: Shrine.ActivateShrine(_calledFromSaveLoad: true) re-plays the one-off activation burst
       for every already-activated shrine. We stop and clear it right after.
     - Loaded unit health: Hp.OnSave stores Mathf.RoundToInt(hp), so a unit with fractional max HP (e.g. 37.5) loads at
@@ -30,6 +30,8 @@ namespace PalaceMod
 
         private static readonly AccessTools.FieldRef<Shrine, ParticleSystem> UpgradeParticles =
             AccessTools.FieldRefAccess<Shrine, ParticleSystem>("upgradeParticles");
+        private static readonly AccessTools.FieldRef<BuildingDestructionHandler, float> DebrisPlaytime =
+            AccessTools.FieldRefAccess<BuildingDestructionHandler, float>("debrisPlaytime");
         private static readonly AccessTools.FieldRef<Hp, float> HpValue = AccessTools.FieldRefAccess<Hp, float>("hp");
         private static readonly AccessTools.FieldRef<Hp, bool> GotLoadedHpValue = AccessTools.FieldRefAccess<Hp, bool>("gotLoadedHpValue");
 
@@ -48,10 +50,23 @@ namespace PalaceMod
         [HarmonyPatch(typeof(BuildingDestructionHandler), "OnEnable")]
         private static class BuildingDestructionHandler_OnEnable
         {
+            // While a match loads, show the rubble as it looks after the collapse instead of replaying the collapse:
+            // same particle placement as OnEnable, but no camera shake, no crash sound, no falling debris or smoke.
             private static bool Prefix(BuildingDestructionHandler __instance)
             {
                 if (!destructionReplayFix.Value || !LocalMatchSaveLoad.CurrentlyLoadingMatch) return true;
-                Plugin.Logger.LogInfo($"Fixes: skipped destruction effects of {__instance.transform.root.name} while loading the match");
+                var mesh = __instance.mainMesh;
+                foreach (var particles in new[] { __instance.debrisParticles, __instance.smokeParticles })
+                {
+                    particles.transform.SetPositionAndRotation(mesh.transform.position, mesh.transform.rotation);
+                    var shape = particles.shape;
+                    shape.scale = mesh.localBounds.size;
+                    shape.position = mesh.localBounds.center;
+                }
+                // OnEnable plays the debris for debrisPlaytime seconds, then Update pauses it; Simulate ends paused there.
+                __instance.debrisParticles.Simulate(DebrisPlaytime(__instance), true, true);
+                __instance.smokeParticles.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                Plugin.Logger.LogInfo($"Fixes: settled destroyed {__instance.transform.root.name} without replaying its collapse");
                 return false;
             }
         }
@@ -87,13 +102,21 @@ namespace PalaceMod
         // Test hooks for reproducing the bugs: `dev.py cmd "fixes <sub>"`.
         private static void RegisterDevCommands()
         {
-            DevCommands.Register("fixes", "fixes god [on|off] | build | kill <n> | shrines | save | retry | hp | units   drive the Fixes repros", args =>
+            DevCommands.Register("fixes", "fixes load <scene> | god [on|off] | build | kill <n> | shrines | save | retry | hp | units | fx   drive the Fixes repros", args =>
             {
-                if (args.Length == 0) throw new ArgumentException("usage: fixes <god|build|kill|shrines|save|retry|hp|units>");
+                if (args.Length == 0) throw new ArgumentException("usage: fixes <load|god|build|kill|shrines|save|retry|hp|units|fx>");
+                if (args[0] == "load")
+                {
+                    // Like Continue in level select: load the scene's match save, then the scene.
+                    if (args.Length < 2) throw new ArgumentException("usage: fixes load <scene>");
+                    MatchSaveLoadHandler.TryLoadRun(args[1]);
+                    SceneTransitionManager.instance.TransitionFromNullToLevel(args[1]);
+                    return MatchSaveLoadHandler.CurrentSave == null ? "no save; fresh start" : "loading save";
+                }
                 var tags = TagManager.instance;
                 if (tags == null || LocalGamestate.Instance == null) throw new InvalidOperationException("not in a level");
                 string sub = args[0].ToLowerInvariant();
-                if (sub is "god" && args.Length > 1 || sub is "build" or "kill" or "shrines")
+                if (sub is "god" or "perk" && args.Length > 1 || sub is "build" or "kill" or "shrines")
                     GameplayImpact.Mark("Fixes test command");
                 switch (sub)
                 {
@@ -102,6 +125,15 @@ namespace PalaceMod
                         var perks = PerkManager.instance;
                         if (args.Length > 1) PerkManager.SetEquipped(perks.destructionGod, args[1] != "off");
                         return $"God of Destruction {(perks.DestructionGodActive ? "on" : "off")}";
+                    }
+                    case "perk":
+                    {
+                        // fixes perk <PerkManager Equippable field, e.g. strongerHerosActive> [on|off]
+                        if (args.Length < 2) throw new ArgumentException("usage: fixes perk <field> [on|off]");
+                        var perk = AccessTools.Field(typeof(PerkManager), args[1])?.GetValue(PerkManager.instance) as Equippable
+                            ?? throw new ArgumentException($"no Equippable field {args[1]}");
+                        if (args.Length > 2) PerkManager.SetEquipped(perk, args[2] != "off");
+                        return $"{perk.name} {(PerkManager.IsEquipped(perk) ? "on" : "off")}";
                     }
                     case "build":
                     {
@@ -161,6 +193,15 @@ namespace PalaceMod
                         return string.Join("\n", PlayerObjects(tags, TagManager.ETag.PlayerUnit)
                             .Where(t => t.Hp != null)
                             .Select(t => $"{t.name}: {t.Hp.HpValue}/{t.Hp.maxHp}"));
+                    case "fx":
+                    {
+                        var lines = UnityEngine.Object.FindObjectsOfType<BuildingDestructionHandler>().Select(h =>
+                            $"{h.transform.root.name}: debris {h.debrisParticles.particleCount} playing={h.debrisParticles.isPlaying} paused={h.debrisParticles.isPaused}, " +
+                            $"smoke {h.smokeParticles.particleCount} playing={h.smokeParticles.isPlaying}, sound playing={h.destructionSource.isPlaying}");
+                        var shrines = UnityEngine.Object.FindObjectsOfType<Shrine>().Select(sh =>
+                            $"shrine {sh.name}: activated={sh.ShrineHasBeenActivated}, burst {UpgradeParticles(sh).particleCount} playing={UpgradeParticles(sh).isPlaying}");
+                        return string.Join("\n", lines.Concat(shrines));
+                    }
                     default:
                         throw new ArgumentException("unknown subcommand");
                 }
