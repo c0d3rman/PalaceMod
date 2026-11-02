@@ -296,6 +296,12 @@ namespace PalaceMod
                 a.Damage = main.Actual;
                 stats.SplashBase = DamageAgainst(weapon.splashDamage, king, prefabDamageMulti);
                 stats.SplashActual = DamageAgainst(weapon.splashDamage, king, prefabDamageMulti * dmgM * armor);
+                // Splash-only attackers (e.g. Flails) would otherwise show no damage at all.
+                if (a.Damage == 0f && stats.SplashActual > 0f)
+                {
+                    b.Damage = stats.SplashBase;
+                    a.Damage = stats.SplashActual;
+                }
             }
             return stats;
         }
