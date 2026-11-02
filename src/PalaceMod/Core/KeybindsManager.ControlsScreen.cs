@@ -6,6 +6,7 @@ using I2.Loc;
 using Rewired;
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 /*
     The keybind rows in Settings > Controls > Keyboard. The game's KeyRebinder makes one ControlMapButton per
@@ -98,14 +99,29 @@ namespace PalaceMod
             }
             if (copy.selectionIndicator != null) UnityEngine.Object.DestroyImmediate(copy.selectionIndicator);
             UnityEngine.Object.DestroyImmediate(copy.GetComponent<ScrollElementID>());
-            UnityEngine.Object.DestroyImmediate(copy.target);
             UnityEngine.Object.DestroyImmediate(copy);
+            // Dependents first: TFUIAudioHelper requires the button.
+            foreach (var helper in header.GetComponentsInChildren<TFUIAudioHelper>(true)) UnityEngine.Object.DestroyImmediate(helper);
             foreach (var element in header.GetComponentsInChildren<ThronefallUIElement>(true)) UnityEngine.Object.DestroyImmediate(element);
 
-            label.text = major ? text.ToUpperInvariant() : text;
-            label.fontStyle = major ? FontStyles.Bold : FontStyles.Italic;
-            label.color = major ? new Color(1f, 0.906f, 0.769f) : new Color(0.784f, 0.651f, 0.455f); // the game's FFE7C4 / C8A674
-            if (major) label.fontSize *= 1.1f;
+            label.text = text;
+            if (major)
+            {
+                // Like the settings tabs: spaced small caps in the bright text colour, with room above it.
+                label.fontStyle = FontStyles.SmallCaps;
+                label.characterSpacing = 12f;
+                label.color = new Color(1f, 0.906f, 0.769f); // the game's FFE7C4
+                label.alignment = TextAlignmentOptions.BottomLeft;
+                var rect = (RectTransform)header.transform;
+                float height = Mathf.Max(rect.sizeDelta.y, LayoutUtility.GetPreferredHeight(rect));
+                var layout = header.GetComponent<LayoutElement>() ?? header.AddComponent<LayoutElement>();
+                layout.minHeight = layout.preferredHeight = height * 2f;
+            }
+            else
+            {
+                label.color = new Color(0.784f, 0.651f, 0.455f); // C8A674
+                label.fontSize *= 0.85f;
+            }
         }
 
         [HarmonyPatch(typeof(ControlMapButton), nameof(ControlMapButton.SetData))]
@@ -151,20 +167,34 @@ namespace PalaceMod
             if (conflicts.Count > 0) label += $" <color={ConflictColor}><size=70%>(also {string.Join(", ", conflicts)})</size></color>";
             row.target.SetOriginalString(label);
 
-            // The native glyph shows only the key; show held modifiers in front of it.
+            // The native glyph is looked up by the element name, which for a key with modifiers is "Ctrl + K" and has
+            // no sprite; draw each part's glyph instead.
             var keyMap = rowKeyMap(row);
             if (decorateKeys && mine && keyMap != null && keyMap.modifierKeyFlags != ModifierKeyFlags.None)
-                row.displayKeyboard.text = $"<color=#C8A674>{ModifierText(keyMap.modifierKeyFlags)}</color>{row.displayKeyboard.text}";
+                row.displayKeyboard.text = ComboGlyphs(keyMap);
         }
 
-        private static string ModifierText(ModifierKeyFlags flags)
+        private static readonly Func<string, string> putIntoVoffset =
+            AccessTools.MethodDelegate<Func<string, string>>(AccessTools.Method(typeof(InputActionGlyph), "PutIntoVoffset"));
+
+        private static string KeyGlyph(string name)
         {
-            string text = "";
-            if ((flags & (ModifierKeyFlags.LeftControl | ModifierKeyFlags.RightControl)) != 0) text += "Ctrl+";
-            if ((flags & (ModifierKeyFlags.LeftAlt | ModifierKeyFlags.RightAlt)) != 0) text += "Alt+";
-            if ((flags & (ModifierKeyFlags.LeftShift | ModifierKeyFlags.RightShift)) != 0) text += "Shift+";
-            if ((flags & (ModifierKeyFlags.LeftCommand | ModifierKeyFlags.RightCommand)) != 0) text += "Cmd+";
-            return text;
+            var sprites = Resources.Load<TMP_SpriteAsset>("Sprite Assets/keyboard_glyphs");
+            if (sprites == null || sprites.GetSpriteIndexFromName(name) < 0) return $"<color=#C8A674>{name}</color>";
+            return putIntoVoffset($"<sprite=\"keyboard_glyphs\" name=\"{name}\" color=#C8A674>");
+        }
+
+        private static string ComboGlyphs(ActionElementMap keyMap)
+        {
+            var parts = new List<string>();
+            var flags = keyMap.modifierKeyFlags;
+            if ((flags & (ModifierKeyFlags.LeftControl | ModifierKeyFlags.RightControl)) != 0) parts.Add(KeyGlyph("Left Control"));
+            if ((flags & (ModifierKeyFlags.LeftAlt | ModifierKeyFlags.RightAlt)) != 0) parts.Add(KeyGlyph("Left Alt"));
+            if ((flags & (ModifierKeyFlags.LeftShift | ModifierKeyFlags.RightShift)) != 0) parts.Add(KeyGlyph("Left Shift"));
+            if ((flags & (ModifierKeyFlags.LeftCommand | ModifierKeyFlags.RightCommand)) != 0) parts.Add(KeyGlyph("Left Command"));
+            string key = ReInput.controllers.Keyboard.GetElementIdentifierById(keyMap.elementIdentifierId)?.name ?? keyMap.keyCode.ToString();
+            parts.Add(KeyGlyph(key));
+            return string.Join("<color=#C8A674> + </color>", parts);
         }
 
         /// <summary>Names of the visible actions sharing a binding with this one, where at least one side is a mod key.</summary>
@@ -278,7 +308,7 @@ namespace PalaceMod
             if (k.ActionId >= 0 && Plugin.Input != null)
             {
                 elements = string.Join(", ", EditableMaps().SelectMany(m => m.GetElementMapsWithAction(k.ActionId)
-                    .Select(e => $"{m.controllerType}:{(e.modifierKeyFlags != ModifierKeyFlags.None ? ModifierText(e.modifierKeyFlags) : "")}{e.elementIdentifierName}")));
+                    .Select(e => $"{m.controllerType}:{e.elementIdentifierName}")));
             }
             var conflicts = k.ActionId >= 0 ? Conflicts(k.ActionId) : [];
             string more = moreEntries.TryGetValue(k, out var entry) && entry.Value != "" ? $" more=[{entry.Value}]" : "";
