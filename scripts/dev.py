@@ -308,6 +308,19 @@ def set_native(game, enabled):
         print("Loader set to Rosetta.")
 
 
+def copy_missing_libs():
+    """Copies game libraries that PalaceMod.csproj references but lib/ lacks (e.g. one added after setup ran)."""
+    project = ET.parse(ROOT / "PalaceMod.csproj")
+    names = [item.text.rsplit("/", 1)[-1] for item in project.findall(".//Reference/HintPath")]
+    missing = [name for name in names if not (ROOT / "lib" / name).is_file()]
+    if not missing:
+        return
+    managed = managed_dir(game_root())
+    for name in missing:
+        shutil.copy2(managed / name, ROOT / "lib" / name)
+    print(f"Copied newly referenced game libraries into lib/: {', '.join(missing)}")
+
+
 def setup(game):
     run("dotnet", "tool", "restore")
     managed = managed_dir(game)
@@ -334,6 +347,7 @@ def setup(game):
 def build(configuration):
     if not (ROOT / "lib/Assembly-CSharp.dll").is_file():
         raise RuntimeError("Game libraries missing from lib/; run `dev.py setup` first.")
+    copy_missing_libs()
     run("dotnet", "build", "PalaceMod.csproj", "-c", configuration, "-nologo", "-clp:NoSummary")
 
 
