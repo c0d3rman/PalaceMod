@@ -123,7 +123,7 @@ def check_owner(force):
     if owner is None:
         raise RuntimeError("Thronefall was not launched by dev.py, so the player may be playing it. "
                            "Ask them to quit, or pass --force once they agree.")
-    if owner != str(ROOT) and not holds_lease():
+    if owner != str(ROOT):
         raise RuntimeError(f"The running game was launched by another checkout ({owner}), so another "
                            "session is probably testing. Wait until it stops the game, or pass --force "
                            "if that session is gone.")
@@ -699,12 +699,23 @@ def free_lease(lease, reason):
     """Stop a dev-launched game, restore the player's config and delete the lease. Call under lease_lock."""
     if lease:
         print(f"Releasing the game lease of {describe_holder(lease)}: {reason}", flush=True)
-    if game_pids() and OWNER.exists():
-        stop_game(force=True)
-    elif game_pids():
-        print("Thronefall is running but wasn't launched by dev.py (the player may be playing); leaving it running.")
+    stop_holders_game(lease)
     restore_user_config()
     LEASE_FILE.unlink(missing_ok=True)
+
+
+def stop_holders_game(lease, force=False):
+    """Stop the game if the lease holder launched it. Anything else (the player's own game, or a checkout whose
+    dev.py predates the lease) is left running unless forced."""
+    if not game_pids():
+        return
+    owner = game_owner()
+    if force or (lease is not None and owner == lease["root"]):
+        stop_game(force=True)
+    elif owner is None:
+        print("Thronefall is running but wasn't launched by dev.py (the player may be playing); leaving it running.")
+    else:
+        print(f"Thronefall was launched by {owner}, which doesn't hold the lease; leaving it running.")
 
 
 def recover():
@@ -820,10 +831,8 @@ def release_lease(force):
         if lease["root"] != str(ROOT) and not force:
             raise RuntimeError(f"The game lease is held by {describe_holder(lease)}, idle "
                                f"{duration(lease_idle(lease))}. Pass --force only if that session is gone.")
-        if game_pids() and not OWNER.exists() and not force:
-            print("Thronefall is running but wasn't launched by dev.py (the player may be playing); leaving it running.")
-        elif game_pids():
-            stop_game(force=True)
+        if game_pids():
+            stop_holders_game(lease, force)
         else:
             print("Thronefall is not running.")
             restore_display()
