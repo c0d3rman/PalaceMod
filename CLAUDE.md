@@ -13,7 +13,7 @@ python3 scripts/dev.py screenshot    # in-game frame capture (works while unfocu
 python3 scripts/dev.py stop          # quit the game, restore the player's display settings and config, release the lease
 python3 scripts/dev.py cmd "<command>"  # drive a dev launch: load levels, start nights, fake input, open/navigate menus
 python3 scripts/dev.py config get|set <Section>.<Key> [value]  # read/edit PalaceMod.cfg; the game reloads it live
-python3 scripts/dev.py land          # merge your branch into overhaul (see Landing)
+python3 scripts/dev.py land --body-file pr.md  # merge origin/main, push, open and merge the PR (see Landing)
 ```
 
 Dev launches are windowed, muted (`--sound` to keep audio) and hand focus back to the app that was in front (`--focus` lets the game keep it). Don't launch `--fullscreen` unless you need to: it switches the user to a new Space.
@@ -34,7 +34,13 @@ Many agents share one game install (the game, the installed DLL, `BepInEx/config
 
 ## Landing
 
-When your feature is done and verified, commit, then run `python3 scripts/dev.py land` from your worktree. It refuses if you have uncommitted changes. It merges your branch into `overhaul` (`--no-ff`, in the `.claude/worktrees/overhaul` worktree, one lander at a time), builds there, and prints the new overhaul commit. If the merge conflicts or the build fails, it undoes the merge. Then run `git merge overhaul` in your worktree (or rebase onto it), fix the problem, commit and land again. Never commit in the overhaul worktree by hand.
+Branch from `origin/main`; that's the base for everything. When your feature is done and verified, commit, write the PR description to a file (end it with your attribution footer lines), and run:
+
+```sh
+python3 scripts/dev.py land --body-file /path/to/pr-body.md [--title "Short title"]
+```
+
+`land` refuses if you have uncommitted changes. Under a global lock, it fetches, merges `origin/main` into your branch, builds, pushes, opens a PR against `main` (or reuses the open one), checks that it's mergeable, merges it (`gh pr merge --merge`), fast-forwards the main checkout, and prints the PR URL and merge commit. Agents merge their own PRs this way. If the merge conflicts or the build fails, it undoes its merge and stops; run `git merge origin/main` yourself, fix it, commit and land again. `--dry-run` stops after the build. `gh` is authenticated as c0d3rman; never run `gh auth switch`.
 
 ## How the Mac setup works
 

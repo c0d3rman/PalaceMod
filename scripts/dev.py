@@ -952,7 +952,7 @@ def config_command(game, action, spec, value):
 
 # --- Landing ----------------------------------------------------------------
 
-INTEGRATION_BRANCH = "overhaul"
+BASE_BRANCH = "main"
 LAND_LOCK = DEV_HOME / "land.lock"
 
 
@@ -963,30 +963,39 @@ def git(*args, cwd=ROOT, check=True):
     return result
 
 
-def worktree_for(branch):
-    current = None
-    for line in git("worktree", "list", "--porcelain").stdout.splitlines():
-        if line.startswith("worktree "):
-            current = Path(line[len("worktree "):])
-        elif line == f"branch refs/heads/{branch}":
-            return current
-    return None
+def gh(*args, check=True):
+    result = subprocess.run(["gh", *map(str, args)], cwd=ROOT, capture_output=True, text=True)
+    if check and result.returncode != 0:
+        raise RuntimeError(f"gh {' '.join(map(str, args))} failed:\n{result.stdout}{result.stderr}")
+    return result
 
 
-def land():
-    """Merge this checkout's branch into the integration branch (--no-ff) in its worktree, build there, and undo
-    the merge on conflict or build failure."""
+def main_checkout():
+    """The repository's main checkout (the parent of the shared .git directory)."""
+    common = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
+    return common.parent
+
+
+def open_pr(branch):
+    result = gh("pr", "list", "--head", branch, "--base", BASE_BRANCH, "--state", "open",
+                "--json", "number,url", "--limit", "1")
+    prs = json.loads(result.stdout or "[]")
+    return prs[0] if prs else None
+
+
+def land(title, body_file, dry_run):
+    """Bring the branch up to date with origin/main, build it, push it, open (or reuse) its PR against main, merge
+    the PR, and fast-forward the main checkout. One lander at a time."""
     branch = current_branch()
     if not branch:
         raise RuntimeError("Not on a branch; check out your feature branch first.")
-    if branch == INTEGRATION_BRANCH:
-        raise RuntimeError(f"Run `land` from a feature worktree, not from {INTEGRATION_BRANCH}.")
+    if branch == BASE_BRANCH:
+        raise RuntimeError(f"Run `land` from a feature branch, not {BASE_BRANCH}.")
     dirty = git("status", "--porcelain").stdout.strip()
     if dirty:
         raise RuntimeError(f"Commit or remove your changes before landing:\n{dirty}")
-    target = worktree_for(INTEGRATION_BRANCH)
-    if target is None:
-        raise RuntimeError(f"No worktree has {INTEGRATION_BRANCH} checked out.")
+    if body_file and not Path(body_file).is_file():
+        raise RuntimeError(f"--body-file {body_file} doesn't exist.")
     LAND_LOCK.parent.mkdir(parents=True, exist_ok=True)
     with open(LAND_LOCK, "a") as lock:
         try:
@@ -994,38 +1003,76 @@ def land():
         except BlockingIOError:
             print("Another checkout is landing; waiting...", flush=True)
             fcntl.flock(lock, fcntl.LOCK_EX)
-        if git("status", "--porcelain", "--untracked-files=no", cwd=target).stdout.strip():
-            raise RuntimeError(f"{target} has uncommitted changes; ask the user to sort them out.")
-        if git("merge-base", "--is-ancestor", branch, INTEGRATION_BRANCH, check=False).returncode == 0:
-            print(f"{branch} is already in {INTEGRATION_BRANCH}; nothing to land.")
-            return
-        before = git("rev-parse", "HEAD", cwd=target).stdout.strip()
-        print(f"Merging {branch} into {INTEGRATION_BRANCH} in {target}...", flush=True)
-        merge = git("merge", "--no-ff", "--no-edit", "-m", f"Land {branch}", branch, cwd=target, check=False)
+
+        print(f"Fetching and merging origin/{BASE_BRANCH} into {branch}...", flush=True)
+        git("fetch", "origin")
+        before = git("rev-parse", "HEAD").stdout.strip()
+        merge = git("merge", "--no-edit", f"origin/{BASE_BRANCH}", check=False)
         if merge.returncode != 0:
-            conflicts = git("diff", "--name-only", "--diff-filter=U", cwd=target, check=False).stdout.strip()
-            git("merge", "--abort", cwd=target, check=False)
-            git("reset", "--hard", before, cwd=target)
-            raise RuntimeError(f"{branch} doesn't merge cleanly into {INTEGRATION_BRANCH}; nothing was landed.\n"
+            conflicts = git("diff", "--name-only", "--diff-filter=U", check=False).stdout.strip()
+            git("merge", "--abort", check=False)
+            raise RuntimeError(f"origin/{BASE_BRANCH} doesn't merge cleanly into {branch}; nothing was landed.\n"
                                f"Conflicts:\n{conflicts or merge.stdout + merge.stderr}\n"
-                               f"Fix it in your worktree: `git merge {INTEGRATION_BRANCH}` (or `git rebase "
-                               f"{INTEGRATION_BRANCH}`), resolve, build, commit, then `dev.py land` again.")
-        try:
-            if not (target / "lib/Assembly-CSharp.dll").is_file():
-                subprocess.run([sys.executable, str(target / "scripts/dev.py"), "setup"], cwd=target, check=True,
-                               capture_output=True, text=True)
-            print(f"Building {INTEGRATION_BRANCH}...", flush=True)
-            subprocess.run([sys.executable, str(target / "scripts/dev.py"), "build"], cwd=target, check=True,
-                           capture_output=True, text=True)
-        except (subprocess.CalledProcessError, OSError) as error:
-            git("reset", "--hard", before, cwd=target)
-            output = getattr(error, "stdout", None) or ""
+                               f"Run `git merge origin/{BASE_BRANCH}`, resolve, build, commit, then `dev.py land` again.")
+        if git("rev-list", "--count", f"origin/{BASE_BRANCH}..HEAD").stdout.strip() == "0":
+            print(f"{branch} has nothing that isn't already in {BASE_BRANCH}; nothing to land.")
+            return
+
+        print("Building...", flush=True)
+        build_result = subprocess.run([sys.executable, str(ROOT / "scripts/dev.py"), "build"], cwd=ROOT,
+                                      capture_output=True, text=True)
+        if build_result.returncode != 0:
+            git("reset", "--hard", before)  # the tree was clean, so this only drops the merge
+            output = build_result.stdout + build_result.stderr
             errors = "\n".join(sorted({line.strip() for line in output.splitlines() if ": error " in line}))
             print(errors or output[-3000:], file=sys.stderr)
-            raise RuntimeError(f"{INTEGRATION_BRANCH} doesn't build with {branch} merged in, so the merge was undone.\n"
-                               f"Fix it in your worktree: `git merge {INTEGRATION_BRANCH}`, fix the build, commit, then "
-                               "`dev.py land` again.")
-        print(f"Landed: {git('log', '-1', '--format=%h %s', cwd=target).stdout.strip()}")
+            raise RuntimeError(f"{branch} doesn't build with origin/{BASE_BRANCH} merged in, so the merge was undone. "
+                               f"Run `git merge origin/{BASE_BRANCH}`, fix the build, commit, then `dev.py land` again.")
+
+        if dry_run:
+            print(f"Dry run: {branch} is merged with origin/{BASE_BRANCH} and builds; not pushing or opening a PR.")
+            return
+
+        print(f"Pushing {branch}...", flush=True)
+        git("push", "-u", "origin", branch)
+        pr = open_pr(branch)
+        if pr is None:
+            if not body_file:
+                raise RuntimeError("No open PR for this branch yet: pass --body-file FILE (the PR description, ending "
+                                   "with your attribution footer lines) to create one.")
+            pr_title = title or branch.replace("-", " ").replace("_", " ").capitalize()
+            gh("pr", "create", "--base", BASE_BRANCH, "--head", branch, "--title", pr_title, "--body-file", body_file)
+            pr = open_pr(branch)
+            if pr is None:
+                raise RuntimeError("Created the PR but can't find it; check `gh pr list`.")
+            print(f"Opened {pr['url']}")
+        else:
+            print(f"Reusing {pr['url']}")
+
+        # GitHub computes mergeability asynchronously after a push.
+        state = None
+        for _ in range(30):
+            state = json.loads(gh("pr", "view", pr["url"], "--json", "mergeable,mergeStateStatus").stdout)
+            if state["mergeable"] != "UNKNOWN":
+                break
+            time.sleep(2)
+        if state["mergeable"] != "MERGEABLE":
+            raise RuntimeError(f"{pr['url']} isn't mergeable ({state['mergeable']}, {state['mergeStateStatus']}). "
+                               f"Merge origin/{BASE_BRANCH}, fix, commit, then `dev.py land` again.")
+        gh("pr", "merge", pr["url"], "--merge")
+        merged = json.loads(gh("pr", "view", pr["url"], "--json", "state,mergeCommit").stdout)
+        if merged["state"] != "MERGED":
+            raise RuntimeError(f"`gh pr merge` didn't merge {pr['url']} (state {merged['state']}).")
+        commit = (merged.get("mergeCommit") or {}).get("oid", "?")
+
+        root = main_checkout()
+        if current_branch(root) == BASE_BRANCH and not git("status", "--porcelain", "--untracked-files=no", cwd=root).stdout.strip():
+            pull = git("pull", "--ff-only", cwd=root, check=False)
+            print(f"Fast-forwarded {root} to {BASE_BRANCH}." if pull.returncode == 0
+                  else f"Couldn't fast-forward {root}: {pull.stderr.strip()}")
+        else:
+            print(f"Left {root} alone (not a clean {BASE_BRANCH} checkout).")
+        print(f"Landed: {pr['url']} merged as {commit[:12]}")
 
 
 # --- Misc -------------------------------------------------------------------
@@ -1141,6 +1188,11 @@ def main():
                         help="Run/launch: start the game with this setting instead of its default (repeatable)")
     parser.add_argument("--keep-config", action="store_true",
                         help="Run/launch: keep PalaceMod.cfg as it is instead of starting from defaults")
+    parser.add_argument("--title", help="Land: PR title when creating it (default: from the branch name)")
+    parser.add_argument("--body-file", help="Land: PR description file, ending with your attribution footer; "
+                                            "required when the PR doesn't exist yet")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Land: merge origin/main and build, but don't push, open or merge a PR")
     args = parser.parse_args()
     game = game_root(args.game)
     rest = args.args
@@ -1216,7 +1268,7 @@ def main():
         else:
             raise RuntimeError("Usage: dev.py lease acquire|release|status")
     elif args.command == "land":
-        land()
+        land(args.title, args.body_file, args.dry_run)
     elif args.command == "native":
         if mode not in (None, "on", "off"):
             raise RuntimeError("Usage: dev.py native [on|off]")
