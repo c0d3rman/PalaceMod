@@ -76,9 +76,10 @@ namespace PalaceMod
             try
             {
                 string path = DebugBundle.Create();
-                string shown = DebugBundle.DisplayPath(path);
-                try { GUIUtility.systemCopyBuffer = path; } catch { }
-                Notify.Show($"Debug bundle saved to {shown} (path copied)", NotifyKind.Success, 6f, key: "palacemod-debug-bundle");
+                bool copied;
+                try { GUIUtility.systemCopyBuffer = path; copied = true; } catch { copied = false; }
+                Notify.Show($"Debug bundle saved in BepInEx/PalaceMod/DebugBundles{(copied ? " (full path copied)" : "")}",
+                    NotifyKind.Success, 6f, key: "palacemod-debug-bundle");
                 return path;
             }
             catch (Exception e)

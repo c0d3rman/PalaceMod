@@ -32,7 +32,7 @@ namespace PalaceMod
             Plugin.Config.Reload();
             // Reloading saves changed values back, which touches the file again; don't treat that as another edit.
             writeTime = File.GetLastWriteTimeUtc(path);
-            Log.Info("Reloaded PalaceMod.cfg");
+            Log.Debug("Reloaded PalaceMod.cfg");
         }
     }
 }
