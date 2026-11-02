@@ -64,8 +64,8 @@ Evidence comes from the decompiled `Assembly-CSharp`, `AstarPathfindingProject.d
 
 | WP | State |
 |---|---|
-| WP1 Data model and loader | **Landed** (contracts PR). `Model/`, `Contracts/`, `PackRepository`, `EditHistory`. |
-| WP2 Catalog and runtime | **In progress** (feat/builder-core): `Runtime/`, `BuilderManager`, `builder` dev command, sample pack, interim `SessionLauncher`. Until it lands, `BuilderServices.Catalog/Units/Waves` throw and `Packs` is a stub. |
+| WP1 Data model and loader | **Landed.** `Model/`, `Contracts/`, `PackRepository`, `EditHistory`. |
+| WP2 Catalog and runtime | **Landed.** `Runtime/`, `builder` dev command, sample pack, interim `SessionLauncher`. |
 | WP3 Session and level select | Open. Interim launcher and isolation patches are in `Session/` (see below). |
 | WP4a Editor UI | Open. |
 | WP4b / WP4c Level overlay, placement editor | Stage 2. Data shape fixed (`LevelDef`), stub `ILevelOverlay`. |
