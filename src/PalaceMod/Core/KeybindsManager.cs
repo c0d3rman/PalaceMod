@@ -103,7 +103,25 @@ namespace PalaceMod
                 keybind.Entry.SettingChanged += (_, _) => OnConfigChanged(bound);
                 moreEntries[keybind].SettingChanged += (_, _) => OnConfigChanged(bound);
             }
+            foreach (var manager in Plugin.Instance.Managers)
+            {
+                if (manager.EnabledEntry != null && sections.Contains(manager.FeatureSection))
+                {
+                    string section = manager.FeatureSection;
+                    manager.EnabledEntry.SettingChanged += (_, _) => OnFeatureToggled(section);
+                }
+            }
             Plugin.Logger.LogInfo($"Keybinds: added {byAction.Count} Rewired actions in category {CategoryName} ({categoryId})");
+        }
+
+        private static void OnFeatureToggled(string section)
+        {
+            if (!Ready) return;
+            foreach (var keybind in byAction.Values)
+            {
+                if (keybind.Section == section) Apply(keybind);
+            }
+            RebuildControlsScreen();
         }
 
         private static void OnConfigChanged(Keybind keybind)
@@ -181,8 +199,14 @@ namespace PalaceMod
         private const int FirstMouseButtonId = 3;
         private static bool IsMouseKey(KeyCode key) => key >= KeyCode.Mouse0 && key <= KeyCode.Mouse6;
 
-        // Rewired mouse maps have no modifiers, so a mouse button with modifiers stays on Unity Input.
-        private static bool UnityOnly(Keybind keybind) => IsMouseKey(keybind.Shortcut.MainKey) && keybind.Shortcut.Modifiers.Any();
+        // Rewired mouse maps have no modifiers and keyboard maps allow only Ctrl/Alt/Shift/Cmd, so other shortcuts (a
+        // mouse button with modifiers, F7+Space) stay on Unity Input; their extra controller bindings still use Rewired.
+        private static bool UnityOnly(Keybind keybind)
+        {
+            var shortcut = keybind.Shortcut;
+            if (!shortcut.Modifiers.Any()) return false;
+            return IsMouseKey(shortcut.MainKey) || shortcut.Modifiers.Any(m => ToFlags([m]) == ModifierKeyFlags.None);
+        }
 
         private static ControllerMap KeyboardMap => Plugin.Input?.controllers.maps.GetMap(ControllerType.Keyboard, 0, 0, 0);
         private static ControllerMap MouseMap => Plugin.Input?.controllers.maps.GetMap(ControllerType.Mouse, 0, 0, 0);
@@ -206,6 +230,8 @@ namespace PalaceMod
             int id = keybind.ActionId;
             if (id < 0 || Plugin.Input == null) return;
             foreach (var map in Plugin.Input.controllers.maps.GetAllMaps()) map.DeleteElementMapsWithAction(id);
+            // A disabled feature's keys are kept in the config but not mapped, so they can't shadow or clash with anything.
+            if (!Keybinds.FeatureEnabled(keybind.Section)) return;
 
             var primary = keybind.Shortcut;
             if (UnityOnly(keybind)) { }
@@ -240,6 +266,7 @@ namespace PalaceMod
         /// <summary>Copies the keybind's current element maps into its config entries.</summary>
         private static void Sync(Keybind keybind)
         {
+            if (!Keybinds.FeatureEnabled(keybind.Section)) return; // not mapped; the config is the binding
             int id = keybind.ActionId;
             ActionElementMap keyboard = null, mouse = null;
             var rest = new List<(ControllerMap map, ActionElementMap element)>();
@@ -314,11 +341,16 @@ namespace PalaceMod
 
         private sealed class RewiredBackend : IKeybindBackend
         {
-            public bool Down(Keybind k) => Use(k) ? Plugin.Input.GetButtonDown(k.ActionId) : Keybinds.UnityInput.Down(k);
-            public bool Held(Keybind k) => Use(k) ? Plugin.Input.GetButton(k.ActionId) : Keybinds.UnityInput.Held(k);
-            public bool Up(Keybind k) => Use(k) ? Plugin.Input.GetButtonUp(k.ActionId) : Keybinds.UnityInput.Up(k);
+            public bool Down(Keybind k) => Read(k, Keybinds.UnityInput.Down, id => Plugin.Input.GetButtonDown(id));
+            public bool Held(Keybind k) => Read(k, Keybinds.UnityInput.Held, id => Plugin.Input.GetButton(id));
+            public bool Up(Keybind k) => Read(k, Keybinds.UnityInput.Up, id => Plugin.Input.GetButtonUp(id));
 
-            private static bool Use(Keybind k) => k.ActionId >= 0 && Ready && !UnityOnly(k);
+            private static bool Read(Keybind k, Func<Keybind, bool> unity, Func<int, bool> rewired)
+            {
+                if (k.ActionId < 0 || !Ready) return unity(k);
+                if (UnityOnly(k)) return unity(k) || rewired(k.ActionId);
+                return rewired(k.ActionId);
+            }
         }
 
         // ---- Patches ----------------------------------------------------------------------------------------------

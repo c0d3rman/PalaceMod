@@ -42,6 +42,15 @@ namespace PalaceMod
             }
         }
 
+        /// <summary>Rebuilds every visible Controls list (after a feature is switched on or off).</summary>
+        private static void RebuildControlsScreen()
+        {
+            foreach (var rebinder in UnityEngine.Object.FindObjectsOfType<KeyRebinder>())
+            {
+                if (rebinder.isActiveAndEnabled) rebinder.RegenerateButtons();
+            }
+        }
+
         // ---- Rows and headings ------------------------------------------------------------------------------------
 
         [HarmonyPatch(typeof(KeyRebinder), nameof(KeyRebinder.RegenerateButtons))]
@@ -58,6 +67,7 @@ namespace PalaceMod
 
             private static void Postfix(KeyRebinder __instance, HashSet<Transform> __state)
             {
+                HideDisabledRows(__instance);
                 var rows = __instance.buttons.Where(IsModRow).ToList();
                 if (rows.Count == 0) return;
 
@@ -76,13 +86,35 @@ namespace PalaceMod
                 int position = 0;
                 foreach (Transform child in __instance.buttonParent)
                 {
-                    if (__state.Contains(child)) continue;
+                    if (__state.Contains(child) || !child.gameObject.activeSelf) continue;
                     var id = child.GetComponent<ScrollElementID>();
                     if (id != null) id.id = position;
                     position++;
                 }
                 __instance.GetComponentInParent<UIFrame>()?.RefetchManagedElements();
             }
+        }
+
+        // Rows of switched-off features are hidden; relink the controller navigation the way RegenerateButtons does.
+        private static void HideDisabledRows(KeyRebinder rebinder)
+        {
+            var buttons = rebinder.buttons;
+            var hidden = buttons.Where(b => IsModRow(b) && !Keybinds.FeatureEnabled(byAction[rowAction(b).id].Section)).ToList();
+            if (hidden.Count == 0 || hidden.Count == buttons.Count) return;
+            var above = buttons[0].target.topNav;
+            foreach (var row in hidden)
+            {
+                buttons.Remove(row);
+                row.gameObject.SetActive(false);
+                UnityEngine.Object.Destroy(row.gameObject);
+            }
+            for (int i = 0; i < buttons.Count; i++)
+            {
+                buttons[i].target.topNav = i == 0 ? above : buttons[i - 1].target;
+                buttons[i].target.botNav = i == buttons.Count - 1 ? rebinder.tabButton : buttons[i + 1].target;
+            }
+            rebinder.tabButton.topNav = buttons[buttons.Count - 1].target;
+            rebinder.GetComponentInParent<UIFrame>()?.RefetchManagedElements();
         }
 
         // A heading made from a copy of the row, so it has the native font, size and indent, minus everything interactive.
@@ -155,7 +187,12 @@ namespace PalaceMod
             var action = rowAction(row);
             if (action == null || !HasActions) return;
             bool mine = byAction.TryGetValue(action.id, out var keybind);
-            var conflicts = Conflicts(action.id);
+            var conflicts = Conflicts(action.id, rowAxisMode(row) switch
+            {
+                ControlMapButton.AxisMode.Positive => Pole.Positive,
+                ControlMapButton.AxisMode.Negative => Pole.Negative,
+                _ => (Pole?)null,
+            });
             // Native rows only get a note when they clash with a mod key; their label otherwise stays the game's.
             if (!mine && conflicts.Count == 0)
             {
@@ -198,7 +235,7 @@ namespace PalaceMod
         }
 
         /// <summary>Names of the visible actions sharing a binding with this one, where at least one side is a mod key.</summary>
-        internal static List<string> Conflicts(int actionId)
+        internal static List<string> Conflicts(int actionId, Pole? pole = null)
         {
             var names = new List<string>();
             if (Plugin.Input == null) return names;
@@ -208,6 +245,7 @@ namespace PalaceMod
                 if (!map.enabled && map.categoryId != 0) continue;
                 foreach (var element in map.GetElementMapsWithAction(actionId))
                 {
+                    if (pole != null && element.axisContribution != pole) continue;
                     foreach (var other in map.AllMaps)
                     {
                         if (other.actionId == actionId || !other.enabled || (!mine && !byAction.ContainsKey(other.actionId))) continue;
