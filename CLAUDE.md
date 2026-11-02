@@ -97,8 +97,9 @@ PauseMenu.AddButton("compendium", "Compendium", frame.Open, order: 10, visible: 
 ModTooltip.Attach(someGameButton, "Title", () => "Body");   // shown while selected or hovered
 ```
 
-- `PauseMenu.AddButton` is idempotent per id and safe to call before the UI exists. Buttons go under Settings, sorted by `order`; past 3 they move into a "More" frame. `visible` is re-checked on every open, so gate it on your feature's `IsEnabled`.
+- `PauseMenu.AddButton` is idempotent per id and safe to call before the UI exists. Buttons go under Settings, sorted by `order`; past 3 they move into a "More" entry that opens a "Mods" frame. `visible` is re-checked on every open, so gate it on your feature's `IsEnabled`.
 - `ModFrame` runs on the game's `UIFrameManager`: Escape or back returns to the menu it was opened from, the game stays paused, and keyboard, controller and mouse navigation work. `Refresh()` rebuilds the current tab; `ModRow.SetValue` updates one row in place.
+- Page pieces: `Header`, `Text`, `Row` (label, value, tooltip, action, icon), `Button`, `Stepper` (left/right or the clickable arrows), `Custom(name, height)` for your own drawing, and `AddElement` to put your own selectable in the up/down chain. `ModFrame.Activated` fires on open and on return from a menu opened on top.
 - `ModTooltip.Show/Hide/Attach/AttachHover` share one tooltip in the game's tooltip look.
 - `GameWidgets.Clone/Button/Text` are the low-level cloners, for widgets the kit doesn't wrap.
 - Dev: `dev.py cmd "uidump <pause|active|hud|tooltip|name> [depth]"` prints a live UI hierarchy with fonts, colours and sprites; `dev.py cmd "uikit frame|notify|buttons <n>|tooltip"` exercises the kit.
@@ -133,9 +134,9 @@ SaveStates.Last, SaveStates.IsRestoring, Delete, Rename, Overwrite
 - Never commit `lib/`, `.decompiled/` or anything else copied from the game; they're in `.gitignore`.
 - Builds target `netstandard2.1`. The 18 existing Harmony003 analyzer warnings predate this guide and aren't regressions.
 
-## Keybind notes (for the keybind UI)
+## Keybinds and the Controls screen
 
-The game reads input from Rewired: `ReInput.players.GetPlayer(0).GetButtonDown("<action>")`. `KeyRebinder` builds Controls > Keyboard by looping `ReInput.mapping.ActionsInCategory(category)` over the scene's `actionCategoriesToShow` and making a `ControlMapButton` for each `userAssignable` action. Labels come from the I2 term `Controls/<action name>`, so add the term or patch `ControlMapButton.SetData`. Remaps go through `InputMapper`s on each controller's category-0 map and are saved by `ControlConfigSaveLoad` to `ControlsConfig_v2.json` via `SaveServicesLocator`, with `AddDefaultMappingsForNewActions` on load. Rewired has no public API for adding actions at runtime: `InputAction` setters are internal, and `ReInput.mapping` is read-only. The likely route is a Harmony prefix on the `InputManager_Base` initialisation that calls `userData.AddAction(categoryId)`, sets the name, type and `userAssignable` by reflection, and adds default keyboard bindings. That's unverified, and mod action IDs would then end up in the player's controls file. Callers only use `Keybind.Down/Held/Up`, so a Rewired backend can replace `Keybinds.Backend` (`IKeybindBackend`) and use `Keybind.Entry` for migration without touching features. Menu focus is `UIFrameManager.instance.ActiveFrame != null`; the HUD isn't a frame, and the game has no text fields of its own. The game's cheat menu (`CheatMenuIMGUI` and `CheatSystem`) is still compiled in, but nothing opens it.
+`Core/KeybindsManager` turns every keybind registered in a feature's `Awake` into a Rewired action (category `PalaceMod`), so it gets a native row under a "Mods" heading in Settings > Controls and is remapped by the game's own listener (keyboard with modifiers, mouse, controller); conflicts with game or mod keys show in red on both rows, and "Restore Default Configuration" resets mod keys too. Bindings persist in the BepInEx config (`Keybinds` section, hidden), never in the game's `ControlsConfig_v2.json`, which stays vanilla. A keybind registered after Rewired starts (i.e. outside `Awake`) has no row and reads Unity Input. `dev.py cmd keybinds` lists bindings and conflicts; `keybinds open|select|bind|reset` drive the screen. Menu focus is `UIFrameManager.instance.ActiveFrame != null`; the game has no text fields of its own. The game's cheat menu (`CheatMenuIMGUI` and `CheatSystem`) is still compiled in, but nothing opens it.
 
 ## Don't
 
