@@ -74,10 +74,11 @@ namespace PalaceMod
                     foreach (var slot in Object.FindObjectsOfType<BuildSlot>())
                     {
                         if (slot.Level != 0 || slot.ActivatorUpgradesThis || !slot.CanBeUpgraded || !slot.gameObject.activeInHierarchy) continue;
-                        slot.ExecuteBuildOrUpgrade(player, false);
+                        slot.TryToBuildOrUpgradeAndPay(player, false);
                         built++;
                     }
                 }
+                if (built > 0) GameplayImpact.Mark("Dev: free buildings");
                 return $"built {built}";
             });
             DevCommands.Register("incomelabels", "incomelabels   list the income labels currently computed", _ => Describe());
@@ -127,7 +128,9 @@ namespace PalaceMod
                 if (screen.z <= 0f) continue;
                 // Pixels per world unit at this depth, so labels shrink and grow with the camera zoom.
                 float ppu = (cam.WorldToScreenPoint(anchor + cam.transform.up) - screen).magnitude;
-                float scale = Mathf.Clamp(ppu / 40f, 0.55f, 1.6f) * sizeMul * Screen.height / 1080f;
+                // Normalise to a 1080p reference before clamping, then scale to the real resolution once.
+                float resolution = Screen.height / 1080f;
+                float scale = Mathf.Clamp(ppu / resolution / 40f, 0.55f, 1.6f) * sizeMul * resolution;
 
                 var label = GetLabel(used++);
                 if (label.Amount != e.Amount)
