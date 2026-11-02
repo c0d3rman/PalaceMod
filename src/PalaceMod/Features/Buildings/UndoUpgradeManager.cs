@@ -125,6 +125,14 @@ namespace PalaceMod
             return classification[type] = reason;
         }
 
+        private static bool HasOnEnable(Type type)
+        {
+            const BindingFlags F = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+            for (var t = type; t != null && t != typeof(MonoBehaviour); t = t.BaseType)
+                if (t.GetMethod("OnEnable", F, null, Type.EmptyTypes, null) != null) return true;
+            return false;
+        }
+
         private static bool IsGameType(Type t) => t.Assembly.GetName().Name == "Assembly-CSharp";
 
         private static bool Capturable(MonoBehaviour c)
@@ -399,15 +407,18 @@ namespace PalaceMod
         private void Settle(UndoAction action)
         {
             action.Settled = true;
-            // Destroyed since capture. Inside newly activated parts that's a first-activation effect: a destroyed
-            // object would be destroyed again, and a component that removed itself (TowerUpgrade) is recreated on undo
-            // so its OnEnable runs again. Anything that existed and was active before must survive.
+            // Destroyed since capture. Inside newly activated parts that's a first-activation effect. A component that
+            // applied itself in OnEnable and removed itself (TowerUpgrade) is recreated on undo, since its target's
+            // fields are rewound and switching it on again must reapply it. One that did so in Start (the Perk*
+            // modifiers on units) applied itself to something undo leaves as is (a new unit), so it stays gone, as
+            // it would after a first build. A destroyed object would be destroyed again. Anything that existed and
+            // was active before must survive.
             foreach (var kv in action.States)
             {
                 if (kv.Key != null) continue;
                 var (go, wasActive, state) = kv.Value;
                 if (wasActive) MarkUnrevertible(action, "it removed something that already existed");
-                else if (go != null) action.Recreate.Add((go, state.Target.GetType(), state));
+                else if (go != null && HasOnEnable(state.Target.GetType())) action.Recreate.Add((go, state.Target.GetType(), state));
             }
             foreach (var go in action.NewObjects)
             {
@@ -474,7 +485,11 @@ namespace PalaceMod
                 foreach (var go in action.NewObjects)
                 {
                     var p = go != null ? go.GetComponent<PathfindMovementPlayerunit>() : null;
-                    if (p != null && command.PlayerUnitsCommanding.Remove(p)) command.OnUnitRemove(p);
+                    if (p != null && command.PlayerUnitsCommanding.Remove(p))
+                    {
+                        command.OnUnitRemove(p);
+                        if (command.PlayerUnitsCommanding.Count == 0) command.commanding = false;
+                    }
                 }
 
             // Let mesh fusion release the meshes before anything moves or switches off.
@@ -492,6 +507,16 @@ namespace PalaceMod
             foreach (var kv in action.Transforms)
                 if (kv.Key != null && !kv.Value.ActiveInHierarchy && kv.Value.PlacementDiffers(kv.Key)) kv.Value.RestorePlacement();
             foreach (var t in action.Moved.Values) t.RestorePlacement();
+
+            // Recruits keep their home spot through deactivation; send it back to the original one so they line up
+            // at the building as after a first build, not where they were ordered to.
+            foreach (var go in action.NewObjects)
+            {
+                var p = go != null ? go.GetComponent<PathfindMovementPlayerunit>() : null;
+                if (p == null) continue;
+                p.HomePosition = p.HomePositionOriginal;
+                p.HasReachedHomePositionAlready = false;
+            }
 
             foreach (var (go, type, state) in action.Recreate)
                 if (go != null) state.WriteTo(go.AddComponent(type));
@@ -701,6 +726,15 @@ namespace PalaceMod
                 mover.TeleportTo(slot.transform.position + new Vector3(dx, 0f, dz));
                 return $"king at {mover.transform.position:F0} near {slot.buildingName} @{slot.transform.position:F0}";
             });
+            DevCommands.Register("hold", "hold <name>            fill the coin slots of the nearest matching building like holding the interact key", args =>
+            {
+                if (args.Length == 0) throw new ArgumentException("usage: hold <name>");
+                var slot = FindSlot(string.Join(" ", args), buyable: true);
+                var interactor = slot.Interactor ?? throw new InvalidOperationException("no interactor");
+                var player = PlayerInteraction.instance ?? throw new InvalidOperationException("no player");
+                Plugin.StartCoroutine(Hold(interactor, player));
+                return $"holding interact on {slot.buildingName} (cost {slot.NextUpgradeOrBuildCost}, gold {player.Balance})";
+            });
             DevCommands.Register("undo-status", "undo-status            list today's undoable actions, newest last", _ =>
                 stack.Count == 0 ? "nothing to undo" : string.Join("\n", stack.Select(a =>
                     $"{a.Label}: +{a.Cost} gold, {a.Changes.Count} fields, {a.NewObjects.Count} new objects, {a.Recreate.Count} to recreate" +
@@ -741,6 +775,21 @@ namespace PalaceMod
                     (a is AutoAttackTower t ? $", projectiles {t.simultaneousProjectiles}" : ""))) +
                 string.Concat(s.GetComponentsInChildren<UnitRespawnerForBuildings>(true).SelectMany(r => r.units).Where(u => u != null && u.gameObject.activeInHierarchy)
                     .Select(u => $"\n  unit {u.name} @{u.transform.position:F0} hp {hpValue(u):0}/{u.maxHp:0}"));
+        }
+
+        private static System.Collections.IEnumerator Hold(BuildingInteractor interactor, PlayerInteraction player)
+        {
+            interactor.Focus(player);
+            interactor.InteractionBegin(player);
+            float end = Time.time + 8f;
+            int level = interactor.targetBuilding.Level;
+            while (Time.time < end && interactor.targetBuilding.Level == level && !interactor.IsWaitingForChoice)
+            {
+                interactor.InteractionHold(player);
+                yield return null;
+            }
+            interactor.InteractionEnd(player);
+            Plugin.Logger.LogInfo($"hold: {interactor.targetBuilding.buildingName} level {level} -> {interactor.targetBuilding.Level}, waiting for choice {interactor.IsWaitingForChoice}, gold {player.Balance}");
         }
 
         private static string Buy(string[] args)
