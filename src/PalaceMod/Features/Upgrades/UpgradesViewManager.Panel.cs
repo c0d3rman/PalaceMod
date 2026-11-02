@@ -181,7 +181,7 @@ namespace PalaceMod
                 child.SetParent(null, false);
             }
 
-            int maxLevel = slot.OwnUpgrades.Count(u => !u.disableInThisMode);
+            int maxLevel = UpgradeInfo.MaxLevel(slot);
             string title = UpgradeInfo.BuildingName(slot);
             string level = slot.Level < 1 ? "Not built" : $"Level {slot.Level}/{maxLevel}";
             AddText(content, $"{title}  <color=#{ModStyle.Hex(ModStyle.Dim)}><size=80%>{level}</size></color>", ModStyle.BoldFont, 27f, ModStyle.Gold);

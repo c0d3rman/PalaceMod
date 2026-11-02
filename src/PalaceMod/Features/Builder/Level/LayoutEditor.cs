@@ -885,10 +885,17 @@ namespace PalaceMod.Builder.Level
             foreach (var item in items.Values.Where(i => i.Kind == ItemKind.Prop && i.Proxy != null))
                 if (PropDef(item)?.Solid != false) { LayoutScene.SetSolid(item.Proxy, true); solid.Add(item.Proxy); }
             long ms = PathCheck.Rescan();
-            // Proxies stay non-solid while editing, so their blockers never catch the editor's raycasts.
-            foreach (var go in solid) LayoutScene.SetSolid(go, false);
             var lineItems = items.Values.Where(i => i.Kind == ItemKind.Line).ToDictionary(i => i.Id);
-            routes = PathCheck.Check(scene, l => lineItems.TryGetValue(l.name, out var it) ? it.Pos : LayoutScene.LineCenter(l.transform), withPoints: true);
+            try
+            {
+                // The check also looks for props walling in a spawn point, so the blockers stay until it's done.
+                routes = PathCheck.Check(scene, l => lineItems.TryGetValue(l.name, out var it) ? it.Pos : LayoutScene.LineCenter(l.transform), withPoints: true);
+            }
+            finally
+            {
+                // Proxies stay non-solid while editing, so their blockers never catch the editor's raycasts.
+                foreach (var go in solid) LayoutScene.SetSolid(go, false);
+            }
             markers?.ShowRoutes(routes);
             int blocked = routes.Count(r => !r.Reachable);
             string text = routes.Count == 0 ? "No ground spawn lines to check"
