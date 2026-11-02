@@ -28,6 +28,8 @@ namespace PalaceMod
         [DllImport(LibObjC, EntryPoint = "objc_msgSend")] private static extern IntPtr SendPtr(IntPtr receiver, IntPtr selector);
         [DllImport(LibObjC, EntryPoint = "objc_msgSend")] private static extern long SendLong(IntPtr receiver, IntPtr selector);
         [DllImport(LibObjC, EntryPoint = "objc_msgSend")] private static extern byte SendBool(IntPtr receiver, IntPtr selector);
+        [DllImport(LibObjC, EntryPoint = "objc_msgSend")] private static extern byte SendBool(IntPtr receiver, IntPtr selector, IntPtr argument);
+        private static bool hasLowPower, hasThermal;
 
         private static IntPtr processInfo;
         private static IntPtr lowPowerSelector, thermalSelector;
@@ -47,10 +49,15 @@ namespace PalaceMod
                     processInfo = SendPtr(objc_getClass("NSProcessInfo"), sel_registerName("processInfo"));
                     lowPowerSelector = sel_registerName("isLowPowerModeEnabled");
                     thermalSelector = sel_registerName("thermalState");
+                    // Sending an unknown selector raises a native exception managed code can't catch, and these
+                    // properties are newer than the oldest macOS the game supports (Low Power Mode: macOS 12).
+                    var respondsTo = sel_registerName("respondsToSelector:");
+                    hasLowPower = SendBool(processInfo, respondsTo, lowPowerSelector) != 0;
+                    hasThermal = SendBool(processInfo, respondsTo, thermalSelector) != 0;
                 }
                 OnBattery = ReadPowerSource() == "Battery Power";
-                LowPowerMode = SendBool(processInfo, lowPowerSelector) != 0;
-                ThermalState = (Thermal)SendLong(processInfo, thermalSelector);
+                LowPowerMode = hasLowPower && SendBool(processInfo, lowPowerSelector) != 0;
+                ThermalState = hasThermal ? (Thermal)SendLong(processInfo, thermalSelector) : Thermal.Nominal;
                 Available = true;
             }
             catch (Exception)

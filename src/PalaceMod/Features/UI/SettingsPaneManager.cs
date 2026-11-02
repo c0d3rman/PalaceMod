@@ -353,6 +353,9 @@ namespace PalaceMod
             if (tags != null) SliderLabels.AddOrUpdate(slider, tags);
             slider.onChange.AddListener(() =>
             {
+                // The game's slider fires onChange on up/down navigation too, without changing the value; don't
+                // re-save (and re-snap) a value the player didn't touch.
+                if (Mathf.Approximately(slider.value, Convert.ToSingle(entry.BoxedValue))) return;
                 // Keyboard steps add to the current value and clicks snap to multiples of the step from zero, so put
                 // the value back on the min + k * step grid.
                 float snapped = Mathf.Clamp(min + Mathf.Round((slider.value - min) / step) * step, min, max);
