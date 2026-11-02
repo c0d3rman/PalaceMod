@@ -65,8 +65,10 @@ namespace PalaceMod
             PlayerLoop.SetPlayerLoop(root);
         }
 
+        // Whole refreshes per frame, rounded up so the frame rate never exceeds the target (a 50 fps cap on a
+        // 120 Hz display gives 40 fps, not 60). The small tolerance keeps 60 on a 119.88 Hz display at 2.
         private int RefreshesPerFrame(long period) =>
-            Math.Max(1, (int)Math.Round(Stopwatch.Frequency / (double)period / TargetFps));
+            Math.Max(1, (int)Math.Ceiling(Stopwatch.Frequency / (double)period / TargetFps - 0.01));
 
         private void Wait()
         {

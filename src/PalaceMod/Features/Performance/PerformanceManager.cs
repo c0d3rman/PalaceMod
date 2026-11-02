@@ -156,7 +156,8 @@ namespace PalaceMod
             vSync = config.Bind(AdvancedSection, "VSync override", VSyncMode.GameDefault,
                 "Override the game's VSync setting. Ignored while precise frame pacing is on.");
             targetFrameRate = config.Bind(AdvancedSection, "Unity frame limiter", 0, new ConfigDescription(
-                "Unity's own frame cap when VSync is off (at least 15); 0 for none. Ignored while precise frame pacing is on.",
+                "Frame cap used when precise frame pacing is off (at least 15); 0 for none. Applied with the mod's pacer, since " +
+                "Unity's own limiter oversleeps on macOS and does nothing while VSync is on.",
                 new AcceptableValueRange<int>(0, 240), new SettingTags { ZeroLabel = "Off", Unit = " fps", Step = 5 }));
             renderScale = config.Bind(AdvancedSection, "Render scale override", 0f, new ConfigDescription(
                 "Resolution multiplier for 3D rendering (UI stays sharp). 0 keeps the game's setting.", new AcceptableValueRange<float>(0f, 2f), new SettingTags { ZeroLabel = "Game default", Unit = "x", Step = 0.05f }));
