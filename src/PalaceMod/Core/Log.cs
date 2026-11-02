@@ -333,23 +333,65 @@ namespace PalaceMod
             return null;
         }
 
+        private sealed class Usage
+        {
+            public readonly Dictionary<Type, int> Loggers = [];      // Log.For<M>() calls, per feature manager M
+            public readonly HashSet<Type> Managers = [];             // feature managers it references at all
+            public readonly HashSet<Type> Uses = [];                 // other mod types (outermost) it references
+        }
+
+        private static Dictionary<Type, Usage> usage;
         private static readonly Dictionary<Type, Type> usageOwners = [];
 
-        /// <summary>The feature a helper class (not nested in a manager) belongs to, read from its code: the manager
-        /// whose logger it uses (<c>Log.For&lt;M&gt;()</c>) most, else the only feature manager it references at all.
-        /// Worked out on first use per type, so it only costs anything when an exception needs attributing.</summary>
+        /// <summary>The feature a helper class (not nested in a manager) belongs to, read from the mod's code: the
+        /// manager whose logger it uses (<c>Log.For&lt;M&gt;()</c>) most, else the only feature manager it references,
+        /// else the only feature its users belong to (a calculator or layout used by one feature). Worked out on first
+        /// need, so it only costs anything when an exception has to be attributed.</summary>
         private static Type UsageOwner(Type type)
         {
             while (type.DeclaringType != null) type = type.DeclaringType;
             lock (usageOwners)
             {
                 if (usageOwners.TryGetValue(type, out var cached)) return cached;
+                Type owner = null;
+                try
+                {
+                    var all = Usages();
+                    owner = Direct(type, all);
+                    if (owner == null)
+                    {
+                        var owners = all.Where(kv => kv.Value.Uses.Contains(type))
+                            .Select(kv => Direct(kv.Key, all)).Where(o => o != null).Distinct().ToList();
+                        owner = owners.Count == 1 ? owners[0] : null; // used by several features: shared, keep its own name
+                    }
+                }
+                catch
+                {
+                    owner = null;
+                }
+                usageOwners[type] = owner;
+                return owner;
             }
-            Type owner = null;
-            try
+        }
+
+        private static Type Direct(Type type, Dictionary<Type, Usage> all)
+        {
+            lock (sync)
             {
-                var loggers = new Dictionary<Type, int>();
-                var referenced = new HashSet<Type>();
+                if (featureManagers.Contains(type)) return type;
+            }
+            if (!all.TryGetValue(type, out var u)) return null;
+            if (u.Loggers.Count > 0) return u.Loggers.OrderByDescending(kv => kv.Value).First().Key;
+            return u.Managers.Count == 1 ? u.Managers.First() : null;
+        }
+
+        private static Dictionary<Type, Usage> Usages()
+        {
+            if (usage != null) return usage;
+            var all = new Dictionary<Type, Usage>();
+            foreach (var type in ModTypes.Values.Distinct().Where(t => t.DeclaringType == null))
+            {
+                var u = new Usage();
                 foreach (var t in Nested(type))
                 {
                     foreach (var method in t.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public |
@@ -359,19 +401,13 @@ namespace PalaceMod
                         byte[] il;
                         try { il = method.GetMethodBody()?.GetILAsByteArray(); }
                         catch { continue; }
-                        if (il == null) continue;
-                        ScanIL(method, il, loggers, referenced);
+                        if (il != null) ScanIL(method, il, u.Loggers, u.Managers, u.Uses);
                     }
                 }
-                owner = loggers.Count > 0 ? loggers.OrderByDescending(kv => kv.Value).First().Key
-                    : referenced.Count == 1 ? referenced.First() : null;
+                u.Uses.Remove(type);
+                all[type] = u;
             }
-            catch
-            {
-                owner = null;
-            }
-            lock (usageOwners) usageOwners[type] = owner;
-            return owner;
+            return usage = all;
         }
 
         private static IEnumerable<Type> Nested(Type type)
@@ -383,7 +419,8 @@ namespace PalaceMod
 
         // Looks at every call/callvirt/newobj/ldftn and field-access operand. Operand bytes can look like opcodes, so a
         // token is only trusted if it resolves to a member; a stray match would have to resolve to a manager to matter.
-        private static void ScanIL(MethodBase method, byte[] il, Dictionary<Type, int> loggers, HashSet<Type> referenced)
+        private static void ScanIL(MethodBase method, byte[] il, Dictionary<Type, int> loggers, HashSet<Type> referenced,
+            HashSet<Type> seen = null)
         {
             var module = method.Module;
             var typeArgs = method.DeclaringType?.IsGenericType == true ? method.DeclaringType.GetGenericArguments() : null;
@@ -423,6 +460,12 @@ namespace PalaceMod
                 // Feature<M>.Instance / .On and members of M itself.
                 if (declaring is { IsGenericType: true } && declaring.GetGenericTypeDefinition() == typeof(Feature<>))
                     declaring = declaring.GetGenericArguments()[0];
+                if (declaring != null && declaring.Assembly == typeof(Log).Assembly)
+                {
+                    var outer = declaring;
+                    while (outer.DeclaringType != null) outer = outer.DeclaringType;
+                    seen?.Add(outer);
+                }
                 var owner = OwningManager(declaring);
                 if (owner != null && featureManagers.Contains(owner)) referenced.Add(owner);
                 i += 4;
