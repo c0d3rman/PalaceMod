@@ -54,6 +54,7 @@ namespace PalaceMod
                 if (args.Length == 2 && args[0] == "preview")
                 {
                     if (helper == null || !helper.isActiveAndEnabled) throw new InvalidOperationException("pause menu not open");
+                    helper.frame.Select(helper.nightButton); // as the game's own arrows do
                     helper.CycleNightPreview(int.Parse(args[1]) - 1 - PreviewWave(helper));
                     return $"previewing wave {PreviewWave(helper) + 1}";
                 }
@@ -272,11 +273,22 @@ namespace PalaceMod
             if (frame != null)
             {
                 frame.RefetchManagedElements();
-                if (ownSelected && helper.continueElement != null) frame.Select(helper.continueElement);
+                // The Night selector, not Continue: selecting anything else snaps the preview back to tonight.
+                if (ownSelected && helper.nightButton != null) frame.Select(helper.nightButton);
             }
         }
 
+        private bool rebuilding;
+
         private void Rebuild(PauseUILoadoutHelper pause)
+        {
+            if (rebuilding) return;
+            rebuilding = true;
+            try { RebuildPanel(pause); }
+            finally { rebuilding = false; }
+        }
+
+        private void RebuildPanel(PauseUILoadoutHelper pause)
         {
             helper = pause;
             DestroyPanel();
