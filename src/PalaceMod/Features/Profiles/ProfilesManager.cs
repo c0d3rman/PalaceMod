@@ -63,7 +63,7 @@ namespace PalaceMod.Profiles
                 reloadPending = false;
                 ReloadGameState();
             }
-            if (recoveryMessage != null && Feature<UIManager>.Instance != null)
+            if (recoveryMessage != null && Time.unscaledTime > 5f)
             {
                 Notify.Show(recoveryMessage, NotifyKind.Warning, 8f, "profiles");
                 recoveryMessage = null;
