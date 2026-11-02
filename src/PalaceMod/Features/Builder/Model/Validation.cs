@@ -207,14 +207,65 @@ namespace PalaceMod.Builder.Model
                     if (ws == null) Error(p + ".waveSet", $"no wave set \"{l.WaveSet}\" in this pack");
                     else if (ws.Host != l.Host) Error(p + ".waveSet", $"wave set is for {ws.Host}, level is on {l.Host}");
                 }
-                if (l.BuildSlots != null || l.SpawnLines != null || (l.Props?.Count ?? 0) > 0)
-                    Warn(p, "build slot, spawn line and prop edits aren't applied yet (stage 2)");
+                // Layout edits: shape only (names on the host are checked when the level loads).
+                var placed = new HashSet<string>();
+                for (int j = 0; j < (l.BuildSlots?.Edit?.Count ?? 0); j++)
+                {
+                    var e = l.BuildSlots.Edit[j];
+                    string ep = $"{p}.buildSlots.edit[{j}]";
+                    if (e == null || string.IsNullOrEmpty(e.Ref)) { Error(ep, "needs the name of a build slot on the map"); continue; }
+                    CheckPos(e.Pos, ep + ".pos", optional: true);
+                    CheckCosts(e.Upgrades, ep + ".upgrades");
+                }
+                for (int j = 0; j < (l.BuildSlots?.Add?.Count ?? 0); j++)
+                {
+                    var a = l.BuildSlots.Add[j];
+                    string ap = $"{p}.buildSlots.add[{j}]";
+                    if (a == null) { Error(ap, "is empty"); continue; }
+                    if (!Ids.IsValid(a.Id)) Error(ap + ".id", "must be 1-64 characters of a-z, 0-9, '.', '_' or '-'");
+                    else if (!placed.Add(a.Id)) Error(ap + ".id", $"\"{a.Id}\" is used twice in this level");
+                    if (ContentRef.Parse(a.Base ?? "").Kind != RefKind.Scene) Error(ap + ".base", "must be \"scene:<build slot on the map>\"");
+                    CheckPos(a.Pos, ap + ".pos", optional: false);
+                    if (a.ActivatorLevel < 0 || a.ActivatorLevel > 10) Error(ap + ".activatorLevel", "must be between 0 and 10");
+                    CheckCosts(a.Upgrades, ap + ".upgrades");
+                }
+                for (int j = 0; j < (l.Props?.Count ?? 0); j++)
+                {
+                    var pr = l.Props[j];
+                    string pp = $"{p}.props[{j}]";
+                    if (pr == null) { Error(pp, "is empty"); continue; }
+                    if (!Ids.IsValid(pr.Id)) Error(pp + ".id", "must be 1-64 characters of a-z, 0-9, '.', '_' or '-'");
+                    else if (!placed.Add(pr.Id)) Error(pp + ".id", $"\"{pr.Id}\" is used twice in this level");
+                    if (pr.Base == null || !pr.Base.StartsWith("mesh:")) Error(pp + ".base", "must be \"mesh:<scenery mesh on the map>\"");
+                    CheckPos(pr.Pos, pp + ".pos", optional: false);
+                    Range(pr.Scale, 0.1f, 10f, pp + ".scale");
+                }
+                for (int j = 0; j < (l.SpawnLines?.Edit?.Count ?? 0); j++)
+                {
+                    var e = l.SpawnLines.Edit[j];
+                    string ep = $"{p}.spawnLines.edit[{j}]";
+                    if (e == null || string.IsNullOrEmpty(e.Ref)) { Error(ep, "needs the name of a spawn line on the map"); continue; }
+                    CheckPos(e.Pos, ep + ".pos", optional: true);
+                }
+                if ((l.SpawnLines?.Add?.Count ?? 0) > 0) Warn(p + ".spawnLines.add", "new spawn lines aren't supported yet; move the map's own lines instead");
             }
             return issues;
 
             void Range(float? value, float min, float max, string path)
             {
                 if (value is float f && (float.IsNaN(f) || f < min || f > max)) Error(path, $"must be between {min.ToString(CultureInfo.InvariantCulture)} and {max.ToString(CultureInfo.InvariantCulture)}");
+            }
+
+            void CheckPos(float[] pos, string path, bool optional)
+            {
+                if (pos == null) { if (!optional) Error(path, "needs a position [x, y, z]"); return; }
+                if (pos.Length != 3 || pos.Any(v => float.IsNaN(v) || float.IsInfinity(v) || Math.Abs(v) > 5000f)) Error(path, "must be [x, y, z] on the map");
+            }
+
+            void CheckCosts(List<UpgradeEdit> list, string path)
+            {
+                for (int j = 0; j < (list?.Count ?? 0); j++)
+                    if (list[j]?.Cost is int c && (c < 0 || c > 10000)) Error($"{path}[{j}].cost", "must be between 0 and 10000");
             }
 
             void CheckAsset(string reference, string path, string[] extensions)
