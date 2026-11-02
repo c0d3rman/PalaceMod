@@ -63,6 +63,7 @@ namespace PalaceMod
         {
             var king = PlayerInteraction.instance;
             if (king == null || UIFrameManager.instance == null || UIFrameManager.instance.ActiveFrame != null) return null;
+            if (Time.timeScale == 0f || (GameWidgets.PauseFrame != null && GameWidgets.PauseFrame.gameObject.activeInHierarchy)) return null;
             if (DayNightCycle.Instance == null || DayNightCycle.Instance.CurrentTimestate == DayNightCycle.Timestate.Night) return null;
             if (BuildingInteractor.IsChoosingUpgrade) return null;
             if (TooltipManager.instance != null && TooltipManager.instance.hideAllTooltips) return null;

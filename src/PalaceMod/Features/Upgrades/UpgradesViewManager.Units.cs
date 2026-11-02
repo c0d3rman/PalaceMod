@@ -119,7 +119,7 @@ namespace PalaceMod
 
         // ---------- Stars ----------
 
-        /// <summary>A row of <paramref name="count"/> stars along the top edge of <paramref name="icon"/>.</summary>
+        /// <summary>A row of <paramref name="count"/> stars on <paramref name="icon"/>.</summary>
         private static GameObject AddStars(Transform icon, int count, bool worldSpace)
         {
             var row = new GameObject(StarsName, typeof(RectTransform));
@@ -128,9 +128,10 @@ namespace PalaceMod
             var iconRect = icon as RectTransform;
             float iconSize = iconRect != null ? Mathf.Max(iconRect.rect.width, iconRect.rect.height) : 1f;
             float star = iconSize * (worldSpace ? 0.55f : 0.36f);
-            rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 1f);
+            // Above the command-mode pin; on the pause tile's bottom edge, clear of the count bubble at its top right.
+            rect.anchorMin = rect.anchorMax = new Vector2(0.5f, worldSpace ? 1f : 0f);
             rect.pivot = new Vector2(0.5f, 0.5f);
-            rect.anchoredPosition = new Vector2(0f, worldSpace ? star * 0.55f : -star * 0.05f);
+            rect.anchoredPosition = new Vector2(0f, worldSpace ? star * 0.55f : star * 0.05f);
             rect.sizeDelta = new Vector2(star * count, star);
             var layout = row.AddComponent<HorizontalLayoutGroup>();
             layout.spacing = -star * 0.15f;
