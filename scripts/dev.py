@@ -1020,7 +1020,7 @@ POOL_CONFIG = POOL_DIR / "config.json"
 SOLO_FILE = POOL_DIR / "solo.json"
 INSTANCES_HOME = Path(os.environ.get("PALACEMOD_INSTANCES",
                                      Path.home() / "Library/Application Support/PalaceMod-dev/instances"))
-POOL_DEFAULT_SIZE = 4
+POOL_DEFAULT_SIZE = 6  # measured: ~0.35 core and ~1.2 GB per idle-ish instance (background 15 fps cap)
 INSTANCE_PROCESS = "ThronefallDev"
 LAST_INSTANCE = ROOT / ".local/pool-instance"  # so `logs` still finds the log after `stop`
 # Files whose change means the base install changed (a game update, `setup`, `native on|off`), so instances
