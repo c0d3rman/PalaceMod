@@ -26,9 +26,9 @@ namespace PalaceMod
         public override string FeatureDescription => "Adds a panel to the pause menu that groups the night's enemies by where they spawn. At night it shows how many of each have spawned so far.";
 
         private const string ContainerName = "PalaceMod Spawns";
-        private const float IconSize = 50f, IconSpacing = 14f, CaptionHeight = 22f, RowSpacing = 24f;
-        private const float LabelMaxWidth = 140f, LabelGap = 16f, GapFromNative = 40f, GapAboveUnits = 18f;
-        private const float MinLeft = 300f, NightArrowsWidth = 35f, MaxRightFraction = 0.55f;
+        private const float IconSize = 50f, IconSpacing = 14f, LineSpacing = 8f, CaptionHeight = 22f, RowSpacing = 18f, GroupSpacing = 28f;
+        private const float LabelGap = 10f, GapFromNative = 40f, GapAboveUnits = 10f, BadgeOverhang = 14f;
+        private const float MinLeft = 280f, NightArrowsWidth = 35f, MaxRightFraction = 0.55f;
         private const int IconsPerLine = 4;
 
         private static readonly AccessTools.FieldRef<PauseUILoadoutHelper, int> PreviewWave =
@@ -326,32 +326,55 @@ namespace PalaceMod
             headerText.alignment = TextAlignmentOptions.BottomLeft;
             header.AddComponent<LayoutElement>().preferredHeight = ((RectTransform)headerSource.transform).rect.height;
 
-            var labels = new List<TextMeshProUGUI>();
-            foreach (var group in groups) labels.Add(AddRow(rect, group, headerSource, live));
+            container.SetActive(true); // TMP measures text only while active
+
+            // Groups flow left to right in bands as wide as one line of icons, so places with one or two enemy types
+            // sit side by side instead of each taking a full row.
+            float bandWidth = IconsPerLine * IconSize + (IconsPerLine - 1) * IconSpacing;
+            Transform band = null;
+            float used = 0f;
+            var bands = new List<List<List<List<ThronefallUIElement>>>>(); // band -> group -> line -> icon
+            foreach (var group in groups)
+            {
+                var (row, groupWidth, lines) = AddGroup(rect, group, headerSource, live);
+                if (band == null || used + GroupSpacing + groupWidth > bandWidth)
+                {
+                    band = NewBand(rect);
+                    bands.Add([]);
+                    used = groupWidth;
+                }
+                else used += GroupSpacing + groupWidth;
+                row.transform.SetParent(band, false);
+                bands[bands.Count - 1].Add(lines);
+            }
+            // Navigation lines run across a band: line k of every group in it, left to right.
+            foreach (var bandGroups in bands)
+                for (int k = 0; k < bandGroups.Max(g => g.Count); k++)
+                    navLines.Add(bandGroups.Where(g => k < g.Count).SelectMany(g => g[k]).ToList());
 
             // Left edge: a fixed column, unless the Night selector ("Night: 12(3)/13" plus arrows) or the native grid,
             // both centred on the menu, are wider than usual.
             var night = pause.nightPreviewText;
             float nightHalfWidth = night.GetPreferredValues(night.text).x / 2f + NightArrowsWidth;
             float nativeHalfWidth = Mathf.Max(nightHalfWidth, NativeGridWidth(pause) / 2f);
+            // Bottom just above the "Units:" row, level with the bottom of the native enemy grid.
             float unitsTop = unitsLabel.anchoredPosition.y + unitsLabel.rect.height * (1f - unitsLabel.pivot.y);
             rect.anchoredPosition = new Vector2(Mathf.Max(MinLeft, nativeHalfWidth + GapFromNative), unitsTop + GapAboveUnits);
 
-            container.SetActive(true);
-            float labelWidth = Mathf.Min(LabelMaxWidth, labels.Max(l => l.GetPreferredValues(l.text).x));
-            foreach (var l in labels) l.GetComponent<LayoutElement>().preferredWidth = l.GetComponent<LayoutElement>().minWidth = labelWidth;
             LayoutRebuilder.ForceRebuildLayoutImmediate(rect);
 
             // Shrink if a level has lots of spawn points: stay below the top of the menu buttons, and in the left part
-            // of the screen (the score panel is on the right).
+            // of the screen (the score panel is on the right), clear of where the game shows the hover panel.
             var menu = column.Find("Menu Items") as RectTransform;
             float top = menu != null ? menu.anchoredPosition.y + menu.rect.height / 2f + column.rect.height * (menu.anchorMin.y - 1f) : 0f;
             float room = top - rect.anchoredPosition.y;
             float scale = rect.rect.height > room && room > 0 ? room / rect.rect.height : 1f;
             var frameRect = (RectTransform)pause.transform;
-            float rightLimit = frameRect.rect.xMin + frameRect.rect.width * MaxRightFraction;
-            float left = frameRect.InverseTransformPoint(rect.TransformPoint(rect.rect.min)).x;
-            if (left + rect.rect.width * scale > rightLimit && rightLimit > left) scale = (rightLimit - left) / rect.rect.width;
+            float rightLimit = column.InverseTransformPoint(frameRect.TransformPoint(new Vector3(frameRect.rect.xMin + frameRect.rect.width * MaxRightFraction, 0f))).x - column.rect.center.x;
+            if (column.Find("Tooltip Background") is RectTransform tooltip && tooltip.anchorMin == rect.anchorMin)
+                rightLimit = Mathf.Min(rightLimit, tooltip.anchoredPosition.x - tooltip.rect.width * tooltip.pivot.x);
+            float left = rect.anchoredPosition.x, width = rect.rect.width + BadgeOverhang;
+            if (left + width * scale > rightLimit && rightLimit > left) scale = (rightLimit - left) / width;
             rect.localScale = new Vector3(scale, scale, 1f);
 
             foreach (var e in container.GetComponentsInChildren<ThronefallUIElement>(true)) ownElements.Add(e);
@@ -367,11 +390,23 @@ namespace PalaceMod
             return columns * grid.cellSize.x + Mathf.Max(0, columns - 1) * grid.spacing.x;
         }
 
-        private TextMeshProUGUI AddRow(RectTransform parent, SpawnGroup group, TextMeshProUGUI style, bool live)
+        private static Transform NewBand(RectTransform parent)
+        {
+            var band = new GameObject("Band", typeof(RectTransform));
+            band.transform.SetParent(parent, false);
+            var hlg = band.AddComponent<HorizontalLayoutGroup>();
+            hlg.spacing = GroupSpacing;
+            hlg.childAlignment = TextAnchor.UpperLeft;
+            hlg.childControlWidth = hlg.childControlHeight = true;
+            hlg.childForceExpandWidth = hlg.childForceExpandHeight = false;
+            return band.transform;
+        }
+
+        private (GameObject Row, float Width, List<List<ThronefallUIElement>> Lines) AddGroup(RectTransform parent, SpawnGroup group, TextMeshProUGUI style, bool live)
         {
             var row = new GameObject("Row " + group.Label, typeof(RectTransform));
             row.transform.SetParent(parent, false);
-            var hlg = row.AddComponent<HorizontalLayoutGroup>();
+            var hlg = row.AddComponent<VerticalLayoutGroup>();
             hlg.spacing = LabelGap;
             hlg.childAlignment = TextAnchor.UpperLeft;
             hlg.childControlWidth = hlg.childControlHeight = true;
@@ -390,31 +425,28 @@ namespace PalaceMod
             label.fontStyle = FontStyles.Normal;
             label.characterSpacing = 0;
             label.alignment = TextAlignmentOptions.Left;
-            label.enableWordWrapping = true;
-            label.overflowMode = TextOverflowModes.Overflow;
-            label.lineSpacing = -20f;
+            label.enableWordWrapping = false;
             label.raycastTarget = false;
-            var labelLayout = labelObj.AddComponent<LayoutElement>();
-            labelLayout.minHeight = IconSize; // long names wrap onto a second line
 
             var icons = new GameObject("Icons", typeof(RectTransform));
             icons.transform.SetParent(row.transform, false);
             var grid = icons.AddComponent<GridLayoutGroup>();
             grid.cellSize = new Vector2(IconSize, cellHeight);
-            grid.spacing = new Vector2(IconSpacing, IconSpacing);
+            grid.spacing = new Vector2(IconSpacing, LineSpacing);
             grid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
             grid.constraintCount = Mathf.Min(IconsPerLine, group.Enemies.Count);
             int lines = Mathf.CeilToInt(group.Enemies.Count / (float)IconsPerLine);
             var iconsLayout = icons.AddComponent<LayoutElement>();
             iconsLayout.preferredWidth = grid.constraintCount * IconSize + (grid.constraintCount - 1) * IconSpacing;
-            iconsLayout.preferredHeight = lines * cellHeight + (lines - 1) * IconSpacing;
+            iconsLayout.preferredHeight = lines * cellHeight + (lines - 1) * LineSpacing;
 
+            var navigation = new List<List<ThronefallUIElement>>();
             for (int i = 0; i < group.Enemies.Count; i++)
             {
-                if (i % IconsPerLine == 0) navLines.Add([]);
-                navLines[navLines.Count - 1].Add(AddIcon(icons.transform, group.Enemies[i], style, live));
+                if (i % IconsPerLine == 0) navigation.Add([]);
+                navigation[navigation.Count - 1].Add(AddIcon(icons.transform, group.Enemies[i], style, live));
             }
-            return label;
+            return (row, Mathf.Max(label.GetPreferredValues(label.text).x, iconsLayout.preferredWidth), navigation);
         }
 
         private TFUIEnemy AddIcon(Transform parent, EnemyEntry enemy, TextMeshProUGUI style, bool live)
