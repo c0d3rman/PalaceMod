@@ -211,11 +211,32 @@ namespace PalaceMod
             }
         }
 
+        // The Eternal Trials defeat screen decides whether to celebrate a new best by comparing the run's score with the
+        // stored best, then stores the higher one. Between the screen starting and that store, an unranked run reads
+        // the best as at least its own score, so there's no banner; the store itself is then refused.
+        private static bool eternalTrialsDefeatPending;
+
+        [HarmonyPatch(typeof(EternalTrialsDefeatUI), nameof(EternalTrialsDefeatUI.PlayAnimation))]
+        private class EternalTrialsDefeat_Patch
+        {
+            private static void Prefix() => eternalTrialsDefeatPending = Blocking;
+        }
+
+        [HarmonyPatch(typeof(LevelProgressManager), nameof(LevelProgressManager.EternalTrialsHighscore), MethodType.Getter)]
+        private class EternalTrialsBestGet_Patch
+        {
+            private static void Postfix(ref int __result)
+            {
+                if (eternalTrialsDefeatPending && Blocking) __result = Mathf.Max(__result, EternalTrialsRunManager.CurrentRun.OverallScore);
+            }
+        }
+
         [HarmonyPatch(typeof(LevelProgressManager), nameof(LevelProgressManager.EternalTrialsHighscore), MethodType.Setter)]
         private class EternalTrialsBest_Patch
         {
             private static void Prefix(LevelProgressManager __instance, ref int value)
             {
+                eternalTrialsDefeatPending = false;
                 if (!Blocking || !InLevel || value <= __instance.EternalTrialsHighscore) return;
                 Plugin.Logger.LogInfo($"Unranked run: not recording Eternal Trials score {value}");
                 value = __instance.EternalTrialsHighscore;
