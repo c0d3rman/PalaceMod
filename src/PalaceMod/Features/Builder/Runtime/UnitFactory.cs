@@ -47,6 +47,7 @@ namespace PalaceMod.Builder
 
         internal static bool IsTemplateObject(GameObject go) => go != null && templateRoot != null && go.transform.IsChildOf(templateRoot);
 
+        /// <summary>Destroys all templates. Only call outside a session: live enemies can reference templates.</summary>
         public void Clear()
         {
             foreach (var (_, t) in templates.Values) if (t != null) Object.Destroy(t);
@@ -92,13 +93,14 @@ namespace PalaceMod.Builder
         {
             error = null;
             string key = pack.Id + "/" + def.Id;
-            // Rebuild when the design changed (the editor re-tests without restarting).
-            string hash = Newtonsoft.Json.JsonConvert.SerializeObject(def);
+            // Rebuild when anything in the pack changed (a unit can reference others, e.g. through SpawnOnDeath).
+            string hash = PackSerializer.WriteCompact(pack);
             if (templates.TryGetValue(key, out var cached) && cached.template != null && cached.hash == hash) return cached.template;
             if (!building.Add(key)) { error = $"unit {key} spawns itself (through SpawnOnDeath)"; return null; }
             try
             {
-                if (cached.template != null) Object.Destroy(cached.template);
+                // Live clones may still point at the old template (SpawnOnDeath), so retire it until Clear().
+                if (cached.template != null) owned.Add(cached.template);
                 var template = Build(pack, def, out error);
                 if (template == null) { templates.Remove(key); return null; }
                 templates[key] = (hash, template);
