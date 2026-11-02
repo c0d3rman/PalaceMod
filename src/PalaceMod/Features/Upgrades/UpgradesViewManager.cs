@@ -84,8 +84,11 @@ namespace PalaceMod
             });
             DevCommands.Register("upgv.upgrade", "upgv.upgrade <slot|nearest> [branch]  free build/upgrade of one level (test helper)", args =>
             {
-                var slot = FindSlot(args.Length > 0 ? args[0] : "nearest");
-                int branch = args.Length > 1 ? int.Parse(args[1]) : 0;
+                // Slot names have spaces ("Outpost Variant (1)"), so a trailing number is the branch.
+                int branch = 0;
+                var words = args.ToList();
+                if (words.Count > 1 && int.TryParse(words[words.Count - 1], out int b)) { branch = b; words.RemoveAt(words.Count - 1); }
+                var slot = FindSlot(words.Count > 0 ? string.Join(" ", words) : "nearest");
                 slot = UpgradeInfo.Owner(slot);
                 if (!slot.CanBeUpgraded) throw new InvalidOperationException($"{slot.name} can't be upgraded now (level {slot.Level})");
                 var next = slot.OwnUpgrades[slot.Level];
@@ -120,7 +123,7 @@ namespace PalaceMod
             });
             DevCommands.Register("upgv.goto", "upgv.goto <slot>       teleport the king next to a build slot", args =>
             {
-                var slot = FindSlot(args.Length > 0 ? args[0] : throw new ArgumentException("slot name needed"));
+                var slot = FindSlot(args.Length > 0 ? string.Join(" ", args) : throw new ArgumentException("slot name needed"));
                 var king = PlayerInteraction.instance ?? throw new InvalidOperationException("not in a level");
                 var target = slot.Interactor != null ? slot.Interactor.transform.position : slot.transform.position;
                 var dir = (king.transform.position - target); dir.y = 0;
