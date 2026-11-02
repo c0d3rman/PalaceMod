@@ -285,7 +285,7 @@ namespace PalaceMod
             var marker = obj.GetComponent<ScreenMarkerIcon>();
             if (marker != null) return marker.UnitName;
             var slot = obj.GetComponentInParent<BuildSlot>();
-            if (slot != null && !string.IsNullOrEmpty(slot.buildingName)) return slot.buildingName;
+            if (slot != null && !string.IsNullOrEmpty(slot.buildingName)) return Translate(slot.LOCIDENTIFIER_NAME);
             return null;
         }
 
