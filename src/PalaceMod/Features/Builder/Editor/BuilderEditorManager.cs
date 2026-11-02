@@ -29,6 +29,7 @@ namespace PalaceMod
             hintShown = plugin.Config.Bind("Builder", "Editor hint shown", false,
                 new ConfigDescription("Whether the Builder editor's first-use hint has been shown.", null, new SettingTags { Hidden = true }));
             PauseMenu.AddButton("builder", "Builder", BuilderEditor.Open, order: 40, visible: () => Feature<BuilderManager>.On);
+            TitleMenu.AddButton("builder", "Builder", BuilderEditor.Open, () => Feature<BuilderManager>.On);
             HookSessionMenu();
             RegisterDevCommand();
         }
