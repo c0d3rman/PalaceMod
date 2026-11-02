@@ -48,7 +48,8 @@ namespace PalaceMod
         // Items the player picked by hand on the current screen; kept on reroll when keepHandPicks is on.
         private readonly HashSet<Equippable> handPicked = new();
         // Loadouts before each roll, for undo. Cleared whenever the loadout screen opens.
-        private readonly List<HashSet<Equippable>> history = new();
+        // Each entry: the loadout and the hand picks before a roll, so undo restores what "Keep hand picks" protects too.
+        private readonly List<(HashSet<Equippable> loadout, HashSet<Equippable> handPicked)> history = new();
         private const int MaxHistory = 30;
         private const double FavorFewerLambda = 0.3;
         private bool hintShown;
@@ -455,7 +456,8 @@ namespace PalaceMod
 
         private void PushHistory(LoadoutUIHelper helper)
         {
-            history.Add(new HashSet<Equippable>(AllCategories(helper).SelectMany(c => Equipped(helper, c)).Select(t => t.Data)));
+            history.Add((new HashSet<Equippable>(AllCategories(helper).SelectMany(c => Equipped(helper, c)).Select(t => t.Data)),
+                new HashSet<Equippable>(handPicked)));
             if (history.Count > MaxHistory) history.RemoveAt(0);
         }
 
@@ -466,8 +468,10 @@ namespace PalaceMod
                 Notify.Show("Nothing to undo.", NotifyKind.Info, 2f, "loadout-randomizer");
                 return false;
             }
-            var snapshot = history[history.Count - 1];
+            var (snapshot, picks) = history[history.Count - 1];
             history.RemoveAt(history.Count - 1);
+            handPicked.Clear();
+            handPicked.UnionWith(picks);
             var changed = new List<TFUIEquippable>();
             foreach (var c in AllCategories(helper))
                 changed.AddRange(SetPicks(helper, c, Items(helper, c).Where(t => snapshot.Contains(t.Data)).ToList()));

@@ -222,14 +222,29 @@ namespace PalaceMod
                 overridingRenderScale = true;
                 SetIfDifferent(scaleProperty, pipeline, scale);
             }
-            else if (overridingRenderScale)
-            {
-                // No override any more (e.g. plugged back in): restore the game's current setting, which the player
-                // may have changed in Video settings meanwhile.
-                overridingRenderScale = false;
-                if (SettingsManager.Instance != null) SetIfDifferent(scaleProperty, pipeline, SettingsManager.Instance.Renderscale);
-            }
+            else RestoreRenderScale();
             if (msaa.Value > 0) SetIfDifferent(type.GetProperty("msaaSampleCount"), pipeline, msaa.Value);
+        }
+
+        // Put the game's own anti-aliasing setting back (when the feature is switched off).
+        private void RestoreMsaa()
+        {
+            var pipeline = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
+            if (msaa.Value <= 0 || pipeline == null || SettingsManager.Instance == null) return;
+            // AntiAliasing is URP's MsaaQuality (sample count), which isn't referenced at compile time.
+            var quality = typeof(SettingsManager).GetProperty("AntiAliasing")?.GetValue(SettingsManager.Instance);
+            if (quality != null) SetIfDifferent(pipeline.GetType().GetProperty("msaaSampleCount"), pipeline, Convert.ToInt32(quality));
+        }
+
+        // No override any more (e.g. plugged back in): restore the game's current setting, which the player may have
+        // changed in Video settings meanwhile.
+        private void RestoreRenderScale()
+        {
+            if (!overridingRenderScale) return;
+            overridingRenderScale = false;
+            var pipeline = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
+            if (pipeline != null && SettingsManager.Instance != null)
+                SetIfDifferent(pipeline.GetType().GetProperty("renderScale"), pipeline, SettingsManager.Instance.Renderscale);
         }
 
         private static void SetIfDifferent(System.Reflection.PropertyInfo property, object target, object value)
