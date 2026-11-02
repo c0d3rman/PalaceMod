@@ -37,9 +37,9 @@ namespace PalaceMod
         private bool MarkingUnits => IsEnabled && MarkUnits.Value;
 
         /// <summary>Which building trains each unit; rebuilt at most once a second.</summary>
-        private static void RefreshUnitSlots(bool force = false)
+        private static bool RefreshUnitSlots(bool force = false)
         {
-            if (!force && Time.unscaledTime - unitSlotsTime < 1f) return;
+            if (!force && Time.unscaledTime - unitSlotsTime < 1f) return false;
             unitSlotsTime = Time.unscaledTime;
             unitSlots.Clear();
             foreach (var respawner in Object.FindObjectsOfType<UnitRespawnerForBuildings>())
@@ -49,6 +49,7 @@ namespace PalaceMod
                 foreach (var hp in respawner.units)
                     if (hp != null) unitSlots[hp] = slot;
             }
+            return true;
         }
 
         internal static UnitUpgrades? UpgradesOf(GameObject unit)
@@ -76,8 +77,8 @@ namespace PalaceMod
                 if (commandStars.Count > 0) ClearCommandStars();
                 return;
             }
-            if (!CommandUnits.instance.ShouldShowUnitTypes) return;
-            RefreshUnitSlots();
+            // Stars only change when a building is upgraded, so a once-a-second pass while the icons show is plenty.
+            if (!CommandUnits.instance.ShouldShowUnitTypes || !RefreshUnitSlots()) return;
             foreach (var (hp, _) in unitSlots)
             {
                 if (hp == null) continue;

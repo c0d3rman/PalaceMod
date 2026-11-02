@@ -123,6 +123,7 @@ namespace PalaceMod
                 {
                     if (c is LayoutGroup or ContentSizeFitter or LayoutElement) Object.DestroyImmediate(c);
                 }
+                obj.AddComponent<LayoutElement>().ignoreLayout = true; // in case the HUD parent lays out its children
                 var image = obj.GetComponent<MPUIKIT.MPImage>();
                 image.raycastTarget = false;
                 ModStyle.MarkPanel(image);
@@ -157,7 +158,7 @@ namespace PalaceMod
         {
             foreach (Transform child in content.Cast<Transform>().ToList())
             {
-                if (child.GetComponent<LayoutElement>()?.ignoreLayout == true) continue; // the emblem
+                if (child.name == "PalaceMod Emblem") continue;
                 Object.Destroy(child.gameObject);
                 child.SetParent(null, false);
             }
