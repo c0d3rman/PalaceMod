@@ -124,7 +124,7 @@ namespace PalaceMod
         private sealed class WaveSnapshot
         {
             public List<Spawn> Spawns;
-            public Dictionary<Spawn, (int Count, bool Elite)> Values;
+            public Dictionary<Spawn, (int Count, bool Elite, int Gold)> Values;
             public float Difficulty;
         }
 
@@ -155,7 +155,7 @@ namespace PalaceMod
             snapshots[wave] = new WaveSnapshot
             {
                 Spawns = [.. wave.spawns],
-                Values = wave.spawns.Where(s => s != null).ToDictionary(s => s, s => (s.count, s.eliteEnemies)),
+                Values = wave.spawns.Where(s => s != null).ToDictionary(s => s, s => (s.count, s.eliteEnemies, s.goldCoins)),
                 Difficulty = wave.difficultyMulti,
             };
         }
@@ -225,6 +225,9 @@ namespace PalaceMod
                 if (spawn == null) break;
                 wave.spawns.Remove(spawn);
                 group.Remove(spawn);
+                // Keep the night's gold reward: hand the removed spawn's coins to one that stays.
+                var heir = wave.spawns.FirstOrDefault(Editable) ?? wave.spawns.FirstOrDefault(s => s != null);
+                if (heir != null) heir.goldCoins += spawn.goldCoins;
             }
             AfterWaveChange();
             return $"{group.Sum(s => s.count)} x {prefab.name}";
@@ -262,6 +265,7 @@ namespace PalaceMod
             {
                 pair.Key.count = pair.Value.Count;
                 pair.Key.eliteEnemies = pair.Value.Elite;
+                pair.Key.goldCoins = pair.Value.Gold;
             }
             wave.difficultyMulti = snap.Difficulty;
             snapshots.Remove(wave);
@@ -272,7 +276,16 @@ namespace PalaceMod
         public static void RestoreAllWaves()
         {
             bool any = false;
-            foreach (var wave in snapshots.Keys.ToList()) any |= Restore(wave);
+            var waves = EnemySpawner.instance != null ? EnemySpawner.instance.waves : null;
+            // Wavenumber is the night in progress, or the last one played during the day.
+            int firstUnplayed = EnemySpawner.instance == null ? int.MaxValue : EnemySpawner.instance.Wavenumber + 1;
+            foreach (var wave in snapshots.Keys.ToList())
+            {
+                // A wave that has started keeps its edits: restored spawns would miss the wave's Reset.
+                int index = waves?.IndexOf(wave) ?? -1;
+                if (index < 0 || index < firstUnplayed) snapshots.Remove(wave);
+                else any |= Restore(wave);
+            }
             if (any && IsPlanningTime) EnemySpawner.instance.Refresh();
         }
 
