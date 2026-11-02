@@ -85,6 +85,7 @@ namespace PalaceMod
             var sb = new StringBuilder();
             foreach (var step in UpgradeInfo.Taken(slot))
             {
+                if (step.Level == 1 && !step.IsChoice) continue; // a plain build has nothing to report
                 string text = Shorten(UpgradeInfo.StepText(slot, step));
                 if (string.IsNullOrEmpty(text)) continue;
                 sb.Append("Lv ").Append(step.Level).Append(": ").AppendLine(text);

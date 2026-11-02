@@ -56,7 +56,9 @@ namespace PalaceMod
         {
             var hp = unit != null ? unit.GetComponent<Hp>() : null;
             if (hp == null || !unitSlots.TryGetValue(hp, out var slot) || slot == null) return null;
-            var taken = UpgradeInfo.Taken(slot);
+            // The unit's type already says what was built, so only upgrades after the build count.
+            var all = UpgradeInfo.Taken(slot);
+            var taken = all.Where(s => s.Level >= 2).ToList();
             if (taken.Count == 0) return null;
             // "Lv 2, 3: More units, faster replenishment." rather than repeating the same text per level.
             var names = taken
@@ -69,7 +71,7 @@ namespace PalaceMod
             {
                 Slot = slot,
                 Stars = taken.Count,
-                Key = string.Join(",", taken.Select(s => s.BranchIndex)) + "|" + taken.Count,
+                Key = string.Join(",", all.Select(s => s.BranchIndex)),
                 Names = names,
             };
         }

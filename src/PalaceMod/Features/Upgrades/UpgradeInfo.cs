@@ -35,7 +35,8 @@ namespace PalaceMod
 
         internal static bool IsBuilt(BuildSlot slot) => slot != null && Owner(slot).Level >= 1;
 
-        /// <summary>Upgrades already applied after the initial build, in order.</summary>
+        /// <summary>Steps already applied, oldest first. Level 1 is the build itself, which can be a choice too (e.g. a
+        /// barracks' Knights or Spearmen).</summary>
         internal static List<Step> Taken(BuildSlot slot)
         {
             var steps = new List<Step>();
@@ -44,7 +45,7 @@ namespace PalaceMod
             var upgrades = slot.OwnUpgrades;
             var applied = slot.AppliedUpgrades;
             int n = Mathf.Min(Mathf.Min(applied.Count, upgrades.Count), slot.Level);
-            for (int i = 1; i < n; i++)
+            for (int i = 0; i < n; i++)
                 steps.Add(new Step { Level = i + 1, Upgrade = upgrades[i], BranchIndex = applied[i] });
             return steps;
         }
