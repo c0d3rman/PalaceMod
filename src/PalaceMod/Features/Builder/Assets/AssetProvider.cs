@@ -52,7 +52,7 @@ namespace PalaceMod.Builder.Assets
         private readonly Dictionary<string, Loaded> cache = [];
         private readonly Dictionary<string, Download> downloads = [];          // by sha256
         private readonly Dictionary<string, string> failedDownloads = [];      // sha256 -> reason
-        private readonly Dictionary<string, float> retryAfter = [];
+        private readonly Dictionary<string, (float until, string reason)> retryAfter = [];          // transient failures
         private readonly List<AudioDecode> decodes = [];
         private readonly HashSet<string> warned = [];
 
@@ -291,7 +291,7 @@ namespace PalaceMod.Builder.Assets
             if (downloads.ContainsKey(sha)) return true;
             if (!DownloadsAllowed()) { why = "downloading pack assets is turned off (Builder settings)"; return false; }
             if (CacheDir == null) { why = "no pack folder"; return false; }
-            if (retryAfter.TryGetValue(sha, out float t) && Time.unscaledTime < t) { why = "download failed recently"; return false; }
+            if (retryAfter.TryGetValue(sha, out var wait) && Time.unscaledTime < wait.until) { why = $"download failed: {wait.reason} (retrying in a minute)"; return false; }
             if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
             {
                 failedDownloads[sha] = "only http and https urls are allowed";
@@ -398,15 +398,15 @@ namespace PalaceMod.Builder.Assets
 
         private void Fail(Download d, string reason, bool retry = false)
         {
-            if (retry) retryAfter[d.Sha256] = Time.unscaledTime + 60f;
+            if (retry) retryAfter[d.Sha256] = (Time.unscaledTime + 60f, reason);
             else failedDownloads[d.Sha256] = reason;
             WarnOnce("download " + d.Sha256 + reason, $"{d.Label}: download from {d.Url} failed: {reason}");
         }
 
         // ------------------------------------------------------------------ housekeeping
 
-        /// <summary>Drops cached objects whose files changed or vanished, and forgets failed downloads (packs may
-        /// have been fixed). Only call when no template or live unit can still reference them (outside sessions,
+        /// <summary>Drops cached objects whose files changed or vanished (a fixed file is then decoded again).
+        /// Only call when no template or live unit can still reference them (outside sessions,
         /// after IUnitFactory.Clear).</summary>
         public void Sweep()
         {
@@ -416,12 +416,10 @@ namespace PalaceMod.Builder.Assets
                 if (loaded.Pending) continue;
                 string file = key.Substring(key.IndexOf('|', key.IndexOf('|', key.IndexOf('|') + 1) + 1) + 1);
                 bool stale = !File.Exists(file) || CacheKey(file, key.Substring(0, key.IndexOf('|'))) != key;
-                if (!stale && loaded.Error == null) continue;
+                if (!stale) continue; // errors stay cached until the file changes (no re-decoding a bad file on every rescan)
                 cache.Remove(key);
                 Destroy(loaded.Value);
             }
-            failedDownloads.Clear();
-            warned.Clear();
         }
 
         /// <summary>Destroys every loaded object and cancels background work.</summary>

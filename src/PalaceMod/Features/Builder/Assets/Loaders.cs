@@ -232,6 +232,8 @@ namespace PalaceMod.Builder.Assets
         public static Mesh Load(byte[] bytes, string name)
         {
             var positions = new List<Vector3>();
+            var colors = new List<Color>();
+            var outColor = new List<Color>();
             var uvs = new List<Vector2>();
             var normals = new List<Vector3>();
             var outPos = new List<Vector3>();
@@ -258,6 +260,12 @@ namespace PalaceMod.Builder.Assets
                     case "v":
                         if (parts.Length < 4) throw Bad(lineNo, "a vertex needs x y z");
                         positions.Add(new Vector3(-F(parts[1], lineNo), F(parts[2], lineNo), F(parts[3], lineNo)));
+                        // Common extension (Blender, MeshLab, MagicaVoxel): "v x y z r g b" with 0-1 colours.
+                        if (parts.Length >= 7)
+                        {
+                            while (colors.Count < positions.Count - 1) colors.Add(Color.white);
+                            colors.Add(new Color(Mathf.Clamp01(F(parts[4], lineNo)), Mathf.Clamp01(F(parts[5], lineNo)), Mathf.Clamp01(F(parts[6], lineNo))));
+                        }
                         break;
                     case "vt":
                         if (parts.Length < 3) throw Bad(lineNo, "a texture coordinate needs u v");
@@ -284,6 +292,7 @@ namespace PalaceMod.Builder.Assets
                                 v = outPos.Count;
                                 vertexMap[key] = v;
                                 outPos.Add(positions[vi]);
+                                outColor.Add(vi < colors.Count ? colors[vi] : Color.white);
                                 outUv.Add(ti >= 0 ? uvs[ti] : Vector2.zero);
                                 outNormal.Add(ni >= 0 ? normals[ni] : Vector3.zero);
                                 anyUv |= ti >= 0;
@@ -304,7 +313,7 @@ namespace PalaceMod.Builder.Assets
                 }
             }
             if (triangles.Count == 0) throw new AssetException("OBJ has no faces");
-            return MeshBuilder.Build(name, outPos, anyUv ? outUv : null, anyNormal ? outNormal : null, triangles);
+            return MeshBuilder.Build(name, outPos, anyUv ? outUv : null, anyNormal ? outNormal : null, outColor, triangles);
         }
 
         private static AssetException Bad(int line, string message) => new($"OBJ line {line}: {message}");
@@ -327,11 +336,15 @@ namespace PalaceMod.Builder.Assets
 
     internal static class MeshBuilder
     {
-        public static Mesh Build(string name, List<Vector3> positions, List<Vector2> uvs, List<Vector3> normals, List<int> triangles)
+        /// <param name="colors">Vertex colours; required, because the game's unit shader (FlatKit Stylized Surface)
+        /// multiplies by them and a mesh without them renders black. White = the material's own colour.</param>
+        public static Mesh Build(string name, List<Vector3> positions, List<Vector2> uvs, List<Vector3> normals, List<Color> colors, List<int> triangles)
         {
             var mesh = new Mesh { name = name };
             if (positions.Count > 65535) mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+            FixOrientation(positions, normals, triangles);
             mesh.SetVertices(positions);
+            mesh.SetColors(colors);
             if (uvs != null) mesh.SetUVs(0, uvs);
             mesh.SetTriangles(triangles, 0, true);
             bool goodNormals = normals != null;
@@ -342,6 +355,29 @@ namespace PalaceMod.Builder.Assets
             var size = mesh.bounds.size;
             if (size.x <= 1e-6f && size.y <= 1e-6f && size.z <= 1e-6f) throw new AssetException("mesh has no size (all vertices in one place)");
             return mesh;
+        }
+
+        /// <summary>
+        /// Exporters disagree on face winding. An inside-out mesh shows its back faces with inward normals, which the
+        /// game's cel shader renders black, so: if the mesh encloses negative volume, flip every triangle; then if
+        /// the file's normals mostly oppose the faces, flip them too.
+        /// </summary>
+        private static void FixOrientation(List<Vector3> p, List<Vector3> normals, List<int> t)
+        {
+            double volume = 0, agree = 0;
+            for (int i = 0; i + 2 < t.Count; i += 3)
+                volume += Vector3.Dot(p[t[i]], Vector3.Cross(p[t[i + 1]], p[t[i + 2]]));
+            bool flip = volume < 0;
+            if (flip)
+                for (int i = 0; i + 2 < t.Count; i += 3) (t[i + 1], t[i + 2]) = (t[i + 2], t[i + 1]);
+            if (normals == null) return;
+            for (int i = 0; i + 2 < t.Count; i += 3)
+            {
+                // Unity's front faces wind clockwise, so the outward face normal is (b - a) x (c - a).
+                var face = Vector3.Cross(p[t[i + 1]] - p[t[i]], p[t[i + 2]] - p[t[i]]);
+                agree += Vector3.Dot(face, normals[t[i]] + normals[t[i + 1]] + normals[t[i + 2]]);
+            }
+            if (agree < 0) for (int i = 0; i < normals.Count; i++) normals[i] = -normals[i];
         }
     }
 }

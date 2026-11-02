@@ -175,7 +175,7 @@ namespace PalaceMod
                 {
                     var mesh = r is SkinnedMeshRenderer s ? s.sharedMesh : t.GetComponent<MeshFilter>()?.sharedMesh;
                     line += $" mesh={mesh?.name} b={mesh?.bounds.size} uv={(mesh != null && mesh.isReadable ? mesh.uv.Length.ToString() : "?")} " +
-                        $"mats=[{string.Join(",", r.sharedMaterials.Select(m => m == null ? "null" : $"{m.name}/{m.shader.name}{(m.HasProperty("_BaseMap") ? $" baseMap={m.GetTexture("_BaseMap")?.name ?? "none"}" : "")}"))}] enabled={r.enabled}";
+                        $"mats=[{string.Join(",", r.sharedMaterials.Select(m => m == null ? "null" : $"{m.name}/{m.shader.name}{(m.HasProperty("_BaseMap") ? $" baseMap={m.GetTexture("_BaseMap")?.name ?? "none"}" : "")} kw={string.Join("+", m.shaderKeywords)}"))}] enabled={r.enabled}";
                 }
                 lines.Add(line);
             }
@@ -189,7 +189,7 @@ namespace PalaceMod
             if (args.Length < 2) throw new ArgumentException("usage: builder-assets gltf <file.glb> [dir with glTFast.dll and consumer.dll] | gltf result");
             var entryType = Type.GetType("SpikeConsumer.SpikeEntry, consumer");
             if (args[1] == "result")
-                return entryType == null ? "not loaded" : (string)entryType.GetField("Last").GetValue(null);
+                return entryType == null ? "not loaded" : (string)(entryType.GetMethod("Result")?.Invoke(null, null) ?? entryType.GetField("Last").GetValue(null));
             if (entryType == null)
             {
                 string dir = args.Length > 2 ? args[2] : throw new ArgumentException("first call needs the dll folder");
