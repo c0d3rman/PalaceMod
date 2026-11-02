@@ -29,7 +29,7 @@ namespace PalaceMod
             PauseMenu.AddButton("compendium", "Compendium", () => frame.Open(), order: 10, visible: () => IsEnabled);
             DevCommands.Register("compendium", "compendium [close]     open (or close) the Compendium", args =>
             {
-                if (args.Length > 1 && args[1] == "close") frame.Close();
+                if (args.Length > 0 && args[0] == "close") frame.Close();
                 else frame.Open();
                 return frame.IsOpen ? "open" : "closed";
             });
@@ -186,7 +186,8 @@ namespace PalaceMod
             if (EnemySpawner.instance == null) { NotInLevel(page); return; }
             // Building slots with their own upgrade tree, grouped by building and tree (e.g. all houses together).
             var groups = new List<(string Key, List<BuildSlot> Slots)>();
-            foreach (var slot in Object.FindObjectsOfType<BuildSlot>())
+            // Include inactive slots: buildings that unlock later are hidden until their prerequisite is upgraded.
+            foreach (var slot in Resources.FindObjectsOfTypeAll<BuildSlot>().Where(b => b.gameObject.scene.isLoaded))
             {
                 if (slot.ActivatorUpgradesThis || slot.OwnUpgrades == null || slot.OwnUpgrades.Count == 0) continue;
                 var key = slot.buildingName + "|" + string.Join(",", slot.OwnUpgrades.Select(u => u.cost));

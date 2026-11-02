@@ -20,6 +20,9 @@ namespace PalaceMod
         public override string FeatureSection => "Stat details";
         public override string FeatureDescription => "The pause menu's enemy and unit stats show base → actual values, including night difficulty, elite bonuses, perks and upgrades.";
 
+        // The scene-enemy baseline patch must run even while the feature is off; the tooltip patch checks On itself.
+        protected override bool UnpatchWhenDisabled => false;
+
         internal const string Arrow = " <sprite name=\"arrow_right\"> ";
 
         private static readonly AccessTools.FieldRef<PerkSelectionTooltipHelper, TFUIEnemy> CurrentEnemy = AccessTools.FieldRefAccess<PerkSelectionTooltipHelper, TFUIEnemy>("currentEnemyElement");
@@ -32,11 +35,11 @@ namespace PalaceMod
         {
             base.Awake(plugin);
             DevCommands.Register("stats", "stats [wave]           print computed enemy (base → actual) and live unit stats for a wave (default: next)", args =>
-                DescribeAll(args.Length > 1 ? int.Parse(args[1]) - 1 : CompendiumStats.NextWaveIndex()));
+                DescribeAll(args.Length > 0 ? int.Parse(args[0]) - 1 : CompendiumStats.NextWaveIndex()));
             DevCommands.Register("statsverify", "statsverify            compare live enemies' HP, damage multiplier, speed and cooldown with the computed values", _ => VerifyLive());
             DevCommands.Register("hitlog", "hitlog [on|off]        log every hit (attacker, target, damage) to the BepInEx log", args =>
             {
-                bool on = args.Length < 2 || args[1] != "off";
+                bool on = args.Length == 0 || args[0] != "off";
                 // Patched only on request: Hp.TakeDamage is hot.
                 var target = AccessTools.Method(typeof(Hp), nameof(Hp.TakeDamage));
                 if (on && hitLogHarmony == null)
@@ -54,21 +57,27 @@ namespace PalaceMod
             DevCommands.Register("equip", "equip [clear | <name part> [off]]   list, equip or unequip perks/weapons/mutators (takes effect on the next level load)", args =>
             {
                 var perks = PerkManager.instance ?? throw new System.InvalidOperationException("no PerkManager");
-                if (args.Length > 1 && args[1] == "clear") PerkManager.ClearAllEquipped();
-                else if (args.Length > 1)
+                if (args.Length > 0 && args[0] == "clear")
+                {
+                    PerkManager.ClearAllEquipped();
+                    GameplayImpact.Mark("Dev: changed the loadout");
+                }
+                else if (args.Length > 0)
                 {
                     bool off = args[^1] == "off";
-                    var query = string.Join(" ", args.Skip(1).Take(args.Length - (off ? 2 : 1)));
+                    var query = string.Join(" ", args.Take(args.Length - (off ? 1 : 0)));
                     var match = perks.allEquippables.FirstOrDefault(e => CompendiumStats.EquippableName(e).IndexOf(query, System.StringComparison.OrdinalIgnoreCase) >= 0 || e.name.IndexOf(query, System.StringComparison.OrdinalIgnoreCase) >= 0)
                         ?? throw new System.ArgumentException($"no equippable matching \"{query}\"");
                     PerkManager.SetEquipped(match, !off);
+                    GameplayImpact.Mark("Dev: changed the loadout");
                 }
                 return "equipped: " + string.Join(", ", perks.CurrentlyEquipped.Select(e => $"{CompendiumStats.EquippableName(e)} ({e.name})"));
             });
             DevCommands.Register("wave", "wave <n>               make night n the next night (by day; dev only)", args =>
             {
                 var spawner = EnemySpawner.instance ?? throw new System.InvalidOperationException("not in a level");
-                int n = int.Parse(args[1]);
+                if (args.Length == 0) throw new System.ArgumentException("usage: wave <n>");
+                int n = int.Parse(args[0]);
                 if (n < 1 || n > spawner.WaveCount) throw new System.ArgumentException($"night must be 1..{spawner.WaveCount}");
                 AccessTools.Field(typeof(EnemySpawner), "wavenumber").SetValue(spawner, n - 2);
                 GameplayImpact.Mark("Dev: skipped to a night");
@@ -92,7 +101,7 @@ namespace PalaceMod
         {
             private static void Postfix(PerkSelectionTooltipHelper __instance)
             {
-                if (SettingsManager.Instance == null || !SettingsManager.Instance.EnableUnitStats) return;
+                if (!Feature<StatDetailsManager>.On || SettingsManager.Instance == null || !SettingsManager.Instance.EnableUnitStats) return;
                 CombatantStats stats = null;
                 var enemy = CurrentEnemy(__instance);
                 var unit = CurrentUnit(__instance);
@@ -123,6 +132,14 @@ namespace PalaceMod
                     if (__instance.sizer) __instance.sizer.Trigger();
                 }
             }
+        }
+
+        // Some levels spawn enemies that live in the scene (bosses, Eldermoles): Spawn.Update activates and modifies that
+        // very object, so remember its authored stats before the first night.
+        [HarmonyPatch(typeof(EnemySpawner), "Start")]
+        private static class EnemySpawner_Start_Patch
+        {
+            private static void Postfix(EnemySpawner __instance) => CompendiumStats.CaptureSceneBaselines(__instance);
         }
 
         private static void WriteRows(UnitStatsDisplayUI display, CombatantStats stats)

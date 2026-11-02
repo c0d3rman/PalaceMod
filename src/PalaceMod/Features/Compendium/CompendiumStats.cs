@@ -192,11 +192,46 @@ namespace PalaceMod
             return mods;
         }
 
+        // Authored stats of enemies that live in the scene, captured before Spawn.Update modifies them in place.
+        private sealed class Baseline { public float Hp, Speed, Cooldown, DamageMulti; public float[] Ranges; }
+        private static readonly Dictionary<GameObject, Baseline> sceneBaselines = [];
+
+        internal static void CaptureSceneBaselines(EnemySpawner spawner)
+        {
+            sceneBaselines.Clear();
+            foreach (var wave in spawner.waves)
+                foreach (var spawn in wave.spawns)
+                {
+                    var go = spawn.enemyPrefab;
+                    if (go == null || !go.scene.isLoaded || sceneBaselines.ContainsKey(go)) continue;
+                    var attack = Find<AutoAttack>(go);
+                    sceneBaselines[go] = new Baseline
+                    {
+                        Hp = Find<Hp>(go)?.maxHp ?? 0f,
+                        Speed = Find<PathfindMovementEnemy>(go)?.movementSpeed ?? 0f,
+                        Cooldown = attack?.cooldownDuration ?? 0f,
+                        DamageMulti = attack?.DamageMultiplyer ?? 1f,
+                        Ranges = attack?.targetPriorities.Select(t => t.range).ToArray() ?? [],
+                    };
+                }
+        }
+
+        /// <summary>The icon the game would show, honouring arachnophobia mode.</summary>
+        public static Sprite EnemyIcon(GameObject prefab)
+        {
+            var marker = prefab.GetComponent<ScreenMarkerIcon>();
+            var arachno = prefab.GetComponent<ScreenMarkerIconArachnophobia>();
+            if (arachno != null)
+                return SettingsManager.Instance != null && SettingsManager.Instance.ArachnophobiaMode && arachno.arachnophobiaModeSprite != null
+                    ? arachno.arachnophobiaModeSprite : arachno.defaultSprite;
+            return marker?.sprite;
+        }
+
         /// <summary>Base and actual stats for an enemy prefab spawned in wave <paramref name="waveIndex"/>.</summary>
         public static CombatantStats Enemy(GameObject prefab, bool elite, int waveIndex)
         {
             var marker = prefab.GetComponent<ScreenMarkerIcon>();
-            var stats = new CombatantStats { Elite = elite, Name = marker != null ? marker.UnitName : prefab.name, Icon = marker?.sprite };
+            var stats = new CombatantStats { Elite = elite, Name = marker != null ? marker.UnitName : prefab.name, Icon = EnemyIcon(prefab) };
             var hp = Find<Hp>(prefab);
             var move = Find<PathfindMovementEnemy>(prefab);
             var attack = Find<AutoAttack>(prefab);
@@ -213,6 +248,19 @@ namespace PalaceMod
                 b.Range = RangeFor(attack, TagManager.ETag.Player);
                 prefabDamageMulti = attack.DamageMultiplyer;
                 if (weapon != null) b.ProjectileSpeed = weapon.projectileSpeed;
+            }
+            if (sceneBaselines.TryGetValue(prefab, out var baseline))
+            {
+                b.Hp = baseline.Hp;
+                b.Speed = baseline.Speed;
+                b.Cooldown = baseline.Cooldown;
+                prefabDamageMulti = baseline.DamageMulti;
+                if (attack != null)
+                {
+                    b.Range = baseline.Ranges.Length > 0 ? baseline.Ranges[0] : 0f;
+                    for (int i = 0; i < attack.targetPriorities.Count && i < baseline.Ranges.Length; i++)
+                        if (attack.targetPriorities[i].mustHaveTags.Contains(TagManager.ETag.Player)) { b.Range = baseline.Ranges[i]; break; }
+                }
             }
 
             stats.Modifiers.AddRange(EnemyModifiers(prefab, elite, waveIndex));
