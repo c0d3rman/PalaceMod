@@ -275,6 +275,7 @@ namespace PalaceMod
             if (frame == null) return;
             currentTab = Mathf.Clamp(index, 0, Math.Max(0, tabs.Count - 1));
             int selectedIndex = page?.Elements.IndexOf(frame.CurrentSelection) ?? -1;
+            string selectedName = selectedIndex >= 0 ? frame.CurrentSelection.name : null;
             // Don't leave the selection on an element that's about to be destroyed.
             if (select && selectedIndex >= 0) frame.Select(tabButtons.Count > 0 ? tabButtons[currentTab] : back);
 
@@ -302,28 +303,40 @@ namespace PalaceMod
             }
             back.topNav = elements.LastOrDefault() ?? up;
             frame.RefetchManagedElements();
+            // Lay the page out now, so scrolling to the restored selection measures its real position.
+            LayoutRebuilder.ForceRebuildLayoutImmediate(contentRoot);
             if (!keepScroll) scroll.ResetTo(0f);
-            else
+            else scroll.Clamp();
+            if (select && selectedIndex >= 0 && elements.Count > 0)
             {
-                LayoutRebuilder.ForceRebuildLayoutImmediate(contentRoot);
-                scroll.Clamp();
+                // The same row (by label) if it's still there, else the same position.
+                frame.Select(elements.FirstOrDefault(e => e.name == selectedName) ?? elements[Math.Min(selectedIndex, elements.Count - 1)]);
             }
-            if (select && selectedIndex >= 0 && elements.Count > 0) frame.Select(elements[Math.Min(selectedIndex, elements.Count - 1)]);
             UpdateTabMarker();
         }
 
         private void UpdateTabMarker()
         {
             if (tabMarker == null || tabButtons.Count == 0) return;
-            var tab = (RectTransform)tabButtons[currentTab].transform;
-            LayoutRebuilder.ForceRebuildLayoutImmediate((RectTransform)tab.parent);
-            var text = tab.GetComponent<TextMeshProUGUI>();
-            text.ForceMeshUpdate();
-            var bounds = text.textBounds; // the visible glyphs, in the tab's local space
-            float width = bounds.size.x > 0f ? bounds.size.x : text.GetPreferredValues(text.text).x;
-            float center = bounds.size.x > 0f ? bounds.center.x : (0.5f - tab.pivot.x) * tab.rect.width;
-            tabMarker.sizeDelta = new Vector2(Mathf.Max(24f, width), 2f);
-            tabMarker.anchoredPosition = new Vector2(tab.anchoredPosition.x + center, -18f);
+            var follower = tabMarker.GetComponent<TabMarker>() ?? tabMarker.gameObject.AddComponent<TabMarker>();
+            follower.Tab = (RectTransform)tabButtons[currentTab].transform;
+        }
+
+        // Keeps the underline under the current tab; tabs resize while their selection animation plays, so this
+        // follows every frame rather than measuring once.
+        private class TabMarker : MonoBehaviour
+        {
+            public RectTransform Tab;
+
+            private void LateUpdate()
+            {
+                if (Tab == null) return;
+                var rect = (RectTransform)transform;
+                var row = (RectTransform)Tab.parent;
+                var center = row.InverseTransformPoint(Tab.TransformPoint(Tab.rect.center));
+                rect.sizeDelta = new Vector2(Mathf.Max(24f, Tab.rect.width * 0.9f), 2f);
+                rect.localPosition = new Vector3(center.x, center.y - 18f, 0f);
+            }
         }
 
         private static void Stretch(RectTransform rect)
@@ -386,6 +399,7 @@ namespace PalaceMod
         {
             var tmp = GameWidgets.Text(content, "Text", text, ModStyle.BodyFont, 25f, new Color(ModStyle.Gold.r, ModStyle.Gold.g, ModStyle.Gold.b, 0.85f));
             tmp.enableWordWrapping = true;
+            tmp.characterSpacing = 0f; // the tooltip text it's cloned from is letter-spaced; paragraphs read better without
             tmp.margin = new Vector4(0f, 2f, 0f, 6f);
             return tmp;
         }
@@ -409,6 +423,7 @@ namespace PalaceMod
                 iconObj.transform.SetParent(button.transform, false);
                 var image = iconObj.GetComponent<Image>();
                 image.sprite = icon;
+                image.color = ModStyle.Gold; // the game's icons are white and tinted gold in its menus
                 image.preserveAspect = true;
                 image.raycastTarget = false;
                 var iconRect = (RectTransform)iconObj.transform;
@@ -522,9 +537,16 @@ namespace PalaceMod
 
         private float MaxScroll => Mathf.Max(0f, content.rect.height - viewport.rect.height);
 
+        private ThronefallUIElement last;
+        private bool stepping;
+        private ThronefallUIElement pendingReselect;
+
         private void KeepSelectionVisible()
         {
+            if (stepping) return;
+            var previous = last;
             var selected = frame.CurrentSelection;
+            last = selected;
             if (selected == null || !selected.transform.IsChildOf(content)) return;
             var rect = (RectTransform)selected.transform;
             var corners = new Vector3[4];
@@ -532,14 +554,38 @@ namespace PalaceMod
             // Positions below the content's top edge (positive down), unaffected by the current scroll.
             float topEdge = -content.InverseTransformPoint(corners[1]).y + content.rect.yMax;
             float bottomEdge = -content.InverseTransformPoint(corners[0]).y + content.rect.yMax;
-            float margin = 40f, height = viewport.rect.height;
-            if (topEdge - margin < target) target = topEdge - margin;
-            else if (bottomEdge + margin > target + height) target = bottomEdge + margin - height;
-            target = Mathf.Clamp(target, 0f, MaxScroll);
+            float margin = 40f, height = viewport.rect.height, page = height - 2f * margin;
+            float wanted = target;
+            if (topEdge - margin < target) wanted = topEdge - margin;
+            else if (bottomEdge + margin > target + height) wanted = bottomEdge + margin - height;
+            wanted = Mathf.Clamp(wanted, 0f, MaxScroll);
+            // Moving between two rows that have tall non-selectable content (text, Custom blocks) between them:
+            // scroll one page towards the new row and keep the old selection, so keyboard and controller players
+            // see everything in between. The next press continues until the row is in view.
+            if (Mathf.Abs(wanted - target) > page && previous != null && previous.transform.IsChildOf(content) && previous.gameObject.activeInHierarchy)
+            {
+                target = Mathf.Clamp(target + Mathf.Sign(wanted - target) * page, 0f, MaxScroll);
+                // Can't re-select from inside the selection event (the game finishes styling the new row after it).
+                pendingReselect = previous;
+                last = previous;
+                return;
+            }
+            target = wanted;
         }
 
         private void Update()
         {
+            if (pendingReselect != null)
+            {
+                var element = pendingReselect;
+                pendingReselect = null;
+                if (element != null && element.gameObject.activeInHierarchy && UIFrameManager.instance?.ActiveFrame == frame)
+                {
+                    stepping = true;
+                    try { frame.Select(element); }
+                    finally { stepping = false; }
+                }
+            }
             if (UIFrameManager.instance?.ActiveFrame == frame && Input.mouseScrollDelta.y != 0f)
             {
                 target = Mathf.Clamp(target - Input.mouseScrollDelta.y * 60f, 0f, MaxScroll);
