@@ -16,8 +16,9 @@ using UnityEngine.EventSystems;
     A keybind is inert while its feature is disabled, while a menu is open (unless AllowInMenus), and while a text field
     has keyboard focus.
 
-    How keys are read is behind IKeybindBackend so the polling can move to Rewired actions later without touching
-    callers; see the keybind notes in CLAUDE.md.
+    How keys are read is behind IKeybindBackend. KeybindsManager makes each keybind a Rewired action (so it gets a
+    native row in Controls > Keyboard and can be bound to keyboard, mouse or controller) and reads it from Rewired;
+    keybinds registered after Rewired starts fall back to Unity's Input.
 */
 namespace PalaceMod
 {
@@ -50,6 +51,9 @@ namespace PalaceMod
         public KeyboardShortcut DefaultShortcut => (KeyboardShortcut)Entry.DefaultValue;
         /// <summary>The saved binding. The keybind UI writes this; it's persisted to the config file.</summary>
         public ConfigEntry<KeyboardShortcut> Entry { get; }
+
+        /// <summary>The Rewired action id backing this keybind, or -1 if it has none (see KeybindsManager).</summary>
+        internal int ActionId { get; set; } = -1;
 
         public KeyboardShortcut Shortcut
         {
@@ -91,7 +95,10 @@ namespace PalaceMod
         public static event Action<Keybind> Registered;
 
         /// <summary>How keys are read; Unity's Input by default.</summary>
-        public static IKeybindBackend Backend { get; set; } = new UnityInputBackend();
+        public static IKeybindBackend Backend { get; set; } = UnityInput;
+
+        /// <summary>Reads the configured KeyboardShortcut with Unity's Input; the fallback for other backends.</summary>
+        internal static readonly IKeybindBackend UnityInput = new UnityInputBackend();
 
         /// <summary>Registers a keybind; registering the same section and id again returns the existing handle.</summary>
         /// <param name="section">The owning feature's FeatureSection, so the keybind follows its Enabled switch.</param>
@@ -104,7 +111,7 @@ namespace PalaceMod
         {
             if (string.IsNullOrEmpty(section)) throw new ArgumentException("section is required", nameof(section));
             if (string.IsNullOrEmpty(id)) throw new ArgumentException("id is required", nameof(id));
-            string key = $"{section}: {id}";
+            string key = ConfigKey(section, id);
             if (byKey.TryGetValue(key, out var existing)) return existing;
             var entry = Plugin.Instance.Config.Bind(ConfigSection, key, defaultKey, new ConfigDescription(
                 $"{displayName}: {description}", null, new SettingTags { Hidden = true }));
@@ -114,6 +121,9 @@ namespace PalaceMod
             Registered?.Invoke(keybind);
             return keybind;
         }
+
+        internal static string ConfigKey(string section, string id) => $"{section}: {id}";
+        internal static string ConfigKey(Keybind keybind) => ConfigKey(keybind.Section, keybind.Id);
 
         // ---- Gating -----------------------------------------------------------------------------------------------
 
@@ -152,11 +162,23 @@ namespace PalaceMod
             return legacy != null && legacy.isFocused;
         }
 
+        // KeyboardShortcut.IsDown etc. return false while any other key is held (walking, sprinting), so check only
+        // the shortcut's own keys.
         private sealed class UnityInputBackend : IKeybindBackend
         {
-            public bool Down(Keybind keybind) => keybind.Shortcut.IsDown();
-            public bool Held(Keybind keybind) => keybind.Shortcut.IsPressed();
-            public bool Up(Keybind keybind) => keybind.Shortcut.IsUp();
+            public bool Down(Keybind keybind) => Check(keybind.Shortcut, Input.GetKeyDown);
+            public bool Held(Keybind keybind) => Check(keybind.Shortcut, Input.GetKey);
+            public bool Up(Keybind keybind) => Check(keybind.Shortcut, Input.GetKeyUp);
+
+            private static bool Check(KeyboardShortcut shortcut, Func<KeyCode, bool> main)
+            {
+                if (shortcut.MainKey == KeyCode.None || !main(shortcut.MainKey)) return false;
+                foreach (var modifier in shortcut.Modifiers)
+                {
+                    if (!Input.GetKey(modifier)) return false;
+                }
+                return true;
+            }
         }
     }
 }
