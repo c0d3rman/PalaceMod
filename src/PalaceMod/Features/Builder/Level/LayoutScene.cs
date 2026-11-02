@@ -110,17 +110,61 @@ namespace PalaceMod.Builder.Level
 
         private static string Readable(string mesh) => mesh.Replace('_', ' ').Trim();
 
-        /// <summary>A prop: a plain mesh object in the host scene, on the obstacle layer when solid.</summary>
+        /// <summary>A prop: a plain mesh object in the host scene, a solid obstacle when solid.</summary>
         public static GameObject MakeProp(Scene scene, PropBase b, string name, Vector3 pos, float yaw, float scale, bool solid)
         {
             var go = new GameObject(AddedPrefix + name);
             if (scene.IsValid()) SceneManager.MoveGameObjectToScene(go, scene);
-            go.layer = solid ? ObstacleLayer : 0;
             go.AddComponent<MeshFilter>().sharedMesh = b.Mesh;
             go.AddComponent<MeshRenderer>().sharedMaterials = b.Materials;
             go.transform.SetPositionAndRotation(pos, Quaternion.Euler(0f, yaw, 0f) * b.Upright);
             go.transform.localScale = b.Scale * scale;
+            SetSolid(go, solid);
             return go;
+        }
+
+        private const string BlockerName = AddedPrefix + "blocker";
+        private static Mesh blockerMesh;
+
+        /// <summary>Makes a prop block pathfinding and movement, or not. The host's recast graphs rasterize renderer
+        /// meshes (not colliders) on the Ground and Obstacle layers, but skip meshes that aren't CPU-readable, which
+        /// scenery meshes aren't. So a solid prop gets an invisible child: a readable box mesh around the prop's mesh on
+        /// the obstacle layer, with a matching box collider.</summary>
+        public static void SetSolid(GameObject go, bool solid)
+        {
+            go.layer = 0;
+            var existing = go.transform.Find(BlockerName);
+            if (!solid)
+            {
+                if (existing != null) UnityEngine.Object.DestroyImmediate(existing.gameObject);
+                return;
+            }
+            var mesh = go.GetComponent<MeshFilter>()?.sharedMesh;
+            if (mesh == null || existing != null) return;
+            var blocker = new GameObject(BlockerName) { layer = ObstacleLayer };
+            blocker.transform.SetParent(go.transform, false);
+            blocker.transform.localPosition = mesh.bounds.center;
+            blocker.transform.localScale = mesh.bounds.size;
+            blocker.AddComponent<MeshFilter>().sharedMesh = BlockerMesh();
+            blocker.AddComponent<MeshRenderer>().forceRenderingOff = true;   // enabled (the gatherer checks), never drawn
+            blocker.AddComponent<BoxCollider>();
+        }
+
+        /// <summary>A readable unit cube centred on the origin.</summary>
+        private static Mesh BlockerMesh()
+        {
+            if (blockerMesh != null) return blockerMesh;
+            var v = new Vector3[8];
+            for (int i = 0; i < 8; i++) v[i] = new Vector3((i & 1) - 0.5f, ((i >> 1) & 1) - 0.5f, ((i >> 2) & 1) - 0.5f);
+            int[] t =
+            [
+                0, 2, 1, 1, 2, 3,   4, 5, 6, 5, 7, 6,   // -z, +z
+                0, 1, 4, 1, 5, 4,   2, 6, 3, 3, 6, 7,   // -y, +y
+                0, 4, 2, 2, 4, 6,   1, 3, 5, 3, 7, 5,   // -x, +x
+            ];
+            blockerMesh = new Mesh { name = BlockerName, vertices = v, triangles = t };
+            blockerMesh.RecalculateBounds();
+            return blockerMesh;
         }
 
         // ---- Poses ---------------------------------------------------------------------------------------------

@@ -19,6 +19,7 @@ namespace PalaceMod.Builder.Level
             public string Line;
             public string Graph;
             public bool Reachable;
+            public string Detail;
             public List<Vector3> Points = [];
         }
 
@@ -67,6 +68,7 @@ namespace PalaceMod.Builder.Level
                 var a = AstarPath.active.GetNearest(from, nn).node;
                 var b = AstarPath.active.GetNearest(to, nn).node;
                 route.Reachable = a != null && b != null && PathUtilities.IsPathPossible(a, b);
+                route.Detail = $"from {from} -> node {(Vector3?)a?.position} area {a?.Area}; to {to} -> node {(Vector3?)b?.position} area {b?.Area}";
                 if (withPoints && a != null && b != null)
                 {
                     var path = ABPath.Construct(from, to);
@@ -83,6 +85,13 @@ namespace PalaceMod.Builder.Level
             }
             return route;
         }
+
+        /// <summary>What each recast graph rasterizes (dev).</summary>
+        public static string DescribeGraphs() => AstarPath.active == null ? "no pathfinding" : string.Join("\n", AstarPath.active.data.graphs.OfType<RecastGraph>().Select(g =>
+            $"{g.name}: mode={g.collectionSettings.collectionMode} tags=[{string.Join(",", g.collectionSettings.tagMask)}] " +
+            $"bounds={g.forcedBoundsCenter}/{g.forcedBoundsSize} " +
+            $"colliders={g.collectionSettings.rasterizeColliders} meshes={g.collectionSettings.rasterizeMeshes} " +
+            $"layers={string.Join(",", Enumerable.Range(0, 32).Where(l => (g.collectionSettings.layerMask.value & (1 << l)) != 0).Select(l => LayerMask.LayerToName(l)))}"));
 
         public static string Describe(List<Route> routes) =>
             routes.Count == 0 ? "no ground spawn lines to check" : string.Join(", ", routes.Select(r => $"{r.Line} {(r.Reachable ? "ok" : "BLOCKED")}"));

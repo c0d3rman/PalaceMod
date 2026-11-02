@@ -8,7 +8,7 @@ using UnityEngine;
     Applies a level's layout edits to the freshly loaded host (ILevelOverlay, called by the session on scene load:
     after Awake, before Start). Build slots are moved, removed, re-priced or cloned the way Falkenpass does it: a
     clone is made inactive, given a deterministic save GUID, its activator and costs, then activated so the game's own
-    Awake/Start register it like any native slot. Props are plain mesh objects on the obstacle layer. Spawn lines are
+    Awake/Start register it like any native slot. Props are mesh objects; solid ones get an invisible blocker box (LayoutScene.SetSolid). Spawn lines are
     moved as a whole. The pathfinding graphs are rescanned once, a frame after Start (see BuilderLevelManager), then
     every ground spawn line is checked for a path to the castle.
 

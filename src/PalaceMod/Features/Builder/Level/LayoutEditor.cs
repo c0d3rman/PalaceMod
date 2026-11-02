@@ -883,9 +883,10 @@ namespace PalaceMod.Builder.Level
             // Show the scene as it will play: solid props block, removed slots are gone (slots don't block until built).
             var solid = new List<GameObject>();
             foreach (var item in items.Values.Where(i => i.Kind == ItemKind.Prop && i.Proxy != null))
-                if (PropDef(item)?.Solid != false) { item.Proxy.layer = LayoutScene.ObstacleLayer; solid.Add(item.Proxy); }
+                if (PropDef(item)?.Solid != false) { LayoutScene.SetSolid(item.Proxy, true); solid.Add(item.Proxy); }
             long ms = PathCheck.Rescan();
-            foreach (var go in solid) go.layer = 0;
+            // Proxies stay non-solid while editing, so their blockers never catch the editor's raycasts.
+            foreach (var go in solid) LayoutScene.SetSolid(go, false);
             var lineItems = items.Values.Where(i => i.Kind == ItemKind.Line).ToDictionary(i => i.Id);
             routes = PathCheck.Check(scene, l => lineItems.TryGetValue(l.name, out var it) ? it.Pos : LayoutScene.LineCenter(l.transform), withPoints: true);
             markers?.ShowRoutes(routes);
