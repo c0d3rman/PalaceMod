@@ -228,6 +228,8 @@ namespace PalaceMod
             DestroyEndPanel();
             if (!showOnEndScreen.Value || NightscoreUI.instance == null) return;
             if (LocalGamestate.Instance == null || LocalGamestate.Instance.CurrentState != LocalGamestate.State.AfterMatchVictory) return;
+            // Eternal Trials victories use their own screen (mainFrameParent stays hidden), which already summarises the run.
+            if (ScoreCalculator.IsEternalTrial) return;
             if (ScoreCalculator.LastNight is not NightScore last || last.Night < ScoreCalculator.NightCount) return;
 
             // A child of the main frame, so it fades in with the score list.
@@ -328,7 +330,6 @@ namespace PalaceMod
                     timeLabel = Find<TextMeshProUGUI>(ui.timeText),
                     baseLabel = Find<TextMeshProUGUI>(ui.nightSurviveText),
                 };
-                if (p.timeLabel != null) p.timeLabel.name = "Time Text";
 
                 // Undo the pop-up animation's start state: every row scaled to zero and the content collapsed.
                 foreach (var rt in new[] { ui.nightSurviveText, ui.nightSurviveNumber, ui.timeText, ui.timeNumber, ui.protectionText,
@@ -363,6 +364,7 @@ namespace PalaceMod
                 float below = bubble != null ? -bubble.anchoredPosition.y + bubble.sizeDelta.y : 70f;
                 element.preferredWidth = width;
                 element.preferredHeight = ExpandedContentHeight + below;
+                if (p.timeLabel != null) p.timeLabel.name = "Time Text"; // last: Find() looks children up by their original names
                 root.SetActive(true);
                 return p;
             }
@@ -531,6 +533,7 @@ namespace PalaceMod
                     }
                     case "killall":
                         Hp.KillAllEnemyUnits();
+                        GameplayImpact.Mark("Dev: killed all enemies");
                         return "killed all enemies";
                     case "dump":
                         return Dump(args.Length > 1 ? args[1] : "pause");
