@@ -243,31 +243,48 @@ namespace PalaceMod
             return string.Join("<color=#C8A674> + </color>", parts);
         }
 
-        /// <summary>Names of the visible actions sharing a binding with this one, where at least one side is a mod key.</summary>
+        /// <summary>Names of the visible actions sharing a binding with this one, where at least one side is a mod key.
+        /// Compares across every map of the same controller (the game keeps some keys, like WASD, in other map
+        /// categories). Menu-only (UI) actions don't count against a mod key that is inert in menus.</summary>
         internal static List<string> Conflicts(int actionId, Pole? pole = null)
         {
             var names = new List<string>();
             if (Plugin.Input == null) return names;
-            bool mine = byAction.ContainsKey(actionId);
-            foreach (var map in Plugin.Input.controllers.maps.GetAllMaps())
+            var allMaps = Plugin.Input.controllers.maps.GetAllMaps().ToList();
+            int uiCategory = ReInput.mapping.GetActionCategoryId("UI");
+            foreach (var map in allMaps)
             {
-                if (!map.enabled && map.categoryId != 0) continue;
                 foreach (var element in map.GetElementMapsWithAction(actionId))
                 {
                     if (pole != null && element.axisContribution != pole) continue;
-                    foreach (var other in map.AllMaps)
+                    foreach (var otherMap in allMaps)
                     {
-                        if (other.actionId == actionId || !other.enabled || (!mine && !byAction.ContainsKey(other.actionId))) continue;
-                        if (other.elementType != element.elementType || other.elementIdentifierId != element.elementIdentifierId) continue;
-                        if (map.controllerType == ControllerType.Keyboard && other.modifierKeyFlags != element.modifierKeyFlags) continue;
-                        // Opposite halves of one axis (wheel up / wheel down, stick left / right) are separate inputs.
-                        if (element.axisRange != AxisRange.Full && other.axisRange != AxisRange.Full && element.axisRange != other.axisRange) continue;
-                        string name = ActionLabel(other);
-                        if (name != null && !names.Contains(name)) names.Add(name);
+                        if (otherMap.controllerType != map.controllerType || otherMap.controllerId != map.controllerId) continue;
+                        foreach (var other in otherMap.AllMaps)
+                        {
+                            if (other.actionId == actionId || !other.enabled) continue;
+                            if (other.elementType != element.elementType || other.elementIdentifierId != element.elementIdentifierId) continue;
+                            if (map.controllerType == ControllerType.Keyboard && other.modifierKeyFlags != element.modifierKeyFlags) continue;
+                            // Opposite halves of one axis (wheel up / wheel down, stick left / right) are separate inputs.
+                            if (element.axisRange != AxisRange.Full && other.axisRange != AxisRange.Full && element.axisRange != other.axisRange) continue;
+                            if (!Clashes(actionId, other.actionId, uiCategory)) continue;
+                            string name = ActionLabel(other);
+                            if (name != null && !names.Contains(name)) names.Add(name);
+                        }
                     }
                 }
             }
             return names;
+        }
+
+        private static bool Clashes(int a, int b, int uiCategory)
+        {
+            bool aMine = byAction.TryGetValue(a, out var ka), bMine = byAction.TryGetValue(b, out var kb);
+            if (!aMine && !bMine) return false;
+            if (aMine && bMine) return true;
+            var mod = aMine ? ka : kb;
+            var native = ReInput.mapping.GetAction(aMine ? b : a);
+            return native != null && (native.categoryId != uiCategory || (mod.Flags & KeybindFlags.AllowInMenus) != 0);
         }
 
         private static string ActionLabel(ActionElementMap element)
@@ -341,6 +358,16 @@ namespace PalaceMod
                         ControlConfigSaveLoad.SaveControlConfigToJson();
                         RefreshControlsScreen();
                         return Describe(keybind);
+                    }
+                    case "key":
+                    {
+                        // Every action bound to a keyboard key, in any map: keybinds key <KeyCode>
+                        if (args.Length < 2) throw new ArgumentException("usage: keybinds key <KeyCode>");
+                        var key = (KeyCode)Enum.Parse(typeof(KeyCode), args[1], true);
+                        return "\n" + string.Join("\n", Plugin.Input.controllers.maps.GetAllMaps(ControllerType.Keyboard)
+                            .SelectMany(m => m.AllMaps.Where(e => e.keyCode == key).Select(e =>
+                                $"map cat {m.categoryId} layout {m.layoutId} enabled {m.enabled}: {ReInput.mapping.GetAction(e.actionId)?.name} " +
+                                $"({e.actionId}, {e.elementType}, id {e.elementIdentifierId}, {e.axisContribution}, range {e.axisRange}, mods {e.modifierKeyFlags}, enabled {e.enabled})")));
                     }
                     case "reset":
                         ActiveRebinder().TriggerControlsReset();
