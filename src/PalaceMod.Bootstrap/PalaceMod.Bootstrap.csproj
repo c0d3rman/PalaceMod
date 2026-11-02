@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Doorstop entrypoint for running BepInEx natively on Apple Silicon; installed to BepInEx/core. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>PalaceMod.Bootstrap</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>latest</LangVersion>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreAdditionalProjectSources>
+      https://api.nuget.org/v3/index.json;
+      https://nuget.bepinex.dev/v3/index.json
+    </RestoreAdditionalProjectSources>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Compile-time only: at runtime the copy BepInEx ships in BepInEx/core is used. -->
+    <PackageReference Include="MonoMod.RuntimeDetour" Version="22.1.29.1" IncludeAssets="compile" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

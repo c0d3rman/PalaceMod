@@ -39,6 +39,10 @@ if [ "$(uname -m)" = "arm64" ] && [ -z "$PALACEMOD_ROSETTA" ]; then
     exec /usr/bin/arch -x86_64 /bin/sh "$0" "$@"
 fi
 """
+PRELOADER_TARGET = 'target_assembly="BepInEx/core/BepInEx.Preloader.dll"'
+BOOTSTRAP_TARGET = 'target_assembly="BepInEx/core/PalaceMod.Bootstrap.dll"'
+DOORSTOP_URL = "https://github.com/NeighTools/UnityDoorstop/releases/download/v4.6.0/doorstop_macos_release_4.6.0.zip"
+DOORSTOP_SHA256 = "8282e8ec37abc81bbf736d12c315fdb78b0418654fb57be9e40858649953ccb7"
 GC_MARKER = "# PalaceMod: garbage collector tuning"
 GC_BLOCK = f"""{GC_MARKER}. Boehm reads these at startup; override any of them in the environment.
 # A lower free-space divisor collects less often, and a larger initial heap avoids mid-level expansions.
@@ -220,10 +224,8 @@ def patch_loader(game):
     if not script.is_file():
         raise RuntimeError(f"Missing {script}; install BepInEx 5 for macOS into the game first.")
     text = script.read_text()
-    archs = subprocess.run(["lipo", "-archs", str(game / "libdoorstop.dylib")],
-                           capture_output=True, text=True).stdout.split()
     blocks = [(GC_MARKER, GC_BLOCK, "tune the garbage collector")]
-    if "arm64" not in archs:
+    if not is_native(game):
         blocks.append((ROSETTA_MARKER, ROSETTA_BLOCK, "run under Rosetta"))
     missing = [(block, label) for marker, block, label in blocks if marker not in text]
     if not missing:
@@ -236,6 +238,65 @@ def patch_loader(game):
         rest = block + rest
     script.write_text(f"{first}\n{rest}")
     return [label for _, label in missing]
+
+
+# --- Native Apple Silicon ---------------------------------------------------
+
+def is_native(game):
+    script = game / "run_bepinex.sh"
+    return script.is_file() and BOOTSTRAP_TARGET in script.read_text()
+
+
+def universal_doorstop():
+    """Doorstop 4.6's universal libdoorstop.dylib, downloaded once and checksummed."""
+    cached = DEV_HOME / "doorstop-4.6.0/libdoorstop.dylib"
+    if cached.is_file():
+        return cached
+    import io
+    import urllib.request
+    import zipfile
+    data = urllib.request.urlopen(DOORSTOP_URL, timeout=60).read()
+    if hashlib.sha256(data).hexdigest() != DOORSTOP_SHA256:
+        raise RuntimeError(f"Checksum mismatch for {DOORSTOP_URL}")
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        cached.write_bytes(archive.read("universal/libdoorstop.dylib"))
+    return cached
+
+
+def set_native(game, enabled):
+    """Switch the loader between native arm64 (PalaceMod.Bootstrap) and Rosetta (stock BepInEx entrypoint)."""
+    require_stopped()
+    script = game / "run_bepinex.sh"
+    text = script.read_text()
+    BACKUPS.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(script, BACKUPS / f"run_bepinex.sh.orig-{stamp()}")
+    if enabled:
+        dylib = game / "libdoorstop.dylib"
+        if "arm64" not in subprocess.run(["lipo", "-archs", str(dylib)], capture_output=True, text=True).stdout.split():
+            shutil.copy2(dylib, BACKUPS / f"libdoorstop.dylib.orig-{stamp()}")
+            # The universal build still loads under Rosetta, so `native off` doesn't need to restore it.
+            temp = dylib.with_suffix(".new")
+            shutil.copy2(universal_doorstop(), temp)
+            os.replace(temp, dylib)
+        run("dotnet", "build", "src/PalaceMod.Bootstrap/PalaceMod.Bootstrap.csproj", "-c", "Release",
+            "-nologo", "-clp:NoSummary")
+        shutil.copy2(ROOT / "src/PalaceMod.Bootstrap/bin/Release/netstandard2.0/PalaceMod.Bootstrap.dll",
+                     game / "BepInEx/core/PalaceMod.Bootstrap.dll")
+        if PRELOADER_TARGET not in text and BOOTSTRAP_TARGET not in text:
+            raise RuntimeError(f"Couldn't find {PRELOADER_TARGET} in {script}")
+        text = text.replace(PRELOADER_TARGET, BOOTSTRAP_TARGET)
+        start = text.find(ROSETTA_MARKER)
+        if start != -1:
+            end = text.index("fi\n", start) + 3
+            text = text[:start] + text[end:]
+        script.write_text(text)
+        patch_loader(game)
+        print("Loader set to native arm64. Check BepInEx/PalaceMod.Bootstrap.log after launching.")
+    else:
+        script.write_text(text.replace(BOOTSTRAP_TARGET, PRELOADER_TARGET))
+        patch_loader(game)
+        print("Loader set to Rosetta.")
 
 
 def setup(game):
@@ -310,13 +371,14 @@ def launch(game, timeout, fullscreen):
     out = ROOT / ".local/launch.log"
     out.parent.mkdir(exist_ok=True)
     with out.open("w") as handle:
-        # Doorstop's dylib is x86_64-only, so the game must run under Rosetta.
-        command = ["/usr/bin/arch", "-x86_64", "/bin/sh", str(game / "run_bepinex.sh")]
+        # run_bepinex.sh re-execs itself under Rosetta unless the loader is native.
+        command = ["/bin/sh", str(game / "run_bepinex.sh")]
         env = {**os.environ, "PALACEMOD_DEV": "1"}
         subprocess.Popen(command, cwd=game, stdout=handle, stderr=subprocess.STDOUT,
                          stdin=subprocess.DEVNULL, start_new_session=True, env=env)
     claim_game()
-    print(f"Launching Thronefall under Rosetta ({'fullscreen' if fullscreen else 'windowed'})...", flush=True)
+    arch = "natively" if is_native(game) else "under Rosetta"
+    print(f"Launching Thronefall {arch} ({'fullscreen' if fullscreen else 'windowed'})...", flush=True)
     deadline = started + timeout
     while time.time() < deadline:
         time.sleep(1)
@@ -465,7 +527,10 @@ def doctor(game, configuration):
     check("Rosetta available", rosetta, "softwareupdate --install-rosetta" if not rosetta else "")
     script = game / "run_bepinex.sh"
     patched = script.is_file() and ROSETTA_MARKER in script.read_text()
-    check("run_bepinex.sh runs under Rosetta", patched, "" if patched else "run `setup` to patch")
+    if is_native(game):
+        check("Loader", True, "native arm64 (PalaceMod.Bootstrap)")
+    else:
+        check("run_bepinex.sh runs under Rosetta", patched, "" if patched else "run `setup` to patch")
     tuned = script.is_file() and GC_MARKER in script.read_text()
     check("run_bepinex.sh tunes the GC", tuned, "" if tuned else "run `setup` to patch")
     localconfigs = list((Path.home() / "Library/Application Support/Steam/userdata").glob("*/config/localconfig.vdf"))
@@ -485,7 +550,8 @@ def doctor(game, configuration):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["setup", "build", "install", "run", "launch", "stop", "logs",
-                                            "screenshot", "backup-saves", "watch", "decompile", "doctor"])
+                                            "screenshot", "backup-saves", "watch", "decompile", "doctor", "native"])
+    parser.add_argument("mode", nargs="?", choices=["on", "off"], help="Native: run natively on arm64 or under Rosetta")
     parser.add_argument("--game", help="Game directory or Thronefall.app; otherwise saved config or THRONEFALL_DIR")
     parser.add_argument("--configuration", default="Debug", choices=["Debug", "Release"])
     parser.add_argument("--type", dest="type_name", help="Decompile a single type instead of the whole assembly")
@@ -528,6 +594,11 @@ def main():
         decompile(game, args.type_name)
     elif args.command == "doctor":
         doctor(game, args.configuration)
+    elif args.command == "native":
+        if args.mode is None:
+            print("native" if is_native(game) else "rosetta")
+        else:
+            set_native(game, args.mode == "on")
 
 
 if __name__ == "__main__":
