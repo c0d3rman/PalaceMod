@@ -4,7 +4,7 @@
   "id": "palacemod.sample",
   "name": "Sample: Goblin Night",
   "author": "PalaceMod",
-  "description": "A small example pack: two custom enemies and a three-night wave set on Nordfels.",
+  "description": "A small example pack: two custom enemies, a royal guard for your Barracks and a three-night wave set on Nordfels.",
   "units": [
     {
       "id": "goblin-runner",
@@ -31,6 +31,16 @@
       },
       "tags": { "add": ["ArmoredAgainstRanged"] },
       "behaviours": [ { "type": "SpawnOnDeath", "unit": "goblin-runner" } ]
+    },
+    {
+      "id": "royal-guard",
+      "side": "player",
+      "base": "vanilla:P Knight",
+      "name": "Royal Guard",
+      "description": "Gilded knights from the king's own household: twice as tough and quicker with the blade.",
+      "visuals": { "tint": "#f2c14e", "scale": 1.25 },
+      "stats": { "maxHp": 220, "attackCooldown": 0.7 },
+      "weapon": { "damageMult": 1.5 }
     }
   ],
   "waveSets": [
@@ -39,6 +49,7 @@
       "name": "Goblin Night",
       "host": "Nordfels",
       "startingGold": 20,
+      "troops": [ { "unit": "royal-guard", "building": "Barracks" } ],
       "nights": [
         {
           "spawns": [

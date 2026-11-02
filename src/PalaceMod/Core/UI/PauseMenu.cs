@@ -143,7 +143,7 @@ namespace PalaceMod
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogError($"Pause menu: couldn't update the mod buttons: {e}");
+                Log.For<PauseMenuManager>().Error($"Couldn't update the mod buttons", e);
             }
         }
 
@@ -167,7 +167,7 @@ namespace PalaceMod
                 try { visible = b.Visible?.Invoke() ?? true; }
                 catch (Exception e)
                 {
-                    Plugin.Logger.LogError($"Pause menu: visibility check for \"{b.Id}\" failed: {e}");
+                    Log.For<PauseMenuManager>().Caught($"Visibility check for \"{b.Id}\" failed", e);
                     visible = false;
                 }
                 if (visible) shown.Add(b);
@@ -187,7 +187,7 @@ namespace PalaceMod
                     catch (Exception e)
                     {
                         failed.Add(b.Id);
-                        Plugin.Logger.LogError($"Pause menu: couldn't add \"{b.Id}\": {e}");
+                        Log.For<PauseMenuManager>().Error($"Couldn't add \"{b.Id}\"", e);
                         continue;
                     }
                 }

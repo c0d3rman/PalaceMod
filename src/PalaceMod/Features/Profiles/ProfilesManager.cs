@@ -38,18 +38,18 @@ namespace PalaceMod.Profiles
             base.Awake(plugin);
             string live = Application.persistentDataPath;
             string root = Path.Combine(Path.GetDirectoryName(live), Path.GetFileName(live) + " PalaceMod Profiles");
-            Store = new ProfileStore(live, root, new PlayerPrefsAdapter(), msg => Plugin.Logger.LogInfo(msg));
+            Store = new ProfileStore(live, root, new PlayerPrefsAdapter(), msg => Log.Info(msg.StartsWith("Profiles: ") ? msg.Substring("Profiles: ".Length) : msg));
             try
             {
                 // Before the game reads its save, so an interrupted switch is resolved before anything loads it.
                 recoveryMessage = Store.RecoverIfNeeded();
                 reloadPending = recoveryMessage != null;
-                if (Store.Initialized) Plugin.Logger.LogInfo($"Profiles: \"{Store.Active.name}\" is active ({Store.Profiles.Count} profiles)");
+                if (Store.Initialized) Log.Info($"\"{Store.Active.name}\" is active ({Store.Profiles.Count} profiles)");
             }
             catch (Exception e)
             {
                 Broken = e.Message;
-                Plugin.Logger.LogError($"Profiles: unavailable, the save folder was left alone: {e}");
+                Log.Error($"Unavailable, the save folder was left alone", e);
             }
             menu = new ProfilesMenu(this);
             RegisterDevCommands();
@@ -111,7 +111,7 @@ namespace PalaceMod.Profiles
             try { change(); }
             catch (ProfileStore.OperationFailedException e)
             {
-                Plugin.Logger.LogError($"Profiles: {e.Message}\n{e.InnerException}");
+                Log.Error(e.Message, e.InnerException);
                 if (Store.Pending) Broken = e.Message;
                 ReloadGameState();
                 throw new InvalidOperationException(e.Message);
@@ -175,7 +175,7 @@ namespace PalaceMod.Profiles
             AccessTools.Field(typeof(EternalTrialsRunManager), "lastDiscardedRun").SetValue(null, null);
             AccessTools.Field(typeof(EternalTrialsRunManager), "freshRunSeed").SetValue(null, 0);
             AccessTools.Method(typeof(SaveLoadManager), "LoadGame").Invoke(SaveLoadManager.instance, [false]);
-            Plugin.Logger.LogInfo($"Profiles: loaded \"{Store.Active.name}\": perk level {PerkManager.instance?.level}, {levels.SceneNameToLevelData.Count} levels with progress");
+            Log.Info($"Loaded \"{Store.Active.name}\": perk level {PerkManager.instance?.level}, {levels.SceneNameToLevelData.Count} levels with progress");
             menu.Close();
             SceneTransitionManager.instance.TransitionToMainMenu();
         }

@@ -57,7 +57,7 @@ namespace PalaceMod.Builder.Sharing
                     Notify.Show($"Copied the code for {name} ({code.Length:N0} characters: long for chat; a .tfpack file may be easier)", NotifyKind.Success, 5f, "builder-share");
                 else
                     Notify.Show($"Copied the share code for {name} ({code.Length:N0} characters)", NotifyKind.Success, 4f, "builder-share");
-                Plugin.Logger.LogInfo($"Builder sharing: copied code for {pack.Id} ({code.Length} chars)");
+                Log.For<BuilderManager>().Info($"Copied code for {pack.Id} ({code.Length} chars)");
                 return code;
             }
             catch (Exception e) when (e is InvalidOperationException || e is ArgumentException || e is NotSupportedException)
@@ -213,7 +213,7 @@ namespace PalaceMod.Builder.Sharing
             {
                 string path = thunderstore ? BuilderServices.Archives.ExportThunderstore(entry) : BuilderServices.Archives.Export(entry);
                 Notify.Show($"Saved {Path.GetFileName(path)} to the exports folder", NotifyKind.Success, 4f, "builder-share");
-                Plugin.Logger.LogInfo($"Builder sharing: exported {entry.Id} to {path}");
+                Log.For<BuilderManager>().Info($"Exported {entry.Id} to {path}");
             }
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException || e is InvalidOperationException || e is ArgumentException)
             {
@@ -240,7 +240,7 @@ namespace PalaceMod.Builder.Sharing
         /// <summary>One notice for an import or export result; details go to the log.</summary>
         private static void Report(PackEntry entry, List<ValidationIssue> issues, string failure)
         {
-            foreach (var i in issues) Plugin.Logger.LogInfo($"Builder sharing: {i}");
+            foreach (var i in issues) Log.For<BuilderManager>().Info($"{i}");
             if (entry == null)
             {
                 string why = issues.FirstOrDefault(i => i.Severity == Severity.Error)?.Message ?? "unknown error";
@@ -248,7 +248,7 @@ namespace PalaceMod.Builder.Sharing
                 return;
             }
             string name = entry.Pack?.Name ?? entry.Id;
-            Plugin.Logger.LogInfo($"Builder sharing: installed {entry.Id} at {entry.Folder}");
+            Log.For<BuilderManager>().Info($"Installed {entry.Id} at {entry.Folder}");
             if (entry.HasErrors)
                 Notify.Show($"Imported {name}, but it has problems to fix in the Builder before it can be played", NotifyKind.Warning, 6f, "builder-share");
             else

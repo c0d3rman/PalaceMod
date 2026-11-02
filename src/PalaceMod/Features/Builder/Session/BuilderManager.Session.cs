@@ -51,7 +51,7 @@ namespace PalaceMod
             private static bool Prefix()
             {
                 if (!InSession) return true;
-                Plugin.Logger.LogInfo("Builder: skipped writing the save file during a custom run");
+                Log.For<BuilderManager>().Debug("Skipped writing the save file during a custom run");
                 return false;
             }
         }
@@ -136,7 +136,7 @@ namespace PalaceMod
             {
                 if (!InSession || LocalGamestate.SelectedGameMode != LocalGamestate.GameMode.Classic) return;
                 try { Launcher.RecordResult(__instance.TotalScoreFromLastMatch); }
-                catch (Exception e) { Plugin.Logger.LogError($"Builder: couldn't record the result: {e}"); }
+                catch (Exception e) { Log.For<BuilderManager>().Error($"Couldn't record the result", e); }
             }
         }
 
@@ -201,7 +201,7 @@ namespace PalaceMod
             {
                 if (Launcher == null) return;
                 try { SessionMenu.OnPreLevelShow(__instance); }
-                catch (Exception e) { Plugin.Logger.LogError($"Builder: pre-level menu: {e}"); }
+                catch (Exception e) { Log.For<BuilderManager>().Error($"Pre-level menu", e); }
             }
         }
 

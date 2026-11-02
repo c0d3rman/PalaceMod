@@ -11,6 +11,7 @@ namespace PalaceMod
     public static class Notify
     {
         public const float DefaultSeconds = 3f;
+        private static readonly Log log = Log.For("Notify");
 
         /// <param name="text">The message.</param>
         /// <param name="kind">What the message is about.</param>
@@ -21,7 +22,7 @@ namespace PalaceMod
         {
             // Logged as info whatever the kind: a message for the player isn't a mod error, so it shouldn't show up in
             // `dev.py logs --errors`. Log real errors yourself.
-            Plugin.Logger?.LogInfo($"Notify ({kind}): {text}");
+            log.Info($"({kind}) {text}");
             Feature<NotificationManager>.Instance?.ShowNotification(text, kind, seconds > 0 ? seconds : DefaultSeconds, key);
         }
     }

@@ -103,7 +103,7 @@ namespace PalaceMod.Builder
             {
                 // Keep the unreadable file for the player and start a new one beside it.
                 string aside = path + ".bad-" + DateTime.Now.ToString("yyyyMMdd-HHmmss");
-                Plugin.Logger.LogWarning($"Builder: couldn't read {path} ({e.Message}); moved it to {aside}");
+                Log.For<BuilderManager>().Warn($"Couldn't read {path} ({e.Message}); moved it to {aside}");
                 try { File.Move(path, aside); } catch { /* left in place; overwritten on next save */ }
                 data = new FileShape();
             }
@@ -123,7 +123,7 @@ namespace PalaceMod.Builder
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogError($"Builder: couldn't write {path}: {e}");
+                Log.For<BuilderManager>().Error($"Couldn't write {path}", e);
             }
         }
     }

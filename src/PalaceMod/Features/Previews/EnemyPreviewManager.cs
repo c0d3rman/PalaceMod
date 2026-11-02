@@ -302,7 +302,7 @@ namespace PalaceMod
             var column = pause.enemyPreview.transform.parent as RectTransform;
             var unitsLabel = column.Find("Units") as RectTransform;
             var headerSource = unitsLabel != null ? unitsLabel.GetComponent<TextMeshProUGUI>() : null;
-            if (headerSource == null) { Plugin.Logger.LogWarning("Enemy previews: pause menu layout changed, \"Units\" label not found"); return; }
+            if (headerSource == null) { Log.Warn("Pause menu layout changed, \"Units\" label not found"); return; }
 
             container = new GameObject(ContainerName, typeof(RectTransform));
             container.SetActive(false); // so the cloned header's Localize doesn't run before it's removed

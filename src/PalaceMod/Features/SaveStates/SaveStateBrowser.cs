@@ -279,7 +279,7 @@ namespace PalaceMod
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogWarning($"Savestates: thumbnail {path} unreadable: {e.Message}");
+                Log.For<SaveStatesManager>().Warn($"Thumbnail {path} unreadable: {e.Message}");
                 return null;
             }
         }
