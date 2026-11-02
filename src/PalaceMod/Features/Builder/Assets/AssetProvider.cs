@@ -296,7 +296,7 @@ namespace PalaceMod.Builder.Assets
                 why = "download failed: " + failedDownloads[sha];
                 return false;
             }
-            var request = UnityWebRequest.Get(uri);
+            var request = new UnityWebRequest(uri, UnityWebRequest.kHttpVerbGET, new BoundedDownloadHandler(AssetLimits.MaxDownloadBytes), null);
             request.timeout = 30;
             request.redirectLimit = 4;
             request.SendWebRequest();
@@ -315,7 +315,7 @@ namespace PalaceMod.Builder.Assets
                 var req = d.Request;
                 if (!req.isDone)
                 {
-                    if (req.downloadedBytes > (ulong)AssetLimits.MaxDownloadBytes) req.Abort();
+                    if (((BoundedDownloadHandler)req.downloadHandler).TooBig) req.Abort();
                     continue;
                 }
                 downloads.Remove(d.Sha256);
@@ -376,11 +376,11 @@ namespace PalaceMod.Builder.Assets
             var req = d.Request;
             if (req.result != UnityWebRequest.Result.Success)
             {
-                bool tooBig = req.downloadedBytes > (ulong)AssetLimits.MaxDownloadBytes;
+                bool tooBig = ((BoundedDownloadHandler)req.downloadHandler).TooBig;
                 Fail(d, tooBig ? $"file is larger than {AssetLimits.Mb(AssetLimits.MaxDownloadBytes)}" : req.error, retry: !tooBig);
                 return;
             }
-            var data = req.downloadHandler.data;
+            var data = ((BoundedDownloadHandler)req.downloadHandler).Bytes;
             if (data == null || data.Length == 0) { Fail(d, "empty response", retry: true); return; }
             if (data.Length > AssetLimits.MaxDownloadBytes) { Fail(d, $"file is larger than {AssetLimits.Mb(AssetLimits.MaxDownloadBytes)}"); return; }
             string actual;
@@ -452,6 +452,36 @@ namespace PalaceMod.Builder.Assets
         private void WarnOnce(string key, string message)
         {
             if (warned.Add(key)) Plugin.Logger.LogWarning("Builder assets: " + message);
+        }
+    }
+
+    /// <summary>
+    /// Collects a download into memory up to a limit. Unlike DownloadHandlerBuffer, it never preallocates from the
+    /// server's Content-Length and stops receiving (aborting the request) as soon as the limit is passed.
+    /// (The overrides are public because the reference assemblies say so; the game declares them protected, and the
+    /// runtime allows an override to widen access.)
+    /// </summary>
+    internal sealed class BoundedDownloadHandler : DownloadHandlerScript
+    {
+        private readonly long limit;
+        private readonly MemoryStream stream = new();
+        public bool TooBig { get; private set; }
+
+        public BoundedDownloadHandler(long limit) : base(new byte[64 * 1024]) { this.limit = limit; }
+
+        public byte[] Bytes => stream.ToArray();
+
+        public override void ReceiveContentLengthHeader(ulong contentLength)
+        {
+            if (contentLength > (ulong)limit) TooBig = true;
+        }
+
+        public override bool ReceiveData(byte[] data, int dataLength)
+        {
+            if (TooBig || data == null) return !TooBig;
+            if (stream.Length + dataLength > limit) { TooBig = true; return false; }
+            stream.Write(data, 0, dataLength);
+            return true;
         }
     }
 }

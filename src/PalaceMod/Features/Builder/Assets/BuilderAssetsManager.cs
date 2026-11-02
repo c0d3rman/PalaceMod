@@ -34,12 +34,15 @@ namespace PalaceMod
             Provider.AssetsArrived += () =>
             {
                 // A download or decode finished: rebuild templates on next use so they pick it up.
-                if (!BuilderServices.InSession) BuilderServices.Units.Clear();
+                // During a session templates are in use, so the rebuild waits until it ends.
+                if (BuilderServices.InSession) templatesStale = true;
+                else BuilderServices.Units.Clear();
             };
             RegisterDevCommands();
         }
 
         private BuilderSessionInfo lastSession;
+        private static bool templatesStale;
 
         public override void Update()
         {
@@ -49,6 +52,7 @@ namespace PalaceMod
             {
                 lastSession = session;
                 if (session != null) Provider.Prefetch(BuilderServices.Packs.Find(session.Pack?.Id));
+                else if (templatesStale) { templatesStale = false; BuilderServices.Units.Clear(); }
             }
             Provider.Update();
         }
@@ -121,6 +125,7 @@ namespace PalaceMod
             if (args.Length < 3) throw new ArgumentException("usage: builder-assets show <pack> <unit> [<unit>...]");
             var player = PlayerMovement.instance ?? throw new InvalidOperationException("no player (load a level)");
             var entry = BuilderServices.Packs.Find(args[1]) ?? throw new ArgumentException($"no pack \"{args[1]}\"");
+            GameplayImpact.Mark("Builder: preview spawn");
             var origin = player.transform.position + player.transform.forward * 6f;
             var right = Vector3.Cross(Vector3.up, player.transform.forward).normalized;
             var spawned = new List<string>();

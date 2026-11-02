@@ -58,8 +58,11 @@ namespace PalaceMod.Builder.Assets
         public static AssetKind DetectFile(string path)
         {
             using var f = File.OpenRead(path);
-            var head = new byte[512];
-            int n = f.Read(head, 0, head.Length);
+            // Binary formats are known by their first bytes; OBJ may open with long comment headers, so read enough
+            // text to get past them.
+            var head = new byte[64 * 1024];
+            int n = 0, read;
+            while (n < head.Length && (read = f.Read(head, n, head.Length - n)) > 0) n += read;
             return Detect(head, n);
         }
 
@@ -97,7 +100,8 @@ namespace PalaceMod.Builder.Assets
                 string kw = line.Split(' ', '\t')[0];
                 return kw is "v" or "vt" or "vn" or "f" or "o" or "g" or "s" or "mtllib" or "usemtl" or "l" or "p";
             }
-            return false;
+            // Only comments so far (a long header): plain text, so let the OBJ parser decide.
+            return true;
         }
     }
 
@@ -216,14 +220,20 @@ namespace PalaceMod.Builder.Assets
             int channels = head[packet + 11];
             int rate = BitConverter.ToInt32(head, packet + 12);
             if (channels < 1 || channels > 8 || rate < 8000 || rate > 192000) throw new AssetException("OGG has an unsupported channel count or sample rate");
-            CheckPages(head, length);
+            long samples = CheckPages(head, length);
+            // The decoder expands everything into memory, so the length limit must hold before decoding: a long,
+            // quiet file is tiny on disk but huge as PCM.
+            if (samples / (double)rate > AssetLimits.MaxAudioSeconds) throw new AssetException($"sound is longer than {AssetLimits.MaxAudioSeconds:0} s");
         }
 
         /// <summary>Walks every Ogg page and verifies its CRC, so a truncated or damaged file is refused here rather
-        /// than by Unity's decoder (which logs an FMOD error).</summary>
-        private static void CheckPages(byte[] b, int length)
+        /// than by Unity's decoder (which logs an FMOD error). Returns the stream's length in samples (the largest
+        /// granule position).</summary>
+        private static long CheckPages(byte[] b, int length)
         {
             int pos = 0, pages = 0;
+            long samples = 0;
+            uint serial = length >= 18 ? BitConverter.ToUInt32(b, 14) : 0;
             while (pos < length)
             {
                 if (pos + 27 > length || b[pos] != 'O' || b[pos + 1] != 'g' || b[pos + 2] != 'g' || b[pos + 3] != 'S' || b[pos + 4] != 0)
@@ -242,10 +252,14 @@ namespace PalaceMod.Builder.Assets
                     crc = (crc << 8) ^ CrcTable[((crc >> 24) & 0xFF) ^ x];
                 }
                 if (crc != stored) throw new AssetException("OGG is damaged (checksum mismatch)");
+                if (BitConverter.ToUInt32(b, pos + 14) != serial) throw new AssetException("OGG has several streams; export a single sound");
+                long granule = BitConverter.ToInt64(b, pos + 6);
+                if (granule > samples) samples = granule; // -1 (no packet ends here) is skipped
                 pos += size;
                 pages++;
             }
             if (pages < 3) throw new AssetException("OGG is truncated");
+            return samples;
         }
 
         private static readonly uint[] CrcTable = MakeCrcTable();
@@ -344,13 +358,7 @@ namespace PalaceMod.Builder.Assets
                             }
                             face.Add(v);
                         }
-                        // Fan triangulation with flipped winding (handedness change).
-                        for (int i = 1; i + 1 < face.Count; i++)
-                        {
-                            triangles.Add(face[0]);
-                            triangles.Add(face[i + 1]);
-                            triangles.Add(face[i]);
-                        }
+                        Triangulate(face, outPos, triangles);
                         if (triangles.Count / 3 > AssetLimits.MaxMeshTriangles)
                             throw new AssetException($"mesh has more than {AssetLimits.MaxMeshTriangles} triangles");
                         break;
@@ -358,6 +366,66 @@ namespace PalaceMod.Builder.Assets
             }
             if (triangles.Count == 0) throw new AssetException("OBJ has no faces");
             return MeshBuilder.Build(name, outPos, anyUv ? outUv : null, anyNormal ? outNormal : null, outColor, triangles);
+        }
+
+        /// <summary>
+        /// Splits a polygon into triangles, emitted with flipped winding (the handedness change). Triangles and convex
+        /// polygons are fanned; concave ones are ear-clipped in their own plane, so a U-shaped face keeps its notch.
+        /// A self-intersecting polygon that can't be clipped falls back to a fan for what remains.
+        /// </summary>
+        private static void Triangulate(List<int> face, List<Vector3> pos, List<int> triangles)
+        {
+            void Emit(int a, int b, int c) { triangles.Add(a); triangles.Add(c); triangles.Add(b); }
+            int n = face.Count;
+            if (n == 3) { Emit(face[0], face[1], face[2]); return; }
+
+            // Newell normal, then a 2D basis in the polygon's plane in which the polygon winds counter-clockwise.
+            var normal = Vector3.zero;
+            for (int i = 0; i < n; i++)
+            {
+                Vector3 a = pos[face[i]], b = pos[face[(i + 1) % n]];
+                normal += new Vector3((a.y - b.y) * (a.z + b.z), (a.z - b.z) * (a.x + b.x), (a.x - b.x) * (a.y + b.y));
+            }
+            if (normal.sqrMagnitude < 1e-20f) { for (int i = 1; i + 1 < n; i++) Emit(face[0], face[i], face[i + 1]); return; }
+            normal.Normalize();
+            var u = Vector3.Cross(normal, Mathf.Abs(normal.x) < 0.9f ? Vector3.right : Vector3.up).normalized;
+            var w = Vector3.Cross(normal, u);
+            var p = new Vector2[n];
+            for (int i = 0; i < n; i++) p[i] = new Vector2(Vector3.Dot(pos[face[i]], w), Vector3.Dot(pos[face[i]], u));
+            static float Cross(Vector2 o, Vector2 a, Vector2 b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+            float area = 0;
+            for (int i = 0; i < n; i++) area += Cross(Vector2.zero, p[i], p[(i + 1) % n]);
+            int sign = area >= 0 ? 1 : -1;
+
+            bool convex = true;
+            for (int i = 0; i < n && convex; i++) convex = sign * Cross(p[i], p[(i + 1) % n], p[(i + 2) % n]) >= -1e-9f;
+            if (convex) { for (int i = 1; i + 1 < n; i++) Emit(face[0], face[i], face[i + 1]); return; }
+
+            var left = new List<int>(n);
+            for (int i = 0; i < n; i++) left.Add(i);
+            int guard = n * n;
+            while (left.Count > 3 && guard-- > 0)
+            {
+                bool clipped = false;
+                for (int k = 0; k < left.Count; k++)
+                {
+                    int ia = left[(k + left.Count - 1) % left.Count], ib = left[k], ic = left[(k + 1) % left.Count];
+                    if (sign * Cross(p[ia], p[ib], p[ic]) <= 1e-12f) continue; // reflex or flat corner
+                    bool inside = false;
+                    foreach (int j in left)
+                    {
+                        if (j == ia || j == ib || j == ic) continue;
+                        if (sign * Cross(p[ia], p[ib], p[j]) >= 0 && sign * Cross(p[ib], p[ic], p[j]) >= 0 && sign * Cross(p[ic], p[ia], p[j]) >= 0) { inside = true; break; }
+                    }
+                    if (inside) continue;
+                    Emit(face[ia], face[ib], face[ic]);
+                    left.RemoveAt(k);
+                    clipped = true;
+                    break;
+                }
+                if (!clipped) break;
+            }
+            for (int i = 1; i + 1 < left.Count; i++) Emit(face[left[0]], face[left[i]], face[left[i + 1]]);
         }
 
         private static AssetException Bad(int line, string message) => new($"OBJ line {line}: {message}");
@@ -403,11 +471,34 @@ namespace PalaceMod.Builder.Assets
 
         /// <summary>
         /// Exporters disagree on face winding. An inside-out mesh shows its back faces with inward normals, which the
-        /// game's cel shader renders black, so: if the mesh encloses negative volume, flip every triangle; then if
-        /// the file's normals mostly oppose the faces, flip them too.
+        /// game's cel shader renders black, so: if the mesh is closed and encloses negative volume, flip every
+        /// triangle; then if the file's normals mostly oppose the faces, flip them too. Open meshes (planes, cards)
+        /// keep their winding: signed volume means nothing for them.
         /// </summary>
+        /// <summary>Whether every edge (by vertex position, so UV and normal seams don't count as holes) is shared by
+        /// an even number of triangles.</summary>
+        private static bool IsClosed(List<Vector3> p, List<int> t)
+        {
+            var ids = new Dictionary<Vector3, int>();
+            int Id(int v) { if (!ids.TryGetValue(p[v], out int id)) ids[p[v]] = id = ids.Count; return id; }
+            var edges = new Dictionary<(int, int), int>();
+            for (int i = 0; i + 2 < t.Count; i += 3)
+            {
+                int a = Id(t[i]), b = Id(t[i + 1]), c = Id(t[i + 2]);
+                foreach (var (x, y) in new[] { (a, b), (b, c), (c, a) })
+                {
+                    if (x == y) continue;
+                    var key = x < y ? (x, y) : (y, x);
+                    edges[key] = edges.TryGetValue(key, out int count) ? count + 1 : 1;
+                }
+            }
+            foreach (int count in edges.Values) if ((count & 1) != 0) return false;
+            return edges.Count > 0;
+        }
+
         private static void FixOrientation(List<Vector3> p, List<Vector3> normals, List<int> t)
         {
+            if (!IsClosed(p, t)) return;
             double volume = 0, agree = 0;
             for (int i = 0; i + 2 < t.Count; i += 3)
                 volume += Vector3.Dot(p[t[i]], Vector3.Cross(p[t[i + 1]], p[t[i + 2]]));
