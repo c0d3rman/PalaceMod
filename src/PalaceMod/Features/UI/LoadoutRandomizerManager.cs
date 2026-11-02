@@ -232,12 +232,20 @@ namespace PalaceMod
                     }
                 }
 
+                // Randomize all sits just above Play: moving down from the last grid stops at it first.
                 if (ui.all != null)
                 {
-                    ui.all.rightNav = play;
+                    foreach (var e in all)
+                    {
+                        if (e == null || e == play) continue;
+                        if (e.botNav == play) e.botNav = ui.all;
+                        if (e.rightNav == play) e.rightNav = ui.all;
+                    }
                     ui.all.topNav = play.topNav;
                     ui.all.leftNav = play.leftNav;
-                    ui.all.botNav = play.botNav;
+                    ui.all.botNav = play;
+                    ui.all.rightNav = play;
+                    play.topNav = ui.all;
                     play.leftNav = ui.all;
                 }
             }
@@ -261,25 +269,38 @@ namespace PalaceMod
         [HarmonyPatch(typeof(PerkSelectionTooltipHelper))]
         private static class TooltipPatch
         {
+            // UpdateTooltip also runs on apply and would redraw the last equippable, so all three entry points re-show the dice.
             [HarmonyPatch(nameof(PerkSelectionTooltipHelper.OnSelection)), HarmonyPostfix]
-            private static void OnSelection(PerkSelectionTooltipHelper __instance) => Show(__instance, __instance.targetFrame?.CurrentSelection);
+            private static void OnSelection(PerkSelectionTooltipHelper __instance) => Show(__instance, Current(__instance.targetFrame));
 
             [HarmonyPatch(nameof(PerkSelectionTooltipHelper.OnFocus)), HarmonyPostfix]
-            private static void OnFocus(PerkSelectionTooltipHelper __instance) =>
-                Show(__instance, __instance.targetFrame?.CurrentFocus ?? __instance.targetFrame?.CurrentSelection);
+            private static void OnFocus(PerkSelectionTooltipHelper __instance) => Show(__instance, Current(__instance.targetFrame));
+
+            [HarmonyPatch(nameof(PerkSelectionTooltipHelper.UpdateTooltip)), HarmonyPostfix]
+            private static void UpdateTooltip(PerkSelectionTooltipHelper __instance) => Show(__instance, Current(__instance.targetFrame));
+
+            private static ThronefallUIElement Current(UIFrame frame)
+            {
+                if (frame == null) return null;
+                return !frame.MouseSleeping && frame.CurrentFocus != null ? frame.CurrentFocus : frame.CurrentSelection;
+            }
 
             private static void Show(PerkSelectionTooltipHelper tooltip, ThronefallUIElement element)
             {
-                if (element is not RandomizeButton button) return;
+                if (element == null) return;
                 var manager = Feature<LoadoutRandomizerManager>.Instance;
                 if (manager == null) return;
+                var button = element as RandomizeButton;
+                var ui = element.GetComponentInParent<LoadoutRandomizerUI>();
+                bool isAll = ui != null && ui.all == element;
+                if (button == null && !isAll) return;
                 if (tooltip.tooltipParent != null) tooltip.tooltipParent.SetActive(true);
-                tooltip.selectionTitle.text = button.Title;
-                tooltip.selectionDescription.text = manager.Describe(button.category, button.isAll);
+                tooltip.selectionTitle.text = isAll ? "Randomize all" : button.Title;
+                tooltip.selectionDescription.text = manager.Describe(button != null ? button.category : Category.Weapon, isAll);
                 tooltip.selectionIcon.sprite = manager.diceSprite;
-                tooltip.selectionIcon.color = Color.white;
+                tooltip.selectionIcon.color = button != null ? button.IconColor : ui.dice.Values.First().IconColor;
                 tooltip.background.enabled = true;
-                tooltip.background.color = button.TileColor;
+                tooltip.background.color = button != null ? button.TileColor : ui.dice.Values.First().TileColor;
                 if (tooltip.eliteBackground != null) tooltip.eliteBackground.enabled = false;
                 if (tooltip.enemyNumberBg != null) tooltip.enemyNumberBg.gameObject.SetActive(false);
                 if (tooltip.UnitStatsDisplay != null) tooltip.UnitStatsDisplay.gameObject.SetActive(false);
@@ -328,7 +349,12 @@ namespace PalaceMod
             if ((only == null || only == Category.Mutators) && HasMutators(helper)) changed.AddRange(RollMutators(helper));
             RefreshTexts(helper);
             var ui = helper.GetComponent<LoadoutRandomizerUI>();
-            if (ui != null) ui.PopTiles(changed);
+            if (ui != null)
+            {
+                ui.PopTiles(changed);
+                foreach (var pair in ui.dice)
+                    if (only == null || only == pair.Key) pair.Value.Tumble();
+            }
             Plugin.Logger.LogInfo($"Loadout rolled ({only?.ToString() ?? "all"}): {LoadoutText(helper)}");
         }
 
@@ -532,7 +558,8 @@ namespace PalaceMod
                 var transitions = SceneTransitionManager.instance ?? throw new InvalidOperationException("not loaded yet");
                 if (UnityEngine.SceneManagement.SceneManager.GetActiveScene().name != transitions.levelSelectScene)
                     throw new InvalidOperationException("go to level select first: `cmd levelselect`");
-                var info = LevelProgressManager.instance.GetLevelInfoFromSceneName(args[0]) ?? throw new ArgumentException($"no level \"{args[0]}\"");
+                string scene = string.Join(" ", args);
+                var info = LevelProgressManager.instance.GetLevelInfoFromSceneName(scene) ?? throw new ArgumentException($"no level \"{scene}\"");
                 if (UIFrameManager.instance.ActiveFrame != null) UIFrameManager.instance.CloseActiveFrame();
                 LevelInteractor.lastActiveLevelInfo = info;
                 if (!UIFrameManager.TryOpenLevelSelect()) throw new InvalidOperationException("couldn't open the loadout screen");
@@ -552,8 +579,9 @@ namespace PalaceMod
                     case "exclude":
                     {
                         if (args.Length < 2) throw new ArgumentException("usage: randomize exclude <item name>");
-                        var e = PerkManager.instance.allEquippables.FirstOrDefault(x => x.name.Equals(args[1], StringComparison.OrdinalIgnoreCase))
-                            ?? throw new ArgumentException($"no item \"{args[1]}\"");
+                        string item = string.Join(" ", args.Skip(1));
+                        var e = PerkManager.instance.allEquippables.FirstOrDefault(x => x.name.Equals(item, StringComparison.OrdinalIgnoreCase))
+                            ?? throw new ArgumentException($"no item \"{item}\"");
                         return $"{e.name} excluded: {ToggleExcluded(e)}";
                     }
                     case "dump": return ui.Dump();
@@ -570,7 +598,7 @@ namespace PalaceMod
         {
             public LoadoutUIHelper helper;
             public readonly Dictionary<Category, RandomizeButton> dice = new();
-            public RandomizeButton all;
+            public TFUITextButton all;
             private readonly Dictionary<Category, TextMeshProUGUI> headers = new();
             private readonly List<GameObject> badges = new();
             private LoadoutRandomizerManager manager;
@@ -589,10 +617,9 @@ namespace PalaceMod
                         var header = FindHeader(c);
                         if (header == null) continue;
                         headers[c] = header;
-                        dice[c] = RandomizeButton.Create(owner, loadout, header.transform, c, false);
+                        dice[c] = RandomizeButton.Create(owner, loadout, header.transform, c);
                     }
-                    all = RandomizeButton.Create(owner, loadout, loadout.playButton.transform.parent, Category.Weapon, true);
-                    PlaceAllButton();
+                    all = CreateAllButton();
                     helper.frame.RefetchManagedElements();
                 }
                 foreach (var pair in dice) pair.Value.gameObject.SetActive(Visible && (pair.Key != Category.Mutators || HasMutators(loadout)));
@@ -609,18 +636,33 @@ namespace PalaceMod
                 return t != null ? t.GetComponent<TextMeshProUGUI>() : null;
             }
 
-            // Puts Randomize all to the left of Play, matching its height.
-            private void PlaceAllButton()
+            private static readonly Func<TFUITextButton, TFUITextButton.Style> DefaultTextStyle = button =>
             {
-                var play = (RectTransform)helper.playButton.transform;
-                var rt = (RectTransform)all.transform;
-                rt.anchorMin = play.anchorMin;
-                rt.anchorMax = play.anchorMax;
-                rt.pivot = new Vector2(1f, play.pivot.y);
-                float h = play.rect.height;
-                rt.sizeDelta = new Vector2(h, h);
-                rt.anchoredPosition = new Vector2(play.anchoredPosition.x - play.rect.width * play.pivot.x - h * 0.3f, play.anchoredPosition.y);
-                rt.SetSiblingIndex(play.GetSiblingIndex());
+                AccessTools.Method(typeof(TFUITextButton), "InitializeDefaultStyle").Invoke(button, null);
+                return (TFUITextButton.Style)AccessTools.Field(typeof(TFUITextButton), "defaultStyle").GetValue(button);
+            };
+
+            // "Randomize all": a copy of the native Play text button (same font, colors and focus animation), just above it.
+            private TFUITextButton CreateAllButton()
+            {
+                if (helper.playButton is not TFUITextButton play) return null;
+                var go = Instantiate(play.gameObject, play.transform.parent, false);
+                go.name = "Randomize All";
+                var loc = go.GetComponent<I2.Loc.Localize>();
+                if (loc != null) DestroyImmediate(loc);
+                var button = go.GetComponent<TFUITextButton>();
+                button.onApply = new UnityEngine.Events.UnityEvent(); // drop Play's own handlers
+                button.onApply.AddListener(() => manager.Roll(helper, null));
+                var style = DefaultTextStyle(play);
+                var text = go.GetComponent<TextMeshProUGUI>();
+                text.color = style.color;
+                text.fontSize = style.fontSize;
+                text.font = style.font;
+                button.SetOriginalString("Randomize all");
+                var rt = (RectTransform)go.transform;
+                var playRect = (RectTransform)play.transform;
+                rt.anchoredPosition = playRect.anchoredPosition + new Vector2(0f, playRect.rect.height * 1.15f);
+                return button;
             }
 
             // Keeps each dice just right of its header's text, which changes length ("Perks (3/5)").
@@ -641,7 +683,7 @@ namespace PalaceMod
                 }
             }
 
-            public void Press(RandomizeButton button)
+            public void Press(ThronefallUIElement button)
             {
                 if (button == null || !button.gameObject.activeInHierarchy) throw new InvalidOperationException("that button isn't shown");
                 helper.frame.Select(button);
@@ -684,9 +726,9 @@ namespace PalaceMod
                         var rt = (RectTransform)go.transform;
                         rt.anchorMin = rt.anchorMax = new Vector2(1f, 1f);
                         rt.pivot = new Vector2(0.5f, 0.5f);
-                        float size = ((RectTransform)tile.transform).rect.width * 0.38f;
+                        float size = ((RectTransform)tile.transform).rect.width * 0.46f;
                         rt.sizeDelta = new Vector2(size, size);
-                        rt.anchoredPosition = new Vector2(-size * 0.2f, -size * 0.2f);
+                        rt.anchoredPosition = new Vector2(-size * 0.3f, -size * 0.3f);
                         var img = go.GetComponent<Image>();
                         img.sprite = badge;
                         img.raycastTarget = false;
@@ -727,7 +769,6 @@ namespace PalaceMod
         internal class RandomizeButton : ThronefallUIElement
         {
             public Category category;
-            public bool isAll;
             private LoadoutRandomizerManager manager;
             private LoadoutUIHelper helper;
             private MPImage background;
@@ -738,7 +779,7 @@ namespace PalaceMod
             private float scaleFrom = 1f, scaleTo = 1f, outlineT, outlineFrom, outlineTo, clock = 1f;
             private const float AnimTime = 0.2f;
 
-            public string Title => isAll ? "Randomize all" : category switch
+            public string Title => category switch
             {
                 Category.Weapon => "Randomize weapon",
                 Category.Perks => "Randomize perks",
@@ -746,10 +787,11 @@ namespace PalaceMod
             };
 
             public Color TileColor => background != null ? background.color : Color.gray;
+            public Color IconColor => icon != null ? icon.color : Color.white;
 
-            public static RandomizeButton Create(LoadoutRandomizerManager manager, LoadoutUIHelper helper, Transform parent, Category category, bool isAll)
+            public static RandomizeButton Create(LoadoutRandomizerManager manager, LoadoutUIHelper helper, Transform parent, Category category)
             {
-                var go = new GameObject(isAll ? "Randomize All" : $"Randomize {category}", typeof(RectTransform));
+                var go = new GameObject($"Randomize {category}", typeof(RectTransform));
                 go.transform.SetParent(parent, false);
                 go.layer = parent.gameObject.layer;
                 go.AddComponent<LayoutElement>().ignoreLayout = true;
@@ -757,12 +799,12 @@ namespace PalaceMod
                 button.manager = manager;
                 button.helper = helper;
                 button.category = category;
-                button.isAll = isAll;
 
-                // Copy the look of a loadout tile: clone its background (with its icon child) from the prefab.
+                // Copy the look of a loadout tile: clone the tile and strip its behaviours, keeping the MPImage and icon.
                 var prefab = helper.equippableButtonPrefab;
-                var bgClone = Instantiate(prefab.backgroundImg.gameObject, go.transform, false);
+                var bgClone = Instantiate(prefab.gameObject, go.transform, false);
                 bgClone.name = "Background";
+                foreach (var audio in bgClone.GetComponentsInChildren<TFUIAudioHelper>(true)) DestroyImmediate(audio);
                 foreach (var stray in bgClone.GetComponentsInChildren<ThronefallUIElement>(true)) DestroyImmediate(stray);
                 var bgRect = (RectTransform)bgClone.transform;
                 bgRect.anchorMin = Vector2.zero;
@@ -771,19 +813,17 @@ namespace PalaceMod
                 bgRect.localScale = Vector3.one;
                 button.background = bgClone.GetComponent<MPImage>();
                 button.scaled = bgClone.transform;
-
-                button.icon = bgClone.GetComponentsInChildren<Image>(true).FirstOrDefault(i => i.name == prefab.iconImg.name && i.gameObject != bgClone);
-                if (button.icon == null)
-                {
-                    var iconGo = Instantiate(prefab.iconImg.gameObject, bgClone.transform, false);
-                    button.icon = iconGo.GetComponent<Image>();
-                }
+                button.icon = bgClone.GetComponentsInChildren<Image>(true).First(i => i.gameObject != bgClone);
+                var iconRect = button.icon.rectTransform;
+                iconRect.anchorMin = new Vector2(0.2f, 0.2f);
+                iconRect.anchorMax = new Vector2(0.8f, 0.8f);
+                iconRect.offsetMin = iconRect.offsetMax = Vector2.zero;
                 button.icon.sprite = manager.diceSprite;
                 button.icon.preserveAspect = true;
                 button.icon.color = prefab.iconImg.color;
                 button.iconHome = button.icon.transform.localPosition;
 
-                button.background.color = isAll ? Color.Lerp(WeaponBgRef(prefab), PerkBgRef(prefab), 0.5f) : category switch
+                button.background.color = category switch
                 {
                     Category.Weapon => WeaponBgRef(prefab),
                     Category.Perks => PerkBgRef(prefab),
@@ -823,9 +863,11 @@ namespace PalaceMod
                 background.OutlineColor = Color.Lerp(outlineDefault, outlineFocus, outlineT);
             }
 
-            protected override void OnApply()
+            protected override void OnApply() => manager.Roll(helper, category);
+
+            public void Tumble()
             {
-                manager.Roll(helper, isAll ? null : category);
+                if (!isActiveAndEnabled) return;
                 StopCoroutine(nameof(RollAnimation));
                 StartCoroutine(nameof(RollAnimation));
             }
