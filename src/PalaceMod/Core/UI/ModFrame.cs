@@ -196,6 +196,8 @@ namespace PalaceMod
                 tabMarker.anchorMin = tabMarker.anchorMax = new Vector2(0f, 0.5f);
                 tabMarker.pivot = new Vector2(0.5f, 1f);
                 top -= 70f;
+                // Layout only runs on active objects, so place the marker again once the frame is showing.
+                frame.onActivate.AddListener(UpdateTabMarker);
                 frame.onNewSelection.AddListener(() =>
                 {
                     int selected = tabButtons.IndexOf(frame.CurrentSelection as TFUITextButton);
