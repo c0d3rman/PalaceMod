@@ -55,8 +55,7 @@ namespace PalaceMod.Builder.Editor
         {
             unitPage ??= new UnitPage();
             unitPage.Index = index;
-            unitPage.Frame.Open();
-            unitPage.Frame.Refresh();
+            Show(unitPage);
         }
 
         internal static void OpenWaveSet(int index)
@@ -64,8 +63,14 @@ namespace PalaceMod.Builder.Editor
             wavePage ??= new WavePage();
             if (wavePage.Index != index) wavePage.ResetSelection();
             wavePage.Index = index;
-            wavePage.Frame.Open();
-            wavePage.Frame.Refresh();
+            Show(wavePage);
+        }
+
+        // Opens a page, or rebuilds it if it's already the open one (it may now show another unit or wave set).
+        private static void Show(EditorPage page)
+        {
+            if (page.Frame.IsOpen) page.Frame.Refresh();
+            else page.Frame.Open();
         }
 
         private static bool CheckAvailable()
@@ -308,8 +313,7 @@ namespace PalaceMod.Builder.Editor
                 int ws = int.Parse(wave.Groups[1].Value);
                 wavePage.Index = ws;
                 wavePage.Expand(wave.Groups[2].Success ? int.Parse(wave.Groups[2].Value) : -1, wave.Groups[3].Success ? int.Parse(wave.Groups[3].Value) : -1);
-                wavePage.Frame.Open();
-                wavePage.Frame.Refresh();
+                Show(wavePage);
                 wavePage.SelectPath(path);
                 return;
             }

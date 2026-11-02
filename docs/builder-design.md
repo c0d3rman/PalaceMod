@@ -67,7 +67,7 @@ Evidence comes from the decompiled `Assembly-CSharp`, `AstarPathfindingProject.d
 | WP1 Data model and loader | **Landed.** `Model/`, `Contracts/`, `PackRepository`, `EditHistory`. |
 | WP2 Catalog and runtime | **Landed.** `Runtime/`, `builder` dev command, sample pack, interim `SessionLauncher`. |
 | WP3 Session and level select | Open. Interim launcher and isolation patches are in `Session/` (see below). |
-| WP4a Editor UI | Open. |
+| WP4a Editor UI | **Stage 1 built** (feat/builder-editor): `Editor/`, see "Editor (WP4a, as built)". Stage 2 is planned below. |
 | WP4b / WP4c Level overlay, placement editor | Stage 2. Data shape fixed (`LevelDef`), stub `ILevelOverlay`. |
 | WP5 Asset import | Open. Stub `IAssetProvider` returns null. |
 | WP6 Sharing | Open. Stub `IShareCodec` refuses. |
@@ -319,6 +319,39 @@ Shared data types (also in `Contracts.cs`): `PackEntry {Pack, Folder, Source, Re
 - Keep codes under about 2,000 characters for typical packs. Measure with the sample pack.
 
 **Not stubbed:** nothing else is needed. `PackSerializer.WriteCompact`, `Read` and `InstallNew` exist.
+
+### Editor (WP4a, as built)
+
+Open it from **Builder** in the title menu or the in-match pause menu, from WP3's custom-runs menu ("Create your own", "Edit"), or with `builder-ui open`. Files in `Features/Builder/Editor/`:
+
+| File | Does |
+|---|---|
+| `BuilderEditorManager.cs` | menu entries, undo/redo keys (Cmd+Z, Cmd+Shift+Z, Ctrl+Z/Ctrl+Y), first-use hint, `builder-ui` dev command, links WP3's `SessionMenu` hooks by reflection |
+| `BuilderEditor.cs` | public entry points `Open()`, `OpenPack(id)`, `IsAvailable`; drafts; save, undo, test-play, share code, problem navigation |
+| `PackDraft.cs` | the working copy of one pack: `EditHistory`, dirty state, validation (`Packs.Validate` plus editor-only warnings), save / save a copy / id rename |
+| `EditorPage.cs` | base screen: fields bound to JSON paths, so issues mark the field and its tooltip; `Picker` (full-screen pick-one / toggle-many list) |
+| `PackPages.cs` | pack list; pack screen with Units, Wave Sets, Pack (details and actions) and Problems tabs |
+| `UnitPage.cs` | unit property panel: identity and base prefab, stats (generated from `StatsDef` by reflection, base values from `CatalogUnit`), weapon and damage modifier lists, tags, look (tint, size, icon), behaviours, test, duplicate, delete |
+| `WavePage.cs` | wave set timeline: map, starting gold, nights as rows with their groups as chips; applying a night or chip opens its fields underneath |
+| `EditorCatalog.cs` | never-throwing catalog lookups, and `Schema` (labels, help, ranges and steps for every numeric field) |
+
+Behaviour worth knowing:
+
+- **Drafts.** Opening a pack copies it into a `PackDraft` kept until the game quits, so closing the editor never loses work; the pack list shows "unsaved". Built-in and plugin packs are editable and saved as a new user pack (`InstallNew`). Changing a saved pack's id saves the new folder, then moves the old one to trash. A draft with no unsaved changes picks up edits made on disk.
+- **Undo.** Every change goes through `PackDraft.Edit(label, change)`, which calls `EditHistory.Record` first. Held steppers coalesce into one step per field (1.5 s window).
+- **Fields** (UI kit `Core/UI/ModFields.cs`, additive): `Stepper` (left/right, accelerating while held), `Choice`, `Toggle` and `TextInput`, all `ModPage.Row`s. Text entry blocks the game's menu input while typing (prefixes on `UIFrame.Update` and `UIFrameManager.Update`), and `Keybinds` treats it as a focused text field. A null override shows the base value dimmed ("100 (base)"); typing an empty value resets it.
+- **Validation feedback.** Issues are matched to fields by path prefix: a red (error) or amber (warning) diamond on the label, the message in the tooltip, and a Problems tab whose rows jump to the field. Editor-only warning: a group on a spawn line that doesn't allow its unit (flying on ground lines, large on small-only lines).
+- **Test play.** Wave sets: save (writable packs without errors), then `Sessions.Launch` with the draft. Units: an unsaved copy of the pack with a generated two-night wave set "editor-test" on the pack's first map (or Nordfels). The editor closes before the map loads.
+- **Share codes.** "Copy share code" and "Import share code" call `BuilderServices.Share` (WP6) and `Packs.InstallNew`; with WP6's stub they explain that codes aren't available yet.
+- **Not built:** the live 3D preview model (planned: a preview camera rendering a stripped `Instantiate` of the template into a `RawImage`; components other than renderers removed before activation so no game script runs); editing `warning` text is stored but not yet shown in play.
+
+### Stage 2 plan: level overlay editor (WP4b/WP4c)
+
+Not started. The plan, in order:
+
+1. **Data first, no 3D.** A Levels tab on the pack screen: host, wave set, and the `buildSlots.edit` list (per vanilla slot: upgrade costs, income, HP) as property panels, using `catalog.json`-style host data (slot names and their upgrade trees) that WP2's catalog would need to add (`CatalogHost.BuildSlots`). This needs `ILevelOverlay` to apply edits, but no placement UI.
+2. **Placement mode** inside the host scene (launched like a test play, with a flag that makes the session an edit session): a free camera, a palette (build slot bases, spawn lines, props from the catalog), a ghost that snaps to the navmesh (`AstarPath.active.GetNearest`), move/rotate gizmos, and the same property panel docked on the right for the selected object. Editing writes `LevelDef` through `PackDraft.Edit`, so undo and validation work unchanged.
+3. **Play from edit mode**: save, reload the host with the overlay (WP4b applies it before `Start`, then rescans).
 
 ### WP4b / WP4c (stage 2)
 
