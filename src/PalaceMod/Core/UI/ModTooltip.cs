@@ -131,7 +131,7 @@ namespace PalaceMod
             {
                 if (obj != null) Object.Destroy(obj);
                 failed = true;
-                Plugin.Logger.LogError($"ModTooltip: couldn't build the tooltip from the game's: {e}");
+                Log.Core.Error($"Couldn't build the tooltip from the game's", e);
                 return false;
             }
         }

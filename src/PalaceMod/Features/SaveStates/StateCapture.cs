@@ -347,7 +347,7 @@ namespace PalaceMod
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogWarning($"Savestates: thumbnail failed: {e.Message}");
+                Log.For<SaveStatesManager>().Warn($"Thumbnail failed: {e.Message}");
             }
             finally
             {
@@ -358,7 +358,7 @@ namespace PalaceMod
                 if (small != null) Object.Destroy(small);
             }
             try { done(png); }
-            catch (Exception e) { Plugin.Logger.LogWarning($"Savestates: writing thumbnail {path} failed: {e.Message}"); }
+            catch (Exception e) { Log.For<SaveStatesManager>().Warn($"Writing thumbnail {path} failed: {e.Message}"); }
         }
     }
 }

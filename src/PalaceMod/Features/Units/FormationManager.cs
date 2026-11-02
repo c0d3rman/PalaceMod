@@ -492,7 +492,7 @@ namespace PalaceMod
                         replaced = true;
                     }
                 }
-                if (!replaced) Plugin.Logger.LogWarning("Formations: PlayerMovement.Update has no \"Move Towards Mouse\" read; right-click placement may also walk the king");
+                if (!replaced) Log.For<FormationManager>().Warn("PlayerMovement.Update has no \"Move Towards Mouse\" read; right-click placement may also walk the king");
                 return list;
             }
         }

@@ -78,6 +78,8 @@ namespace PalaceMod.Builder
         public bool Flying, Large;
         /// <summary>Eternal Trials difficulty value (a balance hint), or 0 if unknown.</summary>
         public float Difficulty;
+        /// <summary>Player troops: names of the buildings that train it (BuildSlot.buildingName, e.g. "Archery Range").</summary>
+        public List<string> Buildings = [];
     }
 
     public sealed class CatalogWeapon
@@ -134,6 +136,12 @@ namespace PalaceMod.Builder
         GameObject Resolve(DesignPack context, string unitRef, out string error);
         /// <summary>Whether go is one of our templates (never activate or modify a template in place).</summary>
         bool IsTemplate(GameObject go);
+        /// <summary>
+        /// Applies a custom unit's overrides in place to an existing instance of its base unit that hasn't started yet
+        /// (e.g. a troop inside a building, on scene load). Weapons and materials are cloned once per unit design and
+        /// shared by every instance. Returns false and fills error if the ref isn't a custom unit or doesn't match.
+        /// </summary>
+        bool ApplyTo(GameObject instance, DesignPack context, string unitRef, out string error);
         /// <summary>Destroys all templates (they're rebuilt on demand). Call when packs change.</summary>
         void Clear();
     }

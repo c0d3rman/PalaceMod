@@ -40,7 +40,8 @@ namespace PalaceMod
             else if (LocalGamestate.SelectedGameMode != LocalGamestate.GameMode.Classic) reason = "Savestates only work in normal levels";
             else if (StateUtil.CustomSession) reason = "Savestates don't work in custom (Builder) levels";
             else if (SceneTransitionManager.instance.SceneTransitionIsRunning || LocalMatchSaveLoad.CurrentlyLoadingMatch) reason = "The level is still loading";
-            else if (LocalGamestate.Instance.CurrentState != LocalGamestate.State.InMatch) reason = "The match is over";
+            // After a defeat the level is still loaded, so a state can be loaded from the defeat screen like retry-day.
+            else if (LocalGamestate.Instance.CurrentState is not (LocalGamestate.State.InMatch or LocalGamestate.State.AfterMatchDefeat)) reason = "The match is over";
             else if (state.WaveCount != EnemySpawner.instance.WaveCount) reason = "That state doesn't match this level's waves";
             return reason == null;
         }
@@ -51,7 +52,7 @@ namespace PalaceMod
             if (backup && state.Kind != SaveStateKind.BeforeLoad && StateCapture.CanCapture(out _))
             {
                 try { SaveStates.Capture(null, SaveStateKind.BeforeLoad); }
-                catch (Exception e) { Plugin.Logger.LogWarning($"Savestates: undo state failed: {e.Message}"); }
+                catch (Exception e) { Log.For<SaveStatesManager>().Warn($"Undo state failed: {e.Message}"); }
             }
             Busy = true;
             Plugin.Instance.StartCoroutine(Run(state));
@@ -60,7 +61,7 @@ namespace PalaceMod
         private static IEnumerator Run(SaveStateInfo state)
         {
             var data = state.Data;
-            Plugin.Logger.LogInfo($"Savestates: loading {state}");
+            Log.For<SaveStatesManager>().Info($"Loading {state}");
             SaveStates.Last = state;
             GameplayImpact.Mark("Savestate loaded");
             Feature<SaveStatesManager>.Instance?.MarkPracticeRun();
@@ -107,7 +108,7 @@ namespace PalaceMod
             {
                 int expected = data.night ? data.wave - 1 : data.wave;
                 if (EnemySpawner.instance.Wavenumber != expected)
-                    Plugin.Logger.LogWarning($"Savestates: the level loaded wave {EnemySpawner.instance.Wavenumber}, expected {expected}; restoring the rest anyway");
+                    Log.For<SaveStatesManager>().Warn($"The level loaded wave {EnemySpawner.instance.Wavenumber}, expected {expected}; restoring the rest anyway");
                 deferred = Apply(data, injected);
             }
             catch (Exception e)
@@ -130,7 +131,7 @@ namespace PalaceMod
             }
             Busy = false;
             SaveStates.Last = state;
-            Plugin.Logger.LogInfo($"Savestates: loaded {state}; {Summary()}");
+            Log.For<SaveStatesManager>().Info($"Loaded {state}; {Summary()}");
             Notify.Show($"Loaded \"{state.Name}\"", NotifyKind.Success, key: "savestates");
             SaveStates.RaiseRestored(state);
         }
@@ -138,7 +139,7 @@ namespace PalaceMod
         private static void Fail(SaveStateInfo state, string what, Exception e)
         {
             Busy = false;
-            Plugin.Logger.LogError($"Savestates: loading {state} failed: {what}{(e != null ? $": {e}" : "")}");
+            Log.For<SaveStatesManager>().Error($"Loading {state} failed: {what}", e);
             Notify.Show($"Couldn't load \"{state.Name}\": {what}", NotifyKind.Error, 5f, "savestates");
         }
 
@@ -169,7 +170,7 @@ namespace PalaceMod
                 .Select(name => all.FirstOrDefault(e => e != null && e.displayName == name))
                 .Where(e => e != null).ToList();
             if (save.currentLoadout.Count != native.loadout.Count)
-                Plugin.Logger.LogWarning($"Savestates: {native.loadout.Count - save.currentLoadout.Count} perk(s) in the state no longer exist");
+                Log.For<SaveStatesManager>().Warn($"{native.loadout.Count - save.currentLoadout.Count} perk(s) in the state no longer exist");
             // The state's weapon isn't available (e.g. the minigun with its feature off): the king gets the Long Bow,
             // as the game's own save does in that case, instead of no weapon.
             if (!save.currentLoadout.OfType<EquippableWeapon>().Any())
@@ -179,7 +180,7 @@ namespace PalaceMod
                 if (bow != null)
                 {
                     save.currentLoadout.Insert(0, bow);
-                    Plugin.Logger.LogInfo($"Savestates: the state's weapon isn't available; using the {bow.displayName}");
+                    Log.For<SaveStatesManager>().Info($"The state's weapon isn't available; using the {bow.displayName}");
                 }
             }
             return save;
@@ -245,7 +246,7 @@ namespace PalaceMod
         private static void RestoreSpawner(SpawnerData saved, EnemySpawner spawner)
         {
             if (spawner.Wavenumber != saved.wavenumber)
-                Plugin.Logger.LogWarning($"Savestates: night started as wave {spawner.Wavenumber}, state has {saved.wavenumber}");
+                Log.For<SaveStatesManager>().Warn($"Night started as wave {spawner.Wavenumber}, state has {saved.wavenumber}");
             if (spawner.Wavenumber < 0 || spawner.Wavenumber >= spawner.waves.Count) return;
             var spawns = spawner.waves[spawner.Wavenumber].spawns;
             for (int i = 0; i < Math.Min(spawns.Count, saved.spawns.Count); i++)
@@ -302,7 +303,7 @@ namespace PalaceMod
                 Priv.Set(interactor, "knockedOutTonight", flag.value);
                 if (interactor.isActiveAndEnabled) interactor.UpdateInteractionState();
             }
-            if (missing > 0) Plugin.Logger.LogInfo($"Savestates: {missing} building/object HP value(s) had no match in the reloaded level");
+            if (missing > 0) Log.For<SaveStatesManager>().Debug($"{missing} building/object HP value(s) had no match in the reloaded level");
         }
 
         private static void RestoreUnits(SaveStateData data, ScenePaths paths)
@@ -335,7 +336,7 @@ namespace PalaceMod
                     }
                 }
             }
-            if (missing > 0) Plugin.Logger.LogInfo($"Savestates: {missing} unit(s) had no match in the reloaded level");
+            if (missing > 0) Log.For<SaveStatesManager>().Debug($"{missing} unit(s) had no match in the reloaded level");
         }
 
         private static void RestoreEnemies(SaveStateData data, ScenePaths paths, List<Action> deferred)
@@ -383,7 +384,7 @@ namespace PalaceMod
                 else
                 {
                     var prefab = prefabs.Find(saved.prefab);
-                    if (prefab == null) { skipped++; Plugin.Logger.LogWarning($"Savestates: no prefab for enemy \"{saved.prefab}\""); continue; }
+                    if (prefab == null) { skipped++; Log.For<SaveStatesManager>().Warn($"No prefab for enemy \"{saved.prefab}\""); continue; }
                     go = Object.Instantiate(prefab, saved.position, saved.rotation);
                     Spawn.AdjustEnemyParametersAfterSpawn(go, saved.hps.Any(h => h.elite));
                 }
@@ -417,8 +418,8 @@ namespace PalaceMod
                     });
                 }
             }
-            if (skipped > 0) Plugin.Logger.LogWarning($"Savestates: {skipped} enemy(ies) couldn't be restored");
-            if (restored > 0) Plugin.Logger.LogInfo($"Savestates: restored {restored} enemies");
+            if (skipped > 0) Log.For<SaveStatesManager>().Warn($"{skipped} enemy(ies) couldn't be restored");
+            if (restored > 0) Log.For<SaveStatesManager>().Debug($"Restored {restored} enemies");
         }
 
         private static void RestoreCoins(SaveStateData data)
@@ -429,7 +430,7 @@ namespace PalaceMod
             {
                 // Can't put them on the ground; bank them instead so no gold is lost.
                 PlayerInteraction.instance.AddCoin(data.freeCoins.Count);
-                Plugin.Logger.LogWarning($"Savestates: no coin prefab; banked {data.freeCoins.Count} ground coins");
+                Log.For<SaveStatesManager>().Warn($"No coin prefab; banked {data.freeCoins.Count} ground coins");
                 return;
             }
             foreach (var position in data.freeCoins) Object.Instantiate(prefab, position, Quaternion.identity);
@@ -460,7 +461,7 @@ namespace PalaceMod
         {
             if (string.IsNullOrEmpty(data.randomState)) return;
             try { UnityEngine.Random.state = JsonUtility.FromJson<UnityEngine.Random.State>(data.randomState); }
-            catch (Exception e) { Plugin.Logger.LogWarning($"Savestates: RNG state not restored: {e.Message}"); }
+            catch (Exception e) { Log.For<SaveStatesManager>().Warn($"RNG state not restored: {e.Message}"); }
         }
 
         /// <summary>One line describing the live game, for logs and the dev "savestate dump" command.</summary>

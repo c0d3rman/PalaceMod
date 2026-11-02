@@ -27,26 +27,26 @@ namespace PalaceMod.Builder
             string scene = spawner.gameObject.scene.name;
             if (!string.Equals(scene, waveSet.Host, System.StringComparison.OrdinalIgnoreCase))
             {
-                Plugin.Logger.LogWarning($"Builder: wave set {pack.Id}/{waveSet.Id} is for {waveSet.Host} but {scene} loaded; playing vanilla waves");
+                Log.For<BuilderManager>().Warn($"Wave set {pack.Id}/{waveSet.Id} is for {waveSet.Host} but {scene} loaded; playing vanilla waves");
                 return false;
             }
             var mode = LocalGamestate.GameModeSet ? LocalGamestate.SelectedGameMode : spawner.currentMode;
             if (mode != LocalGamestate.GameMode.Classic)
             {
-                Plugin.Logger.LogWarning("Builder: custom waves only replace Classic mode waves; playing vanilla waves");
+                Log.For<BuilderManager>().Warn("Custom waves only replace Classic mode waves; playing vanilla waves");
                 return false;
             }
             var issues = new List<ValidationIssue>();
             var waves = BuildWaves(pack, waveSet, spawner, issues);
-            foreach (var i in issues) Plugin.Logger.LogWarning($"Builder: {pack.Id}/{waveSet.Id}: {i}");
+            foreach (var i in issues) Log.For<BuilderManager>().Warn($"{pack.Id}/{waveSet.Id}: {i}");
             if (waves.Count == 0)
             {
-                Plugin.Logger.LogError($"Builder: wave set {pack.Id}/{waveSet.Id} produced no nights; playing vanilla waves");
+                Log.For<BuilderManager>().Error($"Wave set {pack.Id}/{waveSet.Id} produced no nights; playing vanilla waves");
                 return false;
             }
             spawner.waves = waves;
             if (waveSet.StartingGold is int gold) spawner.goldBalanceAtStart = gold;
-            Plugin.Logger.LogInfo($"Builder: injected wave set {pack.Id}/{waveSet.Id} on {scene}: {waves.Count} nights, " +
+            Log.For<BuilderManager>().Info($"Injected wave set {pack.Id}/{waveSet.Id} on {scene}: {waves.Count} nights, " +
                 $"{waves.Sum(w => w.spawns.Sum(s => s.count))} enemies, starting gold {spawner.goldBalanceAtStart}");
             return true;
         }

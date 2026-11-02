@@ -48,7 +48,7 @@ namespace PalaceMod
         {
             if (AccessTools.Property(typeof(ConfigFile), "OrphanedEntries")?.GetValue(config) is not Dictionary<ConfigDefinition, string> orphaned)
             {
-                Plugin.Logger.LogWarning("Config migrations: BepInEx has no OrphanedEntries; renamed settings start from their defaults");
+                Log.Core.Warn("Config migrations: BepInEx has no OrphanedEntries; renamed settings start from their defaults");
                 return;
             }
             var moves = new List<(ConfigDefinition from, ConfigDefinition to)>();
@@ -68,7 +68,7 @@ namespace PalaceMod
                 orphaned.Remove(from);
             }
             if (moves.Count > 0)
-                Plugin.Logger.LogInfo($"Config migrations: renamed {moved} setting(s): " +
+                Log.Core.Info($"Config migrations: renamed {moved} setting(s): " +
                     string.Join(", ", moves.Select(m => $"{m.from.Section}.{m.from.Key} -> {m.to.Section}.{m.to.Key}")));
 
             bool changed = moves.Count > 0;
@@ -80,7 +80,7 @@ namespace PalaceMod
                 if (orphaned.TryGetValue(definition, out var value) && value.Trim() == oldDefault)
                 {
                     orphaned.Remove(definition); // Bind falls back to the new default
-                    Plugin.Logger.LogInfo($"Config migrations: {section}.{key} was the old default ({oldDefault}); using the new default");
+                    Log.Core.Info($"Config migrations: {section}.{key} was the old default ({oldDefault}); using the new default");
                 }
                 orphaned[marker] = "done";
                 changed = true;

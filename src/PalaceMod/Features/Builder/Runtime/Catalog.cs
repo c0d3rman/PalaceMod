@@ -10,14 +10,15 @@ using UnityEngine;
     Index of vanilla content, built from assets that are loaded from the main menu on (no scene loads needed):
     - enemies: every Spawn.enemyPrefab in every LevelInfo.enemySpawner prefab's waves, every EternalTrialEnemySet,
       what they spawn on death, and the God of Afterlife enemy;
-    - player units: loaded prefabs with PathfindMovementPlayerunit + Hp (P Knight, P Archer, ...);
+    - player units: the troops inside the troop buildings' Resources prefabs (TroopIndex: P Knight, P Archer, ...),
+      plus any other loaded root prefab with PathfindMovementPlayerunit + Hp;
     - weapons: the Weapon assets of all of the above;
     - hosts: LevelInfos with an enemy spawner, with spawn lines read from the spawner prefab.
     Ids are prefab / asset names ("E Racer"), matched exactly, then case-insensitively.
 */
 namespace PalaceMod.Builder
 {
-    public sealed class Catalog : ICatalog
+    public sealed class Catalog : ICatalog, ITroopValidationContext
     {
         private List<CatalogUnit> units;
         private List<CatalogWeapon> weapons;
@@ -51,6 +52,12 @@ namespace PalaceMod.Builder
         public bool HasHost(string scene) => Hosts.Any(h => h.Scene == scene);
         public IReadOnlyCollection<string> SpawnLines(string scene) => Hosts.FirstOrDefault(h => h.Scene == scene)?.SpawnLines.Select(l => l.Name).ToList();
         public bool HasPackUnit(string packId, string unitId) => PackUnitExists?.Invoke(packId, unitId) ?? false;
+
+        public IReadOnlyCollection<string> TroopBuildings(string unitId)
+        {
+            var u = FindUnit(unitId);
+            return u == null ? null : u.Side == UnitSide.Player ? u.Buildings : [];
+        }
 
         private static T Find<T>(IReadOnlyList<T> list, Func<T, string> key, string id) where T : class
         {
@@ -95,6 +102,18 @@ namespace PalaceMod.Builder
                 Enqueue(prefab.GetComponentInChildren<Hp>(true)?.enemyToSpawnOnDeath);
             }
 
+            // Troops are children of building prefabs, named after their troop type.
+            foreach (var (proto, buildings) in TroopIndex.Prototypes())
+            {
+                string id = TroopIndex.TroopId(proto);
+                if (unitList.Any(u => u.Id == id)) continue;
+                var unit = Describe(proto, weaponMap);
+                if (unit == null || unit.Side != UnitSide.Player) continue;
+                unit.Id = id;
+                unit.Buildings = buildings;
+                unitList.Add(unit);
+            }
+
             // Names must be unique to work as ids; vanilla has a few duplicate prefab names, which get a suffix.
             foreach (var group in unitList.GroupBy(u => u.Id).Where(g => g.Count() > 1))
             {
@@ -108,7 +127,7 @@ namespace PalaceMod.Builder
                 .Where(l => l.enemySpawner != null && !string.IsNullOrEmpty(l.sceneName) && !l.sceneName.Contains("Tutorial") && LevelProgressManager.SceneExists(l.sceneName))
                 .GroupBy(l => l.sceneName).Select(g => DescribeHost(g.First()))
                 .ToList();
-            Plugin.Logger.LogInfo($"Builder: catalog built: {units.Count} units, {weapons.Count} weapons, {hosts.Count} host maps " +
+            Log.For<BuilderManager>().Debug($"Catalog built: {units.Count} units, {weapons.Count} weapons, {hosts.Count} host maps " +
                 $"in {(DateTime.UtcNow - started).TotalMilliseconds:0} ms");
         }
 
@@ -238,6 +257,7 @@ namespace PalaceMod.Builder
                     ["maxHp"] = R(u.MaxHp), ["moveSpeed"] = R(u.MoveSpeed), ["attackCooldown"] = R(u.AttackCooldown), ["attackRange"] = R(u.AttackRange),
                     ["keepDistance"] = R(u.KeepDistance), ["aggroTime"] = R(u.AggroTime), ["weapon"] = u.Weapon,
                     ["flying"] = u.Flying, ["large"] = u.Large, ["difficulty"] = R(u.Difficulty), ["tags"] = new JArray(u.Tags),
+                    ["buildings"] = new JArray(u.Buildings),
                 })),
                 ["weapons"] = new JArray(Weapons.Select(w => new JObject
                 {

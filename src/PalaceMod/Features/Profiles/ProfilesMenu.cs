@@ -96,20 +96,20 @@ namespace PalaceMod.Profiles
                 BuildFrame(created);
                 BuildConfirm(created);
                 built = true;
-                Plugin.Logger.LogInfo("Profiles: added the Profiles screen to the title menu");
+                Log.For<ProfilesManager>().Debug("Added the Profiles screen to the title menu");
             }
             catch (Exception e)
             {
                 failed = true;
                 foreach (var obj in created) if (obj != null) Object.Destroy(obj);
-                Plugin.Logger.LogError($"Profiles: couldn't add the Profiles screen (use `dev.py cmd profiles` to manage profiles): {e}");
+                Log.For<ProfilesManager>().Error($"Couldn't add the Profiles screen (use `dev.py cmd profiles` to manage profiles)", e);
             }
         }
 
         private void FindTemplates()
         {
             var buttons = titleFrame.GetComponentsInChildren<TFUITextButton>(true);
-            Plugin.Logger.LogInfo("Profiles: title buttons: " + string.Join(", ", buttons.Select(b => $"{b.name} \"{b.GetComponent<TextMeshProUGUI>()?.text}\" [{Listeners(b.onApply)}]")));
+            Log.For<ProfilesManager>().Debug("Title buttons: " + string.Join(", ", buttons.Select(b => $"{b.name} \"{b.GetComponent<TextMeshProUGUI>()?.text}\" [{Listeners(b.onApply)}]")));
             // Settings, not Play: Play is selected when the title opens, and a clone keeps the colour it had then.
             buttonTemplate = buttons.FirstOrDefault(b => b.name == "Settings") ?? buttons.First(b => b.name != "Play");
             // Settings' heading and body text: the big blackletter title and the italic labels.
@@ -117,7 +117,7 @@ namespace PalaceMod.Profiles
             headingTemplate = texts.Where(t => t.GetComponentInParent<SettingsUIHelper>(true) != null).OrderByDescending(t => t.fontSize).FirstOrDefault()
                 ?? throw new InvalidOperationException("no heading text found");
             bodyTemplate = buttonTemplate.GetComponent<TextMeshProUGUI>();
-            Plugin.Logger.LogInfo($"Profiles: templates: button {buttonTemplate.name}, heading {headingTemplate.name} \"{headingTemplate.text}\" {headingTemplate.font?.name} {headingTemplate.fontSize}");
+            Log.For<ProfilesManager>().Debug($"Templates: button {buttonTemplate.name}, heading {headingTemplate.name} \"{headingTemplate.text}\" {headingTemplate.font?.name} {headingTemplate.fontSize}");
         }
 
         private static string Listeners(UnityEventBase e) =>
@@ -305,7 +305,7 @@ namespace PalaceMod.Profiles
             catch (Exception e)
             {
                 Notify.Show($"Profiles: {e.Message}", NotifyKind.Error, 6f, "profiles");
-                if (e is not (InvalidOperationException or ArgumentException)) Plugin.Logger.LogError($"Profiles: {e}");
+                if (e is not (InvalidOperationException or ArgumentException)) Log.For<ProfilesManager>().Error("Profile action failed", e);
             }
         }
 
