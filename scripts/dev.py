@@ -86,10 +86,42 @@ def require_stopped():
         raise RuntimeError("Thronefall is running; run `dev.py stop` first (or use `dev.py run`).")
 
 
-def stop():
+# The game install, its log and its preferences are shared by every checkout and worktree,
+# so the checkout that launched the running game owns it until it stops it.
+OWNER = DEV_HOME / "owner.json"
+
+
+def game_owner():
+    if not game_pids() or not OWNER.exists():
+        return None
+    return json.loads(OWNER.read_text())["root"]
+
+
+def check_owner(force):
+    if not game_pids() or force:
+        return
+    owner = game_owner()
+    if owner is None:
+        raise RuntimeError("Thronefall was not launched by dev.py, so the player may be playing it. "
+                           "Ask them to quit, or pass --force once they agree.")
+    if owner != str(ROOT):
+        raise RuntimeError(f"The running game was launched by another checkout ({owner}), so another "
+                           "session is probably testing. Wait until it stops the game, or pass --force "
+                           "if that session is gone.")
+
+
+def claim_game():
+    OWNER.parent.mkdir(parents=True, exist_ok=True)
+    OWNER.write_text(json.dumps({"root": str(ROOT), "started": stamp()}) + "\n")
+
+
+def stop(force=False):
+    check_owner(force)
     pids = game_pids()
     if not pids:
         print("Thronefall is not running.")
+        restore_display()
+        OWNER.unlink(missing_ok=True)
         return
     for pid in pids:
         os.kill(pid, signal.SIGTERM)
@@ -104,6 +136,7 @@ def stop():
         time.sleep(1)
         print("Thronefall force-stopped.")
     restore_display()
+    OWNER.unlink(missing_ok=True)
 
 
 def save_display():
@@ -188,6 +221,7 @@ def patch_loader(game):
 
 
 def setup(game):
+    run("dotnet", "tool", "restore")
     managed = managed_dir(game)
     project = ET.parse(ROOT / "PalaceMod.csproj")
     names = [item.text.rsplit("/", 1)[-1] for item in project.findall(".//Reference/HintPath")]
@@ -262,6 +296,7 @@ def launch(game, timeout, fullscreen):
         env = {**os.environ, "PALACEMOD_DEV": "1"}
         subprocess.Popen(command, cwd=game, stdout=handle, stderr=subprocess.STDOUT,
                          stdin=subprocess.DEVNULL, start_new_session=True, env=env)
+    claim_game()
     print(f"Launching Thronefall under Rosetta ({'fullscreen' if fullscreen else 'windowed'})...", flush=True)
     deadline = started + timeout
     while time.time() < deadline:
@@ -331,6 +366,9 @@ def screenshot(game, output, timeout=15):
     """Ask the running mod (dev launches only) to capture the game frame; works without focus."""
     if not game_pids():
         raise RuntimeError("Thronefall is not running.")
+    if game_owner() != str(ROOT):
+        raise RuntimeError("The running game was not launched by `dev.py launch`/`run` from this checkout; "
+                           "relaunch it with `dev.py run`.")
     target = (Path(output) if output else ROOT / f".local/screenshots/{stamp()}.png").resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
     target.unlink(missing_ok=True)
@@ -346,7 +384,7 @@ def screenshot(game, output, timeout=15):
             return
         size = target.stat().st_size if target.exists() else -1
     request.unlink(missing_ok=True)
-    raise RuntimeError("No screenshot produced; dev tools only run when the game is started by `dev.py launch`/`run`.")
+    raise RuntimeError("No screenshot produced within the timeout; check `dev.py logs --errors`.")
 
 
 # --- Misc -------------------------------------------------------------------
@@ -383,7 +421,10 @@ def decompile(game, type_name):
     else:
         args.append("-p")
     run(*args, assembly)
-    print(f"Decompiled output: {output} (ignored by Git)")
+    if type_name:
+        print(f"Decompiled to {output / (type_name + '.decompiled.cs')}")
+    else:
+        print(f"Decompiled project written to {output} (ignored by Git)")
 
 
 def file_hash(path):
@@ -413,7 +454,7 @@ def doctor(game, configuration):
     built = ROOT / f"bin/{configuration}/netstandard2.1/PalaceMod.dll"
     installed = game / "BepInEx/plugins/PalaceMod/PalaceMod.dll"
     check("Installed plugin matches this build", file_hash(built) is not None and file_hash(built) == file_hash(installed))
-    check("Game running", True, "yes" if game_pids() else "no")
+    check("Game running", True, f"yes, launched from {game_owner() or 'outside dev.py'}" if game_pids() else "no")
     restored = not DISPLAY_SAVED.exists() or bool(game_pids())
     check("Display settings restored", restored, "" if restored else "run `dev.py stop` to restore them")
     log = log_path(game)
@@ -433,6 +474,8 @@ def main():
     parser.add_argument("--lines", type=int, default=150, help="Logs: number of trailing lines")
     parser.add_argument("--timeout", type=int, default=120, help="Launch: seconds to wait for BepInEx")
     parser.add_argument("--output", help="Screenshot: output PNG path")
+    parser.add_argument("--force", action="store_true",
+                        help="Run/stop: take over a game launched by another checkout")
     parser.add_argument("--fullscreen", action="store_true",
                         help="Launch/run: use the player's display settings instead of windowed mode")
     args = parser.parse_args()
@@ -445,13 +488,13 @@ def main():
         install(game, args.configuration)
     elif args.command == "run":
         build(args.configuration)
-        stop()
+        stop(args.force)
         install(game, args.configuration)
         launch(game, args.timeout, args.fullscreen)
     elif args.command == "launch":
         launch(game, args.timeout, args.fullscreen)
     elif args.command == "stop":
-        stop()
+        stop(args.force)
     elif args.command == "logs":
         logs(game, args.errors, args.follow, args.lines)
     elif args.command == "screenshot":

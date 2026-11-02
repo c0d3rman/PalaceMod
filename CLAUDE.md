@@ -6,7 +6,7 @@ BepInEx 5 mod for Thronefall (Unity 2022.3, Mono), developed on an Apple Silicon
 
 ```sh
 python3 scripts/dev.py doctor        # check the environment; fix anything marked !!
-python3 scripts/dev.py setup         # once per checkout/worktree: copies game DLLs into lib/
+python3 scripts/dev.py setup         # once per checkout/worktree: restores tools, copies game DLLs into lib/
 python3 scripts/dev.py run           # build -> stop game -> install -> launch -> wait for BepInEx -> print errors
 python3 scripts/dev.py logs --errors # unique errors with stack traces from the current game session
 python3 scripts/dev.py screenshot    # in-game frame capture (works while unfocused); prints the PNG path
@@ -16,6 +16,8 @@ python3 scripts/dev.py stop          # quit the game and restore the player's di
 A feature is not done until `run` reports `PalaceMod loaded: yes` and no PalaceMod errors. The one expected error is `HookGenPatcher ... Could not load file or assembly 'MonoMod'`, which comes from a BepInEx patcher and is harmless.
 
 Always finish with `dev.py stop`, so the game isn't left running and the player's fullscreen settings are restored.
+
+There is one game install, so only one session can test at a time. The checkout that launched the game owns it, and `run`, `stop` and `screenshot` refuse to act on a game another checkout launched. If you're refused, wait and retry. Use `--force` only if the other session is definitely gone.
 
 ## How the Mac setup works
 
@@ -39,7 +41,8 @@ The scripts can launch the game, read the log and capture frames, but they can't
 - `Plugin.Update` isolates managers from each other's exceptions, and each distinct error is logged once.
 - Game singletons such as `CommandUnits.instance` are null outside a level. Null-check them in `Update`.
 - `Plugin.Input` (the Rewired player) is null until Rewired initializes. Use `?.`.
-- To read game code: `python3 scripts/dev.py decompile --type <TypeName>` writes to `.decompiled/`. Leave out `--type` to decompile everything.
+- To read game code: `python3 scripts/dev.py decompile --type <TypeName>` writes `.decompiled/<TypeName>.decompiled.cs`. Leave out `--type` to decompile everything into a project, which is the way to grep for things like PlayerPrefs keys.
+- The main menu is the scene `_StartMenu` (`SceneTransitionManager.mainMenuScene`). Use `SceneManager.GetActiveScene().name` to tell which screen you're on.
 - Never commit `lib/`, `.decompiled/` or anything else copied from the game; they're in `.gitignore`.
 - Builds target `netstandard2.1`. The 19 existing Harmony003 analyzer warnings predate this guide and aren't regressions.
 
