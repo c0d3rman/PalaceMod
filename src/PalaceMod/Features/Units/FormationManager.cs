@@ -9,12 +9,13 @@ using UnityEngine;
     Unit placement: formations, dropping one unit at a time, and sending units to the mouse cursor.
 
     The game places units in CommandUnits.PlaceCommandedUnitsAndCalculateTargetPositions: every commanded unit gets a
-    home position in a loose cluster around the king. This feature patches only that method:
+    home position in a loose cluster around the king. This feature patches that method:
     - Prefix: for a "place N units" request, hides the other commanded units from the game's list for the duration of
       the call (and re-hides their auto-attacks afterwards), and applies the Spacing setting.
     - Postfix: overrides the home positions with the chosen formation, at the king or at a mouse-picked spot, and
       optionally makes the placed units hold position.
-    Everything else (sounds, effects, the hold-position buffer, day-time teleport) stays the game's own.
+    Everything else (sounds, effects, the hold-position buffer, day-time teleport) stays the game's own. While a cursor
+    placement is aimed, PlayerMovement's "Move Towards Mouse" read (the same right mouse button) is ignored.
 
     Placements the mod starts (mouse, "place one", dev commands) go through Place(request); a plain Space-bar drop uses
     the default request built from the settings.
@@ -96,7 +97,7 @@ namespace PalaceMod
         {
             CancelDrag();
             placeOneActive = false;
-            devPress = devHeld = devRelease = false;
+            devPress = devHeld = devRelease = devWalk = false;
         }
 
         public override void OnDestroy() => previewMarkers.Destroy();
@@ -179,6 +180,7 @@ namespace PalaceMod
         // Dev-command stand-ins for the mouse, so placement can be driven without a real cursor.
         private Vector2? devCursor;
         private bool devPress, devHeld, devRelease;
+        private bool devWalk; // stands in for holding the game's "Move Towards Mouse"
 
         private void UpdateMouse(CommandUnits cu, bool leading)
         {
@@ -448,6 +450,53 @@ namespace PalaceMod
             return tags != null && tags.Contains(TagManager.ETag.MeeleFighter) && !tags.Contains(TagManager.ETag.RangedFighter);
         }
 
+        /// <summary>A mouse placement is being aimed, or its key is down and about to start one (the game may read its
+        /// input before this manager's Update does).</summary>
+        private bool AimingAtCursor
+        {
+            get
+            {
+                if (dragging) return true;
+                var cu = CommandUnits.instance;
+                return mousePlacement.Value && mouseKey.Held && cu != null && cu.commanding && cu.PlayerUnitsCommanding.Count > 0;
+            }
+        }
+
+        // The game's "Move Towards Mouse" (right mouse button by default) would walk the king toward the cursor while
+        // a placement is aimed with the same button; it's ignored during that window only.
+        [HarmonyPatch(typeof(PlayerMovement), "Update")]
+        private static class MoveTowardsMousePatch
+        {
+            private const string Action = "Move Towards Mouse";
+
+            private static bool GetButton(Rewired.Player player, string action)
+            {
+                if (action != Action) return player.GetButton(action);
+                var manager = Feature<FormationManager>.Instance;
+                if (manager != null && manager.AimingAtCursor) return false;
+                return player.GetButton(action) || (manager != null && manager.devWalk);
+            }
+
+            private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+            {
+                var original = AccessTools.Method(typeof(Rewired.Player), nameof(Rewired.Player.GetButton), [typeof(string)]);
+                var replacement = AccessTools.Method(typeof(MoveTowardsMousePatch), nameof(GetButton));
+                var list = instructions.ToList();
+                bool replaced = false;
+                for (int i = 1; i < list.Count; i++)
+                {
+                    if (list[i].Calls(original) && list[i - 1].opcode == System.Reflection.Emit.OpCodes.Ldstr && (string)list[i - 1].operand == Action)
+                    {
+                        list[i].opcode = System.Reflection.Emit.OpCodes.Call;
+                        list[i].operand = replacement;
+                        replaced = true;
+                    }
+                }
+                if (!replaced) Plugin.Logger.LogWarning("Formations: PlayerMovement.Update has no \"Move Towards Mouse\" read; right-click placement may also walk the king");
+                return list;
+            }
+        }
+
         [HarmonyPatch(typeof(CommandUnits), nameof(CommandUnits.PlaceCommandedUnitsAndCalculateTargetPositions))]
         private static class PlacePatch
         {
@@ -598,7 +647,7 @@ namespace PalaceMod
                 }
                 return Status(cu);
             });
-            DevCommands.Register("place-mouse", "place-mouse press|move <x> <y> | release | off   drive cursor placement (x, y: 0-1 screen fractions)", args =>
+            DevCommands.Register("place-mouse", "place-mouse press|move <x> <y> | release | walk on|off | off   drive cursor placement (x, y: 0-1 screen fractions); walk holds the game's Move Towards Mouse", args =>
             {
                 RequireLevel();
                 string action = args.Length > 0 ? args[0] : "";
@@ -608,10 +657,12 @@ namespace PalaceMod
                     case "press": devPress = devHeld = true; break;
                     case "move": break;
                     case "release": devHeld = false; devRelease = true; break;
-                    case "off": devCursor = null; devHeld = false; break;
-                    default: throw new ArgumentException("usage: place-mouse press|move <x> <y> | release | off");
+                    case "walk": devWalk = args.Length < 2 || args[1] != "off"; break;
+                    case "off": devCursor = null; devHeld = devWalk = false; break;
+                    default: throw new ArgumentException("usage: place-mouse press|move <x> <y> | release | walk on|off | off");
                 }
-                return TryCursorWorld(out var p) ? $"cursor at ground {p}" : "cursor not over ground";
+                string king = $"king at {CommandUnits.instance.transform.position}, aiming {AimingAtCursor}";
+                return TryCursorWorld(out var p) ? $"cursor at ground {p}; {king}" : $"cursor not over ground; {king}";
             });
             DevCommands.Register("place-status", "place-status           following units and every placed unit's home and hold state", _ => Status(RequireLevel()));
         }

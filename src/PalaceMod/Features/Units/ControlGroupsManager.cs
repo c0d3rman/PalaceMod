@@ -17,7 +17,7 @@ namespace PalaceMod
 {
     public class ControlGroupsManager : BaseManager
     {
-        public override string FeatureSection => "Control Groups";
+        public override string FeatureSection => "Control groups";
         public override string FeatureDescription =>
             "Keeps the game's control groups (Settings > Gameplay > Control Groups) assigned when you continue a saved run.";
 
@@ -54,7 +54,7 @@ namespace PalaceMod
             pending.Clear();
             if (restored == 0) return;
             ControlGroupUIHelper.instance?.RefreshGroupFlags();
-            Plugin.Logger.LogInfo($"Control Groups: restored {restored} unit(s) to their groups");
+            Plugin.Logger.LogInfo($"Control groups: restored {restored} unit(s) to their groups");
             if (SettingsManager.Instance != null && SettingsManager.Instance.EnableControlGroups)
                 Notify.Show("Control groups restored", NotifyKind.Info, 0, "control-groups");
         }

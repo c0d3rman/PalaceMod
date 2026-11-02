@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using HarmonyLib;
 using I2.Loc;
 using TMPro;
 using UnityEngine;
-using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using Object = UnityEngine.Object;
 
@@ -18,7 +18,7 @@ using Object = UnityEngine.Object;
     Layout: everything lives in one container, "PalaceMod Score", under the pause frame, anchored to the frame's
     top-right corner (above the loadout). The enemy preview (bottom-left area) is another feature's.
     Numbers come from ScoreCalculator, which mirrors the game's formulas.
-    Tooltips use a minimal local helper (ScoreTooltip); migrate to the shared ui-kit tooltip once it lands on main.
+    Hovering a score text shows how it's worked out, in the shared mod tooltip (ModTooltip).
 */
 namespace PalaceMod
 {
@@ -62,7 +62,7 @@ namespace PalaceMod
             bool shown = frame != null && (HasTooltip(frame.CurrentFocus) || (frame.CurrentFocus == null && HasTooltip(frame.CurrentSelection)));
             if (shown && nativeTooltip.tooltipParent != null && !nativeTooltip.tooltipParent.activeInHierarchy) shown = false;
             pauseGroup.alpha = Mathf.MoveTowards(pauseGroup.alpha, shown ? 0f : 1f, Time.unscaledDeltaTime * 8f);
-            if (shown) ScoreTooltip.Hide();
+            if (shown) ModTooltip.Hide();
         }
 
         private static bool HasTooltip(ThronefallUIElement e) => e is TFUIEquippable || e is TFUIEnemy || e is TFUIPlayerUnit || e is TFUIIncomeDisplay;
@@ -80,7 +80,7 @@ namespace PalaceMod
             if (pausePanel != null) Object.Destroy(pausePanel);
             pausePanel = null;
             pauseNight = null;
-            ScoreTooltip.Hide();
+            ModTooltip.Hide();
         }
 
         private void DestroyEndPanel()
@@ -163,7 +163,7 @@ namespace PalaceMod
             }
             pauseFooter.text = footer.ToString();
             pauseFooter.gameObject.SetActive(footer.Length > 0);
-            ScoreTooltip.Attach(pauseFooter, footerTip.ToString());
+            AttachTip(pauseFooter, footerTip.ToString());
         }
 
         private void BuildPause(PauseUILoadoutHelper helper)
@@ -380,9 +380,9 @@ namespace PalaceMod
                     protectionPercentage.text = $"{Term("Menu/Realm", "Realm")} {n.ProtectionPercent}% {Term("Menu/Protected", "Protected")}";
                 if (overallScore != null) overallScore.text = overall.ToString();
                 if (timeLabel != null) timeLabel.text = timeLabelText + timeSuffix;
-                ScoreTooltip.Attach(baseLabel, baseTip);
-                ScoreTooltip.Attach(protectionPercentage, protectionTip);
-                ScoreTooltip.Attach(timeLabel, timeTip);
+                AttachTip(baseLabel, baseTip);
+                AttachTip(protectionPercentage, protectionTip);
+                AttachTip(timeLabel, timeTip);
             }
 
             private static string RelativePath(Transform root, Transform t)
@@ -397,105 +397,20 @@ namespace PalaceMod
             }
         }
 
-        // ---- Minimal hover tooltip (migrate to the shared ui-kit tooltip when it lands) --------------------------
+        // ---- Tooltips -------------------------------------------------------------------------------------------
 
-        private sealed class ScoreTooltip : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
+        // Each text's current explanation; refreshed with the numbers. Empty shows nothing.
+        private static readonly Dictionary<TextMeshProUGUI, string> tips = [];
+
+        private static void AttachTip(TextMeshProUGUI target, string text)
         {
-            private string text;
-            private static GameObject shown;
-            private static TextMeshProUGUI shownText;
-
-            public static void Attach(TextMeshProUGUI target, string text)
+            if (target == null) return;
+            if (!tips.ContainsKey(target))
             {
-                if (target == null) return;
-                var tip = target.GetComponent<ScoreTooltip>() ?? target.gameObject.AddComponent<ScoreTooltip>();
-                tip.text = text;
-                target.raycastTarget = !string.IsNullOrEmpty(text);
+                foreach (var gone in tips.Keys.Where(k => k == null).ToList()) tips.Remove(gone);
+                ModTooltip.AttachHover(target.gameObject, null, () => tips.TryGetValue(target, out var tip) ? tip : null);
             }
-
-            public void OnPointerEnter(PointerEventData eventData)
-            {
-                if (string.IsNullOrEmpty(text)) return;
-                var label = GetComponent<TextMeshProUGUI>();
-                var canvas = GetComponentInParent<Canvas>()?.rootCanvas;
-                if (canvas == null) return;
-                if (shown == null || shown.transform.parent != canvas.transform) Create(canvas.transform, label);
-                shownText.text = text;
-                shown.SetActive(true);
-                shown.transform.SetAsLastSibling();
-                // Just below the hovered label, right-aligned with it.
-                var rect = (RectTransform)shown.transform;
-                var corners = new Vector3[4];
-                ((RectTransform)transform).GetWorldCorners(corners);
-                rect.position = corners[0];
-                rect.pivot = new Vector2(0f, 1f);
-                LayoutRebuilder.ForceRebuildLayoutImmediate(rect);
-                var canvasRect = (RectTransform)canvas.transform;
-                // Keep it on screen: flip to the label's right edge if it would overflow.
-                var tipCorners = new Vector3[4];
-                rect.GetWorldCorners(tipCorners);
-                var canvasCorners = new Vector3[4];
-                canvasRect.GetWorldCorners(canvasCorners);
-                if (tipCorners[2].x > canvasCorners[2].x)
-                {
-                    rect.pivot = new Vector2(1f, 1f);
-                    rect.position = corners[3];
-                }
-            }
-
-            public void OnPointerExit(PointerEventData eventData) => Hide();
-
-            private void OnDisable() => Hide();
-
-            public static void Hide()
-            {
-                if (shown != null) shown.SetActive(false);
-            }
-
-            private static void Create(Transform canvas, TextMeshProUGUI style)
-            {
-                if (shown != null) Object.Destroy(shown);
-                // The dawn score panel's rounded charcoal background, without its children.
-                var source = NightscoreUI.instance != null ? NightscoreUI.instance.backgroundImage : null;
-                if (source != null)
-                {
-                    shown = Object.Instantiate(source.gameObject, canvas, false);
-                    foreach (Transform child in shown.transform) Object.Destroy(child.gameObject);
-                    source = shown.GetComponent<MPUIKIT.MPImage>();
-                    source.raycastTarget = false;
-                    source.enabled = true;
-                }
-                else
-                {
-                    shown = new GameObject("bg", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
-                    shown.transform.SetParent(canvas, false);
-                    var image = shown.GetComponent<Image>();
-                    image.color = new Color(0.102f, 0.110f, 0.114f); // the game's panel charcoal
-                    image.raycastTarget = false;
-                }
-                shown.name = "PalaceMod Score Tooltip";
-                var shownRect = (RectTransform)shown.transform;
-                shownRect.anchorMin = shownRect.anchorMax = new Vector2(0.5f, 0.5f);
-                var layout = shown.AddComponent<VerticalLayoutGroup>();
-                layout.padding = new RectOffset(22, 22, 14, 14);
-                layout.childControlWidth = layout.childControlHeight = true;
-                var fitter = shown.AddComponent<ContentSizeFitter>();
-                fitter.horizontalFit = fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-                var textObj = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI), typeof(LayoutElement));
-                textObj.transform.SetParent(shown.transform, false);
-                shownText = textObj.GetComponent<TextMeshProUGUI>();
-                shownText.font = TMP_Settings.defaultFontAsset;
-                var body = Resources.Load<TMP_FontAsset>("fonts & materials/CormorantGaramond-Light SDF");
-                body ??= Array.Find(Resources.FindObjectsOfTypeAll<TMP_FontAsset>(), f => f.name == "CormorantGaramond-Light SDF");
-                if (body != null) shownText.font = body;
-                shownText.fontSize = 24f;
-                shownText.color = style != null ? style.color : new Color(0.784f, 0.651f, 0.455f);
-                shownText.raycastTarget = false;
-                shownText.enableWordWrapping = true;
-                textObj.GetComponent<LayoutElement>().preferredWidth = 420f;
-                shown.SetActive(false);
-            }
+            tips[target] = text;
         }
 
         // ---- Dev commands ---------------------------------------------------------------------------------------
@@ -546,11 +461,10 @@ namespace PalaceMod
                     {
                         if (pausePanel == null) throw new InvalidOperationException("pause menu panel not built");
                         string which = args.Length > 1 ? args[1].ToLowerInvariant() : "time";
-                        TextMeshProUGUI target = null;
-                        foreach (var tip in pausePanel.GetComponentsInChildren<ScoreTooltip>(true))
-                            if (tip.name.ToLowerInvariant().Contains(which)) target = tip.GetComponent<TextMeshProUGUI>();
-                        if (target == null) throw new ArgumentException("no tooltip on " + which);
-                        target.GetComponent<ScoreTooltip>().OnPointerEnter(null);
+                        var target = tips.Keys.FirstOrDefault(k => k != null && k.transform.IsChildOf(pausePanel.transform)
+                            && k.name.ToLowerInvariant().Contains(which) && !string.IsNullOrEmpty(tips[k]))
+                            ?? throw new ArgumentException("no tooltip on " + which);
+                        ModTooltip.Show(null, tips[target], target.rectTransform);
                         return "hovering " + target.name;
                     }
                     default:

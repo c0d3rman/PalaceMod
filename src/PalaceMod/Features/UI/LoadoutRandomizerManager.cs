@@ -122,9 +122,11 @@ namespace PalaceMod
             excludedEntry.SettingChanged += (_, _) => { LoadExcluded(); RefreshExcludedMarks(); };
 
             excludeKey = Keybinds.Register(FeatureSection, "exclude", "Exclude from randomizer", new KeyboardShortcut(KeyCode.X),
-                "On the loadout screen, toggles whether the dice may pick the hovered or selected item.", KeybindFlags.AllowInMenus);
+                "On the loadout screen, toggles whether the dice may pick the hovered or selected item.", KeybindFlags.AllowInMenus,
+                KeybindContext.LoadoutScreen);
             undoKey = Keybinds.Register(FeatureSection, "undo", "Undo loadout roll", new KeyboardShortcut(KeyCode.Z),
-                "On the loadout screen, puts back the loadout from before the last roll.", KeybindFlags.AllowInMenus);
+                "On the loadout screen, puts back the loadout from before the last roll.", KeybindFlags.AllowInMenus,
+                KeybindContext.LoadoutScreen);
 
             RegisterDevCommands();
         }

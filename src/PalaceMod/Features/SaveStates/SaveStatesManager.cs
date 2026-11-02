@@ -23,7 +23,7 @@ namespace PalaceMod
     {
         public override string FeatureSection => "Savestates";
         public override string FeatureDescription =>
-            "Save and load the whole game mid-level, for practice. Pause > Savestates lists them. Loading a state marks the run as modded.";
+            "Save and load the whole game mid-level, for practice. Pause > Savestates lists them. Loading a state makes the run unranked.";
 
         // The real-save guard must outlive the Enabled switch: turning savestates off after a load mustn't let the
         // practice run be saved. The other patches check IsEnabled themselves.
