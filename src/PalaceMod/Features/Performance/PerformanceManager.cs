@@ -14,9 +14,12 @@ using UnityEngine.Scripting;
     Smooths out frame-time spikes and reports where the remaining ones come from.
     - Pre-grows the Mono (Boehm) heap at startup so the game doesn't stall on heap expansions mid-level.
     - Optionally widens the incremental GC time slice so collections finish before allocation forces a full stop-the-world pass.
-    - Logs frame spikes with whether a GC ran during that frame, plus a periodic summary, so spikes can be attributed.
+    - Logs frame spikes with whether a GC ran during that frame and which engine subsystems took the time, plus a
+      periodic summary, so spikes can be attributed.
     - Removes per-frame garbage in a few game hot paths, with results identical to the originals.
     - Logs (and optionally overrides) the A* pathfinding thread settings for each level.
+    - On macOS, paces frames precisely and opts out of App Nap/timer coalescing; both VSync and Unity's frame limiter
+      otherwise oversleep by several frames there.
 */
 namespace PalaceMod
 {
@@ -30,10 +33,24 @@ namespace PalaceMod
         private ConfigEntry<float> spikeThresholdMs;
         private ConfigEntry<float> summaryIntervalSeconds;
         private ConfigEntry<PathfindingThreads> pathfindingThreads;
+        private ConfigEntry<VSyncMode> vSync;
+        private ConfigEntry<int> targetFrameRate;
+        private DateTime configWriteTime;
+        private float nextConfigCheck;
+
+        private ConfigEntry<Toggle> precisePacing;
+        private ConfigEntry<int> pacedFrameRate;
+        private readonly FramePacer pacer = new();
+        private ConfigEntry<float> renderScale;
+        private ConfigEntry<int> msaa;
+
+        public enum VSyncMode { GameDefault, On, Off }
+        public enum Toggle { Auto, On, Off }
 
         public enum PathfindingThreads { GameDefault, None, One, Two, Four, AutomaticLowLoad, AutomaticHighLoad }
 
         private readonly FrameStats stats = new();
+        private readonly PlayerLoopTimer loopTimer = new();
         private int lastGcCount;
         private float smoothedFrameMs = 16.7f;
         private float nextSummary;
@@ -58,12 +75,44 @@ namespace PalaceMod
             pathfindingThreads = config.Bind(Section, "Pathfinding threads", PathfindingThreads.GameDefault,
                 "Threads A* uses to compute paths, applied when a level loads. None computes paths on the main thread.");
 
+            vSync = config.Bind(Section, "VSync", VSyncMode.GameDefault,
+                "Override the game's VSync setting. Off plus a target frame rate often paces better on Mac displays.");
+            targetFrameRate = config.Bind(Section, "Target frame rate", 0,
+                "Frame rate cap used when VSync is off. 0 keeps the game's setting, -1 is uncapped.");
+            precisePacing = config.Bind(Section, "Precise frame pacing", Toggle.Auto,
+                "Replace VSync and Unity's frame limiter with a precise one. Both oversleep by several frames on macOS, " +
+                "which makes the game stutter even though it renders in about a millisecond. Auto turns it on on macOS. " +
+                "Overrides the VSync and Target frame rate settings.");
+            pacedFrameRate = config.Bind(Section, "Paced frame rate", 0,
+                "Frame rate for precise frame pacing. 0 matches the display's refresh rate.");
+            renderScale = config.Bind(Section, "Render scale override", 0f,
+                "Resolution multiplier for 3D rendering (UI stays sharp). 0 keeps the game's setting.");
+            msaa = config.Bind(Section, "MSAA override", 0,
+                "Anti-aliasing samples: 1 (off), 2, 4 or 8. 0 keeps the game's setting.");
+            var latencyCritical = config.Bind(Section, "Latency-critical mode", Toggle.Auto,
+                "Ask macOS to treat the game as latency-critical, which disables App Nap and timer coalescing so waits " +
+                "don't overshoot. Auto turns it on on macOS. Takes effect at launch.");
+            configWriteTime = System.IO.File.GetLastWriteTimeUtc(config.ConfigFilePath);
+            if (latencyCritical.Value == Toggle.On || (latencyCritical.Value == Toggle.Auto && Application.platform == RuntimePlatform.OSXPlayer))
+            {
+                try
+                {
+                    Plugin.Logger.LogInfo($"Performance: latency-critical mode {(MacActivity.Begin() ? "on" : "unavailable")}");
+                }
+                catch (Exception e)
+                {
+                    Plugin.Logger.LogWarning($"Performance: couldn't enable latency-critical mode: {e.Message}");
+                }
+            }
+
             AstarPath.OnAwakeSettings += ConfigurePathfinding;
             ReserveHeap(heapReserveMb.Value);
             ApplyGcTimeSlice();
             gcTimeSliceMs.SettingChanged += (_, _) => ApplyGcTimeSlice();
 
             lastGcCount = GC.CollectionCount(0);
+            pacer.Install();
+            if (spikeLogging.Value) loopTimer.Install(); // after the pacer, so its wait shows up as its own entry
             Plugin.Logger.LogInfo($"Performance: GC mode {GarbageCollector.GCMode}, incremental {GarbageCollector.isIncremental}, " +
                 $"time slice {GarbageCollector.incrementalTimeSliceNanoseconds / 1e6:0.#} ms, heap {Profiler.GetMonoHeapSizeLong() / 1048576} MB, " +
                 $"vSync {QualitySettings.vSyncCount}, target fps {Application.targetFrameRate}, arch {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}");
@@ -109,6 +158,8 @@ namespace PalaceMod
 
         public override void Update()
         {
+            ReloadConfigIfChanged();
+            ApplyFramePacing();
             if (!spikeLogging.Value) return;
 
             float frameMs = Time.unscaledDeltaTime * 1000f;
@@ -125,18 +176,86 @@ namespace PalaceMod
             {
                 spikesLoggedThisWindow++;
                 Plugin.Logger.LogInfo($"Performance: spike {frameMs:0.0} ms (baseline {smoothedFrameMs:0.0} ms){(gcRan ? " during GC" : "")} " +
-                    $"in {SceneManager.GetActiveScene().name}, {DescribePhase()}, mono used {Profiler.GetMonoUsedSizeLong() / 1048576} MB");
+                    $"in {SceneManager.GetActiveScene().name}, {DescribePhase()}, mono used {Profiler.GetMonoUsedSizeLong() / 1048576} MB; " +
+                    $"slowest: {loopTimer.DescribeLastFrame()}");
             }
 
             if (Time.unscaledTime >= nextSummary)
             {
                 if (stats.Frames > 0)
                 {
-                    Plugin.Logger.LogInfo($"Performance: {stats.Summarize()}, mono used {Profiler.GetMonoUsedSizeLong() / 1048576}/{Profiler.GetMonoHeapSizeLong() / 1048576} MB");
+                    Plugin.Logger.LogInfo($"Performance: {stats.Summarize()}, vSync {QualitySettings.vSyncCount}, target fps {Application.targetFrameRate}, " +
+                        $"paced {(pacer.Enabled ? $"{pacer.TargetFps:0.#} fps, worst sleep {pacer.WorstSleepMs:0.0} ms" : "off")}, " +
+                        $"display {Screen.currentResolution.refreshRateRatio.value:0.#} Hz, focused {Application.isFocused}, {DescribeRendering()}, mono used {Profiler.GetMonoUsedSizeLong() / 1048576}/{Profiler.GetMonoHeapSizeLong() / 1048576} MB");
                 }
                 stats.Reset();
                 spikesLoggedThisWindow = 0;
                 nextSummary = Time.unscaledTime + Mathf.Max(5f, summaryIntervalSeconds.Value);
+            }
+        }
+
+        // Lets settings be tuned while the game runs by editing the config file.
+        private void ReloadConfigIfChanged()
+        {
+            if (Time.unscaledTime < nextConfigCheck) return;
+            nextConfigCheck = Time.unscaledTime + 2f;
+            var path = Plugin.Config.ConfigFilePath;
+            var written = System.IO.File.GetLastWriteTimeUtc(path);
+            if (written == configWriteTime) return;
+            configWriteTime = written;
+            Plugin.Config.Reload();
+            Plugin.Logger.LogInfo($"Performance: reloaded config (VSync {vSync.Value}, target frame rate {targetFrameRate.Value}, precise pacing {precisePacing.Value} {pacedFrameRate.Value})");
+            stats.Reset();
+        }
+
+        // The game applies its own VSync setting when settings load, so re-assert ours whenever it differs.
+        // The game's URP asset isn't referenced at compile time, so set its properties by name.
+        private void ApplyRenderOverrides()
+        {
+            var pipeline = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
+            if (pipeline == null) return;
+            var type = pipeline.GetType();
+            if (renderScale.Value > 0f) SetIfDifferent(type.GetProperty("renderScale"), pipeline, renderScale.Value);
+            if (msaa.Value > 0) SetIfDifferent(type.GetProperty("msaaSampleCount"), pipeline, msaa.Value);
+        }
+
+        private static void SetIfDifferent(System.Reflection.PropertyInfo property, object target, object value)
+        {
+            if (property == null || Equals(property.GetValue(target), value)) return;
+            property.SetValue(target, value);
+        }
+
+        private string DescribeRendering()
+        {
+            var pipeline = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
+            if (pipeline == null) return "no render pipeline";
+            var type = pipeline.GetType();
+            return $"render scale {type.GetProperty("renderScale")?.GetValue(pipeline)}, MSAA {type.GetProperty("msaaSampleCount")?.GetValue(pipeline)}, " +
+                $"{Screen.width}x{Screen.height}";
+        }
+
+        private void ApplyFramePacing()
+        {
+            ApplyRenderOverrides();
+            bool precise = precisePacing.Value == Toggle.On ||
+                (precisePacing.Value == Toggle.Auto && Application.platform == RuntimePlatform.OSXPlayer);
+            if (precise)
+            {
+                if (QualitySettings.vSyncCount != 0) QualitySettings.vSyncCount = 0;
+                if (Application.targetFrameRate != -1) Application.targetFrameRate = -1;
+                double refresh = Screen.currentResolution.refreshRateRatio.value;
+                pacer.TargetFps = pacedFrameRate.Value > 0 ? pacedFrameRate.Value : (float)(refresh > 1 ? refresh : 60);
+                return;
+            }
+            pacer.TargetFps = 0;
+            if (vSync.Value != VSyncMode.GameDefault)
+            {
+                int count = vSync.Value == VSyncMode.On ? 1 : 0;
+                if (QualitySettings.vSyncCount != count) QualitySettings.vSyncCount = count;
+            }
+            if (targetFrameRate.Value != 0 && Application.targetFrameRate != targetFrameRate.Value)
+            {
+                Application.targetFrameRate = targetFrameRate.Value;
             }
         }
 
