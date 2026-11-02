@@ -72,7 +72,7 @@ namespace PalaceMod
             facing = config.Bind(FeatureSection, "Facing", PlacementFacing.WalkingDirection, new ConfigDescription(
                 "Which way Line and Arc formations face: where the king walks, toward the mouse cursor, or toward the nearest enemies (or the next wave's spawn)."));
             mousePlacement = config.Bind(FeatureSection, "Mouse placement", true, new ConfigDescription(
-                "While units follow you, right-click to send them to the cursor, or right-drag to draw a line for them. Hold the click, or Ctrl, to make them hold position."));
+                "While units follow you, right-click to send them to the cursor, or right-drag to draw a line for them. Hold the click, or Shift, to make them hold position. Using it makes the run unranked."));
             preview = config.Bind(FeatureSection, "Placement preview", true, new ConfigDescription(
                 "Shows markers on the ground where units will stand while you aim a mouse placement."));
             hints = config.Bind(FeatureSection, "Hints", true, new ConfigDescription(
@@ -86,7 +86,7 @@ namespace PalaceMod
                 "Drops one of the units following you; hold to make it hold position.");
             mouseKey = Keybinds.Register(FeatureSection, "mouse-place", "Place at cursor", new KeyboardShortcut(KeyCode.Mouse1),
                 "Sends the units following you to the cursor; drag to draw a line for them.");
-            holdKey = Keybinds.Register(FeatureSection, "mouse-hold", "Hold position (with cursor placement)", new KeyboardShortcut(KeyCode.LeftControl),
+            holdKey = Keybinds.Register(FeatureSection, "mouse-hold", "Hold position (with cursor placement)", new KeyboardShortcut(KeyCode.LeftShift),
                 "Hold while placing at the cursor to make the units hold position.");
 
             RegisterDevCommands();
@@ -211,6 +211,8 @@ namespace PalaceMod
             if (released)
             {
                 CancelDrag();
+                // The user's call: sending units to the cursor goes beyond vanilla controls, so the run is unranked.
+                GameplayImpact.Mark("Mouse unit placement");
                 Place(request);
                 return;
             }

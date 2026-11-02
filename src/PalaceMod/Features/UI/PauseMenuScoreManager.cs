@@ -1,509 +1,627 @@
-using HarmonyLib;
-using UnityEngine;
-using UnityEngine.UI;
-using TMPro;
+using System;
 using System.Collections.Generic;
+using System.Text;
+using HarmonyLib;
+using I2.Loc;
+using TMPro;
+using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.UI;
+using Object = UnityEngine.Object;
 
+/*
+    Pause menu score: the score so far, and a breakdown in the game's own night-score panel (cloned from NightscoreUI):
+    by day the last night's subscores, at night what tonight would score if it ended now. On the last night it also
+    projects the end screen's total. On the end-of-match screen after a victory it shows the final night's breakdown,
+    which the game never shows (NightscoreUI.ShowNightScore skips the last wave because the end screen takes over).
+
+    Layout: everything lives in one container, "PalaceMod Score", under the pause frame, anchored to the frame's
+    top-right corner (above the loadout). The enemy preview (bottom-left area) is another feature's.
+    Numbers come from ScoreCalculator, which mirrors the game's formulas.
+    Tooltips use a minimal local helper (ScoreTooltip); migrate to the shared ui-kit tooltip once it lands on main.
+*/
 namespace PalaceMod
 {
     public class PauseMenuScoreManager : BaseManager
     {
         public override string FeatureSection => "Pause menu score";
-        public override string FeatureDescription => "Shows the current and potential score of the level in the pause menu.";
-        protected override void OnFeatureDisabled() => OnDestroy();
+        public override string FeatureDescription => "The pause menu shows the score so far, last night's breakdown, and at night what the night would score if it ended now. After a victory, the end screen shows the final night's breakdown.";
 
-        private List<GameObject> createdObjects = [];
-        private static readonly TMP_FontAsset titleFont = Resources.Load<TMP_FontAsset>("fonts & materials/CormorantGaramond-SemiBold SDF");
-        private static readonly TMP_FontAsset numberFont = Resources.Load<TMP_FontAsset>("fonts & materials/UnifrakturCook-Bold SDF");
-        private static readonly Color32 GOLD_COLOR = new Color32(200, 166, 116, 255);
-        private const float CHARACTER_SPACING = 45f;
-        private const float ROW_MIN_HEIGHT = 30f;
-        private const int DEFAULT_FONT_SIZE = 28;
-        private const int BIG_VALUE_FONT_SIZE = 40;
+        private BepInEx.Configuration.ConfigEntry<bool> showOnEndScreen;
 
-        public struct ScoreData(int baseScore, int timeBonus, int protectionBonus, float protectionPercent)
+        private GameObject pausePanel;
+        private NightPanel pauseNight;
+        private TextMeshProUGUI pauseHeader, pauseNightLabel, pauseFooter;
+        private GameObject endPanel;
+
+        public override void Awake(Plugin plugin)
         {
-            public int BaseScore = baseScore;
-            public int TimeBonus = timeBonus;
-            public int ProtectionBonus = protectionBonus;
-            public float ProtectionPercent = protectionPercent;
-            public readonly int TotalPotentialScore => BaseScore + TimeBonus + ProtectionBonus;
-
-            public static ScoreData Empty => new(0, 0, 0, 100f);
+            base.Awake(plugin);
+            showOnEndScreen = plugin.Config.Bind(FeatureSection, "Final night on end screen", true,
+                "After a victory, show the final night's score breakdown on the end screen (the game skips it).");
+            showOnEndScreen.SettingChanged += (_, _) => { if (!showOnEndScreen.Value) DestroyEndPanel(); };
+            RegisterDevCommands();
         }
 
+        private CanvasGroup pauseGroup;
+        private PerkSelectionTooltipHelper nativeTooltip;
+
+        public override void Update()
+        {
+            ScoreCalculator.EnsureRecording();
+            if (pausePanel != null && pausePanel.activeInHierarchy) AvoidNativeTooltip();
+        }
+
+        /// <summary>
+        /// The pause menu's own selection tooltip (enemies, units, loadout, income) opens in the middle-right and reaches
+        /// into our corner; fade out while it's up. It shows whenever one of those icons is selected or hovered.
+        /// </summary>
+        private void AvoidNativeTooltip()
+        {
+            var frame = nativeTooltip != null ? nativeTooltip.targetFrame : null;
+            bool shown = frame != null && (HasTooltip(frame.CurrentFocus) || (frame.CurrentFocus == null && HasTooltip(frame.CurrentSelection)));
+            if (shown && nativeTooltip.tooltipParent != null && !nativeTooltip.tooltipParent.activeInHierarchy) shown = false;
+            pauseGroup.alpha = Mathf.MoveTowards(pauseGroup.alpha, shown ? 0f : 1f, Time.unscaledDeltaTime * 8f);
+            if (shown) ScoreTooltip.Hide();
+        }
+
+        private static bool HasTooltip(ThronefallUIElement e) => e is TFUIEquippable || e is TFUIEnemy || e is TFUIPlayerUnit || e is TFUIIncomeDisplay;
+
+        protected override void OnFeatureDisabled()
+        {
+            DestroyPausePanel();
+            DestroyEndPanel();
+        }
+
+        public override void OnDestroy() => OnFeatureDisabled();
+
+        private void DestroyPausePanel()
+        {
+            if (pausePanel != null) Object.Destroy(pausePanel);
+            pausePanel = null;
+            pauseNight = null;
+            ScoreTooltip.Hide();
+        }
+
+        private void DestroyEndPanel()
+        {
+            if (endPanel != null) Object.Destroy(endPanel);
+            endPanel = null;
+        }
+
+        // ---- Pause menu -----------------------------------------------------------------------------------------
+
+        // Refresh is wired to the frame's activation in the prefab; OnEnable covers it in case it isn't.
         [HarmonyPatch(typeof(PauseUILoadoutHelper), "OnEnable")]
-        private class PauseUILoadoutHelper_OnEnable_Patch
+        private static class PauseEnablePatch
         {
-            static PauseMenuScoreManager Instance => Plugin.Instance.GetManager<PauseMenuScoreManager>();
+            private static void Postfix(PauseUILoadoutHelper __instance) => PauseRefreshPatch.Postfix(__instance);
+        }
 
-            private static void Postfix(PauseUILoadoutHelper __instance)
+        [HarmonyPatch(typeof(PauseUILoadoutHelper), nameof(PauseUILoadoutHelper.Refresh))]
+        private static class PauseRefreshPatch
+        {
+            internal static void Postfix(PauseUILoadoutHelper __instance)
             {
-                Instance.AddScoreDisplay(__instance);
+                if (!Feature<PauseMenuScoreManager>.On) return;
+                Feature<PauseMenuScoreManager>.Instance.RefreshPause(__instance);
             }
         }
 
-        private void AddScoreDisplay(PauseUILoadoutHelper pauseUIHelper)
+        private void RefreshPause(PauseUILoadoutHelper helper)
         {
-            foreach (var obj in createdObjects)
+            ScoreCalculator.EnsureRecording();
+            if (!ScoreCalculator.Available || NightscoreUI.instance == null)
             {
-                if (obj != null) Object.Destroy(obj);
-            }
-            createdObjects.Clear();
-
-            Transform pauseMenuFrame = pauseUIHelper.transform;
-
-            Transform enemyPreview = pauseUIHelper.enemyPreview.transform;
-            if (enemyPreview == null) return;
-
-            var scoreContainer = new GameObject("ScoreDisplay", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(LayoutElement), typeof(Image));
-            scoreContainer.transform.SetParent(pauseMenuFrame, false);
-            createdObjects.Add(scoreContainer);
-
-            var rectTransform = scoreContainer.GetComponent<RectTransform>();
-            rectTransform.anchorMin = new Vector2(1, 1);
-            rectTransform.anchorMax = new Vector2(1, 1);
-            rectTransform.pivot = new Vector2(1, 1);
-            rectTransform.anchoredPosition = new Vector2(-50, -50); // Offset from top right
-
-            var image = scoreContainer.GetComponent<Image>();
-            image.color = new Color(0, 0, 0, 0.8f);
-            image.sprite = Resources.Load<Sprite>("ui/frame_round");
-            image.type = Image.Type.Sliced;
-
-            var vlg = scoreContainer.GetComponent<VerticalLayoutGroup>();
-            vlg.spacing = 15;
-            vlg.padding = new RectOffset(30, 30, 20, 20);
-            vlg.childAlignment = TextAnchor.MiddleLeft;
-
-            int currentScore = ScoreManager.Instance.CurrentScore;
-            bool isNight = DayNightCycle.Instance.CurrentTimestate == DayNightCycle.Timestate.Night;
-            ScoreData scoreData = ScoreData.Empty;
-
-            // Calculate potential score for current wave only during night
-            if (isNight)
-            {
-                scoreData = CalculatePotentialScoreDetailed();
-            }
-
-            // Get active mutators and their multipliers
-            List<(string name, float multiplier)> activeMutators = [];
-            float mutatorMultiplier = 1.0f;
-            foreach (var equippable in PerkManager.instance.CurrentlyEquipped)
-            {
-                if (equippable is not EquippableMutation) continue;
-                float scoreMultiplier = (equippable as EquippableMutation).scoreMultiplyerOnWin;
-                string mutationName = equippable.displayName;
-                activeMutators.Add((mutationName, scoreMultiplier));
-                mutatorMultiplier *= scoreMultiplier;
-            }
-            activeMutators.Sort((a, b) => b.multiplier.CompareTo(a.multiplier)); // Sort mutators by bonus (highest first)
-            bool hasMutatorBonus = mutatorMultiplier > 1.0f;
-            float mutatorBonusPercentage = (mutatorMultiplier - 1.0f) * 100f;
-
-            // Set container size based on content
-            rectTransform.sizeDelta = isNight ?
-                (hasMutatorBonus ? new Vector2(800, 480) : new Vector2(800, 420)) :
-                (hasMutatorBonus ? new Vector2(800, 220) : new Vector2(800, 160));
-
-            // Display current score
-            AddScoreRow(scoreContainer, "CURRENT SCORE", currentScore.ToString(), true);
-
-            // Add mutator bonus for current score if applicable
-            if (hasMutatorBonus && currentScore > 0)
-            {
-                int totalWithBonus = Mathf.CeilToInt(currentScore * mutatorMultiplier);
-
-                // Create detailed tooltip showing each mutator's contribution
-                System.Text.StringBuilder tooltipBuilder = new System.Text.StringBuilder();
-                foreach (var (name, multiplier) in activeMutators)
-                {
-                    float individualBonus = (multiplier - 1.0f) * 100f;
-                    tooltipBuilder.AppendLine($"• {name}: +{individualBonus:0}%");
-                }
-                AddScoreRow(scoreContainer, $"W/ MUTATORS (+{mutatorBonusPercentage:0}%)", $"{totalWithBonus}", false, tooltipBuilder.ToString());
-            }
-
-            // Add projected score details during night
-            if (isNight)
-            {
-                AddSpacer(scoreContainer, 5);
-                AddHorizontalRule(scoreContainer);
-                AddSpacer(scoreContainer, 0);
-
-                AddScoreRow(scoreContainer, "PROJECTED:", "");
-
-                int baseScorePerNight = AccessTools.Field(typeof(ScoreManager), "baseScorePerNight").GetValue(ScoreManager.Instance) as int? ?? 100;
-                string baseScoreTooltip = $"You always get {baseScorePerNight} points for surviving the night.";
-                AddScoreRow(scoreContainer, "NIGHT SURVIVED", $"+{scoreData.BaseScore}", false, baseScoreTooltip);
-
-                // Add tooltip for realm protection calculation
-                int protectionScorePerNight = AccessTools.Field(typeof(ScoreManager), "protectionScorePerNight").GetValue(ScoreManager.Instance) as int? ?? 250;
-                float scoreExponent = AccessTools.Field(typeof(ScoreManager), "scoreExponent").GetValue(ScoreManager.Instance) as float? ?? 2f;
-                string protectionTooltip = $"Calculated as {protectionScorePerNight} × (% Buildings Protected)^{scoreExponent}.";
-                AddScoreRow(scoreContainer, $"REALM {scoreData.ProtectionPercent:0}% PROTECTED", $"+{scoreData.ProtectionBonus}", false, protectionTooltip);
-
-                // Add time bonus with seconds since final spawn
-                float timeSinceFinalSpawn = Mathf.Max(0, DayNightCycle.Instance.CurrentNightLength - EnemySpawner.instance.LastSpawnPeriodDuration);
-                int timeScorePerNight = AccessTools.Field(typeof(ScoreManager), "timeScorePerNight").GetValue(ScoreManager.Instance) as int? ?? 250;
-                float timeBonusMinTime = AccessTools.Field(typeof(ScoreManager), "timeBonusMinTime").GetValue(ScoreManager.Instance) as float? ?? 5f;
-                float timeBonusMaxTime = AccessTools.Field(typeof(ScoreManager), "timeBonusMaxTime").GetValue(ScoreManager.Instance) as float? ?? 90f;
-                string timeTooltip = $"Time bonus is based on how long after the final spawn you complete the night.<br>{timeBonusMinTime}s or less gives maximum points, {timeBonusMaxTime}s or more gives no points.<br>Calculated as {timeScorePerNight} × ((({timeBonusMaxTime}s - time since final spawn) / {timeBonusMaxTime - timeBonusMinTime}s))^{scoreExponent}.";
-                AddScoreRow(scoreContainer, $"TIME BONUS ({timeSinceFinalSpawn:0}s)", $"+{scoreData.TimeBonus}", false, timeTooltip);
-
-                AddSpacer(scoreContainer, 0);
-
-                // Show total projected score
-                int projectedScore = currentScore + scoreData.TotalPotentialScore;
-                AddScoreRow(scoreContainer, "", projectedScore.ToString(), true);
-
-                // Add mutator bonus for projected score if applicable
-                if (hasMutatorBonus)
-                {
-                    int totalWithBonus = Mathf.CeilToInt(projectedScore * mutatorMultiplier);
-
-                    // Create detailed tooltip showing each mutator's contribution
-                    System.Text.StringBuilder tooltipBuilder = new System.Text.StringBuilder();
-                    foreach (var (name, multiplier) in activeMutators)
-                    {
-                        float individualBonus = (multiplier - 1.0f) * 100f;
-                        tooltipBuilder.AppendLine($"• {name}: +{individualBonus:0}%");
-                    }
-                    AddScoreRow(scoreContainer, $"W/ MUTATORS (+{mutatorBonusPercentage:0}%)", $"{totalWithBonus}", false, tooltipBuilder.ToString());
-                }
-
-                AddSpacer(scoreContainer, 0);
-            }
-        }
-
-        private void AddSpacer(GameObject parent, float height)
-        {
-            var spacerObj = new GameObject("Spacer", typeof(RectTransform), typeof(LayoutElement));
-            spacerObj.transform.SetParent(parent.transform, false);
-            createdObjects.Add(spacerObj);
-
-            var layoutElement = spacerObj.GetComponent<LayoutElement>();
-            layoutElement.minHeight = height;
-        }
-
-        private void AddHorizontalRule(GameObject parent)
-        {
-            var ruleObj = new GameObject("HorizontalRule", typeof(RectTransform), typeof(Image), typeof(LayoutElement));
-            ruleObj.transform.SetParent(parent.transform, false);
-            createdObjects.Add(ruleObj);
-
-            var rectTransform = ruleObj.GetComponent<RectTransform>();
-            rectTransform.sizeDelta = new Vector2(590, 2);
-
-            var layoutElement = ruleObj.GetComponent<LayoutElement>();
-            layoutElement.minHeight = 2;
-            layoutElement.flexibleWidth = 1;
-
-            var image = ruleObj.GetComponent<Image>();
-            image.color = GOLD_COLOR;
-        }
-
-        private void AddScoreRow(GameObject parent, string label, string value, bool isBigValue = false, string tooltip = null)
-        {
-            // Create row container
-            var rowObj = new GameObject("ScoreRow", typeof(RectTransform), typeof(LayoutElement));
-            rowObj.transform.SetParent(parent.transform, false);
-            createdObjects.Add(rowObj);
-
-            var rowLayout = rowObj.GetComponent<LayoutElement>();
-            rowLayout.minHeight = ROW_MIN_HEIGHT + (isBigValue ? 10 : 0);
-            rowLayout.preferredHeight = ROW_MIN_HEIGHT + (isBigValue ? 10 : 0);
-
-            // Add horizontal layout for label and value
-            var hlgObj = new GameObject("HorizontalLayout", typeof(RectTransform), typeof(HorizontalLayoutGroup));
-            hlgObj.transform.SetParent(rowObj.transform, false);
-            createdObjects.Add(hlgObj);
-
-            var rectTransform = hlgObj.GetComponent<RectTransform>();
-            rectTransform.anchorMin = Vector2.zero;
-            rectTransform.anchorMax = Vector2.one;
-            rectTransform.offsetMin = Vector2.zero;
-            rectTransform.offsetMax = Vector2.zero;
-
-            var hlg = hlgObj.GetComponent<HorizontalLayoutGroup>();
-            hlg.spacing = 10;
-            hlg.childAlignment = TextAnchor.MiddleLeft;
-            hlg.childControlWidth = true;
-            hlg.childForceExpandWidth = true;
-
-            // Add label
-            if (!string.IsNullOrEmpty(label))
-            {
-                var labelObj = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
-                labelObj.transform.SetParent(hlgObj.transform, false);
-                createdObjects.Add(labelObj);
-
-                var labelText = labelObj.GetComponent<TextMeshProUGUI>();
-                labelText.text = label;
-                labelText.fontSize = DEFAULT_FONT_SIZE;
-                labelText.font = titleFont;
-                labelText.color = GOLD_COLOR;
-                labelText.alignment = TextAlignmentOptions.Left;
-                labelText.characterSpacing = CHARACTER_SPACING;
-                labelText.enableAutoSizing = false;
-
-                var labelLayout = labelObj.GetComponent<LayoutElement>();
-                labelLayout.flexibleWidth = 1;
-
-                // Add tooltip if provided
-                if (!string.IsNullOrEmpty(tooltip))
-                {
-                    // Add a simple button component to handle events
-                    var button = labelObj.AddComponent<Button>();
-                    var colors = button.colors;
-                    colors.normalColor = Color.white;
-                    colors.highlightedColor = Color.white;
-                    colors.pressedColor = Color.white;
-                    colors.selectedColor = Color.white;
-                    colors.disabledColor = Color.white;
-                    colors.colorMultiplier = 1f;
-                    button.colors = colors;
-
-                    // Create a static tooltip manager if it doesn't exist
-                    if (tooltipManager == null)
-                    {
-                        CreateTooltipManager();
-                    }
-
-                    // Add event listeners
-                    button.onClick.AddListener(() => {});  // Empty listener to make button work
-
-                    var eventTrigger = labelObj.AddComponent<UnityEngine.EventSystems.EventTrigger>();
-
-                    var pointerEnterEntry = new UnityEngine.EventSystems.EventTrigger.Entry
-                    {
-                        eventID = UnityEngine.EventSystems.EventTriggerType.PointerEnter
-                    };
-                    pointerEnterEntry.callback.AddListener((data) => {
-                        ShowTooltip(tooltip, ((UnityEngine.EventSystems.PointerEventData)data).position);
-                    });
-                    eventTrigger.triggers.Add(pointerEnterEntry);
-
-                    var pointerExitEntry = new UnityEngine.EventSystems.EventTrigger.Entry
-                    {
-                        eventID = UnityEngine.EventSystems.EventTriggerType.PointerExit
-                    };
-                    pointerExitEntry.callback.AddListener((data) => {
-                        HideTooltip();
-                    });
-                    eventTrigger.triggers.Add(pointerExitEntry);
-
-                    var pointerMoveEntry = new UnityEngine.EventSystems.EventTrigger.Entry
-                    {
-                        eventID = UnityEngine.EventSystems.EventTriggerType.Move
-                    };
-                    pointerMoveEntry.callback.AddListener((data) => {
-                        UpdateTooltipPosition(((UnityEngine.EventSystems.PointerEventData)data).position);
-                    });
-                    eventTrigger.triggers.Add(pointerMoveEntry);
-                }
-            }
-
-            // Add value
-            if (!string.IsNullOrEmpty(value))
-            {
-                var valueObj = new GameObject("Value", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
-                valueObj.transform.SetParent(hlgObj.transform, false);
-                createdObjects.Add(valueObj);
-
-                var valueText = valueObj.GetComponent<TextMeshProUGUI>();
-                valueText.text = value;
-                valueText.fontSize = isBigValue ? BIG_VALUE_FONT_SIZE : DEFAULT_FONT_SIZE;
-                valueText.font = numberFont;
-                valueText.color = GOLD_COLOR;
-                valueText.alignment = TextAlignmentOptions.Right;
-                valueText.characterSpacing = CHARACTER_SPACING;
-                valueText.enableAutoSizing = false;
-
-                var valueLayout = valueObj.GetComponent<LayoutElement>();
-                valueLayout.minWidth = 150;
-            }
-        }
-
-        private ScoreData CalculatePotentialScoreDetailed()
-        {
-            try
-            {
-                int baseScorePerNight = AccessTools.Field(typeof(ScoreManager), "baseScorePerNight").GetValue(ScoreManager.Instance) as int? ?? 100;
-                int protectionScorePerNight = AccessTools.Field(typeof(ScoreManager), "protectionScorePerNight").GetValue(ScoreManager.Instance) as int? ?? 200;
-                int timeScorePerNight = AccessTools.Field(typeof(ScoreManager), "timeScorePerNight").GetValue(ScoreManager.Instance) as int? ?? 200;
-                float scoreExponent = AccessTools.Field(typeof(ScoreManager), "scoreExponent").GetValue(ScoreManager.Instance) as float? ?? 2f;
-                float timeBonusMinTime = AccessTools.Field(typeof(ScoreManager), "timeBonusMinTime").GetValue(ScoreManager.Instance) as float? ?? 10f;
-                float timeBonusMaxTime = AccessTools.Field(typeof(ScoreManager), "timeBonusMaxTime").GetValue(ScoreManager.Instance) as float? ?? 120f;
-                float scoreMultiplyerFromPerks = AccessTools.Field(typeof(ScoreManager), "scoreMultiplyerFromPerks").GetValue(ScoreManager.Instance) as float? ?? 1f;
-
-                int baseScore = Mathf.RoundToInt(baseScorePerNight * scoreMultiplyerFromPerks);
-
-                float currentNightLength = DayNightCycle.Instance.CurrentNightLength;
-                float lastSpawnPeriodDuration = EnemySpawner.instance.LastSpawnPeriodDuration;
-
-                float inverseLerp = Mathf.InverseLerp(
-                    timeBonusMaxTime + lastSpawnPeriodDuration,
-                    timeBonusMinTime + lastSpawnPeriodDuration,
-                    currentNightLength);
-
-                int timeBonus = Mathf.RoundToInt(
-                    Mathf.Pow(inverseLerp, scoreExponent) *
-                    timeScorePerNight *
-                    scoreMultiplyerFromPerks);
-
-                List<TaggedObject> buildings = [];
-                TagManager.instance.FindAllTaggedObjectsWithTags(buildings, [TagManager.ETag.Building], null);
-
-                int knockedOutBuildings = 0;
-                foreach (TaggedObject building in buildings)
-                {
-                    BuildingInteractor interactor = building.transform.parent.GetComponentInChildren<BuildingInteractor>(true);
-                    if (interactor != null && interactor.KnockedOutTonight)
-                    {
-                        knockedOutBuildings++;
-                    }
-                }
-
-                float protectionPercent = 100f;
-                if (buildings.Count > 0)
-                {
-                    protectionPercent = 100 * (1f - (float)knockedOutBuildings / buildings.Count);
-                }
-
-                float protectionRatio = 1f - Mathf.InverseLerp(0f, buildings.Count, knockedOutBuildings);
-                float protectionRatioPowered = Mathf.Pow(protectionRatio, scoreExponent);
-
-                int protectionBonus = Mathf.RoundToInt(
-                    protectionScorePerNight *
-                    protectionRatioPowered *
-                    scoreMultiplyerFromPerks);
-
-                return new ScoreData(baseScore, timeBonus, protectionBonus, protectionPercent);
-            }
-            catch (System.Exception ex)
-            {
-                Plugin.Logger.LogError($"Error calculating potential score: {ex.Message}");
-                return ScoreData.Empty;
-            }
-        }
-
-        public override void OnDestroy()
-        {
-            foreach (var obj in createdObjects)
-            {
-                if (obj != null) Object.Destroy(obj);
-            }
-            createdObjects.Clear();
-
-            // Clean up tooltip manager
-            if (tooltipManager != null)
-            {
-                Object.Destroy(tooltipManager);
-                tooltipManager = null;
-            }
-
-            // Clean up any active tooltip
-            if (activeTooltip != null)
-            {
-                Object.Destroy(activeTooltip);
-                activeTooltip = null;
-            }
-        }
-
-        // Global tooltip manager
-        private static GameObject tooltipManager;
-        private static GameObject activeTooltip;
-
-        private void CreateTooltipManager()
-        {
-            tooltipManager = new GameObject("TooltipManager");
-            Object.DontDestroyOnLoad(tooltipManager);
-            createdObjects.Add(tooltipManager);
-        }
-
-        private void ShowTooltip(string text, Vector2 position)
-        {
-            HideTooltip(); // Hide any existing tooltip
-
-            // Find the main canvas
-            Canvas mainCanvas = null;
-            Canvas[] canvases = UnityEngine.Object.FindObjectsOfType<Canvas>();
-            foreach (Canvas canvas in canvases)
-            {
-                if (canvas.renderMode == RenderMode.ScreenSpaceOverlay)
-                {
-                    mainCanvas = canvas;
-                    break;
-                }
-            }
-
-            if (mainCanvas == null)
-            {
-                Debug.LogError("Cannot create tooltip: No overlay canvas found in scene");
+                if (pausePanel != null) pausePanel.SetActive(false);
                 return;
             }
+            if (pausePanel == null || pausePanel.transform.parent != helper.transform) BuildPause(helper);
+            pausePanel.SetActive(true);
 
-            // Create tooltip
-            activeTooltip = new GameObject("ActiveTooltip", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter), typeof(Image), typeof(CanvasGroup));
-            activeTooltip.transform.SetParent(mainCanvas.transform, false);
-            createdObjects.Add(activeTooltip);
+            int score = ScoreCalculator.CurrentScore;
+            pauseHeader.text = $"{Term("Menu/Score", "Score")}: <style=Body Numerals>{score}</style>";
 
-            // Make tooltip ignore mouse events
-            var canvasGroup = activeTooltip.GetComponent<CanvasGroup>();
-            canvasGroup.blocksRaycasts = false;
-            canvasGroup.interactable = false;
+            var footer = new StringBuilder();
+            var footerTip = new StringBuilder();
+            if (ScoreCalculator.IsNight)
+            {
+                var t = ScoreCalculator.ProjectTonight();
+                pauseNightLabel.text = "If the night ended now";
+                pauseNight.Root.SetActive(true);
+                pauseNight.Show(t, score + t.Total, ExplainBase(), ExplainProtection(t), ExplainTime(t), timeSuffix: TimeSuffix(t));
+                if (ScoreCalculator.IsFinalNight)
+                {
+                    var v = ScoreCalculator.Victory(score + t.Total);
+                    footer.Append($"Victory total: <style=Body Numerals>{v.Total}</style>");
+                    footerTip.Append(ExplainVictory(v));
+                }
+            }
+            else if (ScoreCalculator.LastNight is NightScore last)
+            {
+                pauseNightLabel.text = $"{Term("Menu/Night", "Night")} <style=Body Numerals>{last.Night}</style>";
+                pauseNight.Root.SetActive(true);
+                pauseNight.Show(last, score, ExplainBase(), ExplainProtection(last), ExplainTime(last), timeSuffix: TimeSuffix(last));
+            }
+            else
+            {
+                pauseNightLabel.text = "";
+                pauseNight.Root.SetActive(false);
+            }
 
-            var rectTransform = activeTooltip.GetComponent<RectTransform>();
-            // Position tooltip below the cursor instead of directly at cursor position
-            rectTransform.position = position + new Vector2(0, -70);
-
-            var image = activeTooltip.GetComponent<Image>();
-            image.color = new Color(0, 0, 0, 0.9f);
-            image.sprite = Resources.Load<Sprite>("ui/frame_round");
-            image.type = Image.Type.Sliced;
-
-            var vlg = activeTooltip.GetComponent<VerticalLayoutGroup>();
-            vlg.padding = new RectOffset(15, 15, 10, 10);
-
-            var csf = activeTooltip.GetComponent<ContentSizeFitter>();
-            csf.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
-            csf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-            var textObj = new GameObject("TooltipText", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
-            textObj.transform.SetParent(activeTooltip.transform, false);
-            createdObjects.Add(textObj);
-
-            var textComponent = textObj.GetComponent<TextMeshProUGUI>();
-            textComponent.text = text;
-            textComponent.fontSize = 20;
-            textComponent.font = titleFont;
-            textComponent.color = GOLD_COLOR;
-            textComponent.alignment = TextAlignmentOptions.Left;
-
-            var layoutElement = textObj.GetComponent<LayoutElement>();
-            layoutElement.minWidth = 450;
-            layoutElement.preferredWidth = 450;
-            layoutElement.flexibleWidth = 0;
+            if (footer.Length == 0)
+            {
+                var mutators = ScoreCalculator.Mutators();
+                float m = ScoreCalculator.MutatorMultiplier();
+                if (mutators.Count > 0 && !ScoreCalculator.IsEternalTrial)
+                {
+                    footer.Append($"Mutators: <style=Body Numerals>+{Mathf.RoundToInt((m - 1f) * 100f)}%</style> on victory");
+                    footerTip.Append("Added to your score and gold bonus when you win:");
+                    foreach (var (name, mult) in mutators)
+                        footerTip.Append($"\n{name}: +{Mathf.RoundToInt((mult - 1f) * 100f)}%");
+                }
+            }
+            pauseFooter.text = footer.ToString();
+            pauseFooter.gameObject.SetActive(footer.Length > 0);
+            ScoreTooltip.Attach(pauseFooter, footerTip.ToString());
         }
 
-        private void UpdateTooltipPosition(Vector2 position)
+        private void BuildPause(PauseUILoadoutHelper helper)
         {
-            if (activeTooltip != null)
+            DestroyPausePanel();
+            pausePanel = new GameObject("PalaceMod Score", typeof(RectTransform));
+            var rect = (RectTransform)pausePanel.transform;
+            rect.SetParent(helper.transform, false);
+            rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(1f, 1f);
+            rect.anchoredPosition = new Vector2(-45f, -30f); // the dawn score panel's corner
+            var layout = pausePanel.AddComponent<VerticalLayoutGroup>();
+            layout.childAlignment = TextAnchor.UpperRight;
+            layout.childControlWidth = layout.childControlHeight = true;
+            layout.childForceExpandWidth = layout.childForceExpandHeight = false;
+            layout.spacing = 6f;
+            var fitter = pausePanel.AddComponent<ContentSizeFitter>();
+            fitter.horizontalFit = fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            pauseGroup = pausePanel.AddComponent<CanvasGroup>();
+            nativeTooltip = helper.GetComponent<PerkSelectionTooltipHelper>();
+
+            pauseHeader = CloneLabel(helper.nightPreviewText, pausePanel.transform, "Score", 1f);
+            pauseNightLabel = CloneLabel(helper.nightPreviewText, pausePanel.transform, "Night label", 0.75f);
+            pauseNight = NightPanel.Clone(pausePanel.transform, "Night breakdown");
+            pauseFooter = CloneLabel(helper.nightPreviewText, pausePanel.transform, "Footer", 0.75f);
+        }
+
+        /// <summary>A text styled like the pause menu's "Night: 3/12" line.</summary>
+        private static TextMeshProUGUI CloneLabel(TextMeshProUGUI source, Transform parent, string name, float scale)
+        {
+            var obj = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+            obj.transform.SetParent(parent, false);
+            var text = obj.GetComponent<TextMeshProUGUI>();
+            text.font = source.font;
+            text.fontSharedMaterial = source.fontSharedMaterial;
+            text.fontSize = source.fontSize * scale;
+            text.fontStyle = source.fontStyle;
+            text.color = source.color;
+            text.characterSpacing = source.characterSpacing;
+            text.styleSheet = source.styleSheet;
+            text.alignment = TextAlignmentOptions.Right;
+            text.enableWordWrapping = false;
+            text.raycastTarget = false;
+            return text;
+        }
+
+        // ---- End-of-match screen --------------------------------------------------------------------------------
+
+        [HarmonyPatch(typeof(EndOfMatchScoreUIHelper), nameof(EndOfMatchScoreUIHelper.OnActivate))]
+        private static class EndScreenPatch
+        {
+            private static void Postfix(EndOfMatchScoreUIHelper __instance)
             {
-                var rectTransform = activeTooltip.GetComponent<RectTransform>();
-                // Position tooltip below the cursor instead of directly at cursor position
-                rectTransform.position = position + new Vector2(0, -70);
+                if (!Feature<PauseMenuScoreManager>.On) return;
+                Feature<PauseMenuScoreManager>.Instance.ShowFinalNight(__instance);
             }
         }
 
-        private void HideTooltip()
+        private void ShowFinalNight(EndOfMatchScoreUIHelper helper)
         {
-            if (activeTooltip != null)
+            DestroyEndPanel();
+            if (!showOnEndScreen.Value || NightscoreUI.instance == null) return;
+            if (LocalGamestate.Instance == null || LocalGamestate.Instance.CurrentState != LocalGamestate.State.AfterMatchVictory) return;
+            // Eternal Trials victories use their own screen (mainFrameParent stays hidden), which already summarises the run.
+            if (ScoreCalculator.IsEternalTrial) return;
+            if (ScoreCalculator.LastNight is not NightScore last || last.Night < ScoreCalculator.NightCount) return;
+
+            // A child of the main frame, so it fades in with the score list.
+            endPanel = new GameObject("PalaceMod Final Night", typeof(RectTransform));
+            var rect = (RectTransform)endPanel.transform;
+            rect.SetParent(helper.mainFrameParent.transform, false);
+            // Left of the 600-wide centre column, level with the score list.
+            rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 1f);
+            rect.pivot = new Vector2(1f, 1f);
+            rect.anchoredPosition = new Vector2(-340f, -330f);
+            var layout = endPanel.AddComponent<VerticalLayoutGroup>();
+            layout.childAlignment = TextAnchor.UpperRight;
+            layout.childControlWidth = layout.childControlHeight = true;
+            layout.childForceExpandWidth = layout.childForceExpandHeight = false;
+            layout.spacing = 6f;
+            var endFitter = endPanel.AddComponent<ContentSizeFitter>();
+            endFitter.horizontalFit = endFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            var label = CloneLabel(helper.baseScoreName, endPanel.transform, "Label", 1f);
+            label.text = $"{Term("Menu/Night", "Night")} <style=Body Numerals>{last.Night}</style>";
+            var panel = NightPanel.Clone(endPanel.transform, "Night breakdown");
+            panel.Show(last, ScoreCalculator.CurrentScore, ExplainBase(), ExplainProtection(last), ExplainTime(last), TimeSuffix(last));
+        }
+
+        // ---- Text -----------------------------------------------------------------------------------------------
+
+        private static string Term(string term, string fallback)
+        {
+            string s = LocalizationManager.GetTranslation(term);
+            return string.IsNullOrEmpty(s) ? fallback : s;
+        }
+
+        private static string TimeSuffix(NightScore n) => n.SecondsAfterSpawning < 0f ? "" : $" ({Mathf.FloorToInt(n.SecondsAfterSpawning)}s)";
+
+        private static string ExplainBase() => $"Every night survived scores {ScoreManager.Instance.baseScorePerNight}.";
+
+        private static string ExplainProtection(NightScore n)
+        {
+            var sm = ScoreManager.Instance;
+            string counts = n.Buildings >= 0 ? $"{n.BuildingsKnockedOut} of {n.Buildings} buildings knocked out.\n" : "";
+            return $"{counts}Up to {sm.protectionScorePerNight}, scaled by the share of buildings left standing, squared.";
+        }
+
+        private static string ExplainTime(NightScore n)
+        {
+            float full = ScoreCalculator.TimeBonusFullUntil, gone = ScoreCalculator.TimeBonusGoneAfter;
+            bool tonight = ScoreCalculator.IsNight && n.Night == ScoreCalculator.NightNumber;
+            string when = n.SecondsAfterSpawning < 0f ? ""
+                : tonight && EnemySpawner.instance.SpawningInProgress ? "Enemies are still arriving.\n"
+                : tonight ? $"{Mathf.FloorToInt(n.SecondsAfterSpawning)}s since the last enemy arrived.\n"
+                : $"Night ended {Mathf.FloorToInt(n.SecondsAfterSpawning)}s after the last enemy arrived.\n";
+            return $"{when}Full {ScoreManager.Instance.timeScorePerNight} if you clear the night within {full:0}s of the last enemy arriving, falling to 0 at {gone:0}s.";
+        }
+
+        private static string ExplainVictory(MatchEndScore v)
+        {
+            var sb = new StringBuilder("If you win now:");
+            sb.Append($"\nScore: {v.Score}");
+            sb.Append($"\nGold bonus: +{v.Gold}");
+            if (v.Mutators > 0) sb.Append($"\nMutator bonus: +{v.Mutators}");
+            if (v.NoRetry > 0) sb.Append($"\nNo retries bonus: +{v.NoRetry}");
+            return sb.ToString();
+        }
+
+        // ---- The cloned native night-score panel ----------------------------------------------------------------
+
+        /// <summary>A copy of the game's dawn score panel (NightscoreUI), static and fully expanded.</summary>
+        private sealed class NightPanel
+        {
+            public GameObject Root;
+            private TextMeshProUGUI baseScore, timeBonus, protectionPercentage, protectionScore, overallScore, timeLabel, baseLabel;
+            private string timeLabelText;
+
+            public static NightPanel Clone(Transform parent, string name)
             {
-                Object.Destroy(activeTooltip);
-                activeTooltip = null;
+                var ui = NightscoreUI.instance;
+                var source = ui.nightScorePanel.transform;
+                var root = Object.Instantiate(ui.nightScorePanel, parent, false);
+                root.name = name;
+                foreach (var behaviour in root.GetComponentsInChildren<NightscoreUI>(true)) Object.Destroy(behaviour);
+                foreach (var audio in root.GetComponentsInChildren<AudioSource>(true)) Object.Destroy(audio);
+
+                T Find<T>(Component c) where T : Component
+                {
+                    if (c == null) return null;
+                    string path = RelativePath(source, c.transform);
+                    var t = path == null ? null : (path.Length == 0 ? root.transform : root.transform.Find(path));
+                    return t != null ? t.GetComponent<T>() : null;
+                }
+
+                var p = new NightPanel
+                {
+                    Root = root,
+                    baseScore = Find<TextMeshProUGUI>(ui.baseScore),
+                    timeBonus = Find<TextMeshProUGUI>(ui.timeBonus),
+                    protectionPercentage = Find<TextMeshProUGUI>(ui.protectionPercentage),
+                    protectionScore = Find<TextMeshProUGUI>(ui.protectionScore),
+                    overallScore = Find<TextMeshProUGUI>(ui.overallScore),
+                    timeLabel = Find<TextMeshProUGUI>(ui.timeText),
+                    baseLabel = Find<TextMeshProUGUI>(ui.nightSurviveText),
+                };
+
+                // Undo the pop-up animation's start state: every row scaled to zero and the content collapsed.
+                foreach (var rt in new[] { ui.nightSurviveText, ui.nightSurviveNumber, ui.timeText, ui.timeNumber, ui.protectionText,
+                             ui.protectionNumber, ui.overallScoreBG, ui.overallScoreNumber })
+                {
+                    var c = Find<RectTransform>(rt);
+                    if (c != null) c.localScale = Vector3.one;
+                }
+                // The panel stretches over the HUD with its content pinned 45 px into the top-right corner; pin it to our
+                // corner instead and size the root to the content plus the total bubble hanging below it.
+                var content = Find<RectTransform>(ui.content);
+                float width = 560f;
+                if (content != null)
+                {
+                    content.sizeDelta = new Vector2(content.sizeDelta.x, ExpandedContentHeight);
+                    content.anchoredPosition = Vector2.zero;
+                    width = content.sizeDelta.x;
+                }
+                var bg = Find<MPUIKIT.MPImage>(ui.backgroundImage);
+                if (bg != null) bg.enabled = true;
+
+                // Labels: localise once, then let us append to them.
+                if (p.timeLabel != null)
+                {
+                    var loc = p.timeLabel.GetComponent<Localize>();
+                    if (loc != null) { loc.OnLocalize(true); Object.Destroy(loc); }
+                    p.timeLabelText = p.timeLabel.text;
+                }
+
+                var element = root.GetComponent<LayoutElement>() ?? root.AddComponent<LayoutElement>();
+                var bubble = Find<RectTransform>(ui.overallScoreBG);
+                float below = bubble != null ? -bubble.anchoredPosition.y + bubble.sizeDelta.y : 70f;
+                element.preferredWidth = width;
+                element.preferredHeight = ExpandedContentHeight + below;
+                if (p.timeLabel != null) p.timeLabel.name = "Time Text"; // last: Find() looks children up by their original names
+                root.SetActive(true);
+                return p;
+            }
+
+            /// <summary>NightscoreUI grows the content by 55 + 30 + 30 while popping the rows in.</summary>
+            private const float ExpandedContentHeight = 115f;
+
+            public void Show(NightScore n, int overall, string baseTip, string protectionTip, string timeTip, string timeSuffix)
+            {
+                if (baseScore != null) baseScore.text = "+" + n.Base;
+                if (timeBonus != null) timeBonus.text = "+" + n.Time;
+                if (protectionScore != null) protectionScore.text = "+" + n.Protection;
+                if (protectionPercentage != null)
+                    protectionPercentage.text = $"{Term("Menu/Realm", "Realm")} {n.ProtectionPercent}% {Term("Menu/Protected", "Protected")}";
+                if (overallScore != null) overallScore.text = overall.ToString();
+                if (timeLabel != null) timeLabel.text = timeLabelText + timeSuffix;
+                ScoreTooltip.Attach(baseLabel, baseTip);
+                ScoreTooltip.Attach(protectionPercentage, protectionTip);
+                ScoreTooltip.Attach(timeLabel, timeTip);
+            }
+
+            private static string RelativePath(Transform root, Transform t)
+            {
+                var parts = new List<string>();
+                for (var cur = t; cur != null; cur = cur.parent)
+                {
+                    if (cur == root) { parts.Reverse(); return string.Join("/", parts); }
+                    parts.Add(cur.name);
+                }
+                return null;
             }
         }
+
+        // ---- Minimal hover tooltip (migrate to the shared ui-kit tooltip when it lands) --------------------------
+
+        private sealed class ScoreTooltip : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
+        {
+            private string text;
+            private static GameObject shown;
+            private static TextMeshProUGUI shownText;
+
+            public static void Attach(TextMeshProUGUI target, string text)
+            {
+                if (target == null) return;
+                var tip = target.GetComponent<ScoreTooltip>() ?? target.gameObject.AddComponent<ScoreTooltip>();
+                tip.text = text;
+                target.raycastTarget = !string.IsNullOrEmpty(text);
+            }
+
+            public void OnPointerEnter(PointerEventData eventData)
+            {
+                if (string.IsNullOrEmpty(text)) return;
+                var label = GetComponent<TextMeshProUGUI>();
+                var canvas = GetComponentInParent<Canvas>()?.rootCanvas;
+                if (canvas == null) return;
+                if (shown == null || shown.transform.parent != canvas.transform) Create(canvas.transform, label);
+                shownText.text = text;
+                shown.SetActive(true);
+                shown.transform.SetAsLastSibling();
+                // Just below the hovered label, right-aligned with it.
+                var rect = (RectTransform)shown.transform;
+                var corners = new Vector3[4];
+                ((RectTransform)transform).GetWorldCorners(corners);
+                rect.position = corners[0];
+                rect.pivot = new Vector2(0f, 1f);
+                LayoutRebuilder.ForceRebuildLayoutImmediate(rect);
+                var canvasRect = (RectTransform)canvas.transform;
+                // Keep it on screen: flip to the label's right edge if it would overflow.
+                var tipCorners = new Vector3[4];
+                rect.GetWorldCorners(tipCorners);
+                var canvasCorners = new Vector3[4];
+                canvasRect.GetWorldCorners(canvasCorners);
+                if (tipCorners[2].x > canvasCorners[2].x)
+                {
+                    rect.pivot = new Vector2(1f, 1f);
+                    rect.position = corners[3];
+                }
+            }
+
+            public void OnPointerExit(PointerEventData eventData) => Hide();
+
+            private void OnDisable() => Hide();
+
+            public static void Hide()
+            {
+                if (shown != null) shown.SetActive(false);
+            }
+
+            private static void Create(Transform canvas, TextMeshProUGUI style)
+            {
+                if (shown != null) Object.Destroy(shown);
+                // The dawn score panel's rounded charcoal background, without its children.
+                var source = NightscoreUI.instance != null ? NightscoreUI.instance.backgroundImage : null;
+                if (source != null)
+                {
+                    shown = Object.Instantiate(source.gameObject, canvas, false);
+                    foreach (Transform child in shown.transform) Object.Destroy(child.gameObject);
+                    source = shown.GetComponent<MPUIKIT.MPImage>();
+                    source.raycastTarget = false;
+                    source.enabled = true;
+                }
+                else
+                {
+                    shown = new GameObject("bg", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                    shown.transform.SetParent(canvas, false);
+                    var image = shown.GetComponent<Image>();
+                    image.color = new Color(0.102f, 0.110f, 0.114f); // the game's panel charcoal
+                    image.raycastTarget = false;
+                }
+                shown.name = "PalaceMod Score Tooltip";
+                var shownRect = (RectTransform)shown.transform;
+                shownRect.anchorMin = shownRect.anchorMax = new Vector2(0.5f, 0.5f);
+                var layout = shown.AddComponent<VerticalLayoutGroup>();
+                layout.padding = new RectOffset(22, 22, 14, 14);
+                layout.childControlWidth = layout.childControlHeight = true;
+                var fitter = shown.AddComponent<ContentSizeFitter>();
+                fitter.horizontalFit = fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+                var textObj = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI), typeof(LayoutElement));
+                textObj.transform.SetParent(shown.transform, false);
+                shownText = textObj.GetComponent<TextMeshProUGUI>();
+                shownText.font = TMP_Settings.defaultFontAsset;
+                var body = Resources.Load<TMP_FontAsset>("fonts & materials/CormorantGaramond-Light SDF");
+                body ??= Array.Find(Resources.FindObjectsOfTypeAll<TMP_FontAsset>(), f => f.name == "CormorantGaramond-Light SDF");
+                if (body != null) shownText.font = body;
+                shownText.fontSize = 24f;
+                shownText.color = style != null ? style.color : new Color(0.784f, 0.651f, 0.455f);
+                shownText.raycastTarget = false;
+                shownText.enableWordWrapping = true;
+                textObj.GetComponent<LayoutElement>().preferredWidth = 420f;
+                shown.SetActive(false);
+            }
+        }
+
+        // ---- Dev commands ---------------------------------------------------------------------------------------
+
+        private void RegisterDevCommands()
+        {
+            DevCommands.Register("score", "score [wave <n>|mutator|killall|dump <pause|nightscore|end>|shownight|hover <score|time|protection|base|footer>]   score numbers and test helpers", args =>
+            {
+                string sub = args.Length > 0 ? args[0].ToLowerInvariant() : "";
+                switch (sub)
+                {
+                    case "":
+                        return Describe();
+                    case "wave":
+                    {
+                        if (!ScoreCalculator.Available) throw new InvalidOperationException("not in a level");
+                        if (ScoreCalculator.IsNight) throw new InvalidOperationException("only by day");
+                        int n = int.Parse(args[1]);
+                        int count = ScoreCalculator.NightCount;
+                        if (n < 1 || n > count) throw new ArgumentException($"night must be 1..{count}");
+                        AccessTools.Field(typeof(EnemySpawner), "wavenumber").SetValue(EnemySpawner.instance, n - 2);
+                        GameplayImpact.Mark("Dev: skipped nights");
+                        return $"next night is {n}/{count}";
+                    }
+                    case "mutator":
+                    {
+                        // Equips one more mutator (score multiplier only; its gameplay effect isn't applied mid-match).
+                        var equipped = PerkManager.instance.CurrentlyEquipped;
+                        var m = Array.Find(Resources.FindObjectsOfTypeAll<EquippableMutation>(), x => !equipped.Contains(x))
+                            ?? throw new InvalidOperationException("no unequipped mutator loaded");
+                        equipped.Add(m);
+                        GameplayImpact.Mark("Dev: added mutator");
+                        return $"equipped {m.displayName} (x{m.scoreMultiplyerOnWin})";
+                    }
+                    case "killall":
+                        Hp.KillAllEnemyUnits();
+                        GameplayImpact.Mark("Dev: killed all enemies");
+                        return "killed all enemies";
+                    case "dump":
+                        return Dump(args.Length > 1 ? args[1] : "pause");
+                    case "shownight":
+                    {
+                        var last = ScoreCalculator.LastNight ?? throw new InvalidOperationException("no night scored yet");
+                        NightscoreUI.instance.ShowNightScore(last.Base, last.Time, last.ProtectionFraction, last.Protection);
+                        return "shown";
+                    }
+                    case "hover":
+                    {
+                        if (pausePanel == null) throw new InvalidOperationException("pause menu panel not built");
+                        string which = args.Length > 1 ? args[1].ToLowerInvariant() : "time";
+                        TextMeshProUGUI target = null;
+                        foreach (var tip in pausePanel.GetComponentsInChildren<ScoreTooltip>(true))
+                            if (tip.name.ToLowerInvariant().Contains(which)) target = tip.GetComponent<TextMeshProUGUI>();
+                        if (target == null) throw new ArgumentException("no tooltip on " + which);
+                        target.GetComponent<ScoreTooltip>().OnPointerEnter(null);
+                        return "hovering " + target.name;
+                    }
+                    default:
+                        throw new ArgumentException("unknown subcommand " + sub);
+                }
+            });
+        }
+
+        private static string Describe()
+        {
+            if (!ScoreCalculator.Available) return "not in a level";
+            var sb = new StringBuilder();
+            sb.Append($"score {ScoreCalculator.CurrentScore}, night {ScoreCalculator.NightNumber}/{ScoreCalculator.NightCount} {(ScoreCalculator.IsNight ? "(night)" : "(day)")}");
+            if (ScoreCalculator.IsNight)
+            {
+                var t = ScoreCalculator.ProjectTonight();
+                sb.Append($"\ntonight: base {t.Base} time {t.Time} ({t.SecondsAfterSpawning:0.0}s after spawning) protection {t.Protection} ({t.ProtectionPercent}%, {t.BuildingsKnockedOut}/{t.Buildings} down) = {t.Total}");
+                if (ScoreCalculator.IsFinalNight)
+                {
+                    var v = ScoreCalculator.Victory(ScoreCalculator.CurrentScore + t.Total);
+                    sb.Append($"\nvictory now: score {v.Score} gold {v.Gold} mutators {v.Mutators} noretry {v.NoRetry} = {v.Total}");
+                }
+            }
+            foreach (var n in ScoreCalculator.Nights)
+                sb.Append($"\nnight {n.Night}: base {n.Base} time {n.Time} ({n.SecondsAfterSpawning:0.0}s) protection {n.Protection} ({n.ProtectionPercent}%) = {n.Total}");
+            sb.Append($"\nmutators x{ScoreCalculator.MutatorMultiplier():0.###}, no-retry x{ScoreCalculator.NoRetryMultiplier():0.###}");
+            if (!ScoreCalculator.IsNight)
+            {
+                var v = ScoreCalculator.Victory(ScoreCalculator.CurrentScore);
+                sb.Append($"\nvictory with current score and gold: score {v.Score} gold {v.Gold} mutators {v.Mutators} noretry {v.NoRetry} = {v.Total}");
+                if (SceneTransitionManager.instance != null) sb.Append($"; game's last end screen total {SceneTransitionManager.instance.TotalScoreFromLastMatch}");
+            }
+            return sb.ToString();
+        }
+
+        private static string Dump(string what)
+        {
+            var fm = UIFrameManager.instance;
+            Transform root = what switch
+            {
+                "pause" => ((UIFrame)AccessTools.Field(typeof(UIFrameManager), "inMatchPauseMenuFrame").GetValue(fm))?.transform,
+                "end" => ((UIFrame)AccessTools.Field(typeof(UIFrameManager), "endOfMatchFrame").GetValue(fm))?.transform,
+                "nightscore" => NightscoreUI.instance != null ? NightscoreUI.instance.transform : null,
+                _ => throw new ArgumentException("pause, end or nightscore"),
+            };
+            if (root == null) throw new InvalidOperationException("not found");
+            var sb = new StringBuilder();
+            DumpRec(root, 0, sb);
+            Plugin.Logger.LogInfo("UI dump " + what + ":\n" + sb);
+            return sb.ToString();
+        }
+
+        private static void DumpRec(Transform t, int depth, StringBuilder sb)
+        {
+            if (depth > 9) return;
+            var rt = t as RectTransform;
+            sb.Append(' ', depth * 2).Append(t.name).Append(t.gameObject.activeSelf ? "" : " [off]");
+            if (rt != null) sb.Append($" pos{rt.anchoredPosition} size{rt.sizeDelta} anchor{rt.anchorMin}-{rt.anchorMax} pivot{rt.pivot} scale{rt.localScale.x:0.##}");
+            foreach (var c in t.GetComponents<Component>())
+            {
+                if (c is Transform) continue;
+                sb.Append(' ').Append(c.GetType().Name);
+                if (c is TextMeshProUGUI tmp) sb.Append($"(\"{Trim(tmp.text)}\" {tmp.font?.name} {tmp.fontSize} {tmp.color} sp{tmp.characterSpacing} {(tmp.fontSharedMaterial != null ? tmp.fontSharedMaterial.name : "")})");
+                if (c is Localize loc) sb.Append($"(term {loc.Term})");
+                if (c is Image img) sb.Append($"({img.sprite?.name} {img.color})");
+                if (c is MPUIKIT.MPImage mp) sb.Append($"({mp.color})");
+            }
+            sb.Append('\n');
+            foreach (Transform child in t) DumpRec(child, depth + 1, sb);
+        }
+
+        private static string Trim(string s) => s == null ? "" : (s.Length > 40 ? s.Substring(0, 40) : s).Replace("\n", "\\n");
     }
 }

@@ -258,7 +258,8 @@ namespace PalaceMod.Builder
                     if (icon is ScreenMarkerIconArachnophobia spider) spider.defaultSprite = spider.arachnophobiaModeSprite = sprite;
                 }
             }
-            if (v.Mesh != null) notes.Add("custom meshes aren't supported yet");
+            // Imported mesh, skin texture and sounds (WP5). Before the tint, so the tint colours an imported mesh too.
+            PalaceMod.Builder.Assets.AssetVisuals.Apply(go, findPack(pack.Id), v, notes, owned);
             if (v.Tint != null && Validator.TryParseColor(v.Tint, out var rgb))
             {
                 var tint = new Color(rgb.r, rgb.g, rgb.b);
