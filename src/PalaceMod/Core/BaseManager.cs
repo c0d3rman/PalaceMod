@@ -116,6 +116,9 @@ namespace PalaceMod
 
         internal void UnpatchAll() => Unpatch();
 
+        /// <summary>Number of game methods this manager's patches currently modify.</summary>
+        internal int PatchedMethodCount => harmony == null ? 0 : harmony.GetPatchedMethods().Count();
+
         public virtual void Awake(Plugin plugin)
         {
             Plugin = plugin;

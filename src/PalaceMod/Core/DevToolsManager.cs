@@ -70,6 +70,7 @@ namespace PalaceMod
             File.Delete(ScreenshotRequest);
             File.Delete(CommandRequest);
             foreach (string stale in Directory.GetFiles(DevDir, "command-*.response*")) File.Delete(stale);
+            RegisterCommands();
             Plugin.Logger.LogInfo("Dev tools enabled");
         }
 
@@ -127,6 +128,25 @@ namespace PalaceMod
             File.WriteAllText(path + ".tmp", $"{(ok ? "ok" : "error")}\n{text}");
             File.Delete(path);
             File.Move(path + ".tmp", path);
+        }
+
+        // Commands about the foundation APIs, registered through DevCommands like a feature's would be.
+        private void RegisterCommands()
+        {
+            DevCommands.Register("features", "features               list managers: enabled or not, and how many game methods they patch", _ =>
+                "\n" + string.Join("\n", Plugin.Managers.Select(m =>
+                    $"{m.GetType().Name}: {(m.FeatureSection == null ? "always on" : m.IsEnabled ? "enabled" : "disabled")}, {m.PatchedMethodCount} patched methods")));
+            DevCommands.Register("impact", "impact [mark <reason>] show (or record) this run's gameplay-impact reasons", args =>
+            {
+                if (args.Length >= 2 && args[0] == "mark") GameplayImpact.Mark(string.Join(" ", args.Skip(1)));
+                else if (args.Length > 0) throw new ArgumentException("usage: impact [mark <reason>]");
+                return GameplayImpact.Any ? string.Join(", ", GameplayImpact.Reasons) : "none";
+            });
+            DevCommands.Register("notify", "notify <text>          show a notification", args =>
+            {
+                Notify.Show(string.Join(" ", args), key: "dev-notify");
+                return "";
+            });
         }
 
         private string Run(string[] args)

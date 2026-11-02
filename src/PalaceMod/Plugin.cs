@@ -18,6 +18,7 @@ public class Plugin : BaseUnityPlugin
     // Rewired initializes after plugins load, so resolve the player on first use.
     internal static Player Input => input ??= ReInput.isReady ? ReInput.players.GetPlayer(0) : null;
     private readonly List<BaseManager> managers = [];
+    internal IReadOnlyList<BaseManager> Managers => managers;
 
     // Managers in this namespace (src/PalaceMod/Experimental/) are never registered.
     private const string ExperimentalNamespace = "PalaceMod.Experimental";

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """CLI development workflow; private game files stay in ignored directories."""
 import argparse
+import contextlib
 import datetime
+import fcntl
 import hashlib
 import json
 import os
@@ -11,7 +13,9 @@ import signal
 import subprocess
 import sys
 import tarfile
+import threading
 import time
+import uuid
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -119,7 +123,7 @@ def check_owner(force):
     if owner is None:
         raise RuntimeError("Thronefall was not launched by dev.py, so the player may be playing it. "
                            "Ask them to quit, or pass --force once they agree.")
-    if owner != str(ROOT):
+    if owner != str(ROOT) and not holds_lease():
         raise RuntimeError(f"The running game was launched by another checkout ({owner}), so another "
                            "session is probably testing. Wait until it stops the game, or pass --force "
                            "if that session is gone.")
@@ -130,7 +134,7 @@ def claim_game():
     OWNER.write_text(json.dumps({"root": str(ROOT), "started": stamp()}) + "\n")
 
 
-def stop(force=False):
+def stop_game(force=False):
     check_owner(force)
     pids = game_pids()
     if not pids:
@@ -491,7 +495,7 @@ def screenshot(game, output, timeout=15):
     target.unlink(missing_ok=True)
     request = game / "BepInEx/PalaceMod-dev/screenshot.request"
     request.parent.mkdir(parents=True, exist_ok=True)
-    request.write_text(str(target))
+    write_atomic(request, str(target))
     deadline = time.time() + timeout
     size = -1
     while time.time() < deadline:
@@ -505,31 +509,493 @@ def screenshot(game, output, timeout=15):
 
 
 def command(game, text, timeout=30):
-    """Send a command to the running mod (dev launches only; see Core/DevToolsManager.cs) and print its result."""
+    """Send a command to the running mod (dev launches only; `cmd help` lists them) and print its result."""
     if not game_pids():
         raise RuntimeError("Thronefall is not running.")
     if game_owner() != str(ROOT):
         raise RuntimeError("The running game was not launched by `dev.py launch`/`run` from this checkout.")
-    log = log_path(game)
-    start = log.stat().st_size if log.exists() else 0
-    request = game / "BepInEx/PalaceMod-dev/command.request"
-    request.parent.mkdir(parents=True, exist_ok=True)
-    request.write_text(text.strip() + "\n")
+    folder = game / "BepInEx/PalaceMod-dev"
+    folder.mkdir(parents=True, exist_ok=True)
+    request_id = uuid.uuid4().hex
+    response = folder / f"command-{request_id}.response"
+    request = folder / "command.request"
+    write_atomic(request, f"@{request_id}\n{text.strip()}\n")
     deadline = time.time() + timeout
     while time.time() < deadline:
         time.sleep(0.25)
-        with log.open("rb") as handle:
-            handle.seek(start)
-            new = handle.read().decode(errors="replace")
-        for line in new.splitlines():
-            for prefix in (f"Dev command done: {text.strip()}", f"Dev command failed: {text.strip()}"):
-                if prefix in line:
-                    print(line.split("] ", 1)[-1])
-                    if "failed" in prefix:
-                        raise RuntimeError("Command failed.")
-                    return
+        if response.exists():
+            status, _, result = response.read_text().partition("\n")
+            response.unlink(missing_ok=True)
+            if status != "ok":
+                raise RuntimeError(f"Command failed: {result}")
+            print(result or "ok")
+            return
     request.unlink(missing_ok=True)
-    raise RuntimeError("The mod didn't answer; is this a dev launch (`dev.py run`)?")
+    raise RuntimeError("The mod didn't answer; is this a dev launch (`dev.py run`)? Check `dev.py logs --errors`.")
+
+
+# --- Game lease -------------------------------------------------------------
+#
+# Every checkout shares one game install: the running game, BepInEx/plugins/PalaceMod, BepInEx/config and the
+# player's preferences. A checkout takes the lease (`run`, `launch`, `install` or `lease acquire`) and keeps it
+# until `stop` or `lease release`; other checkouts queue for it in FIFO order. Every dev.py call by the holder
+# refreshes its heartbeat, and a lease idle for LEASE_IDLE_LIMIT is stale: the next dev.py call from any checkout
+# stops that holder's game and frees it.
+#
+# BepInEx/config is also the player's real configuration, so it is snapshotted when the lease is taken and put back
+# exactly when it is released or expires. A snapshot found with no live lease (a crash) is restored before
+# anything else.
+
+LEASE_DIR = DEV_HOME / "lease"
+LEASE_LOCK = LEASE_DIR / ".lock"
+LEASE_FILE = LEASE_DIR / "lease.json"
+QUEUE_DIR = LEASE_DIR / "queue"
+USER_CONFIG = LEASE_DIR / "user-config"
+LEASE_IDLE_LIMIT = 10 * 60
+LEASE_BUSY_EXIT = 75  # EX_TEMPFAIL: the lease didn't become free within --wait
+HEARTBEAT_SECONDS = 20
+DEFAULT_WAIT = 60 * 60
+
+
+class LeaseBusy(RuntimeError):
+    pass
+
+
+@contextlib.contextmanager
+def lease_lock():
+    """Serialises every read-modify-write of the lease state, across processes and checkouts."""
+    LEASE_DIR.mkdir(parents=True, exist_ok=True)
+    with open(LEASE_LOCK, "a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def write_atomic(path, text):
+    temp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    temp.write_text(text)
+    os.replace(temp, path)
+
+
+def read_lease():
+    try:
+        return json.loads(LEASE_FILE.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+def lease_idle(lease):
+    return time.time() - lease["heartbeat"]
+
+
+def lease_stale(lease):
+    return lease_idle(lease) > LEASE_IDLE_LIMIT
+
+
+def describe_holder(lease):
+    branch = f" ({lease['branch']})" if lease.get("branch") else ""
+    return f"{lease['root']}{branch}"
+
+
+def duration(seconds):
+    seconds = int(seconds)
+    return f"{seconds // 60}m{seconds % 60:02d}s"
+
+
+def current_branch(root=ROOT):
+    result = subprocess.run(["git", "-C", str(root), "branch", "--show-current"], capture_output=True, text=True)
+    return result.stdout.strip() or None
+
+
+def holds_lease():
+    lease = read_lease()
+    return lease is not None and lease["root"] == str(ROOT) and not lease_stale(lease)
+
+
+def heartbeat(command=None):
+    """Refresh the holder's heartbeat; a no-op for checkouts that don't hold the lease."""
+    with lease_lock():
+        lease = read_lease()
+        if lease is None or lease["root"] != str(ROOT) or lease_stale(lease):
+            return
+        lease["heartbeat"] = time.time()
+        if command:
+            lease["command"] = command
+        write_atomic(LEASE_FILE, json.dumps(lease, indent=2) + "\n")
+
+
+def pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    return True
+
+
+def live_queue():
+    """Waiting checkouts in arrival order, dropping entries whose dev.py process is gone."""
+    QUEUE_DIR.mkdir(parents=True, exist_ok=True)
+    waiters = []
+    for entry in sorted(QUEUE_DIR.glob("*.json")):
+        try:
+            data = json.loads(entry.read_text())
+            fresh = time.time() - entry.stat().st_mtime < 120
+        except (FileNotFoundError, json.JSONDecodeError):
+            continue
+        if pid_alive(data["pid"]) and fresh:
+            waiters.append((entry, data))
+        else:
+            entry.unlink(missing_ok=True)
+    return waiters
+
+
+# The player's config snapshot.
+
+def config_dir(game):
+    return game / "BepInEx/config"
+
+
+def snapshot_user_config(game):
+    if USER_CONFIG.exists():
+        return
+    temp = LEASE_DIR / f".user-config.{os.getpid()}.tmp"
+    shutil.rmtree(temp, ignore_errors=True)
+    (temp / "files").mkdir(parents=True)
+    source = config_dir(game)
+    names = sorted(p.name for p in source.iterdir() if p.is_file()) if source.is_dir() else []
+    for name in names:
+        shutil.copy2(source / name, temp / "files" / name)
+    manifest = {"game": str(game), "files": names, "taken": stamp(), "by": str(ROOT)}
+    (temp / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    os.rename(temp, USER_CONFIG)  # atomic: the snapshot is either complete or absent
+
+
+def restore_user_config():
+    """Put the player's BepInEx/config back exactly as snapshotted. Idempotent, so a crash part-way is redone."""
+    manifest_path = USER_CONFIG / "manifest.json"
+    if not manifest_path.exists():
+        shutil.rmtree(USER_CONFIG, ignore_errors=True)
+        return
+    manifest = json.loads(manifest_path.read_text())
+    target = config_dir(Path(manifest["game"]))
+    target.mkdir(parents=True, exist_ok=True)
+    for name in manifest["files"]:
+        temp = target / f".{name}.restore.tmp"
+        shutil.copy2(USER_CONFIG / "files" / name, temp)
+        os.replace(temp, target / name)
+    for extra in target.iterdir():
+        if extra.is_file() and extra.name not in manifest["files"]:
+            extra.unlink()
+    shutil.rmtree(USER_CONFIG)
+    print("Restored the player's BepInEx config.")
+
+
+def free_lease(lease, reason):
+    """Stop a dev-launched game, restore the player's config and delete the lease. Call under lease_lock."""
+    if lease:
+        print(f"Releasing the game lease of {describe_holder(lease)}: {reason}", flush=True)
+    if game_pids() and OWNER.exists():
+        stop_game(force=True)
+    elif game_pids():
+        print("Thronefall is running but wasn't launched by dev.py (the player may be playing); leaving it running.")
+    restore_user_config()
+    LEASE_FILE.unlink(missing_ok=True)
+
+
+def recover():
+    """Runs before every command: undo what a crashed or abandoned lease left behind."""
+    if not LEASE_DIR.exists():
+        return
+    with lease_lock():
+        lease = read_lease()
+        if lease is None and USER_CONFIG.exists():
+            print("Found the player's config snapshot without a lease (a dev.py crash?); restoring it.", flush=True)
+            free_lease(None, "")
+        elif lease is not None and lease_stale(lease):
+            free_lease(lease, f"idle for {duration(lease_idle(lease))}")
+
+
+def take_lease(game, command):
+    snapshot_user_config(game)
+    now = time.time()
+    lease = {"root": str(ROOT), "branch": current_branch(), "pid": os.getpid(), "command": command,
+             "acquired": now, "heartbeat": now}
+    write_atomic(LEASE_FILE, json.dumps(lease, indent=2) + "\n")
+    print(f"Acquired the game lease (release it with `dev.py stop`; it expires after {LEASE_IDLE_LIMIT // 60} min idle).",
+          flush=True)
+
+
+def acquire_lease(game, command, wait):
+    """Return once this checkout holds the lease, queueing behind other checkouts for up to `wait` seconds."""
+    ticket = None
+    deadline = time.time() + wait
+    shown = None
+    try:
+        while True:
+            with lease_lock():
+                lease = read_lease()
+                if lease is not None and lease_stale(lease):
+                    free_lease(lease, f"idle for {duration(lease_idle(lease))}")
+                    lease = None
+                if lease is not None and lease["root"] == str(ROOT):
+                    lease["heartbeat"] = time.time()
+                    lease["command"] = command
+                    write_atomic(LEASE_FILE, json.dumps(lease, indent=2) + "\n")
+                    return
+                waiters = live_queue()
+                ahead = [w for w in waiters if ticket is None or w[0].name < ticket.name]
+                if lease is None and not ahead:
+                    take_lease(game, command)
+                    return
+                if ticket is None:
+                    ticket = QUEUE_DIR / f"{time.time_ns()}-{os.getpid()}.json"
+                    ticket.write_text(json.dumps({"root": str(ROOT), "branch": current_branch(), "pid": os.getpid(),
+                                                  "since": time.time()}) + "\n")
+                status = (f"held by {describe_holder(lease)}, idle {duration(lease_idle(lease))}" if lease
+                          else "free, but other checkouts are ahead")
+                position = len(ahead) + 1
+            if wait <= 0 or time.time() >= deadline:
+                raise LeaseBusy(f"The game lease is {status}; gave up waiting (exit code {LEASE_BUSY_EXIT}). "
+                                "Retry later, or wait longer with --wait SECONDS.")
+            if (position, lease and lease["root"]) != shown:
+                shown = (position, lease and lease["root"])
+                print(f"Waiting for the game lease: {status}. You are #{position} in the queue.", flush=True)
+            os.utime(ticket)
+            time.sleep(2)
+    finally:
+        if ticket is not None:
+            ticket.unlink(missing_ok=True)
+
+
+def require_lease():
+    if not holds_lease():
+        lease = read_lease()
+        holder = f"; it is held by {describe_holder(lease)}" if lease else ""
+        raise RuntimeError(f"This checkout doesn't hold the game lease{holder}. Start with `dev.py run` "
+                           "(or `dev.py lease acquire`).")
+
+
+@contextlib.contextmanager
+def game_lease(game, command, wait=None):
+    """Wraps a command that touches the shared game. wait=None requires the lease already; otherwise it's acquired
+    (queueing up to `wait` seconds). The heartbeat is refreshed throughout, so long launches don't go stale."""
+    if wait is None:
+        require_lease()
+        heartbeat(command)
+    else:
+        acquire_lease(game, command, wait)
+    done = threading.Event()
+
+    def beat():
+        while not done.wait(HEARTBEAT_SECONDS):
+            heartbeat()
+
+    thread = threading.Thread(target=beat, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        done.set()
+        thread.join()
+        heartbeat()
+
+
+def release_lease(force):
+    """`stop` / `lease release`: quit the game, restore the player's config and free the lease."""
+    with lease_lock():
+        lease = read_lease()
+        if lease is None:
+            if game_pids():
+                stop_game(force)
+            else:
+                print("Thronefall is not running.")
+                restore_display()
+            restore_user_config()
+            return
+        if lease["root"] != str(ROOT) and not force:
+            raise RuntimeError(f"The game lease is held by {describe_holder(lease)}, idle "
+                               f"{duration(lease_idle(lease))}. Pass --force only if that session is gone.")
+        if game_pids() and not OWNER.exists() and not force:
+            print("Thronefall is running but wasn't launched by dev.py (the player may be playing); leaving it running.")
+        elif game_pids():
+            stop_game(force=True)
+        else:
+            print("Thronefall is not running.")
+            restore_display()
+        restore_user_config()
+        LEASE_FILE.unlink(missing_ok=True)
+        print("Released the game lease.")
+
+
+def lease_status():
+    lease = read_lease()
+    if lease is None:
+        print("Lease: free")
+    else:
+        stale = " (STALE: the next dev.py call frees it)" if lease_stale(lease) else ""
+        print(f"Lease: held by {describe_holder(lease)}, last command `{lease.get('command')}`, held "
+              f"{duration(time.time() - lease['acquired'])}, idle {duration(lease_idle(lease))} of "
+              f"{LEASE_IDLE_LIMIT // 60}m{stale}")
+    with lease_lock():
+        waiters = live_queue()
+    print(f"Queue: {len(waiters)} waiting")
+    for i, (_, data) in enumerate(waiters, 1):
+        branch = f" ({data['branch']})" if data.get("branch") else ""
+        print(f"  {i}. {data['root']}{branch}, waiting {duration(time.time() - data['since'])}")
+    print(f"Player config snapshot: {'held' if USER_CONFIG.exists() else 'none'}")
+    print(f"Game: {'running, launched from ' + (game_owner() or 'outside dev.py') if game_pids() else 'not running'}")
+
+
+# Each dev launch starts PalaceMod.cfg from defaults, so one agent's settings never leak into another's test.
+
+def mod_config(game):
+    return config_dir(game) / "PalaceMod.cfg"
+
+
+def reset_mod_config(game, assignments):
+    """Start the launch from default settings, plus `Section.Key=value` overrides. BepInEx keeps values it finds in
+    the file and fills in defaults for the rest."""
+    path = mod_config(game)
+    sections = {}
+    for assignment in assignments:
+        spec, sep, value = assignment.partition("=")
+        section, dot, key = spec.partition(".")
+        if not sep or not dot:
+            raise RuntimeError(f"--set takes Section.Key=value, got {assignment!r}")
+        sections.setdefault(section.strip(), []).append((key.strip(), value.strip()))
+    if not sections:
+        path.unlink(missing_ok=True)
+        return
+    text = "".join(f"[{section}]\n" + "".join(f"{key} = {value}\n" for key, value in entries) + "\n"
+                   for section, entries in sections.items())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_atomic(path, text)
+
+
+def parse_cfg(text):
+    """(section, key, line index, value) for every setting in a BepInEx .cfg file."""
+    entries, section = [], None
+    for i, line in enumerate(text.splitlines()):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section = stripped[1:-1]
+        elif section is not None and stripped and not stripped.startswith("#") and "=" in stripped:
+            key, _, value = stripped.partition("=")
+            entries.append((section, key.strip(), i, value.strip()))
+    return entries
+
+
+def config_command(game, action, spec, value):
+    path = mod_config(game)
+    if not path.exists():
+        raise RuntimeError(f"{path} doesn't exist yet; `dev.py run` creates it.")
+    text = path.read_text()
+    entries = parse_cfg(text)
+    if action == "get" and not spec:
+        for section, key, _, current in entries:
+            print(f"{section}.{key} = {current}")
+        return
+    sections = {section for section, *_ in entries}
+    if action == "get" and spec in sections:
+        for section, key, _, current in entries:
+            if section == spec:
+                print(f"{section}.{key} = {current}")
+        return
+    # Sections and keys can contain spaces (and in principle dots), so match the whole "Section.Key" string.
+    matches = [(s, k, i, v) for s, k, i, v in entries if spec == f"{s}.{k}"]
+    if not matches:
+        raise RuntimeError(f"No setting {spec!r} in {path.name}. `dev.py config get` lists them.")
+    section, key, index, current = matches[0]
+    if action == "get":
+        print(current)
+        return
+    if value is None:
+        raise RuntimeError("Usage: dev.py config set <Section>.<Key> <value>")
+    lines = text.splitlines(keepends=True)
+    if current.lower() in ("true", "false") and value.lower() not in ("true", "false"):
+        raise RuntimeError(f"{spec} is a bool; use true or false.")
+    indent = lines[index][:len(lines[index]) - len(lines[index].lstrip())]
+    lines[index] = f"{indent}{key} = {value}\n"
+    write_atomic(path, "".join(lines))
+    running = " The running game reloads it within 2 s." if game_pids() else ""
+    print(f"{section}.{key}: {current} -> {value}.{running}")
+
+
+# --- Landing ----------------------------------------------------------------
+
+INTEGRATION_BRANCH = "overhaul"
+LAND_LOCK = DEV_HOME / "land.lock"
+
+
+def git(*args, cwd=ROOT, check=True):
+    result = subprocess.run(["git", *map(str, args)], cwd=cwd, capture_output=True, text=True)
+    if check and result.returncode != 0:
+        raise RuntimeError(f"git {' '.join(map(str, args))} failed:\n{result.stdout}{result.stderr}")
+    return result
+
+
+def worktree_for(branch):
+    current = None
+    for line in git("worktree", "list", "--porcelain").stdout.splitlines():
+        if line.startswith("worktree "):
+            current = Path(line[len("worktree "):])
+        elif line == f"branch refs/heads/{branch}":
+            return current
+    return None
+
+
+def land():
+    """Merge this checkout's branch into the integration branch (--no-ff) in its worktree, build there, and undo
+    the merge on conflict or build failure."""
+    branch = current_branch()
+    if not branch:
+        raise RuntimeError("Not on a branch; check out your feature branch first.")
+    if branch == INTEGRATION_BRANCH:
+        raise RuntimeError(f"Run `land` from a feature worktree, not from {INTEGRATION_BRANCH}.")
+    dirty = git("status", "--porcelain").stdout.strip()
+    if dirty:
+        raise RuntimeError(f"Commit or remove your changes before landing:\n{dirty}")
+    target = worktree_for(INTEGRATION_BRANCH)
+    if target is None:
+        raise RuntimeError(f"No worktree has {INTEGRATION_BRANCH} checked out.")
+    LAND_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    with open(LAND_LOCK, "a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("Another checkout is landing; waiting...", flush=True)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        if git("status", "--porcelain", "--untracked-files=no", cwd=target).stdout.strip():
+            raise RuntimeError(f"{target} has uncommitted changes; ask the user to sort them out.")
+        if git("merge-base", "--is-ancestor", branch, INTEGRATION_BRANCH, check=False).returncode == 0:
+            print(f"{branch} is already in {INTEGRATION_BRANCH}; nothing to land.")
+            return
+        before = git("rev-parse", "HEAD", cwd=target).stdout.strip()
+        print(f"Merging {branch} into {INTEGRATION_BRANCH} in {target}...", flush=True)
+        merge = git("merge", "--no-ff", "--no-edit", "-m", f"Land {branch}", branch, cwd=target, check=False)
+        if merge.returncode != 0:
+            conflicts = git("diff", "--name-only", "--diff-filter=U", cwd=target, check=False).stdout.strip()
+            git("merge", "--abort", cwd=target, check=False)
+            git("reset", "--hard", before, cwd=target)
+            raise RuntimeError(f"{branch} doesn't merge cleanly into {INTEGRATION_BRANCH}; nothing was landed.\n"
+                               f"Conflicts:\n{conflicts or merge.stdout + merge.stderr}\n"
+                               f"Fix it in your worktree: `git merge {INTEGRATION_BRANCH}` (or `git rebase "
+                               f"{INTEGRATION_BRANCH}`), resolve, build, commit, then `dev.py land` again.")
+        try:
+            if not (target / "lib/Assembly-CSharp.dll").is_file():
+                subprocess.run([sys.executable, str(target / "scripts/dev.py"), "setup"], cwd=target, check=True)
+            print(f"Building {INTEGRATION_BRANCH}...", flush=True)
+            subprocess.run([sys.executable, str(target / "scripts/dev.py"), "build"], cwd=target, check=True)
+        except (subprocess.CalledProcessError, OSError):
+            git("reset", "--hard", before, cwd=target)
+            raise RuntimeError(f"{INTEGRATION_BRANCH} doesn't build with {branch} merged in, so the merge was undone.\n"
+                               f"Fix it in your worktree: `git merge {INTEGRATION_BRANCH}`, fix the build, commit, then "
+                               "`dev.py land` again.")
+        print(f"Landed: {git('log', '-1', '--format=%h %s', cwd=target).stdout.strip()}")
 
 
 # --- Misc -------------------------------------------------------------------
@@ -605,6 +1071,8 @@ def doctor(game, configuration):
     installed = game / "BepInEx/plugins/PalaceMod/PalaceMod.dll"
     check("Installed plugin matches this build", file_hash(built) is not None and file_hash(built) == file_hash(installed))
     check("Game running", True, f"yes, launched from {game_owner() or 'outside dev.py'}" if game_pids() else "no")
+    lease = read_lease()
+    check("Game lease", True, f"held by {describe_holder(lease)}, idle {duration(lease_idle(lease))}" if lease else "free")
     restored = not DISPLAY_SAVED.exists() or bool(game_pids())
     check("Display settings restored", restored, "" if restored else "run `dev.py stop` to restore them")
     log = log_path(game)
@@ -614,8 +1082,11 @@ def doctor(game, configuration):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["setup", "build", "install", "run", "launch", "stop", "logs",
-                                            "screenshot", "backup-saves", "watch", "decompile", "doctor", "native", "cmd"])
-    parser.add_argument("mode", nargs="?", help="native: on|off. cmd: the command, e.g. \"level Neuland\"")
+                                            "screenshot", "backup-saves", "watch", "decompile", "doctor", "native",
+                                            "cmd", "config", "lease", "land"])
+    parser.add_argument("args", nargs="*",
+                        help="native: on|off. cmd: the command, e.g. \"level Neuland\". "
+                             "config: get [Section[.Key]] | set Section.Key value. lease: acquire|release|status")
     parser.add_argument("--game", help="Game directory or Thronefall.app; otherwise saved config or THRONEFALL_DIR")
     parser.add_argument("--configuration", default="Debug", choices=["Debug", "Release"])
     parser.add_argument("--type", dest="type_name", help="Decompile a single type instead of the whole assembly")
@@ -626,55 +1097,104 @@ def main():
     parser.add_argument("--timeout", type=int, default=120, help="Launch: seconds to wait for BepInEx")
     parser.add_argument("--output", help="Screenshot: output PNG path")
     parser.add_argument("--force", action="store_true",
-                        help="Run/stop: take over a game launched by another checkout")
+                        help="Run/stop/lease release: take over a game or lease held by another checkout")
     parser.add_argument("--focus", action="store_true",
                         help="Launch/run: let the game take focus (by default dev launches hand focus back to your app)")
     parser.add_argument("--sound", action="store_true",
                         help="Launch/run: keep the game's sound on (dev launches start muted)")
     parser.add_argument("--fullscreen", action="store_true",
                         help="Launch/run: use the player's display settings instead of windowed mode")
+    parser.add_argument("--wait", type=int, default=DEFAULT_WAIT,
+                        help=f"Run/launch/install/native/lease acquire: seconds to queue for the game lease "
+                             f"(0 = don't wait); exits with code {LEASE_BUSY_EXIT} if it isn't free in time")
+    parser.add_argument("--set", action="append", default=[], metavar="SECTION.KEY=VALUE",
+                        help="Run/launch: start the game with this setting instead of its default (repeatable)")
+    parser.add_argument("--keep-config", action="store_true",
+                        help="Run/launch: keep PalaceMod.cfg as it is instead of starting from defaults")
     args = parser.parse_args()
     game = game_root(args.game)
+    rest = args.args
+    mode = rest[0] if rest else None
     if args.sound:
         os.environ["PALACEMOD_SOUND"] = "1"
+    if args.set and args.keep_config:
+        raise RuntimeError("--set starts from defaults, so it can't be combined with --keep-config.")
+    recover()
+    heartbeat(args.command)
+
+    def prepare_config():
+        if not args.keep_config:
+            reset_mod_config(game, args.set)
+
     if args.command == "setup":
         setup(game)
     elif args.command == "build":
         build(args.configuration)
     elif args.command == "install":
-        install(game, args.configuration)
+        with game_lease(game, "install", args.wait):
+            install(game, args.configuration)
     elif args.command == "run":
         build(args.configuration)
-        stop(args.force)
-        install(game, args.configuration)
-        launch(game, args.timeout, args.fullscreen, not args.focus)
+        with game_lease(game, "run", args.wait):
+            stop_game(args.force)
+            install(game, args.configuration)
+            prepare_config()
+            launch(game, args.timeout, args.fullscreen, not args.focus)
     elif args.command == "launch":
-        launch(game, args.timeout, args.fullscreen, not args.focus)
+        with game_lease(game, "launch", args.wait):
+            require_stopped()
+            prepare_config()
+            launch(game, args.timeout, args.fullscreen, not args.focus)
     elif args.command == "stop":
-        stop(args.force)
+        release_lease(args.force)
     elif args.command == "logs":
         logs(game, args.errors, args.follow, args.lines)
     elif args.command == "screenshot":
-        screenshot(game, args.output)
+        with game_lease(game, "screenshot"):
+            screenshot(game, args.output)
     elif args.command == "backup-saves":
         print(backup_saves() or f"No save directory at {SAVE_DIR}")
     elif args.command == "watch":
-        watch(game, args.configuration, args.install)
+        if args.install:
+            with game_lease(game, "watch", args.wait):
+                watch(game, args.configuration, True)
+        else:
+            watch(game, args.configuration, False)
     elif args.command == "decompile":
         decompile(game, args.type_name)
     elif args.command == "doctor":
         doctor(game, args.configuration)
     elif args.command == "cmd":
-        if not args.mode:
-            raise RuntimeError("Usage: dev.py cmd \"<command>\" (see src/PalaceMod/Core/DevToolsManager.cs)")
-        command(game, args.mode)
+        if not rest:
+            raise RuntimeError("Usage: dev.py cmd \"<command>\" (`dev.py cmd help` lists them)")
+        with game_lease(game, "cmd"):
+            command(game, " ".join(rest))
+    elif args.command == "config":
+        if mode not in ("get", "set"):
+            raise RuntimeError("Usage: dev.py config get [Section[.Key]] | dev.py config set Section.Key value")
+        with game_lease(game, "config"):
+            config_command(game, mode, rest[1] if len(rest) > 1 else None,
+                           " ".join(rest[2:]) if len(rest) > 2 else None)
+    elif args.command == "lease":
+        if mode == "acquire":
+            with game_lease(game, "lease acquire", args.wait):
+                pass
+        elif mode == "release":
+            release_lease(args.force)
+        elif mode in (None, "status"):
+            lease_status()
+        else:
+            raise RuntimeError("Usage: dev.py lease acquire|release|status")
+    elif args.command == "land":
+        land()
     elif args.command == "native":
-        if args.mode not in (None, "on", "off"):
+        if mode not in (None, "on", "off"):
             raise RuntimeError("Usage: dev.py native [on|off]")
-        if args.mode is None:
+        if mode is None:
             print("native" if is_native(game) else "rosetta")
         else:
-            set_native(game, args.mode == "on")
+            with game_lease(game, "native", args.wait):
+                set_native(game, mode == "on")
 
 
 if __name__ == "__main__":
@@ -682,5 +1202,8 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         pass
+    except LeaseBusy as error:
+        print(error, file=sys.stderr)
+        sys.exit(LEASE_BUSY_EXIT)
     except (RuntimeError, OSError, subprocess.CalledProcessError) as error:
         sys.exit(str(error))
