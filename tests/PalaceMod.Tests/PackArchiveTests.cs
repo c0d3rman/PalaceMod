@@ -131,6 +131,25 @@ namespace PalaceMod.Tests
             Assert.True(issues.Any(i => i.Severity == Severity.Warning && i.Message.Contains("installed as")), "rename warning");
         }
 
+        public static void AssetsOutsideAssetsFolderAreCarried()
+        {
+            using var dir = new TempDir();
+            var repo = new FakeRepository(Path.Combine(dir.Path, "root"));
+            var archive = new PackArchive(() => repo);
+            var entry = SampleFolder(dir.Path);
+            Directory.CreateDirectory(Path.Combine(entry.Folder, "art"));
+            File.WriteAllBytes(Path.Combine(entry.Folder, "art", "skin.png"), Png);
+            File.WriteAllBytes(Path.Combine(dir.Path, "outside.png"), Png);
+            entry.Pack.Assets["skin"] = new AssetDef { Path = "art/skin.png" };
+            entry.Pack.Assets["sneaky"] = new AssetDef { Path = "../outside.png" };
+            var imported = archive.Import(archive.Export(entry), new List<ValidationIssue>());
+            Assert.Equal("assets/art/skin.png", imported.Pack.Assets["skin"].Path, "path rewritten under assets/");
+            Assert.True(File.Exists(Path.Combine(imported.Folder, "assets", "art", "skin.png")), "file carried");
+            Assert.Equal("../outside.png", imported.Pack.Assets["sneaky"].Path, "unsafe path left alone");
+            Assert.True(!File.Exists(Path.Combine(imported.Folder, "assets", "outside.png")) && FilesUnder(imported.Folder).All(f => !f.EndsWith("outside.png")), "file outside the pack not exported");
+            Assert.Equal("art/skin.png", entry.Pack.Assets["skin"].Path, "source pack untouched");
+        }
+
         public static void BuiltInPackWithoutFolderExports()
         {
             using var dir = new TempDir();

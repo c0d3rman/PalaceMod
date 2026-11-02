@@ -94,33 +94,57 @@ namespace PalaceMod.Builder.Sharing
             return path;
         }
 
-        /// <summary>Adds pack.json (+ tfpack.json) and the pack folder's assets/ under prefix.</summary>
+        /// <summary>
+        /// Adds pack.json (+ tfpack.json) and the pack's files under prefix: everything in assets/, plus any file an
+        /// "assets" entry points at outside assets/, which is moved under assets/ (and its path rewritten) because
+        /// imports only carry assets/.
+        /// </summary>
         public static void Write(ZipArchive zip, DesignPack pack, string packFolder, string prefix, bool manifest = true)
         {
             var copy = PackSerializer.Clone(pack) ?? throw new InvalidOperationException("the pack can't be serialised");
             copy.Format = DesignPack.FormatName;
             copy.Version = DesignPack.CurrentVersion;
+
+            // (zip path under assets/, file on disk)
+            var files = new SortedDictionary<string, string>(StringComparer.Ordinal);
+            string assets = packFolder == null ? null : Path.Combine(packFolder, "assets");
+            if (assets != null && Directory.Exists(assets))
+                foreach (var file in Directory.GetFiles(assets, "*", SearchOption.AllDirectories))
+                    if (AssetExtensions.Contains(Path.GetExtension(file)))
+                        files["assets/" + file.Substring(assets.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Replace('\\', '/')] = file;
+            if (packFolder != null && copy.Assets != null)
+            {
+                string root = Path.GetFullPath(packFolder).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                foreach (var def in copy.Assets.Values)
+                {
+                    string rel = def?.Path?.Replace('\\', '/');
+                    if (rel == null || rel.StartsWith("assets/", StringComparison.Ordinal) || !IsSafeEntryName(rel)) continue;
+                    string file = Path.GetFullPath(Path.Combine(packFolder, rel));
+                    string moved = "assets/" + rel;
+                    if (!file.StartsWith(root, StringComparison.Ordinal) || !File.Exists(file) || !AssetExtensions.Contains(Path.GetExtension(file))) continue;
+                    if (files.TryGetValue(moved, out var existing) && existing != file) continue;
+                    files[moved] = file;
+                    def.Path = moved;
+                }
+            }
+
             if (manifest)
                 AddText(zip, prefix + ManifestFile, new JObject { ["format"] = ManifestFormat, ["version"] = CurrentArchiveVersion, ["pack"] = copy.Id }.ToString(Formatting.Indented));
             string json = PackSerializer.Write(copy);
             if (Encoding.UTF8.GetByteCount(json) > MaxPackJsonBytes) throw new InvalidOperationException("the pack is too large to export");
             AddText(zip, prefix + PackFile, json);
 
-            string assets = packFolder == null ? null : Path.Combine(packFolder, "assets");
-            if (assets == null || !Directory.Exists(assets)) return;
             long total = json.Length;
             int count = manifest ? 2 : 1; // WriteToFile re-checks the finished archive against every import limit
-            foreach (var file in Directory.GetFiles(assets, "*", SearchOption.AllDirectories).OrderBy(f => f, StringComparer.Ordinal))
+            foreach (var kv in files)
             {
-                var info = new FileInfo(file);
-                if (!AssetExtensions.Contains(info.Extension)) continue;
+                var info = new FileInfo(kv.Value);
                 if (info.Length > MaxEntryBytes) throw new InvalidOperationException($"{info.Name} is larger than {MaxEntryBytes / (1024 * 1024)} MB");
                 total += info.Length;
                 if (++count > MaxEntries) throw new InvalidOperationException($"the pack would hold more than {MaxEntries} files");
                 if (total > MaxTotalBytes) throw new InvalidOperationException("the pack's assets are too large to export");
-                string rel = file.Substring(assets.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Replace('\\', '/');
-                var entry = zip.CreateEntry(prefix + "assets/" + rel, CompressionLevel.Optimal);
-                using var src = File.OpenRead(file);
+                var entry = zip.CreateEntry(prefix + kv.Key, CompressionLevel.Optimal);
+                using var src = File.OpenRead(kv.Value);
                 using var dst = entry.Open();
                 src.CopyTo(dst);
             }
