@@ -69,7 +69,7 @@ Evidence comes from the decompiled `Assembly-CSharp`, `AstarPathfindingProject.d
 | WP3 Session and level select | In progress on feat/builder-session (rewrites `Session/`, including all-platform leaderboard guards that replace `BuilderManager.Leaderboard.cs`). |
 | WP4a Editor UI | Open. |
 | WP4b / WP4c Level overlay, placement editor | Stage 2. Data shape fixed (`LevelDef`), stub `ILevelOverlay`. |
-| WP5 Asset import | Open. Stub `IAssetProvider` returns null. |
+| WP5 Asset import | **Landed** (feat/builder-assets). `Assets/`: PNG icons and skins, WAV/OGG sounds, OBJ meshes, url assets with sha256 cache. glTF deferred (see "glTF spike"). |
 | WP6 Sharing | Open. Stub `IShareCodec` refuses. |
 
 ## Architecture (as built, WP1 and WP2)
@@ -89,6 +89,11 @@ Features/Builder/
   Runtime/BuilderManager.Spawning.cs   WP2    patches: EnemySpawner.Start, template-aware spawning, unit names
   Session/SessionLauncher.cs           WP3    ISessionLauncher (interim minimal version by WP2)
   Session/BuilderManager.Session.cs    WP3    patches: score/save/achievement isolation during a session
+  Assets/AssetProvider.cs              WP5    IAssetProvider: resolve, cache, downloads, background OGG decode
+  Assets/Loaders.cs                    WP5    PNG/WAV/OGG/OBJ decoders with signature sniffing and limits
+  Assets/AssetVisuals.cs               WP5    mesh/texture/sound swaps on templates (called from UnitFactory)
+  Assets/BuilderAssetsManager.cs       WP5    installs the provider, pumps it, `builder-assets` dev command
+  Assets/BuilderManager.Assets.cs      WP5    patch: UnitAudio.Start (pack sounds)
 Assets/builder-sample.json             WP2    built-in sample pack (embedded resource)
 ```
 
@@ -238,7 +243,7 @@ All are in `Features/Builder/Contracts/Contracts.cs` and reached through `Builde
 | `BuilderServices.Waves` | `IWaveInjector`: `SetPending(pack, waveSet)`, `Pending`, `BuildWaves(...)` | WP2 | `WaveInjector` |
 | `BuilderServices.Sessions` | `ISessionLauncher`: `Current`, `Launch(SessionRequest, out error)`, `End`, `Started`, `Ended` | WP3 | `SessionLauncher` (interim) |
 | `BuilderServices.Overlay` | `ILevelOverlay`: `Apply(pack, level, issues)` | WP4b | `NullLevelOverlay` (warns) |
-| `BuilderServices.Assets` | `IAssetProvider`: `GetSprite`, `GetAudio`, `GetMesh(PackEntry, assetRef)` | WP5 | `NullAssetProvider` (null) |
+| `BuilderServices.Assets` | `IAssetProvider`: `GetSprite`, `GetAudio`, `GetMesh(PackEntry, assetRef)`; added by WP5: `GetTexture`, `GetState(pack, ref, use, out message)` (`AssetState` Missing/Loading/Ready/Failed, `AssetUse` constants), `Prefetch(pack)` | WP5 | `AssetProvider` |
 | `BuilderServices.Share` | `IShareCodec`: `Encode(pack)`, `Decode(code, issues)` | WP6 | `NullShareCodec` (refuses) |
 
 Interfaces are frozen. If a package needs a change, add a member (don't change existing signatures), keep the stub compiling, and note it in the PR and in this table.
@@ -297,19 +302,31 @@ Shared data types (also in `Contracts.cs`): `PackEntry {Pack, Folder, Source, Re
 
 ### WP5: asset import
 
-**Goal:** packs bring their own icons, sounds and (later) meshes.
+**Status:** landed. Owns `Features/Builder/Assets/`. `BuilderAssetsManager` (infrastructure, `[ManagerOrder(-20)]`) installs `AssetProvider` and pumps it every frame.
 
-**Owns:** `Features/Builder/Assets/` (new). Install with `BuilderServices.Assets = new AssetProvider();` in your manager's `Awake`.
+**Pack fields** (all optional, additive, no version bump):
 
-**Contract:** `IAssetProvider.GetSprite(PackEntry pack, string assetRef)` resolves `"asset:<key>"` to `pack.Pack.Assets[key]` and returns null on any failure (callers keep base visuals). The same goes for `GetAudio` and `GetMesh` (mesh plus materials).
+```jsonc
+"assets": { "shroom": { "path": "assets/shroom.obj" }, "skin": { "path": "assets/skin.png" },
+            "hit": { "url": "https://.../hit.ogg", "sha256": "<64 hex>" } },
+"visuals": { "icon": "asset:icon", "mesh": "asset:shroom", "meshScale": null, "meshRotY": 45,
+             "texture": "asset:skin", "sounds": { "attack": "asset:hit", "hurt": "asset:...", "death": "asset:..." } }
+```
 
-- Local: `Path.Combine(pack.Folder, def.Path)`. `pack.Folder` is null for built-in packs, so built-in assets would need embedded resources if ever wanted. The validator already rejects rooted and `..` paths.
-- Remote: `def.Url` plus `def.Sha256`, cached at `BuilderServices.Packs.Root/cache/<sha256>`; verify the hash before use. Downloads are async. `GetSprite` is synchronous, so prefetch on pack load or session launch (subscribe to `BuilderServices.Packs.Changed` and `BuilderServices.Sessions.Started`) and return null until cached.
-- Cache loaded objects per `(packId, key, file mtime)`.
+**How it works:**
 
-**Hooks already wired:** `UnitFactory` calls `GetSprite(entry, visuals.icon)` and sets `ScreenMarkerIcon.sprite` (plus the arachnophobia sprites). `visuals.mesh` is validated but `UnitFactory` only notes "not supported yet". To wire it, add a branch in `UnitFactory.ApplyVisuals` (WP2's file: a small additive change is fine) that swaps `MeshFilter.sharedMesh` and materials, keeping the material named `Enemy` for elite swaps. Sounds: hook `UnitAudio` / `ThronefallAudioManager`; add a model field (`visuals.sounds`?) with no version bump (it's an additive optional field).
+- **Resolution.** `path` is relative to the pack folder and must resolve inside it (checked again at load, beyond the validator's `..` check). `url` assets download once (http/https, 30 s timeout, 24 MB cap) into `cache/<sha256>` and are used only if the hash matches; a mismatch is permanent, a network failure retries after a minute. Downloads and OGG decodes are async: the getters return null until ready, and finishing one clears templates (outside sessions) so they rebuild with it. Prefetch runs on `Packs.Changed` and when a session starts. Setting `Builder.Download pack assets` (default on) turns downloads off.
+- **Decoding.** The file type comes from its first bytes, not its extension. PNG ≤ 8 MB and ≤ 2048 px a side (read from the header before decoding). WAV: PCM 8/16/24/32-bit or float, 1 to 8 channels, ≤ 60 s, parsed by us. OGG: Vorbis only, ≤ 8 MB, every page's CRC verified before Unity's decoder sees it (Unity logs an FMOD error on damaged files otherwise). OBJ ≤ 16 MB, ≤ 100k vertices and 150k triangles: positions, UVs, normals, any polygon, negative indices and `v x y z r g b` vertex colours; `mtllib` is ignored. Malformed files produce a player-facing message (`GetState`) and a warning in the log, never an exception into the game. Loaded objects are cached by file path, size, mtime and use.
+- **Meshes.** Inside-out meshes are flipped automatically (signed volume), and normals that oppose the faces are flipped: the cel shader renders an inside-out mesh solid black. Meshes without vertex colours get white ones. In the template, the biggest renderer with a body material keeps its renderer, `GPUInstanced` and material and gets the mesh, baked into its local space (so it bobs with the walk animation). It's scaled to fit inside the base model's box (or `meshScale`), turned by `meshRotY`, and stands where the model stood. The other parts get a one-triangle invisible mesh rather than being disabled, because `GPUInstanced` draws them even when the renderer is off. So tint, elite material and hit flashes still work.
+- **Texture.** Clones the body material (keeping its name, for the elite swap), sets `_BaseMap` (the shader multiplies it, `_TEXTUREBLENDINGMODE_MULTIPLY`) and resets `_BaseColor` to white. Vanilla meshes have UVs, but they're laid out for flat colour, so a texture is mainly for imported meshes. Elites switch to the elite material and lose the texture, as with tints.
+- **Sounds.** A `BuilderUnitSounds` marker on the template (pack id + refs) is copied to every spawned clone; a postfix on `UnitAudio.Start` replaces `soundOnAttack`, `soundOnDmg` and `soundOnDeath` with the pack clips. Footsteps keep the base unit's.
+- **Not supported:** animated or skinned imported meshes, multi-material OBJ (one submesh, one material), MTL colours, player-unit bodies (the catalog has no player units yet), assets in built-in packs (no folder).
 
-**Spike results that matter here:** see "Tint and skin" below (how unit meshes are coloured).
+**Dev command** `builder-assets`: `check <pack>` (loads every asset for each use and prints its state), `status` (cache), `inspect <vanilla unit>` (hierarchy, meshes, materials and shader keywords), `show <pack> <unit>...` (spawns base, custom and elite copies in front of the player), `sounds` (clips that live custom units will play), `gltf <file.glb> <dir>` / `gltf result` (the glTF spike, loading DLLs from a folder; nothing ships).
+
+### glTF spike
+
+GLTF_VERDICT
 
 ### WP6: sharing
 
