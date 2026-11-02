@@ -226,6 +226,14 @@ namespace PalaceMod
             if (msaa.Value > 0) SetIfDifferent(type.GetProperty("msaaSampleCount"), pipeline, msaa.Value);
         }
 
+        // Put the game's own anti-aliasing setting back (when the feature is switched off).
+        private void RestoreMsaa()
+        {
+            var pipeline = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
+            if (msaa.Value <= 0 || pipeline == null || SettingsManager.Instance == null) return;
+            SetIfDifferent(pipeline.GetType().GetProperty("msaaSampleCount"), pipeline, (int)SettingsManager.Instance.AntiAliasing);
+        }
+
         // No override any more (e.g. plugged back in): restore the game's current setting, which the player may have
         // changed in Video settings meanwhile.
         private void RestoreRenderScale()

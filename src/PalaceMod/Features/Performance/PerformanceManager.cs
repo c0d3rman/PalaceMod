@@ -83,7 +83,8 @@ namespace PalaceMod
             }
             AstarPath.OnAwakeSettings += ConfigurePathfinding;
             if (IsEnabled) ReserveHeap(heapReserveMb.Value);
-            ApplyGcTimeSlice();
+            gameGcTimeSlice = GarbageCollector.incrementalTimeSliceNanoseconds;
+            if (IsEnabled) ApplyGcTimeSlice();
             gcTimeSliceMs.SettingChanged += (_, _) => ApplyGcTimeSlice();
 
             pacer.Install();
@@ -214,15 +215,19 @@ namespace PalaceMod
             Application.targetFrameRate = -1;
             QualitySettings.vSyncCount = SettingsManager.Instance != null && !SettingsManager.Instance.VSync ? 0 : 1;
             RestoreRenderScale();
+            RestoreMsaa();
+            if (GarbageCollector.isIncremental) GarbageCollector.incrementalTimeSliceNanoseconds = gameGcTimeSlice;
             if (MacActivity.Active) MacActivity.End();
             stats.Reset();
         }
+
+        protected override void OnFeatureEnabled() => ApplyGcTimeSlice();
 
         // Runs inside AstarPath.OnEnable, just before its path threads start.
         private void ConfigurePathfinding()
         {
             var astar = AstarPath.active;
-            if (astar == null) return;
+            if (astar == null || !IsEnabled) return;
             var original = astar.threadCount;
             if (pathfindingThreads.Value != PathfindingThreads.GameDefault)
             {
@@ -244,10 +249,12 @@ namespace PalaceMod
             Plugin.Logger.LogInfo($"Performance: grew managed heap {before / 1048576} MB -> {Profiler.GetMonoHeapSizeLong() / 1048576} MB");
         }
 
+        private ulong gameGcTimeSlice;
+
         private void ApplyGcTimeSlice()
         {
-            if (gcTimeSliceMs.Value <= 0f || !GarbageCollector.isIncremental) return;
-            GarbageCollector.incrementalTimeSliceNanoseconds = (ulong)(gcTimeSliceMs.Value * 1e6f);
+            if (!IsEnabled || !GarbageCollector.isIncremental) return;
+            GarbageCollector.incrementalTimeSliceNanoseconds = gcTimeSliceMs.Value > 0f ? (ulong)(gcTimeSliceMs.Value * 1e6f) : gameGcTimeSlice;
         }
     }
 }

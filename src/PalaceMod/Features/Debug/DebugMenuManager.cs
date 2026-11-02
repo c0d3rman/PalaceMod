@@ -19,7 +19,7 @@ namespace PalaceMod
 {
     public class DebugMenuManager : BaseManager
     {
-        public override string FeatureSection => "Debug menu";
+        public override string FeatureSection => "Debug Menu";
         public override string FeatureDescription =>
             "Cheat menu for practice: gold, nights, waves, free buildings, god mode and loadout swaps. Open it from the pause menu. Runs that use it are flagged.";
         protected override bool EnabledByDefault => false;
