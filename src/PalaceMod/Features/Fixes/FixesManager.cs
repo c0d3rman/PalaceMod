@@ -99,7 +99,7 @@ namespace PalaceMod
                 ref float hp = ref HpValue(__instance);
                 // The save stored Mathf.RoundToInt(hp), so anything within 0.5 of max HP was saved from full health.
                 if (hp <= 0f || hp == __instance.maxHp || Mathf.Abs(hp - __instance.maxHp) > 0.5f) return;
-                Plugin.Logger.LogInfo($"Fixes: restored loaded HP of {__instance.name} from {hp} to {__instance.maxHp}");
+                Plugin.Logger.LogDebug($"Fixes: restored loaded HP of {__instance.name} from {hp} to {__instance.maxHp}");
                 hp = __instance.maxHp;
                 __instance.OnHpChange.Invoke();
             }
@@ -123,8 +123,9 @@ namespace PalaceMod
                 {
                     // Like Continue in level select: load the scene's match save, then the scene.
                     if (args.Length < 2) throw new ArgumentException("usage: fixes load <scene>");
+                    var transitions = SceneTransitionManager.instance ?? throw new InvalidOperationException("game still starting");
                     MatchSaveLoadHandler.TryLoadRun(args[1]);
-                    SceneTransitionManager.instance.TransitionFromNullToLevel(args[1]);
+                    transitions.TransitionFromNullToLevel(args[1]);
                     return MatchSaveLoadHandler.CurrentSave == null ? "no save; fresh start" : "loading save";
                 }
                 var tags = TagManager.instance;
@@ -215,8 +216,8 @@ namespace PalaceMod
                         var shrines = UnityEngine.Object.FindObjectsOfType<Shrine>().Select(sh =>
                             $"shrine {sh.name}: activated={sh.ShrineHasBeenActivated}, " + (UpgradeParticles(sh) is { } burst && burst != null
                                 ? $"burst {burst.particleCount} playing={burst.isPlaying}" : "burst destroyed"));
-                        var regen = UnityEngine.Object.FindObjectsOfType<PerkPlayerHealthRegen>()
-                            .Select(r => $"regen component {r.name}: perk {r.requiredPerk?.name} x{r.hpRegenMultiplyer} equipped={PerkManager.IsEquipped(r.requiredPerk)}");
+                        var regen = Resources.FindObjectsOfTypeAll<PerkPlayerHealthRegen>()
+                            .Select(r => $"regen component {r.name} (scene {r.gameObject.scene.name}): perk {r.requiredPerk?.name} x{r.hpRegenMultiplyer} equipped={PerkManager.IsEquipped(r.requiredPerk)}");
                         var manager = PlayerUpgradeManager.instance;
                         return string.Join("\n", lines.Concat(shrines).Concat(regen)
                             .Append($"player regen multiplier {(manager == null ? "no manager" : manager.PlayerHealthRegenerationMultiplyer.ToString())}"));
