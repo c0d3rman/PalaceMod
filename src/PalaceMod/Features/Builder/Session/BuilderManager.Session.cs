@@ -148,6 +148,20 @@ namespace PalaceMod
             }
         }
 
+        // A night's "warning" text (the game stores Wave.warningText but never shows it) as the night starts.
+        [HarmonyPatch(typeof(EnemySpawner), nameof(EnemySpawner.StartSpawning))]
+        private static class NightWarning_Patch
+        {
+            private static void Postfix(EnemySpawner __instance)
+            {
+                var nights = Launcher?.Current?.WaveSet?.Nights;
+                if (nights == null) return;
+                int n = __instance.Wavenumber;
+                if (n < 0 || n >= nights.Count || string.IsNullOrWhiteSpace(nights[n].Warning)) return;
+                Notify.Show(nights[n].Warning, NotifyKind.Warning, 6f, "builder-night");
+            }
+        }
+
         // ------------------------------------------------------------------ pre-level menu
 
         // Play in an armed pre-level menu starts the custom session; the game's own transition then loads the host.
