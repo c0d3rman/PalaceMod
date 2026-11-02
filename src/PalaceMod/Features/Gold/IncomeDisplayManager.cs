@@ -42,7 +42,7 @@ namespace PalaceMod
         public override void Awake(Plugin plugin)
         {
             base.Awake(plugin);
-            DevCommands.Register("income", "income [build [passes]|pause|preview <+n|-n>]   show the income breakdown; build every slot; open the pause menu on the income tooltip; cycle the previewed night", RunCommand);
+            DevCommands.Register("income", "income [build [passes]|knockout [n]|pause|select|preview <+n|-n>]   show the income breakdown; build every slot; knock out n buildings; open the pause menu; show the income tooltip; cycle the previewed night", RunCommand);
         }
 
         protected override void OnFeatureEnabled() => RefreshOpenDisplays();
@@ -173,15 +173,32 @@ namespace PalaceMod
                         }
                     return $"{built} builds/upgrades";
                 }
-                case "pause":
+                case "knockout":
                 {
-                    if (UIFrameManager.instance.ActiveFrame == null) UIFrameManager.instance.InMatchPause();
-                    return SelectIncomeDisplay();
+                    // Flags buildings as knocked out tonight (as if destroyed), without touching their HP.
+                    int count = args.Length > 1 ? int.Parse(args[1]) : 3, done = 0;
+                    foreach (var b in IncomeCalculator.All().Where(b => b.Income > 0).Take(count))
+                    {
+                        b.Slot.Interactor.OnKnockOut();
+                        done++;
+                    }
+                    GameplayImpact.Mark("Dev: knocked out buildings");
+                    return $"knocked out {done}";
                 }
+                case "pause":
+                    if (UIFrameManager.instance.ActiveFrame == null)
+                    {
+                        try { UIFrameManager.instance.InMatchPause(); }
+                        catch (ArgumentOutOfRangeException) { } // see SelectIncomeDisplay
+                    }
+                    return "paused; `income select` shows the tooltip";
+                case "select":
+                    return SelectIncomeDisplay();
                 case "preview":
                 {
                     var helper = UnityEngine.Object.FindObjectOfType<PauseUILoadoutHelper>() ?? throw new InvalidOperationException("pause menu not open");
-                    helper.CycleNightPreview(args.Length > 1 ? int.Parse(args[1]) : 1);
+                    try { helper.CycleNightPreview(args.Length > 1 ? int.Parse(args[1]) : 1); }
+                    catch (ArgumentOutOfRangeException) { } // see SelectIncomeDisplay
                     return SelectIncomeDisplay();
                 }
                 case "":
@@ -199,9 +216,12 @@ namespace PalaceMod
 
         private static string SelectIncomeDisplay()
         {
-            var frame = UIFrameManager.instance.ActiveFrame ?? throw new InvalidOperationException("no menu open");
+            // The pause frame itself, not ActiveFrame: a level loaded straight from `dev.py cmd level` has no loadout,
+            // and the game's PauseUILoadoutHelper.AssignNavigationTargets then throws while the frame opens.
+            var frame = UnityEngine.Object.FindObjectOfType<PauseUILoadoutHelper>()?.frame ?? throw new InvalidOperationException("pause menu not open");
             var display = UnityEngine.Object.FindObjectOfType<TFUIIncomeDisplay>() ?? throw new InvalidOperationException("income display not found");
             frame.Select(display);
+            foreach (var tooltip in UnityEngine.Object.FindObjectsOfType<PerkSelectionTooltipHelper>()) tooltip.OnSelection();
             return display.GetTitle() + ": " + display.CurrentIncome + "\n" + display.GetDescription();
         }
     }
