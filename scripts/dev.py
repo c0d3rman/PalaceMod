@@ -283,6 +283,11 @@ def set_native(game, enabled):
             "-nologo", "-clp:NoSummary")
         shutil.copy2(ROOT / "src/PalaceMod.Bootstrap/bin/Release/netstandard2.0/PalaceMod.Bootstrap.dll",
                      game / "BepInEx/core/PalaceMod.Bootstrap.dll")
+        # Native helper that writes to JIT memory; clang ad-hoc signs arm64 dylibs, which is enough to load it.
+        native = ROOT / "bin/native/libpalacejit.dylib"
+        native.parent.mkdir(parents=True, exist_ok=True)
+        run("clang", "-arch", "arm64", "-O2", "-dynamiclib", "-o", native, "src/PalaceMod.Bootstrap/native/palacejit.c")
+        shutil.copy2(native, game / "BepInEx/core/libpalacejit.dylib")
         if PRELOADER_TARGET not in text and BOOTSTRAP_TARGET not in text:
             raise RuntimeError(f"Couldn't find {PRELOADER_TARGET} in {script}")
         text = text.replace(PRELOADER_TARGET, BOOTSTRAP_TARGET)
@@ -468,6 +473,34 @@ def screenshot(game, output, timeout=15):
     raise RuntimeError("No screenshot produced within the timeout; check `dev.py logs --errors`.")
 
 
+def command(game, text, timeout=30):
+    """Send a command to the running mod (dev launches only; see Core/DevToolsManager.cs) and print its result."""
+    if not game_pids():
+        raise RuntimeError("Thronefall is not running.")
+    if game_owner() != str(ROOT):
+        raise RuntimeError("The running game was not launched by `dev.py launch`/`run` from this checkout.")
+    log = log_path(game)
+    start = log.stat().st_size if log.exists() else 0
+    request = game / "BepInEx/PalaceMod-dev/command.request"
+    request.parent.mkdir(parents=True, exist_ok=True)
+    request.write_text(text.strip() + "\n")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        time.sleep(0.25)
+        with log.open("rb") as handle:
+            handle.seek(start)
+            new = handle.read().decode(errors="replace")
+        for line in new.splitlines():
+            for prefix in (f"Dev command done: {text.strip()}", f"Dev command failed: {text.strip()}"):
+                if prefix in line:
+                    print(line.split("] ", 1)[-1])
+                    if "failed" in prefix:
+                        raise RuntimeError("Command failed.")
+                    return
+    request.unlink(missing_ok=True)
+    raise RuntimeError("The mod didn't answer; is this a dev launch (`dev.py run`)?")
+
+
 # --- Misc -------------------------------------------------------------------
 
 def snapshot():
@@ -550,8 +583,8 @@ def doctor(game, configuration):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["setup", "build", "install", "run", "launch", "stop", "logs",
-                                            "screenshot", "backup-saves", "watch", "decompile", "doctor", "native"])
-    parser.add_argument("mode", nargs="?", choices=["on", "off"], help="Native: run natively on arm64 or under Rosetta")
+                                            "screenshot", "backup-saves", "watch", "decompile", "doctor", "native", "cmd"])
+    parser.add_argument("mode", nargs="?", help="native: on|off. cmd: the command, e.g. \"level Neuland\"")
     parser.add_argument("--game", help="Game directory or Thronefall.app; otherwise saved config or THRONEFALL_DIR")
     parser.add_argument("--configuration", default="Debug", choices=["Debug", "Release"])
     parser.add_argument("--type", dest="type_name", help="Decompile a single type instead of the whole assembly")
@@ -594,7 +627,13 @@ def main():
         decompile(game, args.type_name)
     elif args.command == "doctor":
         doctor(game, args.configuration)
+    elif args.command == "cmd":
+        if not args.mode:
+            raise RuntimeError("Usage: dev.py cmd \"<command>\" (see src/PalaceMod/Core/DevToolsManager.cs)")
+        command(game, args.mode)
     elif args.command == "native":
+        if args.mode not in (None, "on", "off"):
+            raise RuntimeError("Usage: dev.py native [on|off]")
         if args.mode is None:
             print("native" if is_native(game) else "rosetta")
         else:

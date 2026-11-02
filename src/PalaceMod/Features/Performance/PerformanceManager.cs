@@ -40,6 +40,7 @@ namespace PalaceMod
 
         private ConfigEntry<Toggle> precisePacing;
         private ConfigEntry<int> pacedFrameRate;
+        private ConfigEntry<bool> lockToDisplay;
         private readonly FramePacer pacer = new();
         private ConfigEntry<float> renderScale;
         private ConfigEntry<int> msaa;
@@ -85,6 +86,8 @@ namespace PalaceMod
                 "Overrides the VSync and Target frame rate settings.");
             pacedFrameRate = config.Bind(Section, "Paced frame rate", 0,
                 "Frame rate for precise frame pacing. 0 matches the display's refresh rate.");
+            lockToDisplay = config.Bind(Section, "Lock pacing to display refresh", true,
+                "Start each paced frame just after a display refresh, so frames don't drift across refreshes (judder).");
             renderScale = config.Bind(Section, "Render scale override", 0f,
                 "Resolution multiplier for 3D rendering (UI stays sharp). 0 keeps the game's setting.");
             msaa = config.Bind(Section, "MSAA override", 0,
@@ -98,6 +101,7 @@ namespace PalaceMod
                 try
                 {
                     Plugin.Logger.LogInfo($"Performance: latency-critical mode {(MacActivity.Begin() ? "on" : "unavailable")}");
+                    Plugin.Logger.LogInfo($"Performance: display link {(DisplayLink.Start() ? "running" : "unavailable")}");
                 }
                 catch (Exception e)
                 {
@@ -185,10 +189,13 @@ namespace PalaceMod
                 if (stats.Frames > 0)
                 {
                     Plugin.Logger.LogInfo($"Performance: {stats.Summarize()}, vSync {QualitySettings.vSyncCount}, target fps {Application.targetFrameRate}, " +
-                        $"paced {(pacer.Enabled ? $"{pacer.TargetFps:0.#} fps, worst sleep {pacer.WorstSleepMs:0.0} ms" : "off")}, " +
+                        $"paced {(pacer.Enabled ? $"{pacer.TargetFps:0.#} fps{(pacer.LockedToDisplay ? " locked to display" : "")}, worst sleep {pacer.WorstSleepMs:0.0} ms, " +
+                            $"mistimed {pacer.MistimedFrames}/{pacer.Frames} frames" : "off")}, " +
+                        $"refresh period {DisplayLink.PeriodTicks * 1000.0 / System.Diagnostics.Stopwatch.Frequency:0.00} ms, " +
                         $"display {Screen.currentResolution.refreshRateRatio.value:0.#} Hz, focused {Application.isFocused}, {DescribeRendering()}, mono used {Profiler.GetMonoUsedSizeLong() / 1048576}/{Profiler.GetMonoHeapSizeLong() / 1048576} MB");
                 }
                 stats.Reset();
+                pacer.ResetStats();
                 spikesLoggedThisWindow = 0;
                 nextSummary = Time.unscaledTime + Mathf.Max(5f, summaryIntervalSeconds.Value);
             }
@@ -243,7 +250,9 @@ namespace PalaceMod
             {
                 if (QualitySettings.vSyncCount != 0) QualitySettings.vSyncCount = 0;
                 if (Application.targetFrameRate != -1) Application.targetFrameRate = -1;
-                double refresh = Screen.currentResolution.refreshRateRatio.value;
+                long period = DisplayLink.PeriodTicks;
+                double refresh = period > 0 ? System.Diagnostics.Stopwatch.Frequency / (double)period : Screen.currentResolution.refreshRateRatio.value;
+                pacer.LockToDisplay = lockToDisplay.Value;
                 pacer.TargetFps = pacedFrameRate.Value > 0 ? pacedFrameRate.Value : (float)(refresh > 1 ? refresh : 60);
                 return;
             }

@@ -65,6 +65,6 @@ namespace Doorstop
 
         // Kept out of Start so MonoMod types resolve only after the resolver is registered.
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private static void InstallAppleSiliconPlatform() => AppleSiliconDetourPlatform.Install();
+        private static void InstallAppleSiliconPlatform() => AppleSiliconDetourPlatform.Install(coreDir);
     }
 }
