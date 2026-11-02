@@ -152,6 +152,8 @@ namespace PalaceMod.Builder.Editor
                 pack.GameVersion = Application.version;
                 if (ReadOnly || SourceId == null)
                 {
+                    // A copy of an installed pack gets a name of its own, so the two are told apart in lists.
+                    if (ReadOnly && !string.IsNullOrWhiteSpace(pack.Name) && !pack.Name.EndsWith(" (copy)")) pack.Name += " (copy)";
                     var installed = repo.InstallNew(pack);
                     if (installed == null) { message = "Couldn't save the pack"; return false; }
                     bool renamed = installed.Id != pack.Id;
