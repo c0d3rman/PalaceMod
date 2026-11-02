@@ -4,6 +4,7 @@ using System.Text;
 using HarmonyLib;
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 /*
     Enriches the pause menu's native stats panel (2.13+: hover an enemy of the coming night or one of your units).
@@ -31,9 +32,14 @@ namespace PalaceMod
 
         private static readonly string[] RowFields = ["maxHPValueText", "speedValueText", "rangeValueText", "attackDamageValueText", "attackCooldownValueText", "projectileSpeedValueText"];
 
+        private static BepInEx.Configuration.ConfigEntry<bool> alwaysShow;
+
         public override void Awake(Plugin plugin)
         {
             base.Awake(plugin);
+            alwaysShow = plugin.Config.Bind(FeatureSection, "Always show stats", true,
+                "Show the stats panel even when the game's own \"Unit stats\" option (Settings > Gameplay) is off.");
+            alwaysShow.SettingChanged += (_, _) => RefreshOpenTooltips();
             DevCommands.Register("stats", "stats [wave]           print computed enemy (base → actual) and live unit stats for a wave (default: next)", args =>
                 DescribeAll(args.Length > 0 ? int.Parse(args[0]) - 1 : CompendiumStats.NextWaveIndex()));
             DevCommands.Register("statsverify", "statsverify            compare live enemies' HP, damage multiplier, speed and cooldown with the computed values", _ => VerifyLive());
@@ -86,7 +92,11 @@ namespace PalaceMod
             DevCommands.Register("tooltip", "tooltip                print the pause menu's open tooltip (title, description, stat rows)", _ => DescribeTooltip());
         }
 
-        protected override void OnFeatureDisabled() => RefreshOpenTooltips();
+        protected override void OnFeatureDisabled()
+        {
+            Unwiden();
+            RefreshOpenTooltips();
+        }
         protected override void OnFeatureEnabled() => RefreshOpenTooltips();
 
         private static void RefreshOpenTooltips()
@@ -101,7 +111,9 @@ namespace PalaceMod
         {
             private static void Postfix(PerkSelectionTooltipHelper __instance)
             {
-                if (!Feature<StatDetailsManager>.On || SettingsManager.Instance == null || !SettingsManager.Instance.EnableUnitStats) return;
+                if (!Feature<StatDetailsManager>.On || SettingsManager.Instance == null) return;
+                bool gameShowsStats = SettingsManager.Instance.EnableUnitStats;
+                if (!gameShowsStats && !alwaysShow.Value) return;
                 CombatantStats stats = null;
                 var enemy = CurrentEnemy(__instance);
                 var unit = CurrentUnit(__instance);
@@ -123,8 +135,12 @@ namespace PalaceMod
                 }
                 if (stats == null) return;
 
-                if (__instance.UnitStatsDisplay != null && __instance.UnitStatsDisplay.gameObject.activeSelf)
+                if (__instance.UnitStatsDisplay != null)
+                {
+                    // With the game's option off, the panel is hidden; show it for the tiles we have stats for.
+                    __instance.UnitStatsDisplay.gameObject.SetActive(true);
                     WriteRows(__instance.UnitStatsDisplay, stats);
+                }
                 var extra = DetailLines(stats, enemy != null);
                 if (extra.Length > 0)
                 {
@@ -142,8 +158,49 @@ namespace PalaceMod
             private static void Postfix(EnemySpawner __instance) => CompendiumStats.CaptureSceneBaselines(__instance);
         }
 
+        // The panel is sized for one number per row; "base → actual" needs more room, so widen it (the tooltip has
+        // spare width beside it) and keep the labels on one line. Undone when the feature is turned off.
+        private const float PanelWidth = 372f;
+        private static readonly List<(LayoutElement Element, bool Added, float Min, float Preferred, float Width)> widened = [];
+        private static readonly List<TextMeshProUGUI> unwrapped = [];
+
+        private static void Widen(UnitStatsDisplayUI display)
+        {
+            var element = display.GetComponent<LayoutElement>();
+            if (widened.Any(w => w.Element == element && element != null)) return;
+            bool added = element == null;
+            if (added) element = display.gameObject.AddComponent<LayoutElement>();
+            var rect = (RectTransform)display.transform;
+            widened.Add((element, added, element.minWidth, element.preferredWidth, rect.sizeDelta.x));
+            element.minWidth = element.preferredWidth = PanelWidth;
+            rect.sizeDelta = new Vector2(PanelWidth, rect.sizeDelta.y);
+            foreach (var field in RowFields)
+            {
+                var value = Traverse.Create(display).Field(field).GetValue<TextMeshProUGUI>();
+                if (value == null) continue;
+                foreach (var label in value.transform.parent.GetComponentsInChildren<TextMeshProUGUI>(true))
+                    if (label != value && label.enableWordWrapping) { label.enableWordWrapping = false; unwrapped.Add(label); }
+            }
+        }
+
+        private static void Unwiden()
+        {
+            foreach (var (element, added, min, preferred, width) in widened)
+            {
+                if (element == null) continue;
+                var rect = (RectTransform)element.transform;
+                rect.sizeDelta = new Vector2(width, rect.sizeDelta.y);
+                if (added) Object.Destroy(element);
+                else { element.minWidth = min; element.preferredWidth = preferred; }
+            }
+            widened.Clear();
+            foreach (var label in unwrapped) if (label != null) label.enableWordWrapping = true;
+            unwrapped.Clear();
+        }
+
         private static void WriteRows(UnitStatsDisplayUI display, CombatantStats stats)
         {
+            Widen(display);
             var b = stats.Base;
             var a = stats.Actual;
             float[] baseValues = [b.Hp, b.Speed, b.Range, b.Damage, b.Cooldown, b.ProjectileSpeed];
