@@ -214,13 +214,13 @@ namespace PalaceMod.Builder.Level
         {
             const string s = "Builder";
             Menu = Keybinds.Register(s, "layout-menu", "Layout: menu", new KeyboardShortcut(KeyCode.B), "In the layout editor: opens the menu to add slots and scenery, save, check paths and play.");
-            Rotate = Keybinds.Register(s, "layout-rotate", "Layout: turn", new KeyboardShortcut(KeyCode.T), "In the layout editor: turns the selected object (or the one being placed) by 15°.");
-            RotateBack = Keybinds.Register(s, "layout-rotate-back", "Layout: turn back", new KeyboardShortcut(KeyCode.T, KeyCode.LeftShift), "In the layout editor: turns it the other way.");
+            Rotate = Keybinds.Register(s, "layout-rotate", "Layout: turn", new KeyboardShortcut(KeyCode.Period), "In the layout editor: turns the selected object (or the one being placed) by 15°.");
+            RotateBack = Keybinds.Register(s, "layout-rotate-back", "Layout: turn back", new KeyboardShortcut(KeyCode.Comma), "In the layout editor: turns it the other way.");
             Delete = Keybinds.Register(s, "layout-delete", "Layout: remove", new KeyboardShortcut(KeyCode.Delete), "In the layout editor: removes (or restores) the selected object.");
             Properties = Keybinds.Register(s, "layout-details", "Layout: details", new KeyboardShortcut(KeyCode.I), "In the layout editor: shows the selected object's costs and options.");
             Snap = Keybinds.Register(s, "layout-snap", "Layout: snap", new KeyboardShortcut(KeyCode.G), "In the layout editor: turns snapping to the 1 m grid on or off.");
-            TurnLeft = Keybinds.Register(s, "layout-view-left", "Layout: turn view left", new KeyboardShortcut(KeyCode.Comma), "In the layout editor: turns the camera.");
-            TurnRight = Keybinds.Register(s, "layout-view-right", "Layout: turn view right", new KeyboardShortcut(KeyCode.Period), "In the layout editor: turns the camera the other way.");
+            TurnLeft = Keybinds.Register(s, "layout-view-left", "Layout: turn view left", new KeyboardShortcut(KeyCode.K), "In the layout editor: turns the camera.");
+            TurnRight = Keybinds.Register(s, "layout-view-right", "Layout: turn view right", new KeyboardShortcut(KeyCode.L), "In the layout editor: turns the camera the other way.");
         }
 
         public static string Label(Keybind k)
@@ -235,6 +235,8 @@ namespace PalaceMod.Builder.Level
                 KeyCode.LeftAlt or KeyCode.RightAlt => "Alt",
                 KeyCode.Delete => "Del",
                 KeyCode.Comma => ",",
+                KeyCode.LeftBracket => "[",
+                KeyCode.RightBracket => "]",
                 KeyCode.Period => ".",
                 _ => c.ToString(),
             };
