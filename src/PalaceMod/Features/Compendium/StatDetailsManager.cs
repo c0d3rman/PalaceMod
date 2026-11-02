@@ -60,9 +60,11 @@ namespace PalaceMod
                 }
                 return on ? "hit log on" : "hit log off";
             });
-            DevCommands.Register("equip", "equip [clear | <name part> [off]]   list, equip or unequip perks/weapons/mutators (takes effect on the next level load)", args =>
+            DevCommands.Register("equip", "equip [list | clear | <name part> [off]]   list, equip or unequip perks/weapons/mutators (takes effect on the next level load)", args =>
             {
                 var perks = PerkManager.instance ?? throw new System.InvalidOperationException("no PerkManager");
+                if (args.Length > 0 && args[0] == "list")
+                    return string.Join(", ", perks.allEquippables.Where(e => e != null).Select(e => $"{CompendiumStats.EquippableName(e)} ({e.name})"));
                 if (args.Length > 0 && args[0] == "clear")
                 {
                     PerkManager.ClearAllEquipped();
@@ -181,7 +183,7 @@ namespace PalaceMod
 
         // The panel is sized for one number per row; "base → actual" needs more room, so widen it (the tooltip has
         // spare width beside it) and keep the labels on one line. Undone when the feature is turned off.
-        private const float PanelWidth = 372f;
+        private const float PanelWidth = 344f;
         private static readonly List<(LayoutElement Element, bool Added, float Min, float Preferred, float Width)> widened = [];
         private static readonly List<TextMeshProUGUI> unwrapped = [];
 
