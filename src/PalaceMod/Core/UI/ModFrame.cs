@@ -510,7 +510,7 @@ namespace PalaceMod
             var increaseButton = Arrow(right, increase, "Increase");
             var increaseRect = (RectTransform)increaseButton.transform;
             increaseRect.anchorMin = increaseRect.anchorMax = new Vector2(1f, 0.5f);
-            increaseRect.anchoredPosition = new Vector2(-arrowSpace / 2f + increaseRect.rect.width * (increaseRect.pivot.x - 0.5f), 0f);
+            increaseRect.anchoredPosition = new Vector2(-arrowSpace / 2f, 0f);
             var decreaseButton = Arrow(left, decrease, "Decrease");
             var follower = decreaseButton.gameObject.AddComponent<ArrowFollower>();
             follower.Value = value;
@@ -521,6 +521,10 @@ namespace PalaceMod
             var arrow = GameWidgets.Clone(source, Button.transform, name).GetComponent<TFUIEnumSelectorButton>();
             // Clicking an arrow acts on it without moving the selection off the row.
             arrow.cannotBeSelected = true;
+            // The game flips one arrow by rotating it 180 degrees around an edge pivot; pivot on the centre instead,
+            // so positions below are the arrow's centre whichever way it points.
+            var rect = (RectTransform)arrow.transform;
+            rect.pivot = new Vector2(0.5f, 0.5f);
             arrow.onApply.AddListener(() => onClick());
             arrow.gameObject.SetActive(true);
             return arrow;
@@ -539,7 +543,7 @@ namespace PalaceMod
                 var rect = (RectTransform)transform;
                 var parent = (RectTransform)rect.parent;
                 var left = parent.InverseTransformPoint(Value.rectTransform.TransformPoint(new Vector3(bounds.min.x, bounds.center.y, 0f)));
-                rect.localPosition = new Vector3(left.x - 18f + rect.rect.width * (rect.pivot.x - 0.5f), left.y, 0f);
+                rect.localPosition = new Vector3(left.x - 18f, left.y, 0f);
             }
         }
 
