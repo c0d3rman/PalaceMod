@@ -48,7 +48,7 @@ namespace PalaceMod
         {
             base.Awake(plugin);
             PauseMenu.AddButton("analytics", "Run Analytics", Open, order: 20, visible: () => IsEnabled && Rules.Available);
-            DevCommands.Register("analytics", "analytics [open|kill|reload|dump|scenario <income> <fromNight> <faster> <spend%|avg>]   run analytics: summary, open the frame, end the night, scenario", Command);
+            DevCommands.Register("analytics", "analytics [open|kill|build <n>|reload|dump|scenario <income> <fromNight> <faster> <spend%|avg>]   run analytics: summary, open the frame, end the night, scenario", Command);
         }
 
         protected override void OnFeatureDisabled()
@@ -266,6 +266,23 @@ namespace PalaceMod
                     GameplayImpact.Mark("Dev: killed all enemies");
                     Hp.KillAllEnemyUnits();
                     return $"enemies left {EnemySpawner.instance.NumberOfEnemiesOnTheMap}, spawning {EnemySpawner.instance.SpawningInProgress}";
+                case "build":
+                {
+                    // Buy the cheapest unbuilt slots you can afford, paying like the player does (to exercise spending).
+                    int want = args.Length > 1 ? int.Parse(args[1]) : 1, built = 0;
+                    var player = PlayerInteraction.instance;
+                    var slots = UnityEngine.Object.FindObjectsOfType<BuildSlot>()
+                        .Where(s => s.Level == 0 && !s.ActivatorUpgradesThis && s.CanBeUpgraded && s.gameObject.activeInHierarchy)
+                        .OrderBy(s => s.NextUpgradeOrBuildCost).ToList();
+                    foreach (var slot in slots)
+                    {
+                        if (built >= want || player.Balance < slot.NextUpgradeOrBuildCost) break;
+                        player.SpendCoins(slot.NextUpgradeOrBuildCost);
+                        slot.TryToBuildOrUpgradeAndPay(player, false);
+                        built++;
+                    }
+                    return $"built {built}, balance {player.Balance}";
+                }
                 case "reload":
                     // Like quitting and continuing from level select: read the match save from disk and reload the level.
                     MatchSaveLoadHandler.TryLoadRun(SceneManager.GetActiveScene().name);
