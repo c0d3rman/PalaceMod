@@ -342,7 +342,12 @@ namespace PalaceMod
             RequireDay();
             if (slot == null) throw new InvalidOperationException("No building nearby");
             if (ChoiceManager.instance != null && ChoiceManager.instance.ChoiceCoroutineRunning) throw new InvalidOperationException("Finish the open choice first");
-            if (!slot.CanBeUpgraded) throw new InvalidOperationException($"{BuildingName(slot)} can't be upgraded further");
+            if (!slot.CanBeUpgraded)
+            {
+                throw new InvalidOperationException(slot.Level >= slot.Upgrades.Count || slot.Upgrades[slot.Level].disableInThisMode
+                    ? $"{BuildingName(slot)} is fully upgraded"
+                    : $"{BuildingName(slot)} can't be upgraded yet (its parent building needs a higher level)");
+            }
             return slot;
         }
 

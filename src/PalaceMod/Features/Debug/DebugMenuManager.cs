@@ -352,6 +352,12 @@ namespace PalaceMod
                    ?? throw new ArgumentException($"no weapon, perk or mutator \"{name}\"");
         }
 
+        private static string KingHpText()
+        {
+            var hp = PlayerInteraction.instance != null ? PlayerInteraction.instance.GetComponent<Hp>() : null;
+            return hp == null ? "-" : $"{hp.HpValue:0}/{hp.maxHp:0}";
+        }
+
         private string DescribeWave()
         {
             var wave = DebugActions.UpcomingWave ?? throw new InvalidOperationException("no upcoming wave (day only)");
@@ -388,8 +394,15 @@ namespace PalaceMod
                 if (!DebugActions.InLevel) throw new InvalidOperationException("not in a level");
                 return $"gold {DebugActions.Gold}, {(DebugActions.IsNight ? "night" : "day")} {DebugActions.CurrentNight}/{DebugActions.NightCount}, " +
                        $"speed x{DebugActions.Speed:0.##}, god {DebugActions.GodMode}, invulnerable {DebugActions.InvulnerableKingdom}, " +
-                       $"nearest {DebugActions.BuildingName(DebugActions.NearestBuilding())}, loadout " +
+                       $"king hp {KingHpText()}, nearest {DebugActions.BuildingName(DebugActions.NearestBuilding())}, loadout " +
                        string.Join(", ", PerkManager.instance.CurrentlyEquipped.Select(e => e.name));
+            });
+            DevCommands.Register("dbg.hurt", "dbg.hurt <n>           deal n damage to the king (tests god mode)", args =>
+            {
+                var hp = PlayerInteraction.instance != null ? PlayerInteraction.instance.GetComponent<Hp>() : null;
+                if (hp == null) throw new InvalidOperationException("not in a level");
+                hp.TakeDamage(float.Parse(args.FirstOrDefault() ?? "10", CultureInfo.InvariantCulture));
+                return $"king hp {KingHpText()}";
             });
             DevCommands.Register("dbg.gold", "dbg.gold <n|+n|-n>     set gold, or add/remove with a sign", args =>
             {
@@ -435,14 +448,15 @@ namespace PalaceMod
             DevCommands.Register("dbg.upgrade", "dbg.upgrade [nearest|building] [branch]   free build/upgrade one level (branch index, else the choice popup)", args =>
             {
                 if (!DebugActions.InLevel) throw new InvalidOperationException("not in a level");
-                int? branch = args.Length > 1 ? int.Parse(args[1], CultureInfo.InvariantCulture) : null;
-                var slot = DebugActions.FindBuilding(args.FirstOrDefault()) ?? throw new ArgumentException("no such building");
+                int? branch = args.Length > 1 && int.TryParse(args[args.Length - 1], out int b) ? b : null;
+                string name = string.Join(" ", branch.HasValue ? args.Take(args.Length - 1) : args);
+                var slot = DebugActions.FindBuilding(name) ?? throw new ArgumentException("no such building");
                 return DebugActions.Upgrade(slot, branch);
             });
             DevCommands.Register("dbg.max", "dbg.max [nearest|building]   free upgrade to the last level", args =>
             {
                 if (!DebugActions.InLevel) throw new InvalidOperationException("not in a level");
-                return DebugActions.MaxUpgrade(DebugActions.FindBuilding(args.FirstOrDefault()) ?? throw new ArgumentException("no such building"));
+                return DebugActions.MaxUpgrade(DebugActions.FindBuilding(string.Join(" ", args)) ?? throw new ArgumentException("no such building"));
             });
             DevCommands.Register("dbg.buildall", "dbg.buildall           build every blueprint at level 1", _ => DebugActions.BuildAllBlueprints());
             DevCommands.Register("dbg.heal", "dbg.heal               revive and heal the king, units and buildings", _ => DebugActions.HealAll());
