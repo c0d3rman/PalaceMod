@@ -93,21 +93,47 @@ namespace PalaceMod.Profiles
         public void SwitchTo(ProfileStore.Profile profile)
         {
             RequireChangeable();
-            Store.Switch(profile.id);
+            Guarded(() => Store.Switch(profile.id));
             ReloadGameState();
         }
 
         public void ResetActive()
         {
             RequireChangeable();
-            Store.ResetActive();
+            Guarded(() => Store.ResetActive());
             ReloadGameState();
+        }
+
+        // A failed change was undone by the store, so the game's state still matches the files. If undoing it failed
+        // too, the files are in an unknown state: stop offering changes and re-read them so the game shows what's there.
+        private void Guarded(Action change)
+        {
+            try { change(); }
+            catch (ProfileStore.OperationFailedException e)
+            {
+                Plugin.Logger.LogError($"Profiles: {e.Message}\n{e.InnerException}");
+                if (Store.Pending)
+                {
+                    Broken = e.Message;
+                    ReloadGameState();
+                }
+                throw new InvalidOperationException(e.Message);
+            }
+        }
+
+        /// <summary>Most profiles the menu lists; enough for anyone switching by hand, and it keeps the list on screen.</summary>
+        public const int MaxProfiles = 6;
+
+        private void RequireRoom()
+        {
+            if (Store.Profiles.Count >= MaxProfiles) throw new InvalidOperationException($"you have {MaxProfiles} profiles; delete one to make another");
         }
 
         /// <summary>Creates a fresh profile and switches to it.</summary>
         public ProfileStore.Profile CreateAndSwitch(string name)
         {
             RequireChangeable();
+            RequireRoom();
             var profile = Store.CreateFresh(name ?? Store.UniqueName("Profile"));
             SwitchTo(profile);
             return profile;
@@ -116,6 +142,7 @@ namespace PalaceMod.Profiles
         public ProfileStore.Profile Duplicate(ProfileStore.Profile source, string name = null)
         {
             RequireChangeable();
+            RequireRoom();
             return Store.Duplicate(source.id, name ?? Store.UniqueName(source.name + " copy"));
         }
 

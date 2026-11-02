@@ -120,6 +120,9 @@ namespace PalaceMod.Profiles
         /// <summary>Whether profiles have ever been used. Until then nothing has been written anywhere.</summary>
         public bool Initialized => File.Exists(IndexPath);
 
+        /// <summary>An operation was interrupted and not yet finished or undone.</summary>
+        public bool Pending => File.Exists(JournalPath);
+
         public IReadOnlyList<Profile> Profiles => LoadIndex().profiles;
 
         public Profile Active
@@ -175,17 +178,41 @@ namespace PalaceMod.Profiles
 
             string backup = BackupLive("switch", Active.name);
             WriteJournal(new Journal { op = "switch", from = from, to = to.id, stage = "backedup", backup = Rel(backup), started = Now() });
-            // The backup is exactly the live data, so it doubles as the outgoing profile's stored copy.
-            MaybeCrash("backedup");
-            ReplaceSnapshot(ProfileDir(from), dir => CopySnapshot(backup, dir));
-            ApplyToLive(ProfileDir(to.id));
-            WriteJournal(new Journal { op = "switch", from = from, to = to.id, stage = "applied", backup = Rel(backup), started = Now() });
-            MaybeCrash("applied");
-            idx.active = to.id;
-            SaveIndex();
-            File.Delete(JournalPath);
+            Transaction(() =>
+            {
+                // The backup is exactly the live data, so it doubles as the outgoing profile's stored copy.
+                MaybeCrash("backedup");
+                ReplaceSnapshot(ProfileDir(from), dir => CopySnapshot(backup, dir));
+                ApplyToLive(ProfileDir(to.id));
+                WriteJournal(new Journal { op = "switch", from = from, to = to.id, stage = "applied", backup = Rel(backup), started = Now() });
+                MaybeCrash("applied");
+                idx.active = to.id;
+                SaveIndex();
+                File.Delete(JournalPath);
+            });
             log($"Profiles: switched from \"{Name(from)}\" to \"{to.name}\" (backup: {Path.GetFileName(backup)})");
         }
+
+        // Runs the part of an operation after its journal is written. If it fails (a real error, not the crash test
+        // hook), it's undone right away from the journal, so the player never keeps playing on half-swapped files.
+        private void Transaction(Action body)
+        {
+            try { body(); }
+            catch (SimulatedCrash) { throw; }
+            catch (Exception e)
+            {
+                log($"Profiles: operation failed, undoing it: {e.Message}");
+                try { RecoverIfNeeded(); }
+                catch (Exception recovery)
+                {
+                    throw new OperationFailedException($"{e.Message}; undoing it also failed ({recovery.Message}). Restart the game to retry the recovery.", e);
+                }
+                throw new OperationFailedException($"{e.Message}. Nothing was changed.", e);
+            }
+        }
+
+        /// <summary>An operation failed; the message says whether the live data was restored.</summary>
+        public sealed class OperationFailedException(string message, Exception inner) : Exception(message, inner);
 
         /// <summary>Clears the live profile's progression, after backing it up.</summary>
         public string ResetActive()
@@ -194,11 +221,14 @@ namespace PalaceMod.Profiles
             var idx = LoadIndex();
             string backup = BackupLive("reset", Active.name);
             WriteJournal(new Journal { op = "reset", from = idx.active, to = idx.active, stage = "backedup", backup = Rel(backup), started = Now() });
-            string empty = EmptySnapshot();
-            try { ApplyToLive(empty); }
-            finally { DeleteDirectory(empty); }
-            SaveIndex();
-            File.Delete(JournalPath);
+            Transaction(() =>
+            {
+                string empty = EmptySnapshot();
+                try { ApplyToLive(empty); }
+                finally { DeleteDirectory(empty); }
+                SaveIndex();
+                File.Delete(JournalPath);
+            });
             log($"Profiles: reset \"{Active.name}\" (backup: {Path.GetFileName(backup)})");
             return backup;
         }
@@ -469,8 +499,16 @@ namespace PalaceMod.Profiles
         public string UniqueName(string baseName)
         {
             var names = new HashSet<string>(LoadIndex().profiles.Select(p => p.name), StringComparer.OrdinalIgnoreCase);
-            if (!names.Contains(baseName)) return baseName;
-            for (int i = 2; ; i++) if (!names.Contains($"{baseName} {i}")) return $"{baseName} {i}";
+            // Leave room for the number, so truncating to MaxNameLength can't make it collide again.
+            static string Fit(string text, int room) => text.Length > room ? text.Substring(0, room).TrimEnd() : text;
+            string first = CleanName(baseName);
+            if (!names.Contains(first)) return first;
+            for (int i = 2; ; i++)
+            {
+                string suffix = $" {i}";
+                string candidate = Fit(first, MaxNameLength - suffix.Length) + suffix;
+                if (!names.Contains(candidate)) return candidate;
+            }
         }
 
         public const int MaxNameLength = 24;
@@ -527,7 +565,8 @@ namespace PalaceMod.Profiles
         private static string SafeFileName(string name)
         {
             var invalid = Path.GetInvalidFileNameChars().Concat(['/', '\\', ':']).ToHashSet();
-            return new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray());
+            // Dots too, so a folder named after a profile never ends like ".old" or ".palacemod-tmp".
+            return new string(name.Select(c => invalid.Contains(c) || c == '.' ? '_' : c).ToArray());
         }
 
         private static string Hash(string path)

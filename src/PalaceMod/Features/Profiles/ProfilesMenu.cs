@@ -193,9 +193,11 @@ namespace PalaceMod.Profiles
 
         private void BuildTitleButton(List<GameObject> created)
         {
-            // Before Quit, which is the last button of the row.
-            var buttons = titleFrame.GetComponentsInChildren<TFUITextButton>(true);
-            var quit = buttons.FirstOrDefault(b => Listeners(b.onApply).Contains("Quit")) ?? buttons.Last();
+            // Before Quit, the last button of the row the Settings button is in (other menus hide in the same frame).
+            var row = buttonTemplate.transform.parent.GetComponentsInChildren<TFUITextButton>(true)
+                .Where(b => b.transform.parent == buttonTemplate.transform.parent).ToList();
+            var quit = row.FirstOrDefault(b => Listeners(b.onApply).Contains("Quit")) ?? row.Last();
+            Plugin.Logger.LogInfo($"Profiles: title row {string.Join(", ", row.Select(b => b.name))}; inserting before {quit.name}");
             var obj = Object.Instantiate(buttonTemplate.gameObject, quit.transform.parent, false);
             created.Add(obj);
             obj.name = "PalaceMod Profiles Button";
@@ -234,7 +236,8 @@ namespace PalaceMod.Profiles
             {
                 var p = profile;
                 bool active = p.id == store.Active.id;
-                var button = Button(listColumn, active ? $"{p.name}  (current)" : p.name, () => FocusActions());
+                // A mouse click applies the row before the selection is polled, so show its actions first.
+                var button = Button(listColumn, active ? $"{p.name}  (current)" : p.name, () => { ShowActions(p); FocusActions(); });
                 rows.Add((button, p));
             }
             newButton = Button(listColumn, "+ New profile", () => Run(() =>
