@@ -67,6 +67,12 @@ namespace PalaceMod
             }
             if (rules.Count == 0) return;
 
+            // The level's colour scheme only reaches the shared unit materials in ColorAndLightManager.Start, after this
+            // point. Apply it now, so materials cloned for tints and skins start from the level's colours (Start applies
+            // it again, which changes nothing).
+            var colors = ColorAndLightManager.Instance;
+            if (colors != null && colors.gameObject.scene == scene) colors.ApplayColorScheme();
+
             int count = 0;
             var errors = new HashSet<string>();
             foreach (var root in scene.GetRootGameObjects())
