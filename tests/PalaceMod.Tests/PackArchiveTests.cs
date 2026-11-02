@@ -150,6 +150,19 @@ namespace PalaceMod.Tests
             Assert.Equal("art/skin.png", entry.Pack.Assets["skin"].Path, "source pack untouched");
         }
 
+        public static void JsonAssetNamedPackJsonRoundTrips()
+        {
+            using var dir = new TempDir();
+            var repo = new FakeRepository(Path.Combine(dir.Path, "root"));
+            var archive = new PackArchive(() => repo);
+            var entry = SampleFolder(dir.Path);
+            File.WriteAllText(Path.Combine(entry.Folder, "assets", "pack.json"), "{}");
+            var issues = new List<ValidationIssue>();
+            var imported = archive.Import(archive.Export(entry), issues);
+            Assert.NotNull(imported, string.Join("; ", issues));
+            Assert.True(File.Exists(Path.Combine(imported.Folder, "assets", "pack.json")), "asset kept");
+        }
+
         public static void BuiltInPackWithoutFolderExports()
         {
             using var dir = new TempDir();

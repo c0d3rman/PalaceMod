@@ -230,7 +230,9 @@ namespace PalaceMod.Builder.Sharing
                     named.Add((e, name));
                 }
 
-                var packFiles = named.Where(n => n.name == PackFile || n.name.EndsWith("/" + PackFile)).ToList();
+                // The pack root is the folder of the one pack.json that isn't itself an asset (assets/ may hold .json files).
+                var packFiles = named.Where(n => (n.name == PackFile || n.name.EndsWith("/" + PackFile))
+                    && !n.name.StartsWith("assets/", StringComparison.Ordinal) && !n.name.Contains("/assets/")).ToList();
                 if (packFiles.Count == 0) return Reject(issues, "that file has no pack.json, so it isn't a design pack");
                 if (packFiles.Count > 1) return Reject(issues, "that file holds more than one pack.json; import them one at a time");
                 string prefix = packFiles[0].name.Substring(0, packFiles[0].name.Length - PackFile.Length);

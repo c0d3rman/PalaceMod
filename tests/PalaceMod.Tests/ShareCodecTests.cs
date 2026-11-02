@@ -210,6 +210,21 @@ namespace PalaceMod.Tests
             Assert.True(pack.Units != null && pack.WaveSets != null && pack.Assets != null && pack.Levels != null, "lists not null");
         }
 
+        public static void EncodeRefusesWhatDecodeWouldReject()
+        {
+            var pack = Sample();
+            pack.Description = new string('x', ShareCodec.MaxJsonBytes);
+            try
+            {
+                Codec.Encode(pack);
+                throw new AssertException("should refuse");
+            }
+            catch (InvalidOperationException e)
+            {
+                Assert.True(e.Message.Contains(".tfpack"), e.Message);
+            }
+        }
+
         public static void LooksLikeCode()
         {
             Assert.True(ShareCodec.LooksLikeCode("x TFB1:abc"), "TFB1");

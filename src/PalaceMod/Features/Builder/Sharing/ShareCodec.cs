@@ -39,6 +39,8 @@ namespace PalaceMod.Builder.Sharing
         {
             if (pack == null) throw new ArgumentNullException(nameof(pack));
             byte[] json = Encoding.UTF8.GetBytes(PackSerializer.WriteCompact(ForSharing(pack)));
+            // Never hand out a code Decode would refuse.
+            if (json.Length > MaxJsonBytes) throw new InvalidOperationException("this pack is too large for a share code; save it as a .tfpack file instead");
             using var ms = new MemoryStream();
             using (var deflate = new DeflateStream(ms, CompressionLevel.Optimal, leaveOpen: true))
                 deflate.Write(json, 0, json.Length);
@@ -47,7 +49,9 @@ namespace PalaceMod.Builder.Sharing
             ms.WriteByte((byte)(crc >> 16));
             ms.WriteByte((byte)(crc >> 8));
             ms.WriteByte((byte)crc);
-            return Prefix + Base64Url.Encode(ms.ToArray());
+            string payload = Base64Url.Encode(ms.ToArray());
+            if (payload.Length > MaxCodeChars) throw new InvalidOperationException("this pack is too large for a share code; save it as a .tfpack file instead");
+            return Prefix + payload;
         }
 
         public DesignPack Decode(string code, List<ValidationIssue> issues)
