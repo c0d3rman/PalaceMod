@@ -45,7 +45,6 @@ namespace PalaceMod
 
         private CanvasGroup pauseGroup;
         private PerkSelectionTooltipHelper nativeTooltip;
-        private static readonly Vector3[] cornersA = new Vector3[4], cornersB = new Vector3[4];
 
         public override void Update()
         {
@@ -53,21 +52,20 @@ namespace PalaceMod
             if (pausePanel != null && pausePanel.activeInHierarchy) AvoidNativeTooltip();
         }
 
-        /// <summary>The pause menu's own selection tooltip (enemies, units, loadout) can open over the top-right corner; step aside while it's there.</summary>
+        /// <summary>
+        /// The pause menu's own selection tooltip (enemies, units, loadout, income) opens in the middle-right and reaches
+        /// into our corner; fade out while it's up. It shows whenever one of those icons is selected or hovered.
+        /// </summary>
         private void AvoidNativeTooltip()
         {
-            bool overlaps = false;
-            var bg = nativeTooltip != null ? nativeTooltip.background : null;
-            if (bg != null && bg.isActiveAndEnabled && (nativeTooltip.tooltipParent == null || nativeTooltip.tooltipParent.activeInHierarchy))
-            {
-                bg.rectTransform.GetWorldCorners(cornersA);
-                ((RectTransform)pausePanel.transform).GetWorldCorners(cornersB);
-                overlaps = cornersA[0].x < cornersB[2].x && cornersB[0].x < cornersA[2].x && cornersA[0].y < cornersB[2].y && cornersB[0].y < cornersA[2].y;
-            }
-            float target = overlaps ? 0f : 1f;
-            pauseGroup.alpha = Mathf.MoveTowards(pauseGroup.alpha, target, Time.unscaledDeltaTime * 8f);
-            if (overlaps) ScoreTooltip.Hide();
+            var frame = nativeTooltip != null ? nativeTooltip.targetFrame : null;
+            bool shown = frame != null && (HasTooltip(frame.CurrentFocus) || (frame.CurrentFocus == null && HasTooltip(frame.CurrentSelection)));
+            if (shown && nativeTooltip.tooltipParent != null && !nativeTooltip.tooltipParent.activeInHierarchy) shown = false;
+            pauseGroup.alpha = Mathf.MoveTowards(pauseGroup.alpha, shown ? 0f : 1f, Time.unscaledDeltaTime * 8f);
+            if (shown) ScoreTooltip.Hide();
         }
+
+        private static bool HasTooltip(ThronefallUIElement e) => e is TFUIEquippable || e is TFUIEnemy || e is TFUIPlayerUnit || e is TFUIIncomeDisplay;
 
         protected override void OnFeatureDisabled()
         {
