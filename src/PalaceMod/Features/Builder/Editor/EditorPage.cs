@@ -1,0 +1,293 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using PalaceMod.Builder.Model;
+using UnityEngine;
+
+namespace PalaceMod.Builder.Editor
+{
+    /// <summary>
+    /// One editor screen (a ModFrame) bound to the open draft. Fields made through the helpers here carry the JSON
+    /// path of the value they edit, so validation issues mark the field (a coloured diamond and the message in its
+    /// tooltip) and the Problems list can jump to it. Value edits update the open page in place; structural edits
+    /// rebuild it (keeping the selection), and pages that aren't showing rebuild when they're shown again.
+    /// </summary>
+    internal abstract class EditorPage
+    {
+        public ModFrame Frame { get; }
+        protected PackDraft Draft => BuilderEditor.Draft;
+        protected DesignPack Pack => Draft?.Pack;
+
+        private readonly List<(ModField Field, string Path)> bound = [];
+        private bool stale;
+
+        protected EditorPage(string title)
+        {
+            Frame = new ModFrame(title);
+            Frame.Activated += () =>
+            {
+                if (!stale) return;
+                stale = false;
+                Frame.Refresh();
+            };
+        }
+
+        public bool IsOpen => Frame.IsOpen;
+
+        /// <summary>Wraps a page builder so every build starts with a clean field list.</summary>
+        protected Action<ModPage> Page(Action<ModPage> build, bool needsDraft = true) => page =>
+        {
+            bound.Clear();
+            if (needsDraft && Draft == null) { page.Text("No pack is open."); return; }
+            build(page);
+            UpdateFields();
+        };
+
+        public void OnDraftChanged(bool structural)
+        {
+            if (!Frame.IsOpen) { stale = true; return; }
+            if (structural) Frame.Refresh();
+            else UpdateFields();
+        }
+
+        public void MarkStale() => stale = true;
+
+        protected void UpdateFields()
+        {
+            foreach (var (field, path) in bound)
+            {
+                if (field.Button == null) continue;
+                field.Refresh();
+                if (path != null) field.SetMarker(MarkerFor(path));
+            }
+        }
+
+        /// <summary>Selects the field whose path best matches an issue path; false if none is on this page.</summary>
+        public bool SelectPath(string path)
+        {
+            var best = bound.Where(b => b.Path != null && b.Field.Button != null && Covers(b.Path, path))
+                .OrderByDescending(b => b.Path.Length).FirstOrDefault();
+            if (best.Field == null || Frame.Frame == null) return false;
+            Frame.Frame.Select(best.Field.Button);
+            return true;
+        }
+
+        // ---- Validation feedback --------------------------------------------------------------------------------
+
+        protected static bool Covers(string fieldPath, string issuePath) =>
+            issuePath == fieldPath || issuePath.StartsWith(fieldPath + ".") || issuePath.StartsWith(fieldPath + "[");
+
+        protected IEnumerable<ValidationIssue> IssuesAt(string path) =>
+            path == null || Draft == null ? [] : Draft.Issues.Where(i => Covers(path, i.Path));
+
+        protected ModFieldMarker MarkerFor(string path)
+        {
+            var issues = IssuesAt(path).ToList();
+            return issues.Any(i => i.Severity == Severity.Error) ? ModFieldMarker.Error : issues.Count > 0 ? ModFieldMarker.Warning : ModFieldMarker.None;
+        }
+
+        /// <summary>Tooltip text: the help line, then any problems at the path.</summary>
+        protected Func<string> Tip(string help, string path) => () =>
+        {
+            var lines = IssuesAt(path).Select(i =>
+                $"<color=#{ModStyle.Hex(ModStyle.KindColor(i.Severity == Severity.Error ? NotifyKind.Error : NotifyKind.Warning))}>{Capital(i.Message)}</color>").ToList();
+            if (!string.IsNullOrEmpty(help)) lines.Insert(0, help);
+            return string.Join("\n", lines);
+        };
+
+        protected static string Capital(string s) => string.IsNullOrEmpty(s) ? s : char.ToUpperInvariant(s[0]) + s.Substring(1);
+
+        protected T Bind<T>(T field, string path) where T : class
+        {
+            if (field is ModField f) bound.Add((f, path));
+            return field;
+        }
+
+        /// <summary>Marks a plain row (not a field) with its path's issues.</summary>
+        protected ModField Marked(ModPage page, string label, Func<string> value, string help, string path, Action onClick, Sprite icon = null)
+        {
+            var row = page.Row(label, "", Tip(help, path), onClick, icon);
+            var field = new ModField(row, label, value, arrows: false);
+            field.Refresh();
+            return Bind(field, path);
+        }
+
+        // ---- Field helpers ----------------------------------------------------------------------------------------
+
+        protected ModField Number(ModPage page, NumberSpec spec, string path, Func<float?> get, Action<DesignPack, float?> set,
+            Func<float?> baseValue = null, bool nullable = true, string label = null)
+        {
+            label ??= spec.Label;
+            string Display()
+            {
+                var v = get();
+                if (v is float f) return spec.Format(f);
+                var b = baseValue?.Invoke();
+                return b is float bf ? Dim(spec.Format(bf) + "  (base)") : Dim("base");
+            }
+            ModField field = null;
+            field = page.Stepper(label, Display,
+                delta =>
+                {
+                    float current = get() ?? baseValue?.Invoke() ?? spec.Min;
+                    float next = spec.Stepped(current, delta);
+                    Draft.Edit($"Set {label.ToLowerInvariant()}", p => set(p, next), coalesce: path);
+                },
+                () => ModTextInput.Begin(field, get() is float f ? ModFields.FormatNumber(f) : "", text =>
+                {
+                    if (string.IsNullOrWhiteSpace(text))
+                    {
+                        if (nullable) Draft.Edit($"Reset {label.ToLowerInvariant()}", p => set(p, null));
+                        return;
+                    }
+                    if (!ModFields.TryParseNumber(text.Replace(spec.Unit.Trim(), ""), out float value))
+                    {
+                        Notify.Show($"\"{text}\" isn't a number", NotifyKind.Warning, key: "builder-edit");
+                        return;
+                    }
+                    float clamped = spec.Clamp(value);
+                    if (clamped != value) Notify.Show($"{label}: kept to {spec.Format(clamped)} (allowed {spec.Format(spec.Min)} to {spec.Format(spec.Max)})", NotifyKind.Warning, key: "builder-edit");
+                    Draft.Edit($"Set {label.ToLowerInvariant()}", p => set(p, clamped));
+                }, 16),
+                Tip(spec.Help + (nullable ? "\nLeft/right to change, apply to type a value (empty resets to the base unit's)." : "\nLeft/right to change, apply to type a value."), path));
+            return Bind(field, path);
+        }
+
+        protected ModField Text(ModPage page, string label, string path, Func<string> get, Action<DesignPack, string> set, string help, int maxLength = 64)
+        {
+            var field = page.TextInput(label, get, text =>
+            {
+                text = text.Trim();
+                if (text == (get() ?? "")) return;
+                Draft.Edit($"Set {label.ToLowerInvariant()}", p => set(p, text.Length == 0 ? null : text));
+            }, Tip(help, path), maxLength);
+            return Bind(field, path);
+        }
+
+        protected ModField Choice<TValue>(ModPage page, string label, string path, IReadOnlyList<(TValue Value, string Display)> options,
+            Func<TValue> get, Action<DesignPack, TValue> set, string help, Action picker = null, Func<string> display = null)
+        {
+            var names = options.Select(o => o.Display).ToList();
+            int Index() => options.ToList().FindIndex(o => Equals(o.Value, get()));
+            ModField field;
+            if (display != null)
+            {
+                field = page.Stepper(label, display, delta => Step(delta), picker ?? (() => Step(1)), Tip(help, path));
+            }
+            else
+            {
+                field = page.Choice(label, names, Index, i => Draft.Edit($"Set {label.ToLowerInvariant()}", p => set(p, options[i].Value), coalesce: path), picker, Tip(help, path));
+            }
+            return Bind(field, path);
+
+            void Step(int delta)
+            {
+                if (options.Count == 0) return;
+                int i = Index();
+                int next = ((i < 0 ? (delta > 0 ? -1 : 0) : i) + Math.Sign(delta) + options.Count) % options.Count;
+                Draft.Edit($"Set {label.ToLowerInvariant()}", p => set(p, options[next].Value), coalesce: path);
+            }
+        }
+
+        protected ModField Toggle(ModPage page, string label, string path, Func<bool> get, Action<DesignPack, bool> set, string help) =>
+            Bind(page.Toggle(label, get, v => Draft.Edit($"{(v ? "Turn on" : "Turn off")} {label.ToLowerInvariant()}", p => set(p, v)), Tip(help, path)), path);
+
+        /// <summary>A destructive action: the first press arms it ("Press again to ..."), a second within 3 s runs it.</summary>
+        protected void Danger(ModPage page, string label, string help, Action action)
+        {
+            float armedAt = -10f;
+            ModRow row = null;
+            row = page.Row(label, null, help, () =>
+            {
+                if (Time.unscaledTime - armedAt > 3f)
+                {
+                    armedAt = Time.unscaledTime;
+                    row.SetLabel($"{label}: press again to confirm");
+                    return;
+                }
+                armedAt = -10f;
+                row.SetLabel(label);
+                action();
+            });
+        }
+
+        protected static string Dim(string text) => $"<color=#{ModStyle.Hex(ModStyle.Dim)}>{text}</color>";
+        protected static string Accent(string text) => $"<color=#{ModStyle.Hex(ModStyle.Accent)}>{text}</color>";
+        protected static string Escape(string text) => ModFields.TMPEscape(text);
+    }
+
+    /// <summary>A full-screen list to pick one item (or toggle several) from, e.g. a base unit or a spawn line.</summary>
+    internal static class Picker
+    {
+        public sealed class Item
+        {
+            public string Id, Label, Value, Tooltip;
+            public Sprite Icon;
+            /// <summary>A section heading instead of a pickable row.</summary>
+            public bool Header;
+        }
+
+        private static ModFrame frame;
+        private static List<Item> items = [];
+        private static string current;
+        private static Action<string> onPick;
+        private static Func<string, bool> isOn;
+        private static string hint;
+
+        /// <summary>Pick one; <paramref name="pick"/> runs with the chosen id and the picker closes.</summary>
+        public static void One(string title, IEnumerable<Item> choices, string selected, Action<string> pick, string help = null)
+        {
+            items = choices.ToList();
+            current = selected;
+            onPick = id => { frame.Close(); pick(id); };
+            isOn = null;
+            hint = help;
+            Show(title);
+        }
+
+        /// <summary>Toggle several; <paramref name="toggle"/> runs per click and the list stays open.</summary>
+        public static void Many(string title, IEnumerable<Item> choices, Func<string, bool> on, Action<string> toggle, string help = null)
+        {
+            items = choices.ToList();
+            current = null;
+            isOn = on;
+            onPick = id => { toggle(id); frame.Refresh(); };
+            hint = help;
+            Show(title);
+        }
+
+        public static bool IsOpen => frame?.IsOpen == true;
+
+        private static void Show(string title)
+        {
+            if (frame == null)
+            {
+                frame = new ModFrame(title).SetContent(Build);
+            }
+            frame.SetTitle(title);
+            if (frame.IsOpen) frame.Refresh();
+            else frame.Open();
+            // Start on the current choice rather than the top of a long list.
+            if (current != null && rows.TryGetValue(current, out var row) && row != null) frame.Frame?.Select(row);
+        }
+
+        private static readonly Dictionary<string, TFUITextButton> rows = [];
+
+        private static void Build(ModPage page)
+        {
+            rows.Clear();
+            if (!string.IsNullOrEmpty(hint)) page.Text(hint);
+            foreach (var item in items)
+            {
+                if (item.Header) { page.Header(item.Label); continue; }
+                string id = item.Id;
+                bool selected = isOn != null ? isOn(id) : id == current;
+                string value = item.Value ?? "";
+                if (selected) value = (value.Length > 0 ? value + "   " : "") + $"<color=#{ModStyle.Hex(ModStyle.Accent)}>◆</color>";
+                var row = page.Row(item.Label, value, item.Tooltip, () => onPick(id), item.Icon);
+                rows[id] = row.Button;
+            }
+            if (items.Count == 0) page.Text("Nothing to choose from.");
+        }
+    }
+}
