@@ -81,7 +81,7 @@ Then check the result with `dev.py logs` (log what features do with `Plugin.Logg
 
 ## UI kit (src/PalaceMod/Core/UI)
 
-Everything is cloned from the game's own widgets (found through its UI scripts' fields, not GameObject paths) and carries PalaceMod's mark: a small verdigris diamond, and a thin verdigris edge on panels (`ModStyle.Accent`, `ModStyle.AddEmblem`, `ModStyle.MarkPanel`). Take the game's palette and fonts from `ModStyle` for anything custom.
+Everything is cloned from the game's own widgets (found through its UI scripts' fields, not GameObject paths) and carries PalaceMod's mark: a small verdigris gem (the emblem from the logo), and a thin verdigris edge on panels (`ModStyle.Accent`, `ModStyle.AddEmblem`, `ModStyle.MarkPanel`). The logo, palette and textures live in `branding/` (see its README; regenerate with `python3 branding/build.py`). Take the game's palette and fonts from `ModStyle` for anything custom.
 
 ```csharp
 // In Awake. The frame is built on first open; a tab's page is rebuilt each time it's shown.
