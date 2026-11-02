@@ -62,5 +62,9 @@
     <Reference Include="MPUIKit">
       <HintPath>lib/MPUIKit.dll</HintPath>
     </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>lib/Newtonsoft.Json.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 </Project>
