@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using HarmonyLib;
 using PalaceMod.Builder.Model;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -28,6 +29,8 @@ namespace PalaceMod.Builder
         private readonly Dictionary<string, (string hash, GameObject template)> templates = [];
         private readonly List<Object> owned = [];
         private readonly HashSet<string> building = [];
+        /// <summary>Weapon and material clones for in-place application, per unit design and pack revision.</summary>
+        private readonly Dictionary<string, Dictionary<Object, Object>> inPlaceClones = [];
 
         /// <summary>Custom unit names/descriptions by I2 term, answered by the TextTranslator patch.</summary>
         internal static readonly Dictionary<string, string> Texts = [];
@@ -54,6 +57,7 @@ namespace PalaceMod.Builder
             foreach (var o in owned) if (o != null) Object.Destroy(o);
             templates.Clear();
             owned.Clear();
+            inPlaceClones.Clear();
             Texts.Clear();
         }
 
@@ -87,6 +91,31 @@ namespace PalaceMod.Builder
                     error = $"\"{unitRef}\" isn't a unit reference";
                     return null;
             }
+        }
+
+        public bool ApplyTo(GameObject instance, DesignPack context, string unitRef, out string error)
+        {
+            error = null;
+            if (instance == null) { error = "no instance"; return false; }
+            if (IsTemplateObject(instance)) { error = "templates can't be modified in place"; return false; }
+            var r = ContentRef.Parse(unitRef);
+            var pack = r.Kind == RefKind.LocalUnit || (r.Kind == RefKind.PackUnit && r.Pack == context?.Id) ? context
+                : r.Kind == RefKind.PackUnit ? findPack(r.Pack)?.Pack : null;
+            if (r.Kind != RefKind.LocalUnit && r.Kind != RefKind.PackUnit) { error = $"\"{unitRef}\" isn't a custom unit"; return false; }
+            if (pack == null) { error = $"pack \"{r.Pack}\" isn't installed"; return false; }
+            var def = pack.FindUnit(r.Id);
+            if (def == null) { error = $"no unit \"{r.Id}\" in pack {pack.Id}"; return false; }
+            var baseRef = ContentRef.Parse(def.Base);
+            var baseUnit = baseRef.Kind == RefKind.Vanilla ? catalog.FindUnit(baseRef.Id) : null;
+            if (baseUnit == null) { error = $"{pack.Id}/{def.Id}: unknown base \"{def.Base}\""; return false; }
+            if (baseUnit.Side != def.Side) { error = $"{pack.Id}/{def.Id}: base {baseUnit.Id} is a {baseUnit.Side} unit, not {def.Side}"; return false; }
+
+            string key = pack.Id + "/" + def.Id + "|" + PackSerializer.WriteCompact(pack);
+            if (!inPlaceClones.TryGetValue(key, out var clones)) inPlaceClones[key] = clones = [];
+            var notes = new List<string>();
+            Apply(instance, pack, def, clones, notes, inPlace: true);
+            if (notes.Count > 0) error = string.Join("; ", notes);
+            return true;
         }
 
         private GameObject GetTemplate(DesignPack pack, UnitDef def, out string error)
@@ -136,17 +165,22 @@ namespace PalaceMod.Builder
             var go = Object.Instantiate(baseUnit.Prefab, Root());
             go.name = $"{baseUnit.Prefab.name} [{pack.Id}/{def.Id}]";
             var notes = new List<string>();
-
-            ApplyStats(go, def.Stats);
-            ApplyWeapon(go, def.Weapon, notes);
-            ApplyTags(go, def.Tags);
-            ApplyText(go, pack, def);
-            ApplyVisuals(go, pack, def.Visuals, notes);
-            foreach (var b in def.Behaviours ?? [])
-                ApplyBehaviour(go, pack, def, b, notes);
-
+            Apply(go, pack, def, [], notes, inPlace: false);
             Plugin.Logger.LogInfo($"Builder: built {pack.Id}/{def.Id} from {baseUnit.Id}: {Describe(go)}" + (notes.Count > 0 ? $" ({string.Join("; ", notes)})" : ""));
             return go;
+        }
+
+        /// <summary>Writes a design's overrides to a template (inPlace false) or to a live, not yet started instance.
+        /// clones maps shared assets (weapons, materials) to their per-design copies.</summary>
+        private void Apply(GameObject go, DesignPack pack, UnitDef def, Dictionary<Object, Object> clones, List<string> notes, bool inPlace)
+        {
+            ApplyStats(go, def.Stats);
+            ApplyWeapon(go, def.Weapon, clones, notes);
+            ApplyTags(go, def.Tags, inPlace);
+            ApplyText(go, pack, def);
+            ApplyVisuals(go, pack, def.Visuals, clones, notes);
+            foreach (var b in def.Behaviours ?? [])
+                ApplyBehaviour(go, pack, def, b, notes);
         }
 
         private static void ApplyStats(GameObject go, StatsDef s)
@@ -177,10 +211,9 @@ namespace PalaceMod.Builder
             }
         }
 
-        private void ApplyWeapon(GameObject go, WeaponDef w, List<string> notes)
+        private void ApplyWeapon(GameObject go, WeaponDef w, Dictionary<Object, Object> clones, List<string> notes)
         {
             if (w == null) return;
-            var clones = new Dictionary<Weapon, Weapon>();
             Weapon replacement = null;
             if (w.Base != null && w.Base != "inherit")
             {
@@ -193,7 +226,9 @@ namespace PalaceMod.Builder
                 if (w.DamageMult is float dm) a.DamageMultiplyer *= dm;
                 var source = replacement ?? a.weapon;
                 if (source == null) continue;
-                if (!clones.TryGetValue(source, out var clone))
+                Weapon clone;
+                if (clones.TryGetValue(source, out var cached)) clone = (Weapon)cached;
+                else
                 {
                     clone = Object.Instantiate(source);
                     clone.name = source.name;
@@ -214,17 +249,26 @@ namespace PalaceMod.Builder
             damageMultiplyer = d.Mult,
         }).ToList();
 
-        private static void ApplyTags(GameObject go, TagEditDef t)
+        private static readonly AccessTools.FieldRef<TaggedObject, long> TagBitfield = AccessTools.FieldRefAccess<TaggedObject, long>("tagBitfield");
+
+        private static void ApplyTags(GameObject go, TagEditDef t, bool inPlace)
         {
             if (t == null) return;
             foreach (var tagged in go.GetComponentsInChildren<TaggedObject>(true))
             {
-                foreach (var name in t.Remove ?? []) tagged.Tags.Remove((TagManager.ETag)Enum.Parse(typeof(TagManager.ETag), name));
-                foreach (var name in t.Add ?? [])
+                var remove = (t.Remove ?? []).Select(n => (TagManager.ETag)Enum.Parse(typeof(TagManager.ETag), n)).ToList();
+                var add = (t.Add ?? []).Select(n => (TagManager.ETag)Enum.Parse(typeof(TagManager.ETag), n)).ToList();
+                // A live instance that's enabled is registered with the TagManager by tag, so go through its API.
+                if (inPlace && tagged.isActiveAndEnabled)
                 {
-                    var tag = (TagManager.ETag)Enum.Parse(typeof(TagManager.ETag), name);
-                    if (!tagged.Tags.Contains(tag)) tagged.Tags.Add(tag);
+                    foreach (var tag in remove) tagged.RemoveTag(tag);
+                    foreach (var tag in add) tagged.AddTag(tag);
+                    continue;
                 }
+                foreach (var tag in remove) tagged.Tags.Remove(tag);
+                foreach (var tag in add) if (!tagged.Tags.Contains(tag)) tagged.Tags.Add(tag);
+                // OnEnable only ORs tags into the cached bitfield, so drop stale bits from an earlier enable.
+                if (inPlace) TagBitfield(tagged) = TaggedObject.CreateBitfieldFromTags(tagged.Tags);
             }
         }
 
@@ -242,7 +286,7 @@ namespace PalaceMod.Builder
             Texts[descriptionKey] = def.Description ?? baseDescription;
         }
 
-        private void ApplyVisuals(GameObject go, DesignPack pack, VisualsDef v, List<string> notes)
+        private void ApplyVisuals(GameObject go, DesignPack pack, VisualsDef v, Dictionary<Object, Object> clones, List<string> notes)
         {
             if (v == null) return;
             if (v.Scale is float s && s > 0) go.transform.localScale *= s;
@@ -263,7 +307,6 @@ namespace PalaceMod.Builder
             if (v.Tint != null && Validator.TryParseColor(v.Tint, out var rgb))
             {
                 var tint = new Color(rgb.r, rgb.g, rgb.b);
-                var clones = new Dictionary<Material, Material>();
                 int tinted = 0;
                 foreach (var renderer in go.GetComponentsInChildren<Renderer>(true))
                 {
@@ -274,10 +317,13 @@ namespace PalaceMod.Builder
                     {
                         var m = mats[i];
                         if (m == null || !IsBodyMaterial(m)) continue;
-                        if (!clones.TryGetValue(m, out var clone))
+                        Material clone;
+                        if (clones.TryGetValue(m, out var cached)) clone = (Material)cached;
+                        else
                         {
                             clone = new Material(m) { name = m.name }; // same name: the game's elite swap looks for "Enemy"
                             MultiplyColor(clone, tint);
+                            tintedMaterials.Add((m, clone, tint));
                             owned.Add(clone);
                             clones[m] = clone;
                         }
@@ -292,6 +338,22 @@ namespace PalaceMod.Builder
 
         // Unit bodies use the shared "Enemy" material (enemies) or the player colour materials; weapons/FX use others.
         private static bool IsBodyMaterial(Material m) => m.name == "Enemy" || m.name.StartsWith("Player") || m.name.StartsWith("Ally");
+
+        /// <summary>Tinted clones and their sources. ColorAndLightManager recolours the shared unit materials from the
+        /// level's colour scheme on level start and re-tints their outlines with the daylight, so clones follow.</summary>
+        private static readonly List<(Material source, Material clone, Color tint)> tintedMaterials = [];
+
+        /// <summary>Recopies every tinted clone from its source and re-applies the tint (BuilderManager.Troops.cs calls
+        /// this after the game changes its unit material colours).</summary>
+        internal static void ResyncTints()
+        {
+            tintedMaterials.RemoveAll(t => t.source == null || t.clone == null);
+            foreach (var (source, clone, tint) in tintedMaterials)
+            {
+                clone.CopyPropertiesFromMaterial(source);
+                MultiplyColor(clone, tint);
+            }
+        }
 
         private static void MultiplyColor(Material m, Color tint)
         {
@@ -325,11 +387,12 @@ namespace PalaceMod.Builder
         {
             var hp = go.GetComponentInChildren<Hp>(true);
             var move = go.GetComponentInChildren<PathfindMovementEnemy>(true);
+            var playerMove = go.GetComponentInChildren<PathfindMovementPlayerunit>(true);
             var attack = go.GetComponentInChildren<AutoAttack>(true);
             var icon = go.GetComponent<ScreenMarkerIcon>();
             var tagged = go.GetComponentInChildren<TaggedObject>(true);
             string dmg = attack?.weapon == null ? "-" : string.Join(",", attack.weapon.directDamage.Select(d => $"{(d.requiredTags.Count == 0 ? "any" : string.Join("+", d.requiredTags))}:+{d.damageAdded}x{d.damageMultiplyer}"));
-            return $"name=\"{icon?.UnitName}\" maxHp={hp?.maxHp} speed={move?.movementSpeed} cooldown={attack?.cooldownDuration} " +
+            return $"name=\"{icon?.UnitName}\" maxHp={hp?.maxHp} speed={move?.movementSpeed ?? playerMove?.movementSpeed} cooldown={attack?.cooldownDuration} " +
                 $"dmgMult={attack?.DamageMultiplyer} weapon={attack?.weapon?.name}#{attack?.weapon?.GetInstanceID()} damage=[{dmg}] scale={go.transform.localScale.x:0.##} " +
                 $"tags=[{(tagged == null ? "" : string.Join(",", tagged.Tags))}]";
         }
