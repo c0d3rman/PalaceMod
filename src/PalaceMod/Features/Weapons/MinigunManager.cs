@@ -18,7 +18,8 @@ using UnityEngine;
     Saves stay vanilla-safe:
     - Mid-match saves store the loadout by display name. When the minigun is equipped we write the Long Bow's name
       *and* the minigun's; vanilla skips the unknown name and loads the bow, and with the mod on we drop the bow again.
-    - "Beaten with" records never contain the minigun (vanilla's save would write a name it can't resolve).
+    - Minigun victories aren't added to the level's "beaten with" records, so they don't count toward vanilla's
+      "beat it with/without X" quests (and vanilla's save would write a name it can't resolve).
     - Eternal Trials and the mini-modes never offer it, because their run saves can't fall back.
     Turning the feature off removes it from the list, swaps an equipped minigun for the Long Bow, and reverts a live
     minigun back to the bow mid-level.
@@ -267,10 +268,12 @@ namespace PalaceMod
         [HarmonyPatch(typeof(LevelData), nameof(LevelData.SaveScoreAndStatsToBestIfBest))]
         private static class LevelData_Beaten_Patch
         {
+            // A minigun victory isn't a vanilla victory, so it doesn't count toward "beat it with/without X" quests
+            // (and vanilla's save can't resolve the minigun's name anyway).
             private static void Postfix(LevelData __instance)
             {
                 if (minigun == null) return;
-                foreach (var loadout in __instance.levelHasBeenBeatenWith) loadout.Remove(minigun);
+                __instance.levelHasBeenBeatenWith.RemoveAll(loadout => loadout.Contains(minigun));
             }
         }
 
@@ -324,7 +327,10 @@ namespace PalaceMod
                     helper.frame.Apply();
                     return $"picked {want.displayName}; loadout: {string.Join(", ", pm.CurrentlyEquipped.Select(e => e?.displayName ?? "null"))}";
                 case "play":
-                    (LevelSelectManager.instance ?? throw new InvalidOperationException("not in the level select")).PlayButtonPressed();
+                    var screen = UnityEngine.Object.FindObjectsOfType<LoadoutUIHelper>().FirstOrDefault(h => h.playButton != null && h.playButton.gameObject.activeInHierarchy)
+                        ?? throw new InvalidOperationException("no loadout screen open");
+                    screen.frame.Select(screen.playButton);
+                    screen.frame.Apply();
                     return "play";
                 case "zoom":
                     // Camera zoom as a multiple of the default view (0 restores it), for close-up screenshots.

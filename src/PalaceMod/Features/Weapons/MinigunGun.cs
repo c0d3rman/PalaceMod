@@ -160,7 +160,7 @@ namespace PalaceMod
         }
 
         public string Describe() =>
-            $"shots={Shots} hits={Hits} spin={spin:0.00} overdrive={Overdrive} interval={CurrentInterval():0.000}s move={MoveFactor:0.00} bulletsInFlight={bullets.Count} " +
+            $"shots={Shots} hits={Hits} spin={spin:0.00} overdrive={Overdrive} interval={CurrentInterval():0.000}s move={MoveFactor:0.00} kingSpeed={(PlayerMovement.instance != null ? PlayerMovement.instance.Velocity.magnitude : 0f):0.0} bulletsInFlight={bullets.Count} " +
             $"dmg=[{string.Join(",", bulletWeapon.directDamage.ConvertAll(d => $"{string.Join("+", d.requiredTags)}:{d.damageAdded:0.##}x{d.damageMultiplyer:0.##}"))}] " +
             $"bowCooldown={originalPassiveCooldown} range={passive.targetPriorities[0].range} activeCooldown={active.cooldownTime}";
 
@@ -224,7 +224,6 @@ namespace PalaceMod
             var audio = ThronefallAudioManager.Instance;
             if (audio != null)
                 audio.PlaySoundAsOneShot(audio.audioContent.BallistaShot, 0.9f, 0.7f, audio.audioContent.mixGroupFX, 5);
-            Notify.Show("Overdrive!", NotifyKind.Info, 1.5f, "minigun.overdrive");
         }
 
         private static Vector3 AimPoint(Hp hp, Vector3 from)
