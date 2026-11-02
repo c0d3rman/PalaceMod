@@ -84,10 +84,15 @@ namespace PalaceMod
         {
             Detach();
             var sm = ScoreManager.Instance;
-            string scene = SceneManager.GetActiveScene().name;
+            string scene = sm.gameObject.scene.name;
             if (history != null && historyOwner == sm)
             {
-                // Re-enabled in the same level: keep going.
+                // Re-enabled in the same level: nothing was recorded while off, so drop the unfinished night and start
+                // the day's tallies from now (a night in progress gets a fresh record at the next Update).
+                if (history.Current != null) history.nights.RemoveAt(history.nights.Count - 1);
+                history.dawnBank = PlayerInteraction.instance != null ? PlayerInteraction.instance.TrueBalance : 0;
+                history.spentSinceDawn = 0;
+                history.daySeconds = 0f;
             }
             else if (loaded != null && loadedScene == scene)
             {
@@ -111,7 +116,7 @@ namespace PalaceMod
             trackedScore = sm;
             sm.OnNightScoreAdd.AddListener(OnNightScored);
             // Opened mid-night with nothing recorded for it: start its record now.
-            wasNight = RunProjection.IsNight && history.Current != null;
+            wasNight = false;
         }
 
         private ScoreManager historyOwner;
@@ -209,15 +214,27 @@ namespace PalaceMod
 
         // ---- Persistence (inside the game's match save) -----------------------------------------------------------
 
+        // Only the dawn checkpoint (LocalMatchSaveLoad.Save) writes the history: other flushes of the save file, like
+        // the one after a defeat, keep the world from the last dawn, so the history must stay at that dawn too.
+        private static bool checkpointing;
+
+        [HarmonyPatch(typeof(LocalMatchSaveLoad), "Save")]
+        private static class CheckpointPatch
+        {
+            private static void Prefix() => checkpointing = true;
+            private static void Finalizer() => checkpointing = false;
+        }
+
         [HarmonyPatch(typeof(MatchSaveLoadHandler), nameof(MatchSaveLoadHandler.SaveRun))]
         private static class SaveRunPatch
         {
             private static void Prefix()
             {
+                if (!checkpointing) return;
                 var self = Feature<AnalyticsManager>.Instance;
                 var save = MatchSaveLoadHandler.CurrentSave;
                 if (self?.history == null || save == null || self.trackedScore == null) return;
-                if (self.history.level != SceneManager.GetActiveScene().name) return;
+                if (self.history.level != self.trackedScore.gameObject.scene.name) return;
                 save.AddValue(RunHistory.SaveKey, self.history.ToJson());
             }
         }
@@ -227,7 +244,7 @@ namespace PalaceMod
         {
             private static void Prefix(out bool __state) => __state = MatchSaveLoadHandler.IsLoadingPermitted;
 
-            private static void Postfix(bool __state)
+            private static void Postfix(LocalMatchSaveLoad __instance, bool __state)
             {
                 loaded = null;
                 loadedScene = null;
@@ -235,7 +252,7 @@ namespace PalaceMod
                 string json = null;
                 if (!MatchSaveLoadHandler.CurrentSave.TryLoadValue(RunHistory.SaveKey, ref json)) return;
                 loaded = RunHistory.FromJson(json);
-                loadedScene = SceneManager.GetActiveScene().name;
+                loadedScene = __instance.gameObject.scene.name;
             }
         }
 
@@ -280,12 +297,13 @@ namespace PalaceMod
                         player.SpendCoins(slot.NextUpgradeOrBuildCost);
                         slot.TryToBuildOrUpgradeAndPay(player, false);
                         built++;
+                        GameplayImpact.Mark("Dev: remote build");
                     }
                     return $"built {built}, balance {player.Balance}";
                 }
                 case "reload":
                     // Like quitting and continuing from level select: read the match save from disk and reload the level.
-                    MatchSaveLoadHandler.TryLoadRun(SceneManager.GetActiveScene().name);
+                    MatchSaveLoadHandler.TryLoadRun(ScoreManager.Instance.gameObject.scene.name);
                     SceneTransitionManager.instance.RestartCurrentLevel();
                     return "reloading from the save";
                 case "dump":

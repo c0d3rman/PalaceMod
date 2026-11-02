@@ -194,7 +194,7 @@ namespace PalaceMod
             AnalyticsGraph.Table(page.Custom("Waves table", AnalyticsGraph.TableHeight(rows.Count)),
                 new[] { "", "Enemies", "Enemy HP", "Harder", "Drops", "Dawn pay", "Gold", "Score" }, rows,
                 new[] { 1.35f, 0.9f, 0.9f, 0.8f, 0.8f, 1f, 0.9f, 1f }, 0);
-            page.Row("About these numbers", "", "Enemy HP adds up every enemy's health, with night difficulty and elites. Drops are the gold the wave's enemies carry. " +
+            page.Row("About these numbers", "", "Enemy HP adds up every enemy's health, with night difficulty and elites (not perks or mutators that change enemy health). Drops are the gold the wave's enemies carry. " +
                 "Dawn pay is what your current buildings pay (mines run dry, harbours grow) plus the scenario's extra income. Treasure Hunter and Builder's Guild aren't counted.");
         }
 
