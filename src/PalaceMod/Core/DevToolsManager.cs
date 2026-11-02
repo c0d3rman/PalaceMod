@@ -166,7 +166,7 @@ namespace PalaceMod
                     return "";
                 case "level":
                     if (args.Length < 2) throw new ArgumentException("usage: level <scene>");
-                    Require(transitions).TransitionFromNullToLevel(args[1]);
+                    Require(transitions).TransitionFromNullToLevel(string.Join(" ", args.Skip(1)));
                     return "";
                 case "run":
                     if (args.Length < 4) throw new ArgumentException("usage: run <h> <v> <seconds>");
