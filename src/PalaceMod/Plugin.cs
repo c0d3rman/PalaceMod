@@ -37,7 +37,6 @@ public class Plugin : BaseUnityPlugin
         managers.Add(new PerformanceManager());
         managers.Add(new UIManager());
         managers.Add(new SettingsPaneManager());
-        managers.Add(new GoldManager());
         managers.Add(new BuildPreviewManager());
         managers.Add(new FormationManager());
         managers.Add(new EnemyPreviewManager());
