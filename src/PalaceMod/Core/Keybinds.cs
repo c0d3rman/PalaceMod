@@ -153,7 +153,7 @@ namespace PalaceMod
         // The game has no text fields of its own; this covers mod UIs (uGUI, TextMeshPro and IMGUI fields).
         private static bool TextFieldFocused()
         {
-            if (GUIUtility.keyboardControl != 0) return true;
+            if (GUIUtility.keyboardControl != 0 || ModTextInput.Active) return true;
             var selected = EventSystem.current != null ? EventSystem.current.currentSelectedGameObject : null;
             if (selected == null) return false;
             var tmp = selected.GetComponent<TMPro.TMP_InputField>();

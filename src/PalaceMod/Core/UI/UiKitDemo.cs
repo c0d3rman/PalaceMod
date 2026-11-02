@@ -15,6 +15,7 @@ namespace PalaceMod
         private ModFrame demo;
         private int demoButtons;
         private int clicks;
+        private int stepValue = 5;
 
         public override void Awake(Plugin plugin)
         {
@@ -38,7 +39,10 @@ namespace PalaceMod
                         for (int i = 1; i <= Math.Max(n, demoButtons); i++)
                         {
                             int index = i;
-                            if (i <= n) PauseMenu.AddButton($"demo{i}", $"Demo {i}", () => Notify.Show($"Demo {index} clicked", key: "demo-click"), order: i);
+                            // Demo 1 opens the demo frame, the rest just say they were clicked.
+                            if (i <= n) PauseMenu.AddButton($"demo{i}", $"Demo {i}", index == 1
+                                ? () => (demo ??= BuildDemo()).Open()
+                                : () => Notify.Show($"Demo {index} clicked", key: "demo-click"), order: i);
                             else PauseMenu.RemoveButton($"demo{i}");
                         }
                         demoButtons = n;
@@ -81,6 +85,8 @@ namespace PalaceMod
                 page.Button("Success notification", () => Notify.Show("It worked", NotifyKind.Success));
                 page.Button("Warning notification", () => Notify.Show("Careful", NotifyKind.Warning));
                 page.Button("Error notification", () => Notify.Show("It failed", NotifyKind.Error));
+                page.Stepper("Stepper", () => $"{stepValue}", d => stepValue = Math.Max(0, Math.Min(10, stepValue + d)),
+                    () => Notify.Show($"Applied {stepValue}", key: "demo-stepper"), "Left/right or click the arrows; apply to use it.");
                 page.Row("Clicks", clicks.ToString(), tooltip: "Rebuilt by Refresh", onClick: () =>
                 {
                     clicks++;
