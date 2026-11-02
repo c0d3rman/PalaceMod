@@ -5,7 +5,8 @@ namespace PalaceMod
 
     /// <summary>
     /// Short on-screen messages for the player. Every message is also written to the BepInEx log.
-    /// Presentation lives in UIManager; callers only say what to show.
+    /// Presentation lives in NotificationManager (Core/UI): a small panel in the game's style, marked as PalaceMod's,
+    /// at the top centre of the screen. Callers only say what to show.
     /// </summary>
     public static class Notify
     {
@@ -21,7 +22,7 @@ namespace PalaceMod
             // Logged as info whatever the kind: a message for the player isn't a mod error, so it shouldn't show up in
             // `dev.py logs --errors`. Log real errors yourself.
             Plugin.Logger?.LogInfo($"Notify ({kind}): {text}");
-            Feature<UIManager>.Instance?.ShowNotification(text, kind, seconds > 0 ? seconds : DefaultSeconds, key);
+            Feature<NotificationManager>.Instance?.ShowNotification(text, kind, seconds > 0 ? seconds : DefaultSeconds, key);
         }
     }
 }
