@@ -16,6 +16,10 @@ namespace PalaceMod
             RangeIndicatorHandler.IndicatorType.Special
         ];
 
+        // Reused every frame so showing ranges doesn't allocate.
+        private readonly HashSet<float> attackRanges = [];
+        private readonly List<float> sortedRanges = [];
+
         public override void Update()
         {
             // Both singletons are absent outside a level (e.g. on the main menu).
@@ -23,7 +27,7 @@ namespace PalaceMod
 
             foreach (var unit in CommandUnits.instance.PlayerUnitsCommanding)
             {
-                HashSet<float> attackRanges = [];
+                attackRanges.Clear();
 
                 foreach (var autoAttack in unit.autoAttacks)
                 {
@@ -33,7 +37,8 @@ namespace PalaceMod
                     }
                 }
 
-                List<float> sortedRanges = [.. attackRanges];
+                sortedRanges.Clear();
+                sortedRanges.AddRange(attackRanges);
                 sortedRanges.Sort();
 
                 for (int i = 0; i < Math.Min(sortedRanges.Count, orderedIndicatorTypes.Count); i++)

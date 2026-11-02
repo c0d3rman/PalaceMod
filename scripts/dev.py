@@ -39,6 +39,21 @@ if [ "$(uname -m)" = "arm64" ] && [ -z "$PALACEMOD_ROSETTA" ]; then
     exec /usr/bin/arch -x86_64 /bin/sh "$0" "$@"
 fi
 """
+PRELOADER_TARGET = 'target_assembly="BepInEx/core/BepInEx.Preloader.dll"'
+BOOTSTRAP_TARGET = 'target_assembly="BepInEx/core/PalaceMod.Bootstrap.dll"'
+DOORSTOP_URL = "https://github.com/NeighTools/UnityDoorstop/releases/download/v4.6.0/doorstop_macos_release_4.6.0.zip"
+DOORSTOP_SHA256 = "8282e8ec37abc81bbf736d12c315fdb78b0418654fb57be9e40858649953ccb7"
+GC_MARKER = "# PalaceMod: garbage collector tuning"
+GC_BLOCK = f"""{GC_MARKER}. Boehm reads these at startup; override any of them in the environment.
+# A lower free-space divisor collects less often, and a larger initial heap avoids mid-level expansions.
+export GC_FREE_SPACE_DIVISOR="${{GC_FREE_SPACE_DIVISOR:-1}}"
+export GC_INITIAL_HEAP_SIZE="${{GC_INITIAL_HEAP_SIZE:-512M}}"
+# Per-collection timings, overwritten each launch, so spikes can be matched to GC pauses.
+if [ -z "$PALACEMOD_NO_GC_LOG" ]; then
+    export GC_PRINT_STATS=1 GC_LOG_FILE="$(cd "$(dirname "$0")" && pwd)/BepInEx/gc-stats.log"
+    rm -f "$GC_LOG_FILE"
+fi
+"""
 
 
 def run(*args):
@@ -202,22 +217,91 @@ def backup_saves():
 # --- Setup ------------------------------------------------------------------
 
 def patch_loader(game):
-    """Make run_bepinex.sh re-exec under Rosetta so Steam launches load the mod too."""
+    """Patch run_bepinex.sh: re-exec under Rosetta (so Steam launches load the mod) and tune the GC.
+
+    Returns the descriptions of the blocks that were added."""
     script = game / "run_bepinex.sh"
     if not script.is_file():
         raise RuntimeError(f"Missing {script}; install BepInEx 5 for macOS into the game first.")
     text = script.read_text()
-    if ROSETTA_MARKER in text:
-        return False
-    archs = subprocess.run(["lipo", "-archs", str(game / "libdoorstop.dylib")],
-                           capture_output=True, text=True).stdout.split()
-    if "arm64" in archs:
-        return False
+    blocks = [(GC_MARKER, GC_BLOCK, "tune the garbage collector")]
+    if not is_native(game):
+        blocks.append((ROSETTA_MARKER, ROSETTA_BLOCK, "run under Rosetta"))
+    missing = [(block, label) for marker, block, label in blocks if marker not in text]
+    if not missing:
+        return []
     BACKUPS.mkdir(parents=True, exist_ok=True)
     shutil.copy2(script, BACKUPS / f"run_bepinex.sh.orig-{stamp()}")
     first, _, rest = text.partition("\n")
-    script.write_text(f"{first}\n{ROSETTA_BLOCK}{rest}")
-    return True
+    # Each block goes right after the shebang; the GC exports survive the Rosetta re-exec.
+    for block, _ in missing:
+        rest = block + rest
+    script.write_text(f"{first}\n{rest}")
+    return [label for _, label in missing]
+
+
+# --- Native Apple Silicon ---------------------------------------------------
+
+def is_native(game):
+    script = game / "run_bepinex.sh"
+    return script.is_file() and BOOTSTRAP_TARGET in script.read_text()
+
+
+def universal_doorstop():
+    """Doorstop 4.6's universal libdoorstop.dylib, downloaded once and checksummed."""
+    cached = DEV_HOME / "doorstop-4.6.0/libdoorstop.dylib"
+    if cached.is_file():
+        return cached
+    import io
+    import urllib.request
+    import zipfile
+    data = urllib.request.urlopen(DOORSTOP_URL, timeout=60).read()
+    if hashlib.sha256(data).hexdigest() != DOORSTOP_SHA256:
+        raise RuntimeError(f"Checksum mismatch for {DOORSTOP_URL}")
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        cached.write_bytes(archive.read("universal/libdoorstop.dylib"))
+    return cached
+
+
+def set_native(game, enabled):
+    """Switch the loader between native arm64 (PalaceMod.Bootstrap) and Rosetta (stock BepInEx entrypoint)."""
+    require_stopped()
+    script = game / "run_bepinex.sh"
+    text = script.read_text()
+    BACKUPS.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(script, BACKUPS / f"run_bepinex.sh.orig-{stamp()}")
+    if enabled:
+        dylib = game / "libdoorstop.dylib"
+        if "arm64" not in subprocess.run(["lipo", "-archs", str(dylib)], capture_output=True, text=True).stdout.split():
+            shutil.copy2(dylib, BACKUPS / f"libdoorstop.dylib.orig-{stamp()}")
+            # The universal build still loads under Rosetta, so `native off` doesn't need to restore it.
+            temp = dylib.with_suffix(".new")
+            shutil.copy2(universal_doorstop(), temp)
+            os.replace(temp, dylib)
+        run("dotnet", "build", "src/PalaceMod.Bootstrap/PalaceMod.Bootstrap.csproj", "-c", "Release",
+            "-nologo", "-clp:NoSummary")
+        shutil.copy2(ROOT / "src/PalaceMod.Bootstrap/bin/Release/netstandard2.0/PalaceMod.Bootstrap.dll",
+                     game / "BepInEx/core/PalaceMod.Bootstrap.dll")
+        # Native helper that writes to JIT memory; clang ad-hoc signs arm64 dylibs, which is enough to load it.
+        native = ROOT / "bin/native/libpalacejit.dylib"
+        native.parent.mkdir(parents=True, exist_ok=True)
+        run("clang", "-arch", "arm64", "-O2", "-dynamiclib", "-o", native, "src/PalaceMod.Bootstrap/native/palacejit.c")
+        shutil.copy2(native, game / "BepInEx/core/libpalacejit.dylib")
+        if PRELOADER_TARGET not in text and BOOTSTRAP_TARGET not in text:
+            raise RuntimeError(f"Couldn't find {PRELOADER_TARGET} in {script}")
+        text = text.replace(PRELOADER_TARGET, BOOTSTRAP_TARGET)
+        start = text.find(ROSETTA_MARKER)
+        if start != -1:
+            end = text.index("fi\n", start) + 3
+            text = text[:start] + text[end:]
+        script.write_text(text)
+        patch_loader(game)
+        print("Loader set to native arm64. Check BepInEx/PalaceMod.Bootstrap.log after launching.")
+    else:
+        script.write_text(text.replace(BOOTSTRAP_TARGET, PRELOADER_TARGET))
+        patch_loader(game)
+        print("Loader set to Rosetta.")
 
 
 def setup(game):
@@ -235,8 +319,9 @@ def setup(game):
     CONFIG.parent.mkdir(exist_ok=True)
     CONFIG.write_text(json.dumps({"game": str(game)}, indent=2) + "\n")
     print(f"Copied {len(names)} game libraries to {lib}")
-    if patch_loader(game):
-        print(f"Patched run_bepinex.sh to run under Rosetta (original backed up in {BACKUPS}).")
+    added = patch_loader(game)
+    if added:
+        print(f"Patched run_bepinex.sh to {' and '.join(added)} (original backed up in {BACKUPS}).")
     print("Game libraries and local settings are ignored by Git.")
 
 
@@ -291,13 +376,14 @@ def launch(game, timeout, fullscreen):
     out = ROOT / ".local/launch.log"
     out.parent.mkdir(exist_ok=True)
     with out.open("w") as handle:
-        # Doorstop's dylib is x86_64-only, so the game must run under Rosetta.
-        command = ["/usr/bin/arch", "-x86_64", "/bin/sh", str(game / "run_bepinex.sh")]
+        # run_bepinex.sh re-execs itself under Rosetta unless the loader is native.
+        command = ["/bin/sh", str(game / "run_bepinex.sh")]
         env = {**os.environ, "PALACEMOD_DEV": "1"}
         subprocess.Popen(command, cwd=game, stdout=handle, stderr=subprocess.STDOUT,
                          stdin=subprocess.DEVNULL, start_new_session=True, env=env)
     claim_game()
-    print(f"Launching Thronefall under Rosetta ({'fullscreen' if fullscreen else 'windowed'})...", flush=True)
+    arch = "natively" if is_native(game) else "under Rosetta"
+    print(f"Launching Thronefall {arch} ({'fullscreen' if fullscreen else 'windowed'})...", flush=True)
     deadline = started + timeout
     while time.time() < deadline:
         time.sleep(1)
@@ -387,6 +473,34 @@ def screenshot(game, output, timeout=15):
     raise RuntimeError("No screenshot produced within the timeout; check `dev.py logs --errors`.")
 
 
+def command(game, text, timeout=30):
+    """Send a command to the running mod (dev launches only; see Core/DevToolsManager.cs) and print its result."""
+    if not game_pids():
+        raise RuntimeError("Thronefall is not running.")
+    if game_owner() != str(ROOT):
+        raise RuntimeError("The running game was not launched by `dev.py launch`/`run` from this checkout.")
+    log = log_path(game)
+    start = log.stat().st_size if log.exists() else 0
+    request = game / "BepInEx/PalaceMod-dev/command.request"
+    request.parent.mkdir(parents=True, exist_ok=True)
+    request.write_text(text.strip() + "\n")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        time.sleep(0.25)
+        with log.open("rb") as handle:
+            handle.seek(start)
+            new = handle.read().decode(errors="replace")
+        for line in new.splitlines():
+            for prefix in (f"Dev command done: {text.strip()}", f"Dev command failed: {text.strip()}"):
+                if prefix in line:
+                    print(line.split("] ", 1)[-1])
+                    if "failed" in prefix:
+                        raise RuntimeError("Command failed.")
+                    return
+    request.unlink(missing_ok=True)
+    raise RuntimeError("The mod didn't answer; is this a dev launch (`dev.py run`)?")
+
+
 # --- Misc -------------------------------------------------------------------
 
 def snapshot():
@@ -446,7 +560,12 @@ def doctor(game, configuration):
     check("Rosetta available", rosetta, "softwareupdate --install-rosetta" if not rosetta else "")
     script = game / "run_bepinex.sh"
     patched = script.is_file() and ROSETTA_MARKER in script.read_text()
-    check("run_bepinex.sh runs under Rosetta", patched, "" if patched else "run `setup` to patch")
+    if is_native(game):
+        check("Loader", True, "native arm64 (PalaceMod.Bootstrap)")
+    else:
+        check("run_bepinex.sh runs under Rosetta", patched, "" if patched else "run `setup` to patch")
+    tuned = script.is_file() and GC_MARKER in script.read_text()
+    check("run_bepinex.sh tunes the GC", tuned, "" if tuned else "run `setup` to patch")
     localconfigs = list((Path.home() / "Library/Application Support/Steam/userdata").glob("*/config/localconfig.vdf"))
     steam_ok = any("run_bepinex.sh" in f.read_text(errors="replace") for f in localconfigs)
     check("Steam launch options use run_bepinex.sh", steam_ok,
@@ -464,7 +583,8 @@ def doctor(game, configuration):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["setup", "build", "install", "run", "launch", "stop", "logs",
-                                            "screenshot", "backup-saves", "watch", "decompile", "doctor"])
+                                            "screenshot", "backup-saves", "watch", "decompile", "doctor", "native", "cmd"])
+    parser.add_argument("mode", nargs="?", help="native: on|off. cmd: the command, e.g. \"level Neuland\"")
     parser.add_argument("--game", help="Game directory or Thronefall.app; otherwise saved config or THRONEFALL_DIR")
     parser.add_argument("--configuration", default="Debug", choices=["Debug", "Release"])
     parser.add_argument("--type", dest="type_name", help="Decompile a single type instead of the whole assembly")
@@ -507,6 +627,17 @@ def main():
         decompile(game, args.type_name)
     elif args.command == "doctor":
         doctor(game, args.configuration)
+    elif args.command == "cmd":
+        if not args.mode:
+            raise RuntimeError("Usage: dev.py cmd \"<command>\" (see src/PalaceMod/Core/DevToolsManager.cs)")
+        command(game, args.mode)
+    elif args.command == "native":
+        if args.mode not in (None, "on", "off"):
+            raise RuntimeError("Usage: dev.py native [on|off]")
+        if args.mode is None:
+            print("native" if is_native(game) else "rosetta")
+        else:
+            set_native(game, args.mode == "on")
 
 
 if __name__ == "__main__":
