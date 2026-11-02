@@ -153,7 +153,7 @@ namespace PalaceMod
             private static bool Prefix(LevelData __instance, bool _endOfMatch)
             {
                 bool unranked = unrankedLevelData.Remove(__instance);
-                if (!unranked || !Feature<HighscoreGuardManager>.On) return true;
+                if (!unranked || !Feature<HighscoreGuardManager>.On || IsBuilderRecord(__instance)) return true;
                 if (__instance.highscore > __instance.highscoreBest || (_endOfMatch && __instance.beaten))
                     Plugin.Logger.LogInfo($"Unranked run: not recording score {__instance.highscore} (best {__instance.highscoreBest}), beaten={__instance.beaten}");
                 if (countWins.Value && __instance.beaten) __instance.beatenBest = true;
@@ -186,9 +186,15 @@ namespace PalaceMod
             {
                 if (!GameplayImpact.Any) return;
                 if (__instance.LevelDataFromLastMatch != null) unrankedLevelData.Add(__instance.LevelDataFromLastMatch);
-                if (Feature<HighscoreGuardManager>.On) personalRecordField?.SetValue(__instance, false);
+                if (Feature<HighscoreGuardManager>.On && !IsBuilderRecord(__instance.LevelDataFromLastMatch))
+                    personalRecordField?.SetValue(__instance, false);
             }
         }
+
+        // A Builder custom session keeps its own isolated score record, apart from the vanilla level's; its bests are
+        // its own business. Leaderboards, achievements and vanilla records stay blocked.
+        private static bool IsBuilderRecord(LevelData data) =>
+            data != null && Builder.BuilderServices.Sessions?.Current?.Scores == data;
 
         // The "you unlocked ..." popup for a first win; with the win not counted, nothing is unlocked.
         [HarmonyPatch(typeof(EndOfMatchScoreUIHelper), "ShowCampaignLevelBeatenRewards")]
