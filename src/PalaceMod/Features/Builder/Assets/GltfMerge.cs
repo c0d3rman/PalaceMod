@@ -49,6 +49,7 @@ namespace PalaceMod.Builder.Assets
             public readonly List<int> Triangles = [];
             public int[] TriangleSwatches;                 // VertexColour: atlas swatch per triangle
             public int Tile = -1, FlatSwatch = -1;
+            public bool Unweld;                     // Tiles or VertexColour, and within the vertex budget
         }
 
         public static void Build(GltfModel model, GltfTextures textures, SceneRecorder scene, string name, GltfResult result)
@@ -81,18 +82,29 @@ namespace PalaceMod.Builder.Assets
             }
             else
             {
-                // Unwelding tiling and vertex-coloured groups adds vertices; past the limit, simplify them instead.
-                long added = groups.Where(Unwelds).Sum(g => (long)g.Triangles.Count - g.Positions.Count);
-                bool unweld = groups.Sum(g => (long)g.Positions.Count) + Math.Max(0, added) <= AssetLimits.MaxMeshVertices;
-                if (!unweld) result.Warnings.Add("too many vertices to keep tiling textures and vertex colours exact; simplified them");
+                // Unwelding tiling and vertex-coloured groups adds vertices. Within the vertex limit, cheapest first;
+                // the rest are simplified: one average colour each.
+                long budget = AssetLimits.MaxMeshVertices - groups.Sum(g => (long)g.Positions.Count);
+                foreach (var g in groups.Where(Unwelds).OrderBy(g => g.Triangles.Count - g.Positions.Count))
+                {
+                    long added = Math.Max(0, g.Triangles.Count - g.Positions.Count);
+                    if (added > budget)
+                    {
+                        result.Warnings.Add($"too many vertices to keep {(g.Paint == Paint.VertexColour ? "vertex colours" : "a tiling texture")} exact; used its average colour");
+                        continue;
+                    }
+                    g.Unweld = true;
+                    budget -= added;
+                }
 
                 var atlas = new Atlas();
                 var tileOf = keys.ToDictionary(k => k, k => atlas.AddTile(textures.Get(k.Texture), k.Factor));
                 foreach (var g in groups)
                 {
-                    if (g.Paint == Paint.Textured) g.Tile = tileOf[(g.Texture, g.Factor)];
+                    if (g.Paint == Paint.Textured && g.Tiles && !g.Unweld) g.FlatSwatch = atlas.AddSwatch(AverageColour(textures.Get(g.Texture), g.Factor));
+                    else if (g.Paint == Paint.Textured) g.Tile = tileOf[(g.Texture, g.Factor)];
                     else if (g.Paint == Paint.Flat) g.FlatSwatch = atlas.AddSwatch(g.Flat);
-                    else if (!unweld) g.FlatSwatch = atlas.AddSwatch(Multiply(AverageAll(g.Colours), g.Factor));
+                    else if (!g.Unweld) g.FlatSwatch = atlas.AddSwatch(Multiply(AverageAll(g.Colours), g.Factor));
                     else
                     {
                         g.TriangleSwatches = new int[g.Triangles.Count / 3];
@@ -113,7 +125,7 @@ namespace PalaceMod.Builder.Assets
                         var uv = atlas.SwatchUv(g.FlatSwatch);
                         Append(g, positions, normals, uvs, uv0, triangles, (_, _) => uv);
                     }
-                    else if (g.Tiles && unweld)
+                    else if (g.Tiles)
                         AppendUnwelded(g, positions, normals, uvs, uv0, triangles, (t, corner) =>
                         {
                             Vector2 a = g.Uv[g.Triangles[3 * t]], b = g.Uv[g.Triangles[3 * t + 1]], c = g.Uv[g.Triangles[3 * t + 2]];
@@ -383,6 +395,14 @@ namespace PalaceMod.Builder.Assets
             double r = 0, gr = 0, b = 0;
             foreach (var c in colours) { r += ToLinear[c.r]; gr += ToLinear[c.g]; b += ToLinear[c.b]; }
             return new Color32(Encode((float)(r / colours.Count)), Encode((float)(gr / colours.Count)), Encode((float)(b / colours.Count)), 255);
+        }
+
+        private static Color32 AverageColour(Texture2D texture, Color factor)
+        {
+            var (w, h) = FitSize(texture, 16);
+            var pixels = ReadPixels(texture, w, h);
+            Tint(pixels, factor);
+            return AverageAll(pixels.ToList());
         }
 
         private static void Tint(Color32[] pixels, Color factor)

@@ -133,7 +133,8 @@ namespace PalaceMod.Builder.Assets
 
             private void Add(LogType type, LogCode code, string[] messages)
             {
-                if (type is LogType.Log) return;
+                // Performance hints about how glTFast was built or how the file stores buffers: not the player's concern.
+                if (type is LogType.Log || code is LogCode.UnityWebRequestTextureNotEnabled or LogCode.EmbedSlow) return;
                 string text;
                 try { text = LogMessages.GetFullMessage(code, messages); }
                 catch { text = code + (messages == null ? "" : ": " + string.Join(", ", messages)); }
