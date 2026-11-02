@@ -177,7 +177,9 @@ namespace PalaceMod
                         }
                         catch (InvalidOperationException e) { Notify.Show(e.Message, NotifyKind.Warning, key: "savestates"); }
                         confirming = null;
-                        detail.Refresh();
+                        // Back to the list, rebuilt: its rows pointed at the replaced state.
+                        detail.Close();
+                        list.Refresh();
                     });
                     break;
                 case "delete":

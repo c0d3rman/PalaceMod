@@ -25,6 +25,10 @@ namespace PalaceMod
         public override string FeatureDescription =>
             "Save and load the whole game mid-level, for practice. Pause > Savestates lists them. Loading a state marks the run as modded.";
 
+        // The real-save guard must outlive the Enabled switch: turning savestates off after a load mustn't let the
+        // practice run be saved. The other patches check IsEnabled themselves.
+        protected override bool UnpatchWhenDisabled => false;
+
         private ConfigEntry<AutoStateMode> autoMode;
         private ConfigEntry<int> autoHistory;
         private ConfigEntry<bool> confirmLoad;
@@ -94,7 +98,7 @@ namespace PalaceMod
         public override void Update()
         {
             string level = SaveStates.CurrentLevel;
-            if (level != lastLevel)
+            if (level != lastLevel && !StateRestorer.Busy)
             {
                 lastLevel = level;
                 if (SaveStates.Last != null && SaveStates.Last.Level != level) SaveStates.Last = null;
@@ -178,7 +182,7 @@ namespace PalaceMod
         {
             private static void Postfix()
             {
-                if (!StateRestorer.Busy) Plugin.Instance.StartCoroutine(DawnAfterDelay());
+                if (Feature<SaveStatesManager>.On && !StateRestorer.Busy) Plugin.Instance.StartCoroutine(DawnAfterDelay());
             }
         }
 
@@ -200,6 +204,18 @@ namespace PalaceMod
             }
         }
 
+        [HarmonyPatch(typeof(InterestPerk), nameof(InterestPerk.OnDusk))]
+        private class Interest_Patch
+        {
+            private static bool Prefix() => !StateRestorer.ReplayingDusk;
+        }
+
+        [HarmonyPatch(typeof(UpgradeBuildersGuild), nameof(UpgradeBuildersGuild.OnDuskEarly))]
+        private class BuildersGuild_Patch
+        {
+            private static bool Prefix() => !StateRestorer.ReplayingDusk;
+        }
+
         // ---- Load on defeat -------------------------------------------------------------------------------------
 
         [HarmonyPatch(typeof(LocalGamestate), "OnVitalObjectKill")]
@@ -208,7 +224,7 @@ namespace PalaceMod
             private static bool Prefix()
             {
                 var manager = Feature<SaveStatesManager>.Instance;
-                if (manager == null || !manager.loadOnDefeat.Value || LocalGamestate.Instance?.CurrentState != LocalGamestate.State.InMatch) return true;
+                if (manager == null || !manager.IsEnabled || !manager.loadOnDefeat.Value || LocalGamestate.Instance?.CurrentState != LocalGamestate.State.InMatch) return true;
                 // A state that loses again right away would loop; let the defeat through then.
                 if (Time.realtimeSinceStartup - manager.lastDefeatLoad < 10f) return true;
                 var last = SaveStates.Last;

@@ -33,7 +33,18 @@ namespace PalaceMod
                      (!DayNightCycle.Instance.AfterSunrise || Priv.Get<bool>(DayNightCycle.Instance, "currentlySwitchingToDay")))
                 reason = "Wait for the sunrise to finish";
             else if (ChoiceManager.instance != null && ChoiceManager.instance.ChoiceCoroutineWaiting) reason = "Finish the current choice first";
+            else if (PayingForSomething()) reason = "Finish paying first";
             return reason == null;
+        }
+
+        // Coins put into a building's cost display are taken from the balance before the purchase completes.
+        private static bool PayingForSomething()
+        {
+            foreach (var display in Object.FindObjectsOfType<CostDisplay>())
+            {
+                if (Priv.Get<int>(display, "currentlyFilledCoins") > 0) return true;
+            }
+            return false;
         }
 
         public static SaveStateData Capture()
@@ -108,7 +119,14 @@ namespace PalaceMod
             playerEntity = PlayerInteraction.instance.GetComponentInParent<SaveLoadEntity>();
             var entities = AllSaveLoadEntities();
             var real = MatchSaveLoadHandler.CurrentSave;
+            // Start from the run's save, as the game does: some entities (research in progress after a load) only
+            // write their entry once, and rely on it staying in the reused MatchSave.
             var scratch = new MatchSave();
+            if (real != null && !MatchSaveLoadHandler.OverwriteCurrentSave)
+            {
+                foreach (var pair in Priv.Get<Dictionary<string, object>>(typeof(MatchSave), "savedEntities", real))
+                    scratch.AddValue(pair.Key, pair.Value is int[] a ? (int[])a.Clone() : pair.Value is TagManager.ETag[] t ? (TagManager.ETag[])t.Clone() : pair.Value);
+            }
             Priv.SetStatic(typeof(MatchSaveLoadHandler), "currentSave", scratch);
             try
             {

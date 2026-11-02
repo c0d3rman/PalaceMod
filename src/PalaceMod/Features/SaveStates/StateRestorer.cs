@@ -24,6 +24,10 @@ namespace PalaceMod
 
         public static bool Busy { get; private set; }
 
+        /// <summary>True while the restore restarts the captured night, so one-shot dusk effects already in the
+        /// state (Interest gold, the Builders' Guild's free upgrade) aren't applied a second time.</summary>
+        public static bool ReplayingDusk { get; private set; }
+
         public static bool CanRestore(SaveStateInfo state, out string reason)
         {
             reason = null;
@@ -125,6 +129,7 @@ namespace PalaceMod
                 yield break;
             }
             Busy = false;
+            SaveStates.Last = state;
             Plugin.Logger.LogInfo($"Savestates: loaded {state}; {Summary()}");
             Notify.Show($"Loaded \"{state.Name}\"", NotifyKind.Success, key: "savestates");
             SaveStates.RaiseRestored(state);
@@ -213,7 +218,9 @@ namespace PalaceMod
             var spawner = EnemySpawner.instance;
             if (data.night)
             {
-                cycle.SwitchToNight();
+                ReplayingDusk = true;
+                try { cycle.SwitchToNight(); }
+                finally { ReplayingDusk = false; }
                 if (data.hasSpawner) RestoreSpawner(data.spawner, spawner);
             }
             Priv.Set(cycle, "currentNightLength", data.time.currentNightLength);
