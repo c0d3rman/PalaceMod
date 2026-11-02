@@ -18,7 +18,8 @@ using UnityEngine.SceneManagement;
 
     A unit's attack ranges are each AutoAttack's longest target-priority range (the shorter priorities of one attack
     are target filters inside that reach), deduplicated. Its engage range (how far it walks to fight once placed) is
-    an optional lighter ring, shown when it's beyond the attack range. Ranges are read once when a unit starts
+    an optional lighter ring, shown when it's beyond the attack range (around its post, capped at 7, while it holds
+    position). Ranges are read once when a unit starts
     showing and reused until it stops.
 
     RangeIndicatorHandler keys rings by (type, sender GameObject). The game only ever uses buildings as senders, so
@@ -37,6 +38,7 @@ namespace PalaceMod
         private const int MaxAttackRanges = 3;
         private const int MaxGroupRings = 4;
         private const float SameRangeTolerance = 0.25f;
+        private const float HoldEngageRange = 7f; // PathfindMovementPlayerunit.FindTargetPosition's limit while holding
         private const RangeIndicatorHandler.IndicatorType AttackStyle = RangeIndicatorHandler.IndicatorType.Built;
         private const RangeIndicatorHandler.IndicatorType EngageStyle = RangeIndicatorHandler.IndicatorType.Preview;
 
@@ -171,7 +173,16 @@ namespace PalaceMod
                 info.keys[i] ??= i == 0 ? unit.gameObject : TakeKey();
                 Show(handler, position, info.attack[i], info.keys[i], AttackStyle);
             }
-            if (info.engage > 0f) Show(handler, position, info.engage, unit.gameObject, EngageStyle);
+            if (info.engage > 0f)
+            {
+                // A unit holding position only engages enemies within HoldEngageRange of its post.
+                if (unit.HoldPosition)
+                {
+                    float held = Mathf.Min(info.engage, HoldEngageRange);
+                    if (held > (info.count > 0 ? info.attack[0] : 0f) + SameRangeTolerance) Show(handler, unit.HomePosition, held, unit.gameObject, EngageStyle);
+                }
+                else Show(handler, position, info.engage, unit.gameObject, EngageStyle);
+            }
         }
 
         private void Show(RangeIndicatorHandler handler, Vector3 position, float range, GameObject key, RangeIndicatorHandler.IndicatorType type)
