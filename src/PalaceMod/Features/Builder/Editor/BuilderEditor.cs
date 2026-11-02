@@ -47,7 +47,9 @@ namespace PalaceMod.Builder.Editor
             Bind(draft);
             packPage ??= new PackPage();
             packPage.Frame.SetTitle(Title(draft));
-            packPage.Frame.Open();
+            // Never stack a second copy of an editor screen that's already open under the current one.
+            if (EditorFocused && !packPage.Frame.IsOpen) CloseAll();
+            Show(packPage);
             BuilderEditorManager.FirstUseHint();
         }
 
