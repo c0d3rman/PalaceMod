@@ -16,6 +16,9 @@ using UnityEngine;
       for every already-activated shrine. We stop and clear it right after.
     - Loaded unit health: Hp.OnSave stores Mathf.RoundToInt(hp), so a unit with fractional max HP (e.g. 37.5) loads at
       37 or 38 instead of full. When the loaded value is within rounding distance of max HP, we restore it to max.
+    - Regen perk on load: PerkPlayerHealthRegen applies its bonus in OnBeforeMainLoadPass, which LocalMatchSaveLoad.Awake
+      can call before PlayerUpgradeManager.Awake has set the instance. On a cold Continue that throws; on Retry Day it
+      writes into the previous scene's destroyed manager. Either way the bonus is lost. We defer it to Start instead.
 */
 namespace PalaceMod
 {
@@ -27,6 +30,7 @@ namespace PalaceMod
         private static ConfigEntry<bool> destructionReplayFix;
         private static ConfigEntry<bool> shrineParticlesFix;
         private static ConfigEntry<bool> loadedHealthFix;
+        private static ConfigEntry<bool> regenPerkFix;
 
         private static readonly AccessTools.FieldRef<Shrine, ParticleSystem> UpgradeParticles =
             AccessTools.FieldRefAccess<Shrine, ParticleSystem>("upgradeParticles");
@@ -44,6 +48,8 @@ namespace PalaceMod
                 "Already-activated shrines don't replay their activation burst when a save loads or a day is retried.");
             loadedHealthFix = plugin.Config.Bind(FeatureSection, "Full health on load", true,
                 "Units with fractional max HP load at full health instead of slightly below or above it (saves round HP to whole numbers).");
+            regenPerkFix = plugin.Config.Bind(FeatureSection, "Regen perks on load", true,
+                "Perks that boost your health regeneration keep working after a save loads or a day is retried.");
             RegisterDevCommands();
         }
 
@@ -66,7 +72,7 @@ namespace PalaceMod
                 // OnEnable plays the debris for debrisPlaytime seconds, then Update pauses it; Simulate ends paused there.
                 __instance.debrisParticles.Simulate(DebrisPlaytime(__instance), true, true);
                 __instance.smokeParticles.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-                Plugin.Logger.LogInfo($"Fixes: settled destroyed {__instance.transform.root.name} without replaying its collapse");
+                Plugin.Logger.LogDebug($"Fixes: settled destroyed {__instance.transform.root.name} without replaying its collapse");
                 return false;
             }
         }
@@ -80,7 +86,7 @@ namespace PalaceMod
                 var particles = UpgradeParticles(__instance);
                 if (particles == null) return;
                 particles.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-                Plugin.Logger.LogInfo($"Fixes: cleared activation burst of loaded shrine {__instance.name}");
+                Plugin.Logger.LogDebug($"Fixes: cleared activation burst of loaded shrine {__instance.name}");
             }
         }
 
@@ -97,6 +103,14 @@ namespace PalaceMod
                 hp = __instance.maxHp;
                 __instance.OnHpChange.Invoke();
             }
+        }
+
+        [HarmonyPatch(typeof(PerkPlayerHealthRegen), "Execute")]
+        private static class PerkPlayerHealthRegen_Execute
+        {
+            // Unity's == also catches the previous scene's destroyed manager, which the static still points to.
+            private static bool Prefix(PerkPlayerHealthRegen __instance) =>
+                !regenPerkFix.Value || PlayerUpgradeManager.instance != null;
         }
 
         // Test hooks for reproducing the bugs: `dev.py cmd "fixes <sub>"`.
@@ -199,8 +213,13 @@ namespace PalaceMod
                             $"{h.transform.root.name}: debris {h.debrisParticles.particleCount} playing={h.debrisParticles.isPlaying} paused={h.debrisParticles.isPaused}, " +
                             $"smoke {h.smokeParticles.particleCount} playing={h.smokeParticles.isPlaying}, sound playing={h.destructionSource.isPlaying}");
                         var shrines = UnityEngine.Object.FindObjectsOfType<Shrine>().Select(sh =>
-                            $"shrine {sh.name}: activated={sh.ShrineHasBeenActivated}, burst {UpgradeParticles(sh).particleCount} playing={UpgradeParticles(sh).isPlaying}");
-                        return string.Join("\n", lines.Concat(shrines));
+                            $"shrine {sh.name}: activated={sh.ShrineHasBeenActivated}, " + (UpgradeParticles(sh) is { } burst && burst != null
+                                ? $"burst {burst.particleCount} playing={burst.isPlaying}" : "burst destroyed"));
+                        var regen = UnityEngine.Object.FindObjectsOfType<PerkPlayerHealthRegen>()
+                            .Select(r => $"regen component {r.name}: perk {r.requiredPerk?.name} x{r.hpRegenMultiplyer} equipped={PerkManager.IsEquipped(r.requiredPerk)}");
+                        var manager = PlayerUpgradeManager.instance;
+                        return string.Join("\n", lines.Concat(shrines).Concat(regen)
+                            .Append($"player regen multiplier {(manager == null ? "no manager" : manager.PlayerHealthRegenerationMultiplyer.ToString())}"));
                     }
                     default:
                         throw new ArgumentException("unknown subcommand");
