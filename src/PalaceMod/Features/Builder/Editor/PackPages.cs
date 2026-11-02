@@ -216,6 +216,15 @@ namespace PalaceMod.Builder.Editor
         private void BuildProblems(ModPage page)
         {
             var issues = Draft.Issues;
+            // Problems with the pack's own details are fixed right here (the Pack tab isn't built while this one shows).
+            if (issues.Any(i => i.Path == "name" || i.Path == "id"))
+            {
+                page.Header("Pack");
+                if (issues.Any(i => i.Path == "name"))
+                    Text(page, "Name", "name", () => Pack.Name, (p, v) => p.Name = v, "Shown in pack lists and to players you share it with.");
+                if (issues.Any(i => i.Path == "id"))
+                    Text(page, "Id", "id", () => Pack.Id, (p, v) => p.Id = v ?? p.Id, "Unique pack id and folder name: lowercase letters, digits, '.', '_' or '-'.", isId: true);
+            }
             if (issues.Count == 0)
             {
                 page.Text("No problems. The pack is ready to play and share.");

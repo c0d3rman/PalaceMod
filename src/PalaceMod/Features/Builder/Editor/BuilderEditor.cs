@@ -47,8 +47,10 @@ namespace PalaceMod.Builder.Editor
             Bind(draft);
             packPage ??= new PackPage();
             packPage.Frame.SetTitle(Title(draft));
-            // Never stack a second copy of an editor screen that's already open under the current one.
-            if (EditorFocused && !packPage.Frame.IsOpen) CloseAll();
+            // Opened from one of its own child screens (a unit, a wave set, a picker): go back down to it rather than
+            // stacking a second copy. From the pack list or another menu, open it on top as usual.
+            var manager = UIFrameManager.instance;
+            for (int guard = 0; guard < 8 && !packPage.Frame.IsOpen && IsChildScreen(manager.ActiveFrame); guard++) manager.CloseActiveFrame();
             Show(packPage);
             BuilderEditorManager.FirstUseHint();
         }
@@ -189,6 +191,9 @@ namespace PalaceMod.Builder.Editor
                 return active != null && (Picker.IsOpen || Pages.Any(p => p != null && p.Frame.Frame == active));
             }
         }
+
+        private static bool IsChildScreen(UIFrame frame) =>
+            frame != null && (Picker.IsOpen || (unitPage != null && unitPage.Frame.Frame == frame) || (wavePage != null && wavePage.Frame.Frame == frame));
 
         internal static void CloseAll()
         {

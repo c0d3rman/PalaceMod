@@ -41,6 +41,7 @@ namespace PalaceMod.Builder.Editor
 
         private void Build(ModPage page)
         {
+            chipKeys.Clear();
             var ws = Set;
             if (ws == null) { page.Text("This wave set no longer exists."); return; }
             ws.Nights ??= [];
@@ -54,7 +55,7 @@ namespace PalaceMod.Builder.Editor
                 "Unique within the pack: lowercase letters, digits, '.', '_' or '-'.", isId: true);
             Choice(page, "Map", P + ".host", EditorCatalog.Hosts.Select(h => (h.Scene, h.DisplayName)).ToList(), () => Set?.Host,
                 (p, v) => p.WaveSets[Index].Host = v,
-                "The map the run is played on. Spawn lines are the map's; groups on lines it doesn't have are marked.",
+                "The map the run is played on. Spawn lines are the map's; groups on lines it doesn't have are marked.", structural: true,
                 picker: () => Picker.One("Choose a Map", HostItems(), Set.Host, scene => Edit("Change map", w => w.Host = scene, structural: true)),
                 display: () => Host?.DisplayName ?? Set?.Host ?? "none");
             Number(page, Schema.StartingGold, P + ".startingGold", () => Set?.StartingGold, (p, v) => p.WaveSets[Index].StartingGold = v is float f ? (int?)Mathf.RoundToInt(f) : null,
@@ -74,7 +75,7 @@ namespace PalaceMod.Builder.Editor
                 }, structural: true);
                 night = added;
                 spawn = -1;
-                Frame.Refresh();
+                Rebuild();
             }, "Adds a night after the last one, starting as a copy of it.");
             if (Host != null)
                 Danger(page, $"Replace with {Host.DisplayName}'s own waves", "Swaps every night for the map's vanilla nights (you can undo this).", () =>
@@ -111,7 +112,7 @@ namespace PalaceMod.Builder.Editor
         {
             if (night == n && spawn == s) { night = -1; spawn = -1; }
             else { night = n; spawn = s; }
-            Frame.Refresh();
+            Rebuild();
         }
 
         private string NightSummary(NightDef nd)
@@ -138,14 +139,14 @@ namespace PalaceMod.Builder.Editor
             {
                 Edit("Duplicate night", w => w.Nights.Insert(n + 1, EditorCatalog.Copy(w.Nights[n])), structural: true);
                 night = n + 1;
-                Frame.Refresh();
+                Rebuild();
             }, "Inserts a copy of this night after it.");
             if (Set.Nights.Count > 1)
                 Danger(page, "    Delete night", "Removes this night.", () =>
                 {
                     Edit("Delete night", w => w.Nights.RemoveAt(n), structural: true);
                     ResetSelection();
-                    Frame.Refresh();
+                    Rebuild();
                 });
         }
 
@@ -153,7 +154,7 @@ namespace PalaceMod.Builder.Editor
         {
             Edit(dir < 0 ? "Move night earlier" : "Move night later", w => (w.Nights[n], w.Nights[n + dir]) = (w.Nights[n + dir], w.Nights[n]), structural: true);
             night = n + dir;
-            Frame.Refresh();
+            Rebuild();
         }
 
         private void AddSpawn(int n)
@@ -166,7 +167,7 @@ namespace PalaceMod.Builder.Editor
             }, structural: true);
             night = n;
             spawn = added;
-            Frame.Refresh();
+            Rebuild();
         }
 
         internal static SpawnDef DefaultSpawn(DesignPack pack, CatalogHost host)
@@ -176,6 +177,22 @@ namespace PalaceMod.Builder.Editor
             var b = EditorCatalog.BaseOf(pack, unit);
             var line = host?.SpawnLines.FirstOrDefault(l => b?.Flying == true ? l.Flying : l.SmallGround) ?? host?.SpawnLines.FirstOrDefault();
             return new SpawnDef { Unit = unit, Count = 5, Interval = 1f, Line = line?.Name, Gold = 5 };
+        }
+
+        // Chips other than a night's first aren't in the page's element list, so ModFrame can't keep them selected
+        // across a rebuild; remember which chip (night, group; -1 for "+ group") was selected and select its new copy.
+        private readonly Dictionary<TFUITextButton, (int Night, int Spawn)> chipKeys = [];
+
+        public override void Rebuild()
+        {
+            var selected = Frame.Frame?.CurrentSelection as TFUITextButton;
+            bool wasChip = selected != null && chipKeys.TryGetValue(selected, out var key);
+            if (!wasChip) { Frame.Refresh(); return; }
+            chipKeys.TryGetValue(selected, out key);
+            Frame.Refresh();
+            var again = chipKeys.FirstOrDefault(kv => kv.Value == key).Key
+                ?? chipKeys.FirstOrDefault(kv => kv.Value.Night == key.Night).Key;
+            if (again != null) Frame.Frame?.Select(again);
         }
 
         // ---- Chips ----------------------------------------------------------------------------------------------------
@@ -211,10 +228,12 @@ namespace PalaceMod.Builder.Editor
                     $"{sp?.Count} from {sp?.Line}, one every {EditorCatalog.Num(sp?.Interval ?? 0)} s, starting {EditorCatalog.Num(sp?.Delay ?? 0)} s into the night; " +
                     $"{sp?.Gold} gold in all." + string.Concat(IssuesAt(sp_).Select(i => "\n" + Capital(i.Message))) + "\nApply to edit.");
                 chips.Add(chip);
+                chipKeys[chip] = (n, s);
             }
             var add = Chip(area, $"<color=#{ModStyle.Hex(ModStyle.Dim)}>+ group</color>", null, () => AddSpawn(n), false);
             ModTooltip.Attach(add, "Add group", () => "Adds a group of enemies to this night.");
             chips.Add(add);
+            chipKeys[add] = (n, -1);
 
             // The first chip joins the page's up/down chain; the others follow it up and down, and left/right moves
             // along the row.
@@ -320,13 +339,13 @@ namespace PalaceMod.Builder.Editor
             {
                 Edit("Duplicate group", w => w.Nights[n].Spawns.Insert(s + 1, EditorCatalog.Copy(w.Nights[n].Spawns[s])), structural: true);
                 spawn = s + 1;
-                Frame.Refresh();
+                Rebuild();
             }, "Inserts a copy of this group.");
             page.Button(I + "Remove group", () =>
             {
                 Edit("Remove group", w => w.Nights[n].Spawns.RemoveAt(s), structural: true);
                 spawn = -1;
-                Frame.Refresh();
+                Rebuild();
             }, "Removes this group from the night (you can undo this).");
         }
 
@@ -338,7 +357,7 @@ namespace PalaceMod.Builder.Editor
                 (list[s], list[s + dir]) = (list[s + dir], list[s]);
             }, structural: true);
             spawn = s + dir;
-            Frame.Refresh();
+            Rebuild();
         }
 
         // ---- Picker items ---------------------------------------------------------------------------------------------

@@ -14,7 +14,7 @@ namespace PalaceMod
 {
     public class BuilderEditorManager : BaseManager
     {
-        private Keybind undo, redo, redoAlt;
+        private Keybind undo, redo, redoAlt, undoCtrl, redoCtrl;
         private static ConfigEntry<bool> hintShown;
 
         public override void Awake(Plugin plugin)
@@ -25,6 +25,10 @@ namespace PalaceMod
             redo = Keybinds.Register("Builder", "editor-redo", "Builder: redo", new KeyboardShortcut(KeyCode.Z, KeyCode.LeftCommand, KeyCode.LeftShift),
                 "Redoes the last undone change in the Builder editor.", KeybindFlags.AllowInMenus);
             redoAlt = Keybinds.Register("Builder", "editor-redo-ctrl", "Builder: redo (Ctrl)", new KeyboardShortcut(KeyCode.Y, KeyCode.LeftControl),
+                "Also redoes in the Builder editor.", KeybindFlags.AllowInMenus);
+            undoCtrl = Keybinds.Register("Builder", "editor-undo-ctrl", "Builder: undo (Ctrl)", new KeyboardShortcut(KeyCode.Z, KeyCode.LeftControl),
+                "Also undoes in the Builder editor.", KeybindFlags.AllowInMenus);
+            redoCtrl = Keybinds.Register("Builder", "editor-redo-ctrl-shift", "Builder: redo (Ctrl+Shift)", new KeyboardShortcut(KeyCode.Z, KeyCode.LeftControl, KeyCode.LeftShift),
                 "Also redoes in the Builder editor.", KeybindFlags.AllowInMenus);
             hintShown = plugin.Config.Bind("Builder", "Editor hint shown", false,
                 new ConfigDescription("Whether the Builder editor's first-use hint has been shown.", null, new SettingTags { Hidden = true }));
@@ -39,10 +43,8 @@ namespace PalaceMod
             if (!BuilderEditor.EditorFocused) return;
             if (!Feature<BuilderManager>.On) { BuilderEditor.Shutdown(); return; }
             if (ModTextInput.Active) return;
-            bool ctrlUndo = Input.GetKey(KeyCode.LeftControl) && Input.GetKeyDown(KeyCode.Z) && !Input.GetKey(KeyCode.LeftShift);
-            bool ctrlRedo = Input.GetKey(KeyCode.LeftControl) && Input.GetKeyDown(KeyCode.Z) && Input.GetKey(KeyCode.LeftShift);
-            if (redo.Down || redoAlt.Down || ctrlRedo) BuilderEditor.Redo();
-            else if (undo.Down || ctrlUndo) BuilderEditor.Undo();
+            if (redo.Down || redoAlt.Down || redoCtrl.Down) BuilderEditor.Redo();
+            else if (undo.Down || undoCtrl.Down) BuilderEditor.Undo();
         }
 
         internal static void FirstUseHint()

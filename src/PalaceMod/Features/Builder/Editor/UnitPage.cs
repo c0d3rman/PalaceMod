@@ -66,7 +66,7 @@ namespace PalaceMod.Builder.Editor
             }, "How wave sets refer to this unit: lowercase letters, digits, '.', '_' or '-'. Renaming updates this pack's references.", isId: true);
             Choice(page, "Base unit", P + ".base", EditorCatalog.Units(u.Side).Select(c => (ContentRef.Vanilla(c.Id), c.DisplayName)).ToList(),
                 () => Unit?.Base, (p, v) => p.Units[Index].Base = v,
-                "The vanilla unit this one is built from: its model, animations and every stat you don't override. Apply for the full list.",
+                "The vanilla unit this one is built from: its model, animations and every stat you don't override. Apply for the full list.", structural: true,
                 picker: () => Picker.One("Base Unit", BaseItems(Pack, Unit.Side), ContentRef.Parse(Unit.Base).Id,
                     id => Edit("Change base unit", unit => unit.Base = ContentRef.Vanilla(id), structural: true)),
                 display: () => BaseUnit?.DisplayName ?? ContentRef.Parse(Unit?.Base).Id ?? "none");
@@ -117,7 +117,7 @@ namespace PalaceMod.Builder.Editor
             {
                 string path = $"{P}.stats.{key}";
                 Number(page, spec, path,
-                    get: () => ToFloat(property.GetValue(Unit?.Stats)),
+                    get: () => Unit?.Stats == null ? null : ToFloat(property.GetValue(Unit.Stats)),
                     set: (p, v) =>
                     {
                         var unit = p.Units[Index];
@@ -149,7 +149,7 @@ namespace PalaceMod.Builder.Editor
                 unit.Weapon ??= new WeaponDef();
                 unit.Weapon.Base = v;
                 TrimWeapon(unit);
-            }, "Which weapon the unit attacks with. Another unit's weapon brings its projectile and damage.",
+            }, "Which weapon the unit attacks with. Another unit's weapon brings its projectile and damage.", structural: true,
                 picker: () => Picker.One("Weapon", WeaponItems(), Unit?.Weapon?.Base ?? "inherit", id => Edit("Change weapon", unit =>
                 {
                     unit.Weapon ??= new WeaponDef();
@@ -277,8 +277,9 @@ namespace PalaceMod.Builder.Editor
 
         private static readonly HashSet<string> MovementTags = ["Flying", "LargeUnit"];
 
-        private static IEnumerable<Picker.Item> TagItems(Func<string, bool> filter = null) =>
-            Enum.GetNames(typeof(TagManager.ETag)).Where(t => !MovementTags.Contains(t) && (filter?.Invoke(t) ?? true)).OrderBy(t => t)
+        /// <summary>Tag choices. Movement tags can't be added to or removed from a unit, but damage can target them.</summary>
+        private static IEnumerable<Picker.Item> TagItems(Func<string, bool> filter = null, bool unitTags = false) =>
+            Enum.GetNames(typeof(TagManager.ETag)).Where(t => !(unitTags && MovementTags.Contains(t)) && (filter?.Invoke(t) ?? true)).OrderBy(t => t)
                 .Select(t => new Picker.Item { Id = t, Label = Schema.Words(t) });
 
         private static string TagList(List<string> tags, string none) =>
@@ -292,11 +293,11 @@ namespace PalaceMod.Builder.Editor
             string tp = P + ".tags";
             Marked(page, "Add tags", () => TagList(Unit?.Tags?.Add, "none"),
                 "Tags change how the game treats the unit, e.g. Armored Against Ranged. Flying and Large come from the base unit.", tp,
-                () => Picker.Many("Add Tags", TagItems(t => !baseTags.Contains(t)), t => Unit?.Tags?.Add?.Contains(t) == true,
+                () => Picker.Many("Add Tags", TagItems(t => !baseTags.Contains(t), unitTags: true), t => Unit?.Tags?.Add?.Contains(t) == true,
                     t => EditTags(tags => { if (!tags.Add.Remove(t)) tags.Add.Add(t); tags.Remove.Remove(t); })));
             if (baseTags.Count > 0)
                 Marked(page, "Remove tags", () => TagList(Unit?.Tags?.Remove, "none"), "Takes tags away from the base unit.", tp,
-                    () => Picker.Many("Remove Tags", TagItems(baseTags.Contains), t => Unit?.Tags?.Remove?.Contains(t) == true,
+                    () => Picker.Many("Remove Tags", TagItems(baseTags.Contains, unitTags: true), t => Unit?.Tags?.Remove?.Contains(t) == true,
                         t => EditTags(tags => { if (!tags.Remove.Remove(t)) tags.Remove.Add(t); tags.Add.Remove(t); })));
         }
 

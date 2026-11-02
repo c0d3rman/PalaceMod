@@ -28,7 +28,7 @@ namespace PalaceMod.Builder.Editor
             {
                 if (!stale) return;
                 stale = false;
-                Frame.Refresh();
+                Rebuild();
             };
         }
 
@@ -46,9 +46,12 @@ namespace PalaceMod.Builder.Editor
         public void OnDraftChanged(bool structural)
         {
             if (!Frame.IsOpen) { stale = true; return; }
-            if (structural) Frame.Refresh();
+            if (structural) Rebuild();
             else UpdateFields();
         }
+
+        /// <summary>Rebuilds the open page, keeping the selection (pages with custom selectables override this).</summary>
+        public virtual void Rebuild() => Frame.Refresh();
 
         public void MarkStale() => stale = true;
 
@@ -173,7 +176,7 @@ namespace PalaceMod.Builder.Editor
         }
 
         protected ModField Choice<TValue>(ModPage page, string label, string path, IReadOnlyList<(TValue Value, string Display)> options,
-            Func<TValue> get, Action<DesignPack, TValue> set, string help, Action picker = null, Func<string> display = null)
+            Func<TValue> get, Action<DesignPack, TValue> set, string help, bool structural = false, Action picker = null, Func<string> display = null)
         {
             var names = options.Select(o => o.Display).ToList();
             int Index() => options.ToList().FindIndex(o => Equals(o.Value, get()));
@@ -184,7 +187,7 @@ namespace PalaceMod.Builder.Editor
             }
             else
             {
-                field = page.Choice(label, names, Index, i => Draft.Edit($"Set {label.ToLowerInvariant()}", p => set(p, options[i].Value), coalesce: path), picker, Tip(help, path));
+                field = page.Choice(label, names, Index, i => Draft.Edit($"Set {label.ToLowerInvariant()}", p => set(p, options[i].Value), structural, coalesce: path), picker, Tip(help, path));
             }
             return Bind(field, path);
 
@@ -193,7 +196,7 @@ namespace PalaceMod.Builder.Editor
                 if (options.Count == 0) return;
                 int i = Index();
                 int next = ((i < 0 ? (delta > 0 ? -1 : 0) : i) + Math.Sign(delta) + options.Count) % options.Count;
-                Draft.Edit($"Set {label.ToLowerInvariant()}", p => set(p, options[next].Value), coalesce: path);
+                Draft.Edit($"Set {label.ToLowerInvariant()}", p => set(p, options[next].Value), structural, coalesce: path);
             }
         }
 

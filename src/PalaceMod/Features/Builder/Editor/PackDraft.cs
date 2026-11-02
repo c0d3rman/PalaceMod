@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using PalaceMod.Builder.Model;
 using UnityEngine;
@@ -154,7 +155,8 @@ namespace PalaceMod.Builder.Editor
                 {
                     // A copy of an installed pack gets a name of its own, so the two are told apart in lists.
                     if (ReadOnly && !string.IsNullOrWhiteSpace(pack.Name) && !pack.Name.EndsWith(" (copy)")) pack.Name += " (copy)";
-                    var installed = repo.InstallNew(pack);
+                    // Asset files come along from the source pack's folder (plugin packs have one; built-in packs don't).
+                    var installed = repo.InstallNew(pack, SourceId == null ? null : repo.Find(SourceId)?.Folder);
                     if (installed == null) { message = "Couldn't save the pack"; return false; }
                     bool renamed = installed.Id != pack.Id;
                     message = ReadOnly ? $"Saved a copy as \"{installed.Id}\"" : renamed ? $"Saved as \"{installed.Id}\" (the id was taken)" : "Saved";
@@ -165,8 +167,14 @@ namespace PalaceMod.Builder.Editor
                 else
                 {
                     if (pack.Id != SourceId && repo.Find(pack.Id) != null) { message = $"Another pack already has the id \"{pack.Id}\""; return false; }
-                    repo.Save(pack);
-                    if (pack.Id != SourceId) repo.Delete(SourceId);
+                    string oldFolder = pack.Id != SourceId ? repo.Find(SourceId)?.Folder : null;
+                    string path = repo.Save(pack);
+                    if (oldFolder != null)
+                    {
+                        // A rename writes a new folder; bring the pack's files over before the old folder goes to trash.
+                        CopyDirectory(Path.Combine(oldFolder, "assets"), Path.Combine(Path.GetDirectoryName(path), "assets"));
+                        repo.Delete(SourceId);
+                    }
                     SourceId = pack.Id;
                     message = "Saved";
                 }
@@ -181,6 +189,18 @@ namespace PalaceMod.Builder.Editor
                 message = "Couldn't save: " + e.Message;
                 return false;
             }
+        }
+
+        private static void CopyDirectory(string from, string to)
+        {
+            if (!Directory.Exists(from)) return;
+            Directory.CreateDirectory(to);
+            foreach (var file in Directory.GetFiles(from))
+            {
+                string target = Path.Combine(to, Path.GetFileName(file));
+                if (!File.Exists(target)) File.Copy(file, target);
+            }
+            foreach (var dir in Directory.GetDirectories(from)) CopyDirectory(dir, Path.Combine(to, Path.GetFileName(dir)));
         }
 
         /// <summary>The pack's installed entry (for assets), if it has been saved.</summary>
