@@ -39,6 +39,17 @@ if [ "$(uname -m)" = "arm64" ] && [ -z "$PALACEMOD_ROSETTA" ]; then
     exec /usr/bin/arch -x86_64 /bin/sh "$0" "$@"
 fi
 """
+GC_MARKER = "# PalaceMod: garbage collector tuning"
+GC_BLOCK = f"""{GC_MARKER}. Boehm reads these at startup; override any of them in the environment.
+# A lower free-space divisor collects less often, and a larger initial heap avoids mid-level expansions.
+export GC_FREE_SPACE_DIVISOR="${{GC_FREE_SPACE_DIVISOR:-1}}"
+export GC_INITIAL_HEAP_SIZE="${{GC_INITIAL_HEAP_SIZE:-512M}}"
+# Per-collection timings, overwritten each launch, so spikes can be matched to GC pauses.
+if [ -z "$PALACEMOD_NO_GC_LOG" ]; then
+    export GC_PRINT_STATS=1 GC_LOG_FILE="$(cd "$(dirname "$0")" && pwd)/BepInEx/gc-stats.log"
+    rm -f "$GC_LOG_FILE"
+fi
+"""
 
 
 def run(*args):
@@ -202,22 +213,29 @@ def backup_saves():
 # --- Setup ------------------------------------------------------------------
 
 def patch_loader(game):
-    """Make run_bepinex.sh re-exec under Rosetta so Steam launches load the mod too."""
+    """Patch run_bepinex.sh: re-exec under Rosetta (so Steam launches load the mod) and tune the GC.
+
+    Returns the descriptions of the blocks that were added."""
     script = game / "run_bepinex.sh"
     if not script.is_file():
         raise RuntimeError(f"Missing {script}; install BepInEx 5 for macOS into the game first.")
     text = script.read_text()
-    if ROSETTA_MARKER in text:
-        return False
     archs = subprocess.run(["lipo", "-archs", str(game / "libdoorstop.dylib")],
                            capture_output=True, text=True).stdout.split()
-    if "arm64" in archs:
-        return False
+    blocks = [(GC_MARKER, GC_BLOCK, "tune the garbage collector")]
+    if "arm64" not in archs:
+        blocks.append((ROSETTA_MARKER, ROSETTA_BLOCK, "run under Rosetta"))
+    missing = [(block, label) for marker, block, label in blocks if marker not in text]
+    if not missing:
+        return []
     BACKUPS.mkdir(parents=True, exist_ok=True)
     shutil.copy2(script, BACKUPS / f"run_bepinex.sh.orig-{stamp()}")
     first, _, rest = text.partition("\n")
-    script.write_text(f"{first}\n{ROSETTA_BLOCK}{rest}")
-    return True
+    # Each block goes right after the shebang; the GC exports survive the Rosetta re-exec.
+    for block, _ in missing:
+        rest = block + rest
+    script.write_text(f"{first}\n{rest}")
+    return [label for _, label in missing]
 
 
 def setup(game):
@@ -235,8 +253,9 @@ def setup(game):
     CONFIG.parent.mkdir(exist_ok=True)
     CONFIG.write_text(json.dumps({"game": str(game)}, indent=2) + "\n")
     print(f"Copied {len(names)} game libraries to {lib}")
-    if patch_loader(game):
-        print(f"Patched run_bepinex.sh to run under Rosetta (original backed up in {BACKUPS}).")
+    added = patch_loader(game)
+    if added:
+        print(f"Patched run_bepinex.sh to {' and '.join(added)} (original backed up in {BACKUPS}).")
     print("Game libraries and local settings are ignored by Git.")
 
 
@@ -447,6 +466,8 @@ def doctor(game, configuration):
     script = game / "run_bepinex.sh"
     patched = script.is_file() and ROSETTA_MARKER in script.read_text()
     check("run_bepinex.sh runs under Rosetta", patched, "" if patched else "run `setup` to patch")
+    tuned = script.is_file() and GC_MARKER in script.read_text()
+    check("run_bepinex.sh tunes the GC", tuned, "" if tuned else "run `setup` to patch")
     localconfigs = list((Path.home() / "Library/Application Support/Steam/userdata").glob("*/config/localconfig.vdf"))
     steam_ok = any("run_bepinex.sh" in f.read_text(errors="replace") for f in localconfigs)
     check("Steam launch options use run_bepinex.sh", steam_ok,

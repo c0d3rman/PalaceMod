@@ -35,8 +35,8 @@ namespace PalaceMod
         {
             base.Awake(plugin);
             var config = plugin.Config;
-            heapReserveMb = config.Bind(Section, "Heap reserve (MB)", 256,
-                "Grow the managed heap by this much at startup so it doesn't have to expand (and stall) during play. 0 disables.");
+            heapReserveMb = config.Bind(Section, "Minimum heap size (MB)", 512,
+                "Grow the managed heap to at least this size at startup so it doesn't have to expand (and stall) during play. 0 disables.");
             gcTimeSliceMs = config.Bind(Section, "Incremental GC time slice (ms)", 0f,
                 "Per-frame budget for the incremental garbage collector. 0 keeps the game's default (3 ms).");
             spikeLogging = config.Bind(Section, "Log frame spikes", true,
@@ -58,14 +58,15 @@ namespace PalaceMod
 
         private static void ReserveHeap(int megabytes)
         {
-            if (megabytes <= 0) return;
             long before = Profiler.GetMonoHeapSizeLong();
+            int missing = megabytes - (int)(before / 1048576);
+            if (missing <= 0) return;
             // Hold every chunk at once so the collector has to expand the heap instead of reusing freed space.
-            var chunks = new List<byte[]>(megabytes);
-            for (int i = 0; i < megabytes; i++) chunks.Add(new byte[1024 * 1024]);
+            var chunks = new List<byte[]>(missing);
+            for (int i = 0; i < missing; i++) chunks.Add(new byte[1024 * 1024]);
             chunks.Clear();
             long after = Profiler.GetMonoHeapSizeLong();
-            Plugin.Logger.LogInfo($"Performance: reserved managed heap {before / 1048576} MB -> {after / 1048576} MB");
+            Plugin.Logger.LogInfo($"Performance: grew managed heap {before / 1048576} MB -> {after / 1048576} MB");
         }
 
         private void ApplyGcTimeSlice()
