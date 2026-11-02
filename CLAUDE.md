@@ -11,7 +11,10 @@ python3 scripts/dev.py run           # build -> stop game -> install -> launch -
 python3 scripts/dev.py logs --errors # unique errors with stack traces from the current game session
 python3 scripts/dev.py screenshot    # in-game frame capture (works while unfocused); prints the PNG path
 python3 scripts/dev.py stop          # quit the game and restore the player's display settings
+python3 scripts/dev.py cmd "<command>"  # drive a dev launch: load levels, start nights, fake input, open/navigate menus
 ```
+
+Dev launches are windowed, muted (`--sound` to keep audio) and hand focus back to the app that was in front (`--focus` lets the game keep it). Don't launch `--fullscreen` unless you need to: it switches the user to a new Space.
 
 A feature is not done until `run` reports `PalaceMod loaded: yes` and no PalaceMod errors. The one expected error is `HookGenPatcher ... Could not load file or assembly 'MonoMod'`, which comes from a BepInEx patcher and is harmless.
 
@@ -30,14 +33,22 @@ There is one game install, so only one session can test at a time. The checkout 
 
 ## Verifying in-game behavior
 
-The scripts can launch the game, read the log and capture frames, but they can't play. To check gameplay features:
+Drive the game yourself instead of asking the user to click through it. `dev.py cmd` sends commands to `Core/DevToolsManager.cs` (the full list is in its header comment), for example:
 
-1. Log what the feature does (`Plugin.Logger.LogInfo`), then check it with `dev.py logs`.
-2. Take a `dev.py screenshot` and look at the image.
-3. For anything that needs real input (starting a level, building, fighting a wave), use computer use if you have it. Otherwise, ask the user to test it, with exact steps to follow and what they should see.
+```sh
+python3 scripts/dev.py cmd scenes            # list scenes
+python3 scripts/dev.py cmd "level Nordfels"  # load a level
+python3 scripts/dev.py cmd night             # start the next wave now
+python3 scripts/dev.py cmd "circle 30"       # run the king in circles for 30 s (camera motion)
+python3 scripts/dev.py cmd settings          # open Settings on the Mods tab
+python3 scripts/dev.py cmd "ui down"         # navigate the open menu like a controller (up/down/left/right/apply/close)
+```
+
+Then check the result with `dev.py logs` (log what features do with `Plugin.Logger.LogInfo`) and `dev.py screenshot`. `PerformanceManager` logs a frame-time summary (fps, percentiles, CPU work per frame, frame-rate cap and reason) every "Summary interval"; settings edited in `BepInEx/config/PalaceMod.cfg` are reloaded live within 2 s. Only ask the user to test what genuinely needs a human, like how motion looks.
 
 ## Code layout and conventions
 
+- Settings are BepInEx `ConfigEntry`s. `Features/UI/SettingsPaneManager.cs` generates the in-game Settings > Mods tab from them: bool = checkbox, enum or `AcceptableValueList` = selector, `AcceptableValueRange` = slider. Give every entry a description (shown beside the selected row) and, where useful, a `SettingTags` tag for units, a label for 0 and slider steps.
 - `src/PalaceMod/Plugin.cs` registers the managers. Harmony patches are applied only for registered managers and the patch classes nested inside them, so new patch classes go inside their manager.
 - Each feature is one `BaseManager` subclass under `Features/<Area>/`. Don't register managers from `Experimental/`.
 - `Plugin.Update` isolates managers from each other's exceptions, and each distinct error is logged once.

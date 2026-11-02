@@ -18,6 +18,11 @@ using UnityEngine.SceneManagement;
         circle <seconds>       run in a circle, for testing camera motion
         sprint <on|off>        hold sprint while running
         stop                   release all fake input
+        settings               open the Settings screen on the Mods tab
+        ui [up|down|left|right|apply|close]   navigate the open menu like a controller; prints the selection
+        mute [off]           mute or unmute the game (dev launches start muted unless PALACEMOD_SOUND=1)
+        night                  start the next night (wave) now
+        timescale <x>          set Time.timeScale
         resolutions            list the current and available display modes
         setres <w> <h> <hz>    switch display mode (keeps the fullscreen mode)
     Each command logs "Dev command done: <command>" or "Dev command failed: <command>: <reason>".
@@ -35,6 +40,7 @@ namespace PalaceMod
 
         // Fake input, read by the Rewired patch below.
         private static bool inputActive;
+        public static bool FakeInputActive => inputActive;
         private static float moveHorizontal, moveVertical;
         private static bool sprint;
         private float inputUntil;
@@ -47,6 +53,7 @@ namespace PalaceMod
             if (!enabled) return;
 
             Application.runInBackground = true;
+            if (Environment.GetEnvironmentVariable("PALACEMOD_SOUND") != "1") AudioListener.volume = 0f;
             Directory.CreateDirectory(DevDir);
             File.Delete(ScreenshotRequest);
             File.Delete(CommandRequest);
@@ -121,6 +128,40 @@ namespace PalaceMod
                 case "stop":
                     inputActive = circling = sprint = false;
                     return "";
+                case "settings":
+                {
+                    var pane = Plugin.GetManager<SettingsPaneManager>();
+                    if (pane?.Frame == null) throw new InvalidOperationException("settings screen not found");
+                    UIFrameManager.instance.ChangeActiveFrame(pane.Frame);
+                    // The tab is injected when the screen first wakes up, i.e. by the line above.
+                    if (pane.TabButton != null) pane.Frame.Select(pane.TabButton);
+                    return DescribeSelection();
+                }
+                case "ui":
+                {
+                    var frame = UIFrameManager.instance?.ActiveFrame ?? throw new InvalidOperationException("no menu open");
+                    string action = args.Length > 1 ? args[1] : "";
+                    if (action == "apply") frame.Apply();
+                    else if (action == "close") UIFrameManager.instance.CloseActiveFrame();
+                    else if (action != "")
+                    {
+                        var direction = (ThronefallUIElement.NavigationDirection)Enum.Parse(typeof(ThronefallUIElement.NavigationDirection), action, true);
+                        var next = frame.CurrentSelection?.TryNavigate(direction);
+                        if (next != null) frame.Select(next);
+                    }
+                    return DescribeSelection();
+                }
+                case "mute":
+                    AudioListener.volume = args.Length > 1 && args[1] == "off" ? 1f : 0f;
+                    return "";
+                case "night":
+                    if (DayNightCycle.Instance == null) throw new InvalidOperationException("not in a level");
+                    DayNightCycle.Instance.SwitchToNight();
+                    return "";
+                case "timescale":
+                    if (args.Length < 2) throw new ArgumentException("usage: timescale <x>");
+                    Time.timeScale = float.Parse(args[1]);
+                    return "";
                 case "resolutions":
                     return $"current {Screen.currentResolution.width}x{Screen.currentResolution.height}@{Screen.currentResolution.refreshRateRatio.value:0.##} " +
                         $"({Screen.fullScreenMode}); available " +
@@ -133,6 +174,17 @@ namespace PalaceMod
                 default:
                     throw new ArgumentException("unknown command");
             }
+        }
+
+        private static string DescribeSelection()
+        {
+            var frame = UIFrameManager.instance?.ActiveFrame;
+            var selected = frame?.CurrentSelection;
+            if (frame == null) return "no menu open";
+            if (selected == null) return $"{frame.name} > nothing selected";
+            static string Name(ThronefallUIElement e) => e == null ? "-" : $"{e.name}{(e.gameObject.activeInHierarchy ? "" : " (inactive)")}";
+            return $"{frame.name} > {selected.name} [{selected.GetType().Name}, up {Name(selected.topNav)}, down {Name(selected.botNav)}, " +
+                $"left {Name(selected.leftNav)}, right {Name(selected.rightNav)}]";
         }
 
         private static SceneTransitionManager Require(SceneTransitionManager transitions) =>

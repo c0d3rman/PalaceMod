@@ -16,8 +16,15 @@ namespace PalaceMod
 {
     internal class FramePacer
     {
-        // Thread.Sleep(1) usually wakes within a few ms on macOS, so spin for the last stretch.
-        private const double SleepMarginMs = 4.0;
+        // Thread.Sleep(1) overshoots by a variable amount, so the pacer sleeps until a margin before the deadline and
+        // spins the rest. The margin adapts to the overshoot actually observed (95th percentile plus a little), capped
+        // by MaxSpinMs: spinning keeps a core busy, so a lower cap saves battery at the cost of some precision.
+        private const double MinMarginMs = 0.5;
+        private const int OvershootSamples = 256;
+        private readonly float[] overshoots = new float[OvershootSamples];
+        private readonly float[] sorted = new float[OvershootSamples];
+        private int overshootCount, overshootNext, samplesSinceUpdate;
+        private double marginMs = 2.0;
         // How long after a refresh to start the next frame.
         private const double PhaseOffsetMs = 0.5;
         private static readonly double TicksPerMs = Stopwatch.Frequency / 1000.0;
@@ -28,12 +35,16 @@ namespace PalaceMod
         public float TargetFps { get; set; }
         public bool Enabled => TargetFps > 0f;
         public bool LockToDisplay { get; set; } = true;
+        public double MaxSpinMs { get; set; } = 4.0;
+        public double MarginMs => Math.Min(marginMs, MaxSpinMs);
         public bool LockedToDisplay { get; private set; }
 
-        // Diagnostics, reset by the summary. WorstSleepMs is how far a sleep overshot its wake-up time.
+        // Diagnostics, reset by the summary. WorstSleepMs is how late a frame started after its deadline.
         public double WorstSleepMs { get; private set; }
         public int Frames { get; private set; }
         public int MistimedFrames { get; private set; } // shown for more or fewer refreshes than intended
+        /// <summary>How long the last frame waited in the pacer, so callers can tell work time from waiting.</summary>
+        public double LastWaitMs { get; private set; }
 
         public void ResetStats()
         {
@@ -54,8 +65,10 @@ namespace PalaceMod
             PlayerLoop.SetPlayerLoop(root);
         }
 
+        // Whole refreshes per frame, rounded up so the frame rate never exceeds the target (a 50 fps cap on a
+        // 120 Hz display gives 40 fps, not 60). The small tolerance keeps 60 on a 119.88 Hz display at 2.
         private int RefreshesPerFrame(long period) =>
-            Math.Max(1, (int)Math.Round(Stopwatch.Frequency / (double)period / TargetFps));
+            Math.Max(1, (int)Math.Ceiling(Stopwatch.Frequency / (double)period / TargetFps - 0.01));
 
         private void Wait()
         {
@@ -65,6 +78,7 @@ namespace PalaceMod
                 return;
             }
             long now = Stopwatch.GetTimestamp();
+            LastWaitMs = 0;
             long refresh = DisplayLink.LastRefresh;
             long period = DisplayLink.PeriodTicks;
             LockedToDisplay = LockToDisplay && refresh != 0 && period > 0;
@@ -78,6 +92,7 @@ namespace PalaceMod
             else
             {
                 SleepUntil(nextDeadline);
+                LastWaitMs = (Stopwatch.GetTimestamp() - now) / TicksPerMs;
             }
 
             long next = nextDeadline + interval;
@@ -93,16 +108,34 @@ namespace PalaceMod
 
         private void SleepUntil(long deadline)
         {
-            long sleepUntil = deadline - (long)(SleepMarginMs * TicksPerMs);
+            long sleepUntil = deadline - (long)(MarginMs * TicksPerMs);
             long now = Stopwatch.GetTimestamp();
-            if (now < sleepUntil)
+            while (now < sleepUntil)
             {
-                // Short sleeps overshoot least here; mach_wait_until to the full deadline overshot by up to 70 ms.
-                while (Stopwatch.GetTimestamp() < sleepUntil) Thread.Sleep(1);
-                double overshoot = (Stopwatch.GetTimestamp() - sleepUntil) / TicksPerMs;
-                if (overshoot > WorstSleepMs) WorstSleepMs = overshoot;
+                long before = now;
+                Thread.Sleep(1);
+                now = Stopwatch.GetTimestamp();
+                RecordOvershoot((now - before) / TicksPerMs - 1.0);
+            }
+            if (now > deadline)
+            {
+                double late = (now - deadline) / TicksPerMs;
+                if (late > WorstSleepMs) WorstSleepMs = late;
             }
             while (Stopwatch.GetTimestamp() < deadline) Thread.SpinWait(64);
+        }
+
+        private void RecordOvershoot(double ms)
+        {
+            overshoots[overshootNext] = (float)Math.Max(0, ms);
+            overshootNext = (overshootNext + 1) % OvershootSamples;
+            if (overshootCount < OvershootSamples) overshootCount++;
+            if (++samplesSinceUpdate < 32) return;
+            samplesSinceUpdate = 0;
+            Array.Copy(overshoots, sorted, overshootCount);
+            Array.Sort(sorted, 0, overshootCount);
+            float p95 = sorted[(int)(0.95 * (overshootCount - 1))];
+            marginMs = Math.Max(MinMarginMs, p95 + 0.5);
         }
 
         // At the end of the frame, count frames that will appear after a different number of refreshes than intended.

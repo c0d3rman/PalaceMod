@@ -1,138 +1,223 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
-using System.Runtime.CompilerServices;
+using System.Linq;
 using BepInEx.Configuration;
-using HarmonyLib;
 using Pathfinding;
 using UnityEngine;
 using UnityEngine.Profiling;
-using UnityEngine.SceneManagement;
 using UnityEngine.Scripting;
 
 /*
-    Smooths out frame-time spikes and reports where the remaining ones come from.
-    - Pre-grows the Mono (Boehm) heap at startup so the game doesn't stall on heap expansions mid-level.
-    - Optionally widens the incremental GC time slice so collections finish before allocation forces a full stop-the-world pass.
-    - Logs frame spikes with whether a GC ran during that frame and which engine subsystems took the time, plus a
-      periodic summary, so spikes can be attributed.
-    - Removes per-frame garbage in a few game hot paths, with results identical to the originals.
-    - Logs (and optionally overrides) the A* pathfinding thread settings for each level.
-    - On macOS, paces frames precisely and opts out of App Nap/timer coalescing; both VSync and Unity's frame limiter
-      otherwise oversleep by several frames there.
+    Performance and battery features that don't change gameplay. Split across partial files:
+    - PerformanceManager.cs: settings and lifecycle.
+    - PerformanceManager.FrameRate.cs: precise frame pacing, refresh rate, and lowering the frame rate in menus, in
+      the background, on battery and when the Mac is hot.
+    - PerformanceManager.Diagnostics.cs: spike logging and frame-time summaries.
+    - PerformanceManager.HotPaths.cs: Harmony patches removing per-frame work and garbage in game code, with results
+      identical to the originals.
 */
 namespace PalaceMod
 {
-    public class PerformanceManager : BaseManager
+    public partial class PerformanceManager : BaseManager
     {
-        private const string Section = "Performance";
+        public enum Toggle { Auto, On, Off }
+        public enum VSyncMode { GameDefault, On, Off }
+        public enum PathfindingThreads { GameDefault, None, One, Two, Four, AutomaticLowLoad, AutomaticHighLoad }
 
+        private const string FrameRateSection = "Frame rate";
+        private const string BatterySection = "Battery";
+        private const string MemorySection = "Memory";
+        private const string DiagnosticsSection = "Diagnostics";
+        private const string AdvancedSection = "Advanced";
+
+        // Frame rate
+        private ConfigEntry<Toggle> precisePacing;
+        private ConfigEntry<int> maxFrameRate;
+        private ConfigEntry<int> raiseRefreshRate;
+        private ConfigEntry<int> menuFrameRate;
+        private ConfigEntry<bool> lockToDisplay;
+        // Battery
+        private ConfigEntry<int> backgroundFrameRate;
+        private ConfigEntry<int> batteryFrameRate;
+        private ConfigEntry<bool> saveCpuOnBattery;
+        private ConfigEntry<bool> coolDownWhenHot;
+        private ConfigEntry<float> batteryRenderScale;
+        private ConfigEntry<int> idleFrameRate;
+        private ConfigEntry<int> idleAfterSeconds;
+        // Memory
         private ConfigEntry<int> heapReserveMb;
         private ConfigEntry<float> gcTimeSliceMs;
+        private ConfigEntry<bool> collectWhenPaused;
+        // Diagnostics
         private ConfigEntry<bool> spikeLogging;
         private ConfigEntry<float> spikeThresholdMs;
         private ConfigEntry<float> spikeRatio;
         private ConfigEntry<float> summaryIntervalSeconds;
-        private ConfigEntry<PathfindingThreads> pathfindingThreads;
+        // Advanced
+        private ConfigEntry<Toggle> latencyCritical;
+        private ConfigEntry<float> maxSpinMs;
         private ConfigEntry<VSyncMode> vSync;
         private ConfigEntry<int> targetFrameRate;
+        private ConfigEntry<float> renderScale;
+        private ConfigEntry<int> msaa;
+        private ConfigEntry<PathfindingThreads> pathfindingThreads;
+
         private DateTime configWriteTime;
         private float nextConfigCheck;
 
-        private ConfigEntry<Toggle> precisePacing;
-        private ConfigEntry<int> pacedFrameRate;
-        private ConfigEntry<bool> lockToDisplay;
-        private ConfigEntry<int> raiseRefreshRate;
-        private bool refreshRateApplied;
-        private readonly FramePacer pacer = new();
-        private ConfigEntry<float> renderScale;
-        private ConfigEntry<int> msaa;
-
-        public enum VSyncMode { GameDefault, On, Off }
-        public enum Toggle { Auto, On, Off }
-
-        public enum PathfindingThreads { GameDefault, None, One, Two, Four, AutomaticLowLoad, AutomaticHighLoad }
-
-        private readonly FrameStats stats = new();
-        private readonly PlayerLoopTimer loopTimer = new();
-        private int lastGcCount;
-        private float smoothedFrameMs = 16.7f;
-        private float nextSummary;
-        private int spikesLoggedThisWindow;
-        private const int MaxSpikeLinesPerWindow = 20;
+        private static bool IsMac => Application.platform == RuntimePlatform.OSXPlayer;
 
         public override void Awake(Plugin plugin)
         {
             base.Awake(plugin);
-            var config = plugin.Config;
-            heapReserveMb = config.Bind(Section, "Minimum heap size (MB)", 512,
-                "Grow the managed heap to at least this size at startup so it doesn't have to expand (and stall) during play. 0 disables.");
-            gcTimeSliceMs = config.Bind(Section, "Incremental GC time slice (ms)", 0f,
-                "Per-frame budget for the incremental garbage collector. 0 keeps the game's default (3 ms).");
-            spikeLogging = config.Bind(Section, "Log frame spikes", true,
-                "Write frame-time spikes and a periodic frame-time summary to the BepInEx log.");
-            spikeThresholdMs = config.Bind(Section, "Spike threshold (ms)", 25f,
-                "A frame counts as a spike when it takes longer than this...");
-            spikeRatio = config.Bind(Section, "Spike ratio", 2f,
-                "...and longer than this multiple of the recent average frame time.");
-            summaryIntervalSeconds = config.Bind(Section, "Summary interval (s)", 60f,
-                "How often to log the frame-time summary.");
+            BindSettings(plugin.Config);
+            RemoveOldSettings(plugin.Config);
+            configWriteTime = System.IO.File.GetLastWriteTimeUtc(plugin.Config.ConfigFilePath);
 
-            pathfindingThreads = config.Bind(Section, "Pathfinding threads", PathfindingThreads.GameDefault,
-                "Threads A* uses to compute paths, applied when a level loads. None computes paths on the main thread.");
-
-            vSync = config.Bind(Section, "VSync", VSyncMode.GameDefault,
-                "Override the game's VSync setting. Off plus a target frame rate often paces better on Mac displays.");
-            targetFrameRate = config.Bind(Section, "Target frame rate", 0,
-                "Frame rate cap used when VSync is off. 0 keeps the game's setting, -1 is uncapped.");
-            precisePacing = config.Bind(Section, "Precise frame pacing", Toggle.Auto,
-                "Replace VSync and Unity's frame limiter with a precise one. Both oversleep by several frames on macOS, " +
-                "which makes the game stutter even though it renders in about a millisecond. Auto turns it on on macOS. " +
-                "Overrides the VSync and Target frame rate settings.");
-            pacedFrameRate = config.Bind(Section, "Paced frame rate", 0,
-                "Frame rate for precise frame pacing. 0 matches the display's refresh rate.");
-            lockToDisplay = config.Bind(Section, "Lock pacing to display refresh", true,
-                "Start each paced frame just after a display refresh, so frames don't drift across refreshes (judder).");
-            raiseRefreshRate = config.Bind(Section, "Raise refresh rate (Hz)", 0,
-                "macOS: while the game runs, switch the display to the highest refresh rate up to this (e.g. 120 on a " +
-                "ProMotion screen set to 60 Hz). macOS restores your setting when the game quits. 0 leaves it alone.");
-            renderScale = config.Bind(Section, "Render scale override", 0f,
-                "Resolution multiplier for 3D rendering (UI stays sharp). 0 keeps the game's setting.");
-            msaa = config.Bind(Section, "MSAA override", 0,
-                "Anti-aliasing samples: 1 (off), 2, 4 or 8. 0 keeps the game's setting.");
-            var latencyCritical = config.Bind(Section, "Latency-critical mode", Toggle.Auto,
-                "Ask macOS to treat the game as latency-critical, which disables App Nap and timer coalescing so waits " +
-                "don't overshoot. Auto turns it on on macOS. Takes effect at launch.");
-            configWriteTime = System.IO.File.GetLastWriteTimeUtc(config.ConfigFilePath);
-            if (latencyCritical.Value == Toggle.On || (latencyCritical.Value == Toggle.Auto && Application.platform == RuntimePlatform.OSXPlayer))
+            if (IsMac)
             {
-                try
-                {
-                    Plugin.Logger.LogInfo($"Performance: latency-critical mode {(MacActivity.Begin() ? "on" : "unavailable")}");
-                    Plugin.Logger.LogInfo($"Performance: display link {(DisplayLink.Start() ? "running" : "unavailable")}");
-                }
-                catch (Exception e)
-                {
-                    Plugin.Logger.LogWarning($"Performance: couldn't enable latency-critical mode: {e.Message}");
-                }
+                TryLog("display link", () => DisplayLink.Start() ? "running" : "unavailable");
+                PowerState.Refresh();
+                Plugin.Logger.LogInfo($"Performance: on battery {PowerState.OnBattery}, low power mode {PowerState.LowPowerMode}, thermal {PowerState.ThermalState}");
             }
-
             AstarPath.OnAwakeSettings += ConfigurePathfinding;
             ReserveHeap(heapReserveMb.Value);
             ApplyGcTimeSlice();
             gcTimeSliceMs.SettingChanged += (_, _) => ApplyGcTimeSlice();
 
-            lastGcCount = GC.CollectionCount(0);
             pacer.Install();
             if (spikeLogging.Value) loopTimer.Install(); // after the pacer, so its wait shows up as its own entry
-            Plugin.Logger.LogInfo($"Performance: GC mode {GarbageCollector.GCMode}, incremental {GarbageCollector.isIncremental}, " +
-                $"time slice {GarbageCollector.incrementalTimeSliceNanoseconds / 1e6:0.#} ms, heap {Profiler.GetMonoHeapSizeLong() / 1048576} MB, " +
-                $"vSync {QualitySettings.vSyncCount}, target fps {Application.targetFrameRate}, arch {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}");
+            lastGcCount = GC.CollectionCount(0);
+            Plugin.Logger.LogInfo($"Performance: GC incremental {GarbageCollector.isIncremental}, heap {Profiler.GetMonoHeapSizeLong() / 1048576} MB, " +
+                $"run in background {Application.runInBackground}, arch {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}");
+        }
+
+        private void BindSettings(ConfigFile config)
+        {
+            precisePacing = config.Bind(FrameRateSection, "Precise frame pacing", Toggle.Auto,
+                "Pace frames with the mod's own precise timer instead of VSync and Unity's frame limiter, which both " +
+                "oversleep by several frames on macOS and make the game stutter. Auto: on for macOS.");
+            maxFrameRate = config.Bind(FrameRateSection, "Max frame rate", 0, new ConfigDescription(
+                "Frame rate cap while playing (at least 15). 0 matches the display's refresh rate.", new AcceptableValueRange<int>(0, 240), new SettingTags { ZeroLabel = "Display", Unit = " fps", Step = 5 }));
+            raiseRefreshRate = config.Bind(FrameRateSection, "Raise refresh rate (Hz)", 120, new ConfigDescription(
+                "macOS: while the game runs, switch the display to the highest refresh rate up to this, e.g. 120 on a " +
+                "ProMotion screen set to 60 Hz. macOS restores your setting when the game quits. 0 leaves it alone. " +
+                "Takes effect at launch.", new AcceptableValueList<int>(0, 90, 100, 120, 144), new SettingTags { ZeroLabel = "Off", Unit = " Hz" }));
+            menuFrameRate = config.Bind(FrameRateSection, "Menu frame rate", 60, new ConfigDescription(
+                "Frame rate cap on the main menu and while paused. 0 for no extra cap.", new AcceptableValueRange<int>(0, 240), new SettingTags { ZeroLabel = "Off", Unit = " fps", Step = 5 }));
+            lockToDisplay = config.Bind(FrameRateSection, "Lock to display refresh", true,
+                "Start each frame just after a display refresh so frames don't drift across refreshes, which looks like judder.");
+
+            backgroundFrameRate = config.Bind(BatterySection, "Background frame rate", 15, new ConfigDescription(
+                "Frame rate cap while the game window isn't focused (if the game keeps running in the background). " +
+                "0 for no extra cap.", new AcceptableValueRange<int>(0, 240), new SettingTags { ZeroLabel = "Off", Unit = " fps", Step = 5 }));
+            batteryFrameRate = config.Bind(BatterySection, "Battery frame rate", 60, new ConfigDescription(
+                "Frame rate cap while on battery power or in Low Power Mode. 0 for no extra cap.", new AcceptableValueRange<int>(0, 240), new SettingTags { ZeroLabel = "Off", Unit = " fps", Step = 5 }));
+            saveCpuOnBattery = config.Bind(BatterySection, "Save CPU on battery", true,
+                "On battery, sleep instead of busy-waiting for the exact frame time. Uses much less CPU; frame timing gets slightly less precise.");
+            coolDownWhenHot = config.Bind(BatterySection, "Cool down when hot", true,
+                "Cap the frame rate at 60 when macOS reports the Mac is under thermal pressure, and at 30 when critical.");
+
+            batteryRenderScale = config.Bind(BatterySection, "Battery render scale", 0f, new ConfigDescription(
+                "Render the 3D scene at this fraction of full resolution on battery or in Low Power Mode (UI stays sharp). " +
+                "Saves a lot of GPU power at some sharpness. Off keeps the game's setting.", new AcceptableValueRange<float>(0f, 1f),
+                new SettingTags { ZeroLabel = "Off", Unit = "x", Step = 0.05f }));
+            idleFrameRate = config.Bind(BatterySection, "Idle frame rate", 30, new ConfigDescription(
+                "Frame rate cap when there's been no input for a while, outside of night battles. 0 for no extra cap.",
+                new AcceptableValueRange<int>(0, 240), new SettingTags { ZeroLabel = "Off", Unit = " fps", Step = 5 }));
+            idleAfterSeconds = config.Bind(BatterySection, "Idle after (s)", 60, new ConfigDescription(
+                "Seconds without keyboard, mouse or controller input before the idle frame rate applies.", new AcceptableValueRange<int>(5, 600), new SettingTags { Unit = " s", Step = 5 }));
+
+            heapReserveMb = config.Bind(MemorySection, "Minimum heap size (MB)", 512, new ConfigDescription(
+                "Grow the managed heap to at least this size at startup so it doesn't have to expand (and stall) during play. " +
+                "0 disables. Takes effect at launch.", new AcceptableValueRange<int>(0, 2048), new SettingTags { ZeroLabel = "Off", Unit = " MB", Step = 64 }));
+            gcTimeSliceMs = config.Bind(MemorySection, "Incremental GC time slice (ms)", 0f, new ConfigDescription(
+                "Per-frame budget for the incremental garbage collector. 0 keeps the game's default (3 ms).", new AcceptableValueRange<float>(0f, 10f), new SettingTags { ZeroLabel = "Default", Unit = " ms", Step = 0.5f }));
+
+            collectWhenPaused = config.Bind(MemorySection, "Collect garbage when paused", true,
+                "Run a garbage collection when the game is paused or a menu opens, where the pause can't be felt, so " +
+                "fewer collections happen mid-battle.");
+
+            spikeLogging = config.Bind(DiagnosticsSection, "Log frame spikes", true,
+                "Write frame-time spikes and a periodic frame-time summary to the BepInEx log. Takes effect at launch.");
+            spikeThresholdMs = config.Bind(DiagnosticsSection, "Spike threshold (ms)", 25f, new ConfigDescription(
+                "A frame counts as a spike when it takes longer than this...", new AcceptableValueRange<float>(5f, 200f), new SettingTags { Unit = " ms", Step = 5 }));
+            spikeRatio = config.Bind(DiagnosticsSection, "Spike ratio", 2f, new ConfigDescription(
+                "...and longer than this multiple of the recent average frame time.", new AcceptableValueRange<float>(1f, 10f), new SettingTags { Unit = "x", Step = 0.25f }));
+            summaryIntervalSeconds = config.Bind(DiagnosticsSection, "Summary interval (s)", 60f, new ConfigDescription(
+                "How often to log the frame-time summary.", new AcceptableValueRange<float>(5f, 600f), new SettingTags { Unit = " s", Step = 5 }));
+
+            latencyCritical = config.Bind(AdvancedSection, "Latency-critical mode", Toggle.Auto,
+                "Ask macOS to treat the game as latency-critical while it's focused, which disables App Nap and timer " +
+                "coalescing so waits don't overshoot. Auto: on for macOS.");
+            maxSpinMs = config.Bind(AdvancedSection, "Max busy-wait (ms)", 4f, new ConfigDescription(
+                "Longest the frame pacer busy-waits before each frame for exact timing. It adapts to how precisely this Mac " +
+                "wakes from sleep and only spins as long as needed.", new AcceptableValueRange<float>(0f, 8f), new SettingTags { ZeroLabel = "Off", Unit = " ms", Step = 0.5f }));
+            vSync = config.Bind(AdvancedSection, "VSync override", VSyncMode.GameDefault,
+                "Override the game's VSync setting. Ignored while precise frame pacing is on.");
+            targetFrameRate = config.Bind(AdvancedSection, "Unity frame limiter", 0, new ConfigDescription(
+                "Frame cap used when precise frame pacing is off (at least 15); 0 for none. Applied with the mod's pacer, since " +
+                "Unity's own limiter oversleeps on macOS and does nothing while VSync is on.",
+                new AcceptableValueRange<int>(0, 240), new SettingTags { ZeroLabel = "Off", Unit = " fps", Step = 5 }));
+            renderScale = config.Bind(AdvancedSection, "Render scale override", 0f, new ConfigDescription(
+                "Resolution multiplier for 3D rendering (UI stays sharp). 0 keeps the game's setting.", new AcceptableValueRange<float>(0f, 2f), new SettingTags { ZeroLabel = "Game default", Unit = "x", Step = 0.05f }));
+            msaa = config.Bind(AdvancedSection, "MSAA override", 0, new ConfigDescription(
+                "Anti-aliasing samples. 0 keeps the game's setting.", new AcceptableValueList<int>(0, 1, 2, 4, 8), new SettingTags { ZeroLabel = "Game default", Unit = "x" }));
+            pathfindingThreads = config.Bind(AdvancedSection, "Pathfinding threads", PathfindingThreads.GameDefault,
+                "Threads A* uses to compute paths, applied when a level loads.");
+
+            BindOptimizations(config);
+        }
+
+        // Earlier versions kept everything in one "Performance" section; BepInEx would otherwise keep those orphaned
+        // entries in the file forever.
+        private static void RemoveOldSettings(ConfigFile config)
+        {
+            var orphans = HarmonyLib.Traverse.Create(config).Property("OrphanedEntries").GetValue<Dictionary<ConfigDefinition, string>>();
+            if (orphans == null) return;
+            var old = orphans.Keys.Where(d => d.Section == "Performance").ToList();
+            if (old.Count == 0) return;
+            foreach (var definition in old) orphans.Remove(definition);
+            config.Save();
+            Plugin.Logger.LogInfo($"Performance: removed {old.Count} settings left over from an older version");
+        }
+
+        private static void TryLog(string what, Func<string> action)
+        {
+            try
+            {
+                Plugin.Logger.LogInfo($"Performance: {what} {action()}");
+            }
+            catch (Exception e)
+            {
+                Plugin.Logger.LogWarning($"Performance: {what} failed: {e.Message}");
+            }
         }
 
         public override void OnDestroy()
         {
             AstarPath.OnAwakeSettings -= ConfigurePathfinding;
+            if (MacActivity.Active) MacActivity.End();
+        }
+
+        public override void Update()
+        {
+            ReloadConfigIfChanged();
+            UpdateFrameRate();
+            UpdateDiagnostics();
+        }
+
+        // Lets settings be tuned while the game runs by editing the config file.
+        private void ReloadConfigIfChanged()
+        {
+            if (Time.unscaledTime < nextConfigCheck) return;
+            nextConfigCheck = Time.unscaledTime + 2f;
+            var written = System.IO.File.GetLastWriteTimeUtc(Plugin.Config.ConfigFilePath);
+            if (written == configWriteTime) return;
+            configWriteTime = written;
+            Plugin.Config.Reload();
+            Plugin.Logger.LogInfo("Performance: reloaded config");
+            stats.Reset();
         }
 
         // Runs inside AstarPath.OnEnable, just before its path threads start.
@@ -158,289 +243,13 @@ namespace PalaceMod
             var chunks = new List<byte[]>(missing);
             for (int i = 0; i < missing; i++) chunks.Add(new byte[1024 * 1024]);
             chunks.Clear();
-            long after = Profiler.GetMonoHeapSizeLong();
-            Plugin.Logger.LogInfo($"Performance: grew managed heap {before / 1048576} MB -> {after / 1048576} MB");
+            Plugin.Logger.LogInfo($"Performance: grew managed heap {before / 1048576} MB -> {Profiler.GetMonoHeapSizeLong() / 1048576} MB");
         }
 
         private void ApplyGcTimeSlice()
         {
             if (gcTimeSliceMs.Value <= 0f || !GarbageCollector.isIncremental) return;
             GarbageCollector.incrementalTimeSliceNanoseconds = (ulong)(gcTimeSliceMs.Value * 1e6f);
-        }
-
-        public override void Update()
-        {
-            ReloadConfigIfChanged();
-            ApplyRefreshRate();
-            ApplyFramePacing();
-            if (!spikeLogging.Value) return;
-
-            float frameMs = Time.unscaledDeltaTime * 1000f;
-            int gcCount = GC.CollectionCount(0);
-            bool gcRan = gcCount != lastGcCount;
-            lastGcCount = gcCount;
-
-            bool spike = frameMs > spikeThresholdMs.Value && frameMs > smoothedFrameMs * spikeRatio.Value;
-            stats.Add(frameMs, spike, gcRan);
-            // Don't let spikes drag the baseline up.
-            if (!spike) smoothedFrameMs = Mathf.Lerp(smoothedFrameMs, frameMs, 0.05f);
-
-            if (spike && spikesLoggedThisWindow < MaxSpikeLinesPerWindow)
-            {
-                spikesLoggedThisWindow++;
-                Plugin.Logger.LogInfo($"Performance: spike {frameMs:0.0} ms (baseline {smoothedFrameMs:0.0} ms){(gcRan ? " during GC" : "")} " +
-                    $"in {SceneManager.GetActiveScene().name}, {DescribePhase()}, mono used {Profiler.GetMonoUsedSizeLong() / 1048576} MB; " +
-                    $"slowest: {loopTimer.DescribeLastFrame()}");
-            }
-
-            if (Time.unscaledTime >= nextSummary)
-            {
-                if (stats.Frames > 0)
-                {
-                    Plugin.Logger.LogInfo($"Performance: {stats.Summarize()}, vSync {QualitySettings.vSyncCount}, target fps {Application.targetFrameRate}, " +
-                        $"paced {(pacer.Enabled ? $"{pacer.TargetFps:0.#} fps{(pacer.LockedToDisplay ? " locked to display" : "")}, worst wake overshoot {pacer.WorstSleepMs:0.0} ms, " +
-                            $"mistimed {pacer.MistimedFrames}/{pacer.Frames} frames" : "off")}, " +
-                        $"refresh period {DisplayLink.PeriodTicks * 1000.0 / System.Diagnostics.Stopwatch.Frequency:0.00} ms, " +
-                        $"display {Screen.currentResolution.refreshRateRatio.value:0.#} Hz, focused {Application.isFocused}, {DescribeRendering()}, mono used {Profiler.GetMonoUsedSizeLong() / 1048576}/{Profiler.GetMonoHeapSizeLong() / 1048576} MB");
-                }
-                stats.Reset();
-                pacer.ResetStats();
-                spikesLoggedThisWindow = 0;
-                nextSummary = Time.unscaledTime + Mathf.Max(5f, summaryIntervalSeconds.Value);
-            }
-        }
-
-        // Lets settings be tuned while the game runs by editing the config file.
-        private void ReloadConfigIfChanged()
-        {
-            if (Time.unscaledTime < nextConfigCheck) return;
-            nextConfigCheck = Time.unscaledTime + 2f;
-            var path = Plugin.Config.ConfigFilePath;
-            var written = System.IO.File.GetLastWriteTimeUtc(path);
-            if (written == configWriteTime) return;
-            configWriteTime = written;
-            Plugin.Config.Reload();
-            Plugin.Logger.LogInfo($"Performance: reloaded config (VSync {vSync.Value}, target frame rate {targetFrameRate.Value}, precise pacing {precisePacing.Value} {pacedFrameRate.Value})");
-            stats.Reset();
-        }
-
-        // The game applies its own VSync setting when settings load, so re-assert ours whenever it differs.
-        // Done on the first frame rather than in Awake so it lands after the game applies its own display settings.
-        private void ApplyRefreshRate()
-        {
-            if (refreshRateApplied || raiseRefreshRate.Value <= 0 || Application.platform != RuntimePlatform.OSXPlayer) return;
-            refreshRateApplied = true;
-            try
-            {
-                Plugin.Logger.LogInfo($"Performance: refresh rate {DisplayMode.RaiseRefreshRate(raiseRefreshRate.Value)}");
-            }
-            catch (Exception e)
-            {
-                Plugin.Logger.LogWarning($"Performance: couldn't change the refresh rate: {e.Message}");
-            }
-        }
-
-        // The game's URP asset isn't referenced at compile time, so set its properties by name.
-        private void ApplyRenderOverrides()
-        {
-            var pipeline = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
-            if (pipeline == null) return;
-            var type = pipeline.GetType();
-            if (renderScale.Value > 0f) SetIfDifferent(type.GetProperty("renderScale"), pipeline, renderScale.Value);
-            if (msaa.Value > 0) SetIfDifferent(type.GetProperty("msaaSampleCount"), pipeline, msaa.Value);
-        }
-
-        private static void SetIfDifferent(System.Reflection.PropertyInfo property, object target, object value)
-        {
-            if (property == null || Equals(property.GetValue(target), value)) return;
-            property.SetValue(target, value);
-        }
-
-        private string DescribeRendering()
-        {
-            var pipeline = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
-            if (pipeline == null) return "no render pipeline";
-            var type = pipeline.GetType();
-            return $"render scale {type.GetProperty("renderScale")?.GetValue(pipeline)}, MSAA {type.GetProperty("msaaSampleCount")?.GetValue(pipeline)}, " +
-                $"{Screen.width}x{Screen.height}";
-        }
-
-        private void ApplyFramePacing()
-        {
-            ApplyRenderOverrides();
-            bool precise = precisePacing.Value == Toggle.On ||
-                (precisePacing.Value == Toggle.Auto && Application.platform == RuntimePlatform.OSXPlayer);
-            if (precise)
-            {
-                if (QualitySettings.vSyncCount != 0) QualitySettings.vSyncCount = 0;
-                if (Application.targetFrameRate != -1) Application.targetFrameRate = -1;
-                long period = DisplayLink.PeriodTicks;
-                double refresh = period > 0 ? System.Diagnostics.Stopwatch.Frequency / (double)period : Screen.currentResolution.refreshRateRatio.value;
-                pacer.LockToDisplay = lockToDisplay.Value;
-                pacer.TargetFps = pacedFrameRate.Value > 0 ? pacedFrameRate.Value : (float)(refresh > 1 ? refresh : 60);
-                return;
-            }
-            pacer.TargetFps = 0;
-            if (vSync.Value != VSyncMode.GameDefault)
-            {
-                int count = vSync.Value == VSyncMode.On ? 1 : 0;
-                if (QualitySettings.vSyncCount != count) QualitySettings.vSyncCount = count;
-            }
-            if (targetFrameRate.Value != 0 && Application.targetFrameRate != targetFrameRate.Value)
-            {
-                Application.targetFrameRate = targetFrameRate.Value;
-            }
-        }
-
-        private static string DescribePhase()
-        {
-            var cycle = DayNightCycle.Instance;
-            return cycle == null ? "no level" : cycle.CurrentTimestate.ToString().ToLowerInvariant();
-        }
-
-        // TagManager.PlayerUnits/EnemyUnits/Players wrap their list in a new ReadOnlyCollection on every access.
-        // A ReadOnlyCollection is a live view, so handing out one per list is equivalent.
-        private static class ReadOnlyViews
-        {
-            private static readonly ConditionalWeakTable<List<TaggedObject>, ReadOnlyCollection<TaggedObject>> Views = new();
-            private static readonly ConditionalWeakTable<List<TaggedObject>, ReadOnlyCollection<TaggedObject>>.CreateValueCallback Create = list => list.AsReadOnly();
-
-            public static IReadOnlyList<TaggedObject> For(List<TaggedObject> list) => list == null ? null : Views.GetValue(list, Create);
-        }
-
-        [HarmonyPatch(typeof(TagManager), nameof(TagManager.PlayerUnits), MethodType.Getter)]
-        private class TagManager_PlayerUnits_Patch
-        {
-            private static bool Prefix(List<TaggedObject> ___bufferedPlayerUnits, ref IReadOnlyList<TaggedObject> __result)
-            {
-                __result = ReadOnlyViews.For(___bufferedPlayerUnits);
-                return false;
-            }
-        }
-
-        [HarmonyPatch(typeof(TagManager), nameof(TagManager.EnemyUnits), MethodType.Getter)]
-        private class TagManager_EnemyUnits_Patch
-        {
-            private static bool Prefix(List<TaggedObject> ___bufferedEnemyUnits, ref IReadOnlyList<TaggedObject> __result)
-            {
-                __result = ReadOnlyViews.For(___bufferedEnemyUnits);
-                return false;
-            }
-        }
-
-        [HarmonyPatch(typeof(TagManager), nameof(TagManager.Players), MethodType.Getter)]
-        private class TagManager_Players_Patch
-        {
-            private static bool Prefix(List<TaggedObject> ___bufferedPlayers, ref IReadOnlyList<TaggedObject> __result)
-            {
-                __result = ReadOnlyViews.For(___bufferedPlayers);
-                return false;
-            }
-        }
-
-        // GPUInstancingManager.Update allocates a new Plane[6] every frame; fill one reused array instead.
-        [HarmonyPatch(typeof(GPUInstancingManager), "Update")]
-        private class GPUInstancingManager_Update_Patch
-        {
-            private static readonly Plane[] Planes = new Plane[6];
-
-            public static Plane[] CalculateFrustumPlanes(Camera camera)
-            {
-                GeometryUtility.CalculateFrustumPlanes(camera, Planes);
-                return Planes;
-            }
-
-            private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
-            {
-                var original = AccessTools.Method(typeof(GeometryUtility), nameof(GeometryUtility.CalculateFrustumPlanes), [typeof(Camera)]);
-                var replacement = AccessTools.Method(typeof(GPUInstancingManager_Update_Patch), nameof(CalculateFrustumPlanes));
-                bool replaced = false;
-                foreach (var instruction in instructions)
-                {
-                    if (instruction.Calls(original))
-                    {
-                        instruction.operand = replacement;
-                        replaced = true;
-                    }
-                    yield return instruction;
-                }
-                if (!replaced) Plugin.Logger.LogWarning("Performance: GPUInstancingManager.Update no longer calls CalculateFrustumPlanes; patch skipped");
-            }
-        }
-
-        // PowerTowerPerk.Update calls GetComponentsInChildren twice per frame at night. Look the components up again
-        // whenever the game refreshes its closest tower (every 0.2 s) instead. Towers can't be rebuilt at night.
-        [HarmonyPatch(typeof(PowerTowerPerk), "Update")]
-        private class PowerTowerPerk_Update_Patch
-        {
-            private class TowerParts
-            {
-                public TaggedObject Tower;
-                public AutoAttack[] Attacks;
-                public HotOilTower[] HotOil;
-            }
-
-            private static readonly ConditionalWeakTable<PowerTowerPerk, TowerParts> Cache = new();
-
-            private static bool Prefix(PowerTowerPerk __instance, TagManager ___tagManager, float ___attackSpeedBonus, ref float ___nextRefreshIn,
-                ref TaggedObject ___closestTower, List<TagManager.ETag> ___mustHaveTags, List<TagManager.ETag> ___mayNotHaveTags)
-            {
-                if (DayNightCycle.Instance.CurrentTimestate == DayNightCycle.Timestate.Day) return false;
-                var parts = Cache.GetOrCreateValue(__instance);
-                ___nextRefreshIn -= Time.deltaTime;
-                if (___nextRefreshIn <= 0f)
-                {
-                    ___closestTower = ___tagManager.FindClosestTaggedObjectWithTags(__instance.transform.position, ___mustHaveTags, ___mayNotHaveTags);
-                    ___nextRefreshIn = 0.2f;
-                    parts.Tower = null; // re-read the components below
-                }
-                if (___closestTower == null) return false;
-                if (!ReferenceEquals(parts.Tower, ___closestTower))
-                {
-                    parts.Tower = ___closestTower;
-                    parts.Attacks = ___closestTower.GetComponentsInChildren<AutoAttack>();
-                    parts.HotOil = ___closestTower.GetComponentsInChildren<HotOilTower>();
-                }
-                float reduction = ___attackSpeedBonus * Time.deltaTime;
-                foreach (var attack in parts.Attacks) attack.ReduceCooldownBy(reduction);
-                foreach (var oil in parts.HotOil) oil.ReduceCooldownBy(reduction);
-                return false;
-            }
-        }
-
-        private class FrameStats
-        {
-            private readonly List<float> frameTimes = new(4096);
-            private int spikes;
-            private int gcSpikes;
-            private int gcFrames;
-
-            public int Frames => frameTimes.Count;
-
-            public void Add(float frameMs, bool spike, bool gcRan)
-            {
-                frameTimes.Add(frameMs);
-                if (gcRan) gcFrames++;
-                if (spike) spikes++;
-                if (spike && gcRan) gcSpikes++;
-            }
-
-            public string Summarize()
-            {
-                float total = 0f;
-                foreach (float t in frameTimes) total += t;
-                frameTimes.Sort();
-                float Percentile(float p) => frameTimes[Mathf.Clamp((int)(p * (frameTimes.Count - 1)), 0, frameTimes.Count - 1)];
-                return $"{frameTimes.Count} frames, avg {1000f * frameTimes.Count / total:0} fps, median {Percentile(0.5f):0.0} ms, " +
-                    $"p99 {Percentile(0.99f):0.0} ms, worst {frameTimes[frameTimes.Count - 1]:0.0} ms, " +
-                    $"{spikes} spikes ({gcSpikes} with GC), {gcFrames} GCs";
-            }
-
-            public void Reset()
-            {
-                frameTimes.Clear();
-                spikes = gcSpikes = gcFrames = 0;
-            }
         }
     }
 }
