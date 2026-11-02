@@ -165,16 +165,26 @@ namespace PalaceMod
         {
             private static void Postfix(LoadoutUIHelper __instance)
             {
-                var manager = Feature<LoadoutRandomizerManager>.Instance;
-                if (manager == null || __instance == null || !__instance.gameObject.activeSelf) return;
-                manager.history.Clear();
-                manager.handPicked.Clear();
-                var ui = __instance.GetComponent<LoadoutRandomizerUI>();
-                if (ui == null) ui = __instance.gameObject.AddComponent<LoadoutRandomizerUI>();
-                ui.Build(manager, __instance);
-                if (WeaponsRef(__instance).Count > 0) RecomputeNavigation(__instance);
-                manager.RefreshExcludedMarks();
+                if (__instance != null && __instance.gameObject.activeSelf) Feature<LoadoutRandomizerManager>.Instance?.Attach(__instance);
             }
+        }
+
+        private void Attach(LoadoutUIHelper helper)
+        {
+            history.Clear();
+            handPicked.Clear();
+            var ui = helper.GetComponent<LoadoutRandomizerUI>();
+            if (ui == null) ui = helper.gameObject.AddComponent<LoadoutRandomizerUI>();
+            ui.Build(this, helper);
+            if (WeaponsRef(helper).Count > 0) RecomputeNavigation(helper);
+            RefreshExcludedMarks();
+        }
+
+        // Turned on while a loadout screen is open: add the buttons right away.
+        protected override void OnFeatureEnabled()
+        {
+            foreach (var helper in UnityEngine.Object.FindObjectsOfType<LoadoutUIHelper>())
+                if (helper.frame != null && UIFrameManager.instance != null && UIFrameManager.instance.ActiveFrame == helper.frame) Attach(helper);
         }
 
         // Threads the dice into the game's own navigation: each dice sits between the previous grid (or Play) and the
