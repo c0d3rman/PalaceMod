@@ -139,7 +139,8 @@ namespace PalaceMod
                 };
                 if (delta == 0) return;
                 step(delta);
-                row.SetValue(Arrows(value()));
+                // A step that ran an action has already rebuilt the page, destroying this row.
+                if (row.Button != null) row.SetValue(Arrows(value()));
             });
             return row;
         }
@@ -180,11 +181,10 @@ namespace PalaceMod
             page.Header("Speed");
             Stepper(page, "Game speed", () => $"x{DebugActions.Speed:0.##}", d =>
             {
-                int i = Array.FindIndex(DebugActions.Speeds, s => s >= DebugActions.Speed - 0.001f);
-                if (i < 0) i = DebugActions.Speeds.Length - 1;
-                if (!Mathf.Approximately(DebugActions.Speeds[i], DebugActions.Speed) && d > 0) i--;
-                Run(() => DebugActions.SetSpeed(DebugActions.Speeds[Mathf.Clamp(i + d, 0, DebugActions.Speeds.Length - 1)]), quiet: true);
-            }, () => Run(() => DebugActions.SetSpeed(1f)), "Left/right change the game speed; apply resets it to normal. Takes effect when the menu closes.");
+                var speeds = DebugActions.Speeds;
+                int nearest = Array.IndexOf(speeds, speeds.OrderBy(s => Mathf.Abs(s - DebugActions.Speed)).First());
+                Run(() => DebugActions.SetSpeed(speeds[Mathf.Clamp(nearest + d, 0, speeds.Length - 1)]), quiet: true);
+            },() => Run(() => DebugActions.SetSpeed(1f)), "Left/right change the game speed; apply resets it to normal. Takes effect when the menu closes.");
         }
 
         private void BuildWaveTab(ModPage page)
@@ -310,7 +310,7 @@ namespace PalaceMod
                 {
                     var item = e;
                     bool on = pendingLoadout.Contains(item);
-                    page.Row(DebugActions.DisplayName(item), on ? (current.Contains(item) ? "Equipped" : "Equip") : (current.Contains(item) ? "Remove" : ""),
+                    page.Row(DebugActions.DisplayName(item), on ? (current.Contains(item) ? "Equipped" : "Adding") : (current.Contains(item) ? "Removing" : ""),
                         () => DebugActions.Description(item), () => Run(() =>
                         {
                             if (category == DebugActions.Category.Weapon)
