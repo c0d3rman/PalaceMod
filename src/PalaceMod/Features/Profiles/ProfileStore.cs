@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
-using UnityEngine;
+using Newtonsoft.Json;
 
 /*
     Storage for save profiles. Only this file touches the player's save files.
@@ -148,7 +148,7 @@ namespace PalaceMod.Profiles
             if (index != null) return index;
             if (File.Exists(IndexPath))
             {
-                var loaded = JsonUtility.FromJson<Index>(File.ReadAllText(IndexPath));
+                var loaded = Json.Read<Index>(File.ReadAllText(IndexPath));
                 if (loaded?.profiles == null || loaded.profiles.Count == 0 || loaded.profiles.All(p => p.id != loaded.active))
                     throw new InvalidDataException($"{IndexPath} is damaged; fix or delete it to start over (the live save is untouched)");
                 return index = loaded;
@@ -160,7 +160,7 @@ namespace PalaceMod.Profiles
         private void SaveIndex()
         {
             Directory.CreateDirectory(Root);
-            WriteAllTextAtomic(IndexPath, JsonUtility.ToJson(index, true));
+            WriteAllTextAtomic(IndexPath, Json.Write(index));
         }
 
         // ---- Operations -------------------------------------------------------------------------------------------
@@ -305,7 +305,7 @@ namespace PalaceMod.Profiles
                 foreach (string dir in Directory.GetDirectories(parent)) RepairSnapshotSwap(dir, allowOld: parent == ProfilesDir);
             if (!File.Exists(JournalPath)) return null;
 
-            var journal = JsonUtility.FromJson<Journal>(File.ReadAllText(JournalPath));
+            var journal = Json.Read<Journal>(File.ReadAllText(JournalPath));
             index = null; // as on a fresh start: trust only what's on disk
             var idx = LoadIndex();
             string message;
@@ -399,8 +399,8 @@ namespace PalaceMod.Profiles
                 manifest.files.Add(new ManifestFile { name = Path.GetFileName(file), size = new FileInfo(dest).Length, sha256 = Hash(dest) });
                 if (Hash(file) != manifest.files[manifest.files.Count - 1].sha256) throw new IOException($"{file} changed while it was being copied");
             }
-            WriteAllTextAtomic(Path.Combine(dir, "prefs.json"), JsonUtility.ToJson(new PrefsFile { prefs = prefValues }, true));
-            WriteAllTextAtomic(Path.Combine(dir, "manifest.json"), JsonUtility.ToJson(manifest, true));
+            WriteAllTextAtomic(Path.Combine(dir, "prefs.json"), Json.Write(new PrefsFile { prefs = prefValues }));
+            WriteAllTextAtomic(Path.Combine(dir, "manifest.json"), Json.Write(manifest));
         }
 
         private static void CopySnapshot(string source, string dest)
@@ -419,7 +419,7 @@ namespace PalaceMod.Profiles
         private static bool SnapshotComplete(string dir) => File.Exists(Path.Combine(dir, "manifest.json"));
 
         private static Manifest ReadManifest(string dir) =>
-            JsonUtility.FromJson<Manifest>(File.ReadAllText(Path.Combine(dir, "manifest.json")));
+            Json.Read<Manifest>(File.ReadAllText(Path.Combine(dir, "manifest.json")));
 
         /// <summary>Throws unless every file in the snapshot matches its manifest and nothing extra is there.</summary>
         public static void VerifySnapshot(string dir)
@@ -457,7 +457,7 @@ namespace PalaceMod.Profiles
                 if (!incoming.Contains(Path.GetFileName(live))) File.Delete(live);
             MaybeCrash("midapply");
             foreach (var (tmp, dest) in staged) MoveOver(tmp, dest);
-            prefs.Write(JsonUtility.FromJson<PrefsFile>(File.ReadAllText(Path.Combine(snapshot, "prefs.json"))).prefs);
+            prefs.Write(Json.Read<PrefsFile>(File.ReadAllText(Path.Combine(snapshot, "prefs.json"))).prefs);
         }
 
         /// <summary>Perk level and maps beaten, read from the profile's ThroneSave.sav (live for the active one).</summary>
@@ -527,7 +527,7 @@ namespace PalaceMod.Profiles
         private void WriteJournal(Journal journal)
         {
             Directory.CreateDirectory(Root);
-            WriteAllTextAtomic(JournalPath, JsonUtility.ToJson(journal, true));
+            WriteAllTextAtomic(JournalPath, Json.Write(journal));
         }
 
         private static void WriteAllTextAtomic(string path, string text)
@@ -578,5 +578,14 @@ namespace PalaceMod.Profiles
 
         private static string Now() => DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
         private static string Stamp() => DateTime.Now.ToString("yyyyMMdd_HHmmss");
+
+        // Newtonsoft (shipped with the game), not JsonUtility: JsonUtility silently drops lists of a mod's own classes.
+        private static class Json
+        {
+            public static string Write(object value) => JsonConvert.SerializeObject(value, Formatting.Indented);
+
+            public static T Read<T>(string text) =>
+                JsonConvert.DeserializeObject<T>(text) ?? throw new InvalidDataException($"empty {typeof(T).Name} file");
+        }
     }
 }

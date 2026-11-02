@@ -112,7 +112,8 @@ namespace PalaceMod.Profiles
         {
             var buttons = titleFrame.GetComponentsInChildren<TFUITextButton>(true);
             Plugin.Logger.LogInfo("Profiles: title buttons: " + string.Join(", ", buttons.Select(b => $"{b.name} \"{b.GetComponent<TextMeshProUGUI>()?.text}\" [{Listeners(b.onApply)}]")));
-            buttonTemplate = buttons.FirstOrDefault(b => Listeners(b.onApply).Contains("Settings")) ?? buttons.First();
+            // Settings, not Play: Play is selected when the title opens, and a clone keeps the colour it had then.
+            buttonTemplate = buttons.FirstOrDefault(b => b.name == "Settings") ?? buttons.First(b => b.name != "Play");
             // Settings' heading and body text: the big blackletter title and the italic labels.
             var texts = Resources.FindObjectsOfTypeAll<TextMeshProUGUI>().Where(t => t.gameObject.scene.IsValid()).ToList();
             headingTemplate = texts.Where(t => t.GetComponentInParent<SettingsUIHelper>(true) != null).OrderByDescending(t => t.fontSize).FirstOrDefault()
@@ -313,7 +314,8 @@ namespace PalaceMod.Profiles
             }
             foreach (var r in rows) r.button.rightNav = actions.FirstOrDefault();
             var (level, beaten) = store.Summary(profile);
-            info.text = $"{profile.name}: perk level {level}, {beaten} {(beaten == 1 ? "map" : "maps")} beaten. Created {profile.created}."
+            info.text = $"{profile.name}: perk level {level}, {beaten} {(beaten == 1 ? "map" : "maps")} beaten."
+                + (profile.id == ProfileStore.DefaultId ? "" : $" Created {profile.created}.")
                 + (active ? "\nThis is the profile you're playing. Steam Cloud keeps the profile in use." : "");
             frame.RefetchManagedElements();
         }
@@ -387,6 +389,8 @@ namespace PalaceMod.Profiles
             var obj = Object.Instantiate(buttonTemplate.gameObject, parent, false);
             obj.name = label;
             obj.SetActive(true);
+            var rect = (RectTransform)obj.transform;
+            rect.sizeDelta = new Vector2(rect.sizeDelta.x, rect.sizeDelta.y * 0.75f); // a title button is tall for a list
             StripLocalization(obj);
             var button = obj.GetComponent<TFUITextButton>();
             button.onApply = new UnityEvent();
@@ -406,7 +410,7 @@ namespace PalaceMod.Profiles
         {
             var obj = Object.Instantiate(template.gameObject, parent, false);
             foreach (Transform child in obj.transform.Cast<Transform>().ToList()) Object.DestroyImmediate(child.gameObject);
-            foreach (var component in obj.GetComponents<Component>())
+            foreach (var component in Enumerable.Reverse(obj.GetComponents<Component>())) // dependents (audio helper) go first
                 if (component is not (RectTransform or CanvasRenderer or TextMeshProUGUI)) Object.DestroyImmediate(component);
             obj.SetActive(true);
             var tmp = obj.GetComponent<TextMeshProUGUI>();
@@ -423,7 +427,7 @@ namespace PalaceMod.Profiles
             Place(rect, min, max);
             var layout = obj.AddComponent<VerticalLayoutGroup>();
             layout.childAlignment = TextAnchor.UpperLeft;
-            layout.spacing = 12f;
+            layout.spacing = 0f;
             layout.childControlWidth = true;
             layout.childControlHeight = false;
             layout.childForceExpandWidth = true;
