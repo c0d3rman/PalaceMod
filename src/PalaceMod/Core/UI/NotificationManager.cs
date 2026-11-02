@@ -147,7 +147,7 @@ namespace PalaceMod
         private static void Apply(Message m)
         {
             m.Label.text = m.Text;
-            m.Emblem.color = ModStyle.KindColor(m.Kind);
+            ModStyle.TintEmblem(m.Emblem, ModStyle.KindColor(m.Kind));
             m.Label.color = m.Kind == NotifyKind.Error ? Color.Lerp(ModStyle.Gold, ModStyle.KindColor(NotifyKind.Error), 0.35f) : ModStyle.Gold;
             var size = m.Label.GetPreferredValues(m.Text, MaxTextWidth, 0f);
             float width = Mathf.Min(Mathf.Ceil(size.x) + 2f, MaxTextWidth);
