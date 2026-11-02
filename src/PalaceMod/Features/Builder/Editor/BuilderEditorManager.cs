@@ -39,7 +39,7 @@ namespace PalaceMod
 
         public override void Update()
         {
-            if (!BuilderEditor.EditorFocused) return;
+            if (!BuilderEditor.EditorFocused && !Builder.Level.LayoutEditor.Active) return;
             if (!Feature<BuilderManager>.On) { BuilderEditor.Shutdown(); return; }
             if (ModTextInput.Active) return;
             if (redo.Down || redoAlt.Down || redoCtrl.Down) BuilderEditor.Redo();

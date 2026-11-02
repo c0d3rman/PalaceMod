@@ -29,6 +29,7 @@ namespace PalaceMod.Builder.Editor
             foreach (var entry in mine) PackRow(page, entry);
             page.Button("New pack", BuilderEditor.NewPack, "Start an empty pack of your own.");
             page.Button("Import share code", BuilderEditor.ImportShareCode, "Adds the pack whose share code is on the clipboard (it never replaces one you have).");
+            page.Button("Share designs", Sharing.SharingUI.Open, "Import .tfpack files and codes, and export packs to share.");
 
             if (installed.Count > 0)
             {
@@ -54,6 +55,7 @@ namespace PalaceMod.Builder.Editor
             var parts = new List<string>();
             parts.Add(Count(pack.Units.Count, "unit"));
             parts.Add(Count(pack.WaveSets.Count, "wave set"));
+            if ((pack.Levels?.Count ?? 0) > 0) parts.Add(Count(pack.Levels.Count, "level"));
             string value = string.Join(" · ", parts);
             if (draft?.Dirty == true) value = Accent("unsaved") + "   " + value;
             if (entry.ReadOnly) value += "   " + Dim(entry.Source == PackSource.BuiltIn ? "built in" : "mod");
@@ -74,6 +76,7 @@ namespace PalaceMod.Builder.Editor
         {
             Frame.AddTab("Units", Page(BuildUnits))
                 .AddTab("Wave Sets", Page(BuildWaveSets))
+                .AddTab("Levels", Page(page => LevelPage.BuildList(this, page)))
                 .AddTab("Pack", Page(BuildPack))
                 .AddTab("Problems", Page(BuildProblems));
         }
@@ -196,6 +199,7 @@ namespace PalaceMod.Builder.Editor
                 test.SetMarker(Draft.ErrorCount > 0 ? ModFieldMarker.Error : ModFieldMarker.None);
             }
             page.Button("Copy share code", BuilderEditor.CopyShareCode, "Copies a code for this pack to the clipboard, to paste in a message. Images and other files aren't included.");
+            page.Button("Export or share", ExportPack, "Save the pack as a .tfpack file or a Thunderstore package, or copy its share code.");
             if (Draft.SavedJson != null && Draft.Dirty) Danger(page, "Revert to saved", "Throws away the changes since the last save (you can undo this).", Draft.Revert);
             if (!Draft.ReadOnly && Draft.SourceId != null)
             {
@@ -212,6 +216,23 @@ namespace PalaceMod.Builder.Editor
         }
 
         private string testSet;
+
+        private void ExportPack()
+        {
+            var entry = Draft.Entry;
+            if (entry == null || Draft.Dirty)
+            {
+                Notify.Show(Draft.ReadOnly ? "Save a copy first: exports use the saved pack" : "Save first: exports use the saved pack", NotifyKind.Info, key: "builder-editor");
+                return;
+            }
+            Sharing.SharingUI.OpenPack(entry);
+        }
+
+        /// <summary>Marked row helper for other screens' lists on this page (the Levels tab).</summary>
+        internal ModField ListRow(ModPage page, string label, System.Func<string> value, string help, string path, System.Action onClick) =>
+            Marked(page, label, value, help, path, onClick);
+
+        internal void ShowStatus(ModPage page) => Status(page);
 
         private void BuildProblems(ModPage page)
         {
