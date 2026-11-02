@@ -32,6 +32,9 @@ namespace PalaceMod
         public override string FeatureDescription =>
             "Place teleporters during the day and stand on one to jump to the next. Units following you come along. Placing one makes the run unranked.";
 
+        // Save bookkeeping must run while disabled (see SaveRun_Patch); nothing else is patched.
+        protected override bool UnpatchWhenDisabled => false;
+
         private const string SaveGuid = "PalaceMod";
         private const string SaveKey = "teleporters";
         private const float MinSpacing = 6f;
@@ -283,9 +286,17 @@ namespace PalaceMod
 
         // ---- Save and load ----------------------------------------------------------------------------------------
 
-        private string Serialize() => string.Join(";", pads.Select(p =>
-            string.Format(CultureInfo.InvariantCulture, "{0:0.##},{1:0.##},{2:0.##},{3}", p.Position.x, p.Position.y, p.Position.z,
-                paid.TryGetValue(p, out var g) ? g : 0)));
+        private string Serialize() => Serialize(pads.Select(p => (p.Position, paid.TryGetValue(p, out var g) ? g : 0)));
+
+        private static string Serialize(IEnumerable<(Vector3 at, int gold)> entries) => string.Join(";", entries.Select(e =>
+            string.Format(CultureInfo.InvariantCulture, "{0:0.##},{1:0.##},{2:0.##},{3}", e.at.x, e.at.y, e.at.z, e.gold)));
+
+        // The current level's network, even while the feature is off and its pads were never spawned.
+        private string CurrentNetwork()
+        {
+            if (padScene == PlayerMovement.instance.gameObject.scene) return Serialize();
+            return pendingLoad != null ? Serialize(pendingLoad) : "";
+        }
 
         private static List<(Vector3, int)> Parse(string text)
         {
@@ -319,16 +330,26 @@ namespace PalaceMod
             }
         }
 
-        // The dawn save writes every entity's values and then the file; add ours just before the write.
+        // Only the dawn checkpoint (LocalMatchSaveLoad.Save) records the network, so it stays in step with the saved
+        // gold; other writes of the file (the score after a defeat) keep the dawn value. These patches stay applied while
+        // the feature is off, so saving with it disabled doesn't drop a network that was paid for.
+        private static bool checkpoint;
+
+        [HarmonyPatch(typeof(LocalMatchSaveLoad), "Save")]
+        private class Checkpoint_Patch
+        {
+            private static void Prefix() => checkpoint = true;
+            private static void Finalizer() => checkpoint = false;
+        }
+
         [HarmonyPatch(typeof(MatchSaveLoadHandler), nameof(MatchSaveLoadHandler.SaveRun))]
         private class SaveRun_Patch
         {
             private static void Prefix()
             {
                 var manager = Feature<TeleporterManager>.Instance;
-                if (manager == null || MatchSaveLoadHandler.CurrentSave == null || PlayerMovement.instance == null) return;
-                if (manager.padScene != PlayerMovement.instance.gameObject.scene) return;
-                MatchSaveLoadHandler.SaveValue(SaveGuid, SaveKey, manager.Serialize());
+                if (!checkpoint || manager == null || MatchSaveLoadHandler.CurrentSave == null || PlayerMovement.instance == null) return;
+                MatchSaveLoadHandler.SaveValue(SaveGuid, SaveKey, manager.CurrentNetwork());
             }
         }
 
