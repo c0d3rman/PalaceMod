@@ -33,6 +33,13 @@ namespace PalaceMod.Builder.Model
         bool HasPackUnit(string packId, string unitId);
     }
 
+    /// <summary>Optional extra game context for troop replacements; ICatalog implements it.</summary>
+    public interface ITroopValidationContext
+    {
+        /// <summary>Building names that train the vanilla player troop, empty if no building does, null if unknown.</summary>
+        IReadOnlyCollection<string> TroopBuildings(string unitId);
+    }
+
     public static class Validator
     {
         // TagManager.ETag names. Changing Flying or LargeUnit would also need a pathfinding graph change, which v1 doesn't do.
@@ -167,6 +174,7 @@ namespace PalaceMod.Builder.Model
                         else if (lines != null && !lines.Contains(sp.Line)) Error(sp_ + ".line", $"no spawn line \"{sp.Line}\" on {ws.Host} (has: {string.Join(", ", lines)})");
                     }
                 }
+                CheckTroops(ws, p);
             }
 
             var levelIds = new HashSet<string>();
@@ -211,6 +219,31 @@ namespace PalaceMod.Builder.Model
                     foreach (var t in m.Tags ?? []) if (!IsTag(t)) Error($"{path}[{j}].tags", $"unknown tag \"{t}\"");
                     if (float.IsNaN(m.Add) || m.Add < -100000 || m.Add > 100000) Error($"{path}[{j}].add", "out of range");
                     if (float.IsNaN(m.Mult) || m.Mult < 0 || m.Mult > 1000) Error($"{path}[{j}].mult", "must be between 0 and 1000");
+                }
+            }
+
+            void CheckTroops(WaveSetDef ws, string p)
+            {
+                var troopGame = game as ITroopValidationContext;
+                var seen = new HashSet<string>();
+                for (int t = 0; t < (ws.Troops?.Count ?? 0); t++)
+                {
+                    var troop = ws.Troops[t];
+                    string tp = $"{p}.troops[{t}]";
+                    if (troop == null) { Error(tp, "is empty"); continue; }
+                    var r = ContentRef.Parse(troop.Unit);
+                    if (r.Kind == RefKind.Vanilla) { Error(tp + ".unit", "must be a custom player unit (its base is the troop it replaces)"); continue; }
+                    CheckUnitRef(troop.Unit, tp + ".unit", UnitSide.Player);
+                    // The base is only known for units in this pack; another pack's unit is checked when it loads.
+                    var def = r.Kind == RefKind.LocalUnit || (r.Kind == RefKind.PackUnit && r.Pack == pack.Id) ? pack.FindUnit(r.Id) : null;
+                    string baseId = def != null && def.Side == UnitSide.Player ? ContentRef.Parse(def.Base).Id : null;
+                    if (baseId == null) continue;
+                    var buildings = troopGame?.TroopBuildings(baseId);
+                    if (buildings != null && buildings.Count == 0) Error(tp + ".unit", $"no building trains \"{baseId}\" (`builder dump` lists troops and their buildings)");
+                    else if (troop.Building != null && buildings != null && !buildings.Any(b => string.Equals(b, troop.Building, StringComparison.OrdinalIgnoreCase)))
+                        Error(tp + ".building", $"\"{troop.Building}\" doesn't train {baseId} (trained by: {string.Join(", ", buildings)})");
+                    if (!seen.Add(baseId.ToLowerInvariant() + "|" + (troop.Building ?? "").ToLowerInvariant()))
+                        Error(tp, $"{baseId}{(troop.Building == null ? "" : " in " + troop.Building)} is replaced twice");
                 }
             }
 
