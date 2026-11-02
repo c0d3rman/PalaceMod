@@ -7,6 +7,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import signal
@@ -473,10 +474,14 @@ def error_blocks(text):
     return ["\n".join(block) for block in blocks]
 
 
+# Plugin.Awake logs this once every manager has started; see CLAUDE.md (Logging).
+STARTUP_MARKER = "PalaceMod startup complete"
+
+
 def report(game, pids=game_pids):
     log = log_path(game)
     text = log.read_text(errors="replace")
-    loaded = "Notify (Info): PalaceMod loaded" in text  # Plugin.Awake's startup message
+    loaded = STARTUP_MARKER in text or "Notify (Info): PalaceMod loaded" in text  # the latter: builds before the marker
     print(f"PalaceMod loaded: {'yes' if loaded else 'NO'}  (game running: {'yes' if pids() else 'no'})")
     print_errors(text)
     if not loaded:
@@ -497,14 +502,87 @@ def print_errors(text):
         print("\n".join(lines[:8] + (["  ..."] if len(lines) > 8 else [])))
 
 
-def logs(game, errors, follow, lines):
+LOG_HEADER = re.compile(r"^\[(\w+)\s*:\s*([^\]]*?)\s*\] ?(.*)$")
+FEATURE_PREFIX = re.compile(r"^\[([^\]]+)\] (\(debug\) )?")
+LEVEL_RANKS = {"error": 0, "warn": 1, "info": 2, "debug": 3}
+
+
+def log_entries(text):
+    """Split a BepInEx log into entries (a header line plus its continuation lines, e.g. a stack trace), each as
+    (level, source, feature, text). PalaceMod lines read "[Feature] message"; debug ones "[Feature] (debug) message"."""
+    entries = []
+    for line in text.splitlines():
+        m = LOG_HEADER.match(line)
+        if m:
+            level, source, message = m.group(1).lower(), m.group(2), m.group(3)
+            level = {"fatal": "error", "warning": "warn", "message": "info"}.get(level, level)
+            feature = None
+            if source == "PalaceMod":
+                f = FEATURE_PREFIX.match(message)
+                if f:
+                    feature = f.group(1)
+                    if f.group(2):
+                        level = "debug"
+            entries.append([level, source, feature, [line]])
+        elif entries:
+            entries[-1][3].append(line)
+        else:
+            entries.append(["info", "", None, [line]])
+    return [(level, source, feature, "\n".join(body)) for level, source, feature, body in entries]
+
+
+def filter_log(text, features, level):
+    wanted = {f.lower() for f in features}
+    rank = LEVEL_RANKS[level] if level else None
+    kept = []
+    for entry_level, _, feature, body in log_entries(text):
+        if wanted and (feature or "").lower() not in wanted:
+            continue
+        if rank is not None and LEVEL_RANKS.get(entry_level, 2) > rank:
+            continue
+        kept.append(body)
+    return kept
+
+
+def logs(game, errors, follow, lines, features=(), level=None):
     log = log_path(game)
     if not log.exists():
         raise RuntimeError(f"No BepInEx log yet: {log}")
-    if follow:
+    filtered = bool(features or level)
+    if follow and not filtered:
         subprocess.run(["tail", "-n", str(lines), "-F", str(log)])
+    elif follow:
+        text = log.read_text(errors="replace")
+        print("\n".join(filter_log(text, features, level)[-lines:]), flush=True)
+        offset = len(text.encode("utf-8", errors="replace"))
+        pending = ""
+        try:
+            while True:
+                time.sleep(0.5)
+                size = log.stat().st_size if log.exists() else 0
+                if size < offset:  # the game restarted and BepInEx rewrote the log
+                    offset, pending = 0, ""
+                if size == offset:
+                    continue
+                with log.open("rb") as f:
+                    f.seek(offset)
+                    chunk = f.read()
+                offset += len(chunk)
+                pending += chunk.decode("utf-8", errors="replace")
+                # Hold back the last entry: its stack trace may still be arriving.
+                cut = max(pending.rfind("\n["), -1)
+                if cut < 0:
+                    continue
+                ready, pending = pending[:cut + 1], pending[cut + 1:]
+                for body in filter_log(ready, features, level):
+                    print(body, flush=True)
+        except KeyboardInterrupt:
+            pass
     elif errors:
-        print_errors(log.read_text(errors="replace"))
+        text = log.read_text(errors="replace")
+        print_errors("\n".join(filter_log(text, features, None)) if features else text)
+    elif filtered:
+        print("\n".join(filter_log(log.read_text(errors="replace"), features, level)[-lines:]))
     else:
         print("\n".join(log.read_text(errors="replace").splitlines()[-lines:]))
 
@@ -1750,6 +1828,10 @@ def main():
     parser.add_argument("--install", action="store_true", help="Watch: install after each successful build")
     parser.add_argument("--errors", action="store_true", help="Logs: show unique errors with stack traces")
     parser.add_argument("--follow", action="store_true", help="Logs: stream the log")
+    parser.add_argument("--feature", action="append", default=[], metavar="NAME",
+                        help="Logs: only PalaceMod lines from this feature (its [Name] prefix; repeatable or comma-separated)")
+    parser.add_argument("--level", type=str.lower, choices=list(LEVEL_RANKS),
+                        help="Logs: only lines at this level or more severe (debug shows everything)")
     parser.add_argument("--lines", type=int, default=150, help="Logs: number of trailing lines")
     parser.add_argument("--timeout", type=int, default=120, help="Launch: seconds to wait for BepInEx")
     parser.add_argument("--output", help="Screenshot: output PNG path")
@@ -1862,7 +1944,8 @@ def main():
             last = instance.number if instance else (
                 int(LAST_INSTANCE.read_text()) if LAST_INSTANCE.exists() and not holds_lease() else None)
             target = Instance(last).game if last else game
-        logs(target, args.errors, args.follow, args.lines)
+        features = [f.strip() for value in args.feature for f in value.split(",") if f.strip()]
+        logs(target, args.errors, args.follow, args.lines, features, args.level)
     elif args.command == "screenshot":
         if instance:
             with pool_session("screenshot") as inst:
