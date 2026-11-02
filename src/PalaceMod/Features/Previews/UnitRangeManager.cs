@@ -18,6 +18,9 @@ namespace PalaceMod
 
         public override void Update()
         {
+            // Both singletons are absent outside a level (e.g. on the main menu).
+            if (CommandUnits.instance == null || RangeIndicatorHandler.instance == null) return;
+
             foreach (var unit in CommandUnits.instance.PlayerUnitsCommanding)
             {
                 HashSet<float> attackRanges = [];
@@ -61,6 +64,8 @@ namespace PalaceMod
 
         public override void OnDestroy()
         {
+            if (CommandUnits.instance == null || RangeIndicatorHandler.instance == null) return;
+
             foreach (var unit in CommandUnits.instance.PlayerUnitsCommanding)
             {
                 foreach (var indicatorType in orderedIndicatorTypes)
