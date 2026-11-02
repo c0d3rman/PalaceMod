@@ -55,7 +55,7 @@ namespace PalaceMod
         internal void RaiseActivated()
         {
             try { Activated?.Invoke(); }
-            catch (Exception e) { Plugin.Logger.LogError($"ModFrame \"{Title}\": Activated handler failed: {e}"); }
+            catch (Exception e) { Log.For<ModFrameManager>().Caught($"ModFrame \"{Title}\": Activated handler failed", e); }
         }
 
         internal static readonly Dictionary<UIFrame, ModFrame> Frames = [];
@@ -152,7 +152,7 @@ namespace PalaceMod
                 if (obj != null) Object.DestroyImmediate(obj);
                 frame = null;
                 tabButtons.Clear();
-                Plugin.Logger.LogError($"ModFrame \"{Title}\": couldn't build the menu: {e}");
+                Log.For<ModFrameManager>().Caught($"ModFrame \"{Title}\": couldn't build the menu", e);
                 Notify.Show($"Couldn't open {Title}; see the log", NotifyKind.Error, key: "modframe-error");
                 return false;
             }
@@ -288,7 +288,7 @@ namespace PalaceMod
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogError($"ModFrame \"{Title}\": building the page failed: {e}");
+                Log.For<ModFrameManager>().Caught($"ModFrame \"{Title}\": building the page failed", e);
                 page.Text("This page couldn't be shown; the error is in the BepInEx log.");
             }
 
@@ -462,7 +462,7 @@ namespace PalaceMod
             void Step(int delta)
             {
                 try { step(delta); }
-                catch (Exception e) { Plugin.Logger.LogError($"Stepper \"{label}\" failed: {e}"); }
+                catch (Exception e) { Log.For<ModFrameManager>().Caught($"Stepper \"{label}\" failed", e); }
                 // A step may rebuild the page (Refresh), destroying this row.
                 if (row.Button != null) row.SetValue(value());
             }

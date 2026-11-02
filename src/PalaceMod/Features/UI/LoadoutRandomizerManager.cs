@@ -357,7 +357,7 @@ namespace PalaceMod
                 foreach (var pair in ui.dice)
                     if (only == null || only == pair.Key) pair.Value.Tumble();
             }
-            Plugin.Logger.LogInfo($"Loadout rolled ({only?.ToString() ?? "all"}): {LoadoutText(helper)}");
+            Log.Info($"Loadout rolled ({only?.ToString() ?? "all"}): {LoadoutText(helper)}");
         }
 
         private bool Rollable(TFUIEquippable t) => t != null && !t.Locked && t.Data != null && t.Data.IsUnlocked && !excluded.Contains(t.Data.name);
@@ -477,7 +477,7 @@ namespace PalaceMod
                 changed.AddRange(SetPicks(helper, c, Items(helper, c).Where(t => snapshot.Contains(t.Data)).ToList()));
             RefreshTexts(helper);
             helper.GetComponent<LoadoutRandomizerUI>()?.PopTiles(changed);
-            Plugin.Logger.LogInfo($"Loadout roll undone: {LoadoutText(helper)}");
+            Log.Info($"Loadout roll undone: {LoadoutText(helper)}");
             return true;
         }
 

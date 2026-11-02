@@ -94,7 +94,7 @@ namespace PalaceMod.Builder
             // GameplayImpact keeps its record when the same map is re-entered without a fresh start (continuing a
             // save). The next run on the host is a different run, so make it count as a new level.
             Traverse.Create(typeof(GameplayImpact)).Field("level").SetValue(null);
-            Plugin.Logger.LogInfo($"Builder: session ended: {ended.Pack.Id} on {ended.HostScene}");
+            Log.For<BuilderManager>().Info($"Session ended: {ended.Pack.Id} on {ended.HostScene}");
             Ended?.Invoke(ended);
         }
 
@@ -112,14 +112,14 @@ namespace PalaceMod.Builder
                 Name = level?.Name ?? waveSet?.Name ?? request.Pack.Name,
                 Best = record?.Best?.Score,
             };
-            Plugin.Logger.LogInfo($"Builder: armed {request.Pack.Id}/{request.LevelId ?? request.WaveSetId} on {Armed.Host}");
+            Log.For<BuilderManager>().Debug($"Armed {request.Pack.Id}/{request.LevelId ?? request.WaveSetId} on {Armed.Host}");
             return true;
         }
 
         internal void Disarm()
         {
             if (Armed == null) return;
-            Plugin.Logger.LogInfo("Builder: disarmed");
+            Log.For<BuilderManager>().Debug("Disarmed");
             Armed = null;
         }
 
@@ -159,7 +159,7 @@ namespace PalaceMod.Builder
             if (assists.Count > 0) run.Assists = assists;
             var previousBest = ScoreStore.Get(ScoreStore.Key(s))?.Best?.Score;
             var record = ScoreStore.Record(s, run);
-            Plugin.Logger.LogInfo($"Builder: result {ScoreStore.Key(s)} score={run.Score} beaten={run.Beaten} nights={run.Nights} best={record.Best.Score} plays={record.Plays}");
+            Log.For<BuilderManager>().Info($"Result {ScoreStore.Key(s)} score={run.Score} beaten={run.Beaten} nights={run.Nights} best={record.Best.Score} plays={record.Plays}");
             string best = previousBest == null || run.Score > previousBest ? "New custom best!" : $"Custom best: {record.Best.Score}.";
             Notify.Show($"{record.Name}: {run.Score}. {best}", NotifyKind.Info, 6f, "builder-result");
         }
@@ -232,7 +232,7 @@ namespace PalaceMod.Builder
             Traverse.Create(typeof(MatchSaveLoadHandler)).Field("currentMap").SetValue(host);
             Traverse.Create(typeof(MatchSaveLoadHandler)).Field("currentSave").SetValue(null);
             MatchSaveLoadHandler.OverwriteCurrentSave = true;
-            Plugin.Logger.LogInfo($"Builder: session started: {pack.Id} " + (level != null ? $"level {level.Id}" : $"wave set {waveSet.Id}") + $" on {Current.HostScene}");
+            Log.For<BuilderManager>().Info($"Session started: {pack.Id} " + (level != null ? $"level {level.Id}" : $"wave set {waveSet.Id}") + $" on {Current.HostScene}");
             Started?.Invoke(Current);
             return true;
         }
@@ -267,7 +267,7 @@ namespace PalaceMod.Builder
             {
                 var issues = new List<ValidationIssue>();
                 BuilderServices.Overlay.Apply(Current.Pack, Current.Level, issues);
-                foreach (var i in issues) Plugin.Logger.LogWarning($"Builder: {Current.Pack.Id}/{Current.Level.Id}: {i}");
+                foreach (var i in issues) Log.For<BuilderManager>().Warn($"{Current.Pack.Id}/{Current.Level.Id}: {i}");
             }
             Notify.Show($"Custom run: {SessionName(Current)}. Kept apart from your saves and scores.", NotifyKind.Info, 5f, "builder-session");
         }

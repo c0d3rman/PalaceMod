@@ -127,7 +127,7 @@ namespace PalaceMod.Builder
                 .Where(l => l.enemySpawner != null && !string.IsNullOrEmpty(l.sceneName) && !l.sceneName.Contains("Tutorial") && LevelProgressManager.SceneExists(l.sceneName))
                 .GroupBy(l => l.sceneName).Select(g => DescribeHost(g.First()))
                 .ToList();
-            Plugin.Logger.LogInfo($"Builder: catalog built: {units.Count} units, {weapons.Count} weapons, {hosts.Count} host maps " +
+            Log.For<BuilderManager>().Debug($"Catalog built: {units.Count} units, {weapons.Count} weapons, {hosts.Count} host maps " +
                 $"in {(DateTime.UtcNow - started).TotalMilliseconds:0} ms");
         }
 

@@ -325,7 +325,7 @@ namespace PalaceMod.Builder
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogError($"Builder: couldn't add the Custom runs entry: {e}");
+                Log.For<BuilderManager>().Error($"Couldn't add the Custom runs entry", e);
                 if (entry != null) Object.Destroy(entry.gameObject);
                 entry = null;
                 return false;
