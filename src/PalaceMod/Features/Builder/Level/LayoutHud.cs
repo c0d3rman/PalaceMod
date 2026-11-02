@@ -97,7 +97,7 @@ namespace PalaceMod.Builder.Level
             }
             catch (System.Exception e)
             {
-                Plugin.Logger.LogError($"Builder: layout editor panel couldn't be built: {e}");
+                Log.For<BuilderManager>().Error("The layout editor panel couldn't be built", e);
                 Destroy();
                 return false;
             }

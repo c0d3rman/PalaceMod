@@ -121,7 +121,7 @@ namespace PalaceMod.Builder.Level
                 return false;
             }
             session = BuilderServices.Sessions.Current;
-            Plugin.Logger.LogInfo($"Builder: editing the layout of {packId}/{level} on {host}");
+            Log.For<BuilderManager>().Info($"editing the layout of {packId}/{level} on {host}");
             return true;
         }
 
@@ -248,7 +248,7 @@ namespace PalaceMod.Builder.Level
             BuilderEditor.BindDraft(draft);
             state = State.Editing;
             Reconcile();
-            Plugin.Logger.LogInfo($"Builder: layout editor on {scene.name}: {natives.Count} build slots, {lines.Count} spawn lines, {propBases.Count} prop kinds");
+            Log.For<BuilderManager>().Info($"layout editor on {scene.name}: {natives.Count} build slots, {lines.Count} spawn lines, {propBases.Count} prop kinds");
             LayoutMenus.FirstUseHint();
         }
 
@@ -886,7 +886,7 @@ namespace PalaceMod.Builder.Level
                 : blocked == 0 ? $"Enemies can reach the castle from all {routes.Count} ground spawn lines"
                 : $"Blocked: enemies from {string.Join(", ", routes.Where(r => !r.Reachable).Select(r => r.Line))} can't reach the castle";
             Notify.Show(text, blocked == 0 ? NotifyKind.Success : NotifyKind.Warning, 6f, "builder-paths");
-            Plugin.Logger.LogInfo($"Builder: layout path check (rescan {ms} ms): {PathCheck.Describe(routes)}");
+            Log.For<BuilderManager>().Info($"layout path check (rescan {ms} ms): {PathCheck.Describe(routes)}");
             return $"rescan {ms} ms; {PathCheck.Describe(routes)}";
         }
 

@@ -79,7 +79,7 @@ namespace PalaceMod.Builder.Level
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogWarning($"Builder: path check for {name} failed: {e.Message}");
+                Log.For<BuilderManager>().Warn($"path check for {name} failed: {e.Message}");
             }
             return route;
         }

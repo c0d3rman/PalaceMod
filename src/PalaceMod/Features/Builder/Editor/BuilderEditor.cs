@@ -233,7 +233,7 @@ namespace PalaceMod.Builder.Editor
             if (Draft == null) return;
             var unit = unitIndex >= 0 && unitIndex < Draft.Pack.Units.Count ? Draft.Pack.Units[unitIndex] : null;
             if (unit == null) return;
-            if (unit.Side != UnitSide.Enemy) { Notify.Show("Only enemies can be test-played for now", NotifyKind.Warning, key: "builder-editor"); return; }
+            if (unit.Side == UnitSide.Player) { TestTroop(unit); return; }
             var copy = PackSerializer.Clone(Draft.Pack);
             var baseUnit = EditorCatalog.BaseOf(copy, unit.Id);
             string hostScene = Draft.Pack.WaveSets.Select(w => w.Host).FirstOrDefault(h => EditorCatalog.Host(h) != null)
@@ -256,6 +256,23 @@ namespace PalaceMod.Builder.Editor
                 ],
             });
             Launch(copy, id);
+        }
+
+        // A player unit plays as a troop: the map's own nights, with the buildings training it instead of its base.
+        private static void TestTroop(UnitDef unit)
+        {
+            var copy = PackSerializer.Clone(Draft.Pack);
+            string hostScene = Draft.Pack.WaveSets.Select(w => w.Host).FirstOrDefault(h => EditorCatalog.Host(h) != null)
+                ?? EditorCatalog.Hosts.FirstOrDefault(h => h.Scene == "Nordfels")?.Scene ?? EditorCatalog.Hosts.FirstOrDefault()?.Scene;
+            var host = EditorCatalog.Host(hostScene);
+            var ws = EditorCatalog.Copy(host?.VanillaWaves);
+            if (host == null || ws == null) { Notify.Show("No map to test on", NotifyKind.Error, key: "builder-editor"); return; }
+            ws.Id = EditorCatalog.UniqueId("editor-test", copy.WaveSets.Select(w => w.Id));
+            ws.Name = $"Test: {unit.Name ?? unit.Id}";
+            ws.Host = host.Scene;
+            ws.Troops = [new TroopDef { Unit = unit.Id }];
+            copy.WaveSets.Add(ws);
+            Launch(copy, ws.Id);
         }
 
         private static void Launch(DesignPack pack, string waveSetId)

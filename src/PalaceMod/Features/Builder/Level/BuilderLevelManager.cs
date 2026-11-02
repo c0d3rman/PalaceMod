@@ -43,14 +43,14 @@ namespace PalaceMod
             {
                 long ms = PathCheck.Rescan();
                 var routes = PathCheck.Check(scene);
-                Plugin.Logger.LogInfo($"Builder: level start rescan took {ms} ms; paths: {PathCheck.Describe(routes)}");
+                Log.For<BuilderManager>().Info($"level start rescan took {ms} ms; paths: {PathCheck.Describe(routes)}");
                 var blocked = routes.Where(r => !r.Reachable).Select(r => r.Line).ToList();
                 if (blocked.Count > 0)
                     Notify.Show($"This layout blocks enemies from {string.Join(", ", blocked)}: they can't reach the castle", NotifyKind.Warning, 8f, "builder-paths");
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogError($"Builder: rescan after the layout failed: {e}");
+                Log.For<BuilderManager>().Error("Rescan after the layout failed", e);
             }
         }
 

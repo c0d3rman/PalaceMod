@@ -117,7 +117,7 @@ namespace PalaceMod.Builder.Level
 
             ScanAfterFrame = Time.frameCount + 2;
             ScanHost = level.Host;
-            Plugin.Logger.LogInfo($"Builder: level {pack.Id}/{level.Id} on {level.Host}: {moved} slots moved, {added} added, {removed} removed, {lines} spawn lines moved, {props} props");
+            Log.For<BuilderManager>().Info($"level {pack.Id}/{level.Id} on {level.Host}: {moved} slots moved, {added} added, {removed} removed, {lines} spawn lines moved, {props} props");
         }
 
         public static bool HasEdits(LevelDef level) =>

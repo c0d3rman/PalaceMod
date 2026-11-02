@@ -102,28 +102,30 @@ namespace PalaceMod.Builder.Editor
                 }
                 if (side == UnitSide.Enemy && ofSide.Count == 0) page.Text("No custom enemies yet. Each one starts as a copy of a vanilla enemy that you then change.");
             }
-            page.Button("New enemy", () => NewUnit(), "Pick a vanilla enemy to start from.");
+            page.Button("New enemy", () => NewUnit(UnitSide.Enemy), "Pick a vanilla enemy to start from.");
+            page.Button("New player unit", () => NewUnit(UnitSide.Player), "Pick a troop to start from. Then add it to a wave set's Troops, and the buildings train yours instead.");
         }
 
-        private void NewUnit()
+        private void NewUnit(string side)
         {
-            Picker.One("Start From", UnitPage.BaseItems(Pack, UnitSide.Enemy), null, baseId =>
+            bool player = side == UnitSide.Player;
+            Picker.One("Start From", UnitPage.BaseItems(Pack, side), null, baseId =>
             {
                 var b = EditorCatalog.Catalog?.FindUnit(baseId);
                 int index = Pack.Units.Count;
-                Draft.Edit("Add enemy", p =>
+                Draft.Edit(player ? "Add player unit" : "Add enemy", p =>
                 {
-                    string name = $"New {b?.DisplayName ?? "Enemy"}";
+                    string name = $"New {b?.DisplayName ?? (player ? "Troop" : "Enemy")}";
                     p.Units.Add(new UnitDef
                     {
                         Id = EditorCatalog.UniqueId(Ids.FromName(name), p.Units.Select(u => u.Id)),
-                        Side = UnitSide.Enemy,
+                        Side = side,
                         Base = ContentRef.Vanilla(baseId),
                         Name = name,
                     });
                 }, structural: true);
                 BuilderEditor.OpenUnit(index);
-            }, "Your enemy starts with this one's model, stats and weapon. You can change all of it.");
+            }, player ? "Your unit starts as this troop: its model, stats and weapon. It replaces this troop in the buildings that train it." : "Your enemy starts with this one's model, stats and weapon. You can change all of it.");
         }
 
         private void BuildWaveSets(ModPage page)
