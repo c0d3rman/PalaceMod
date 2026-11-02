@@ -73,30 +73,63 @@ namespace PalaceMod
             }
             // Mirrors MatchSaveLoadHandler.IsLoadingPermitted for Classic: the level's match save is loaded unless
             // there's none or the player chose to start over.
-            bool continuing = !MatchSaveLoadHandler.OverwriteCurrentSave && MatchSaveLoadHandler.CurrentSave != null;
+            var save = MatchSaveLoadHandler.CurrentSave;
+            bool continuing = !MatchSaveLoadHandler.OverwriteCurrentSave && save != null;
             if (continuing) pending.Remove(levelName);
-            else pending[levelName] = [];
+            else
+            {
+                pending[levelName] = [];
+                replacedSave = save;
+            }
             Switch(levelName, force: !continuing);
         }
 
-        internal static void EternalTrialsRunCreated()
+        // The save a pending Classic run will replace, and the fresh Eternal Trials run that's pending. Until the game
+        // writes a different save object, writes still go to the old run (e.g. a defeat before the first dawn
+        // re-saves the old match save).
+        private static MatchSave replacedSave;
+        private static EternalTrialsRun freshEternalTrialsRun;
+        // The game keeps an abandoned Eternal Trials run in memory and can bring it back; its record goes with it.
+        private static List<string> discardedEternalTrialsReasons;
+
+        internal static void EternalTrialsRunCreated(EternalTrialsRun run)
         {
             pending[EternalTrialsKey] = [];
+            freshEternalTrialsRun = run;
             if (currentKey == EternalTrialsKey) Switch(EternalTrialsKey, force: true);
         }
 
-        // "Back" on the new-run screen brings the abandoned (still saved) run back.
+        internal static void EternalTrialsRunDiscarded()
+        {
+            var r = pending.TryGetValue(EternalTrialsKey, out var p) ? p : records.TryGetValue(EternalTrialsKey, out var stored) ? stored : [];
+            discardedEternalTrialsReasons = [.. r];
+        }
+
         internal static void EternalTrialsRunRestored()
         {
             pending.Remove(EternalTrialsKey);
+            var r = discardedEternalTrialsReasons ?? [];
+            if (r.Count > 0) records[EternalTrialsKey] = [.. r];
+            else records.Remove(EternalTrialsKey);
+            SaveRecords();
             if (currentKey == EternalTrialsKey) Switch(EternalTrialsKey, force: true);
         }
 
-        // The game wrote the current run's match save, or the Eternal Trials run: the record now belongs to that save.
-        internal static void RunSaved(bool eternalTrialsRun)
+        internal static void MatchSaved(MatchSave save)
         {
-            string key = eternalTrialsRun ? EternalTrialsKey : currentKey;
-            if (key == null || !pending.TryGetValue(key, out var fresh)) return;
+            if (currentKey == null || currentKey == EternalTrialsKey || save == null || save == replacedSave) return;
+            Promote(currentKey);
+        }
+
+        internal static void EternalTrialsRunSaved(EternalTrialsRun run)
+        {
+            if (run != null && run == freshEternalTrialsRun) Promote(EternalTrialsKey);
+        }
+
+        // The game wrote the fresh run's first save: the record now belongs to it and the old one is gone.
+        private static void Promote(string key)
+        {
+            if (!pending.TryGetValue(key, out var fresh)) return;
             pending.Remove(key);
             if (fresh.Count > 0) records[key] = fresh;
             else if (!records.Remove(key)) return;
@@ -183,7 +216,16 @@ namespace PalaceMod
         [HarmonyPatch(typeof(EternalTrialsRunManager), nameof(EternalTrialsRunManager.CreateFreshRun))]
         private class EternalTrialsCreate_Patch
         {
-            private static void Postfix() => GameplayImpact.EternalTrialsRunCreated();
+            private static void Postfix() => GameplayImpact.EternalTrialsRunCreated(EternalTrialsRunManager.CurrentRun);
+        }
+
+        [HarmonyPatch(typeof(EternalTrialsRunManager), nameof(EternalTrialsRunManager.DiscardActiveRun))]
+        private class EternalTrialsDiscard_Patch
+        {
+            private static void Prefix()
+            {
+                if (EternalTrialsRunManager.HasOngoingRun) GameplayImpact.EternalTrialsRunDiscarded();
+            }
         }
 
         [HarmonyPatch(typeof(EternalTrialsRunManager), nameof(EternalTrialsRunManager.TurnLastDiscardedRunIntoCurrentRun))]
@@ -200,13 +242,13 @@ namespace PalaceMod
         [HarmonyPatch(typeof(MatchSaveLoadHandler), nameof(MatchSaveLoadHandler.SaveRun))]
         private class MatchSaved_Patch
         {
-            private static void Postfix() => GameplayImpact.RunSaved(eternalTrialsRun: false);
+            private static void Postfix() => GameplayImpact.MatchSaved(MatchSaveLoadHandler.CurrentSave);
         }
 
         [HarmonyPatch(typeof(EternalTrialsRunManager), nameof(EternalTrialsRunManager.SaveRun))]
         private class EternalTrialsSaved_Patch
         {
-            private static void Postfix() => GameplayImpact.RunSaved(eternalTrialsRun: true);
+            private static void Postfix(EternalTrialsRun runToSave) => GameplayImpact.EternalTrialsRunSaved(runToSave);
         }
     }
 }
