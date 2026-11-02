@@ -17,6 +17,8 @@ using Object = UnityEngine.Object;
     A skinned body (no MeshFilter) is hidden and the mesh goes on a new static child instead.
 
     Texture: the body material is cloned (keeping its name, which the elite swap matches) with the PNG as its base map.
+    A glTF mesh brings its own colours as a texture (its materials baked by GltfMerge), applied the same way unless
+    the unit sets "texture"; then the mesh is painted with that PNG through the model's own first UV set instead.
     Sounds: a BuilderUnitSounds marker on the template names the pack and asset keys; the UnitAudio.Start patch in
     BuilderManager.Assets.cs resolves them when the spawned clone starts (OGG may still be decoding at build time).
 */
@@ -35,11 +37,13 @@ namespace PalaceMod.Builder.Assets
                 return;
             }
             var assets = BuilderServices.Assets;
+            Texture2D meshColours = null;
             if (v.Mesh != null)
             {
                 var mesh = assets.GetMesh(entry, v.Mesh);
                 if (mesh == null) notes.Add($"mesh {v.Mesh}: {Reason(entry, v.Mesh, AssetUse.Mesh)}, kept the base mesh");
                 else if (!SwapMesh(go, mesh.Value.mesh, v, owned, out string error)) notes.Add($"mesh {v.Mesh}: {error}");
+                else meshColours = (assets as AssetProvider)?.GetMeshTexture(entry, v.Mesh);
             }
             if (v.Texture != null)
             {
@@ -47,6 +51,7 @@ namespace PalaceMod.Builder.Assets
                 if (tex == null) notes.Add($"texture {v.Texture}: {Reason(entry, v.Texture, AssetUse.Texture)}");
                 else if (!ApplyTexture(go, tex, owned)) notes.Add("texture: no body material with a base map found");
             }
+            else if (meshColours != null && !ApplyTexture(go, meshColours, owned)) notes.Add("mesh colours: no body material with a base map found");
             if (v.Sounds != null && (v.Sounds.Attack ?? v.Sounds.Hurt ?? v.Sounds.Death) != null)
             {
                 var marker = go.GetComponent<BuilderUnitSounds>() ?? go.AddComponent<BuilderUnitSounds>();
@@ -135,7 +140,7 @@ namespace PalaceMod.Builder.Assets
             {
                 // Into the body renderer's local space, so it keeps animating with the body part.
                 var toBody = body.Renderer.transform.worldToLocalMatrix * root.localToWorldMatrix * fit;
-                baked = Bake(source, toBody);
+                baked = Bake(source, toBody, ownUvs: v.Texture != null);
                 body.Filter.sharedMesh = baked;
                 // GPUInstanced and the elite swap read sharedMaterial (slot 0): make it the body material.
                 var mats = body.Renderer.sharedMaterials;
@@ -144,7 +149,7 @@ namespace PalaceMod.Builder.Assets
             }
             else
             {
-                baked = Bake(source, fit);
+                baked = Bake(source, fit, ownUvs: v.Texture != null);
                 var child = new GameObject("PalaceBuilder Mesh");
                 child.transform.SetParent(root, false);
                 child.AddComponent<MeshFilter>().sharedMesh = baked;
@@ -174,10 +179,18 @@ namespace PalaceMod.Builder.Assets
             return m;
         }
 
-        private static Mesh Bake(Mesh source, Matrix4x4 m)
+        /// <param name="ownUvs">Use the model's own UVs (a glTF mesh keeps them in UV2; its UV1 addresses its baked
+        /// colour texture), for painting it with the unit's "texture".</param>
+        private static Mesh Bake(Mesh source, Matrix4x4 m, bool ownUvs)
         {
             var mesh = Object.Instantiate(source);
             mesh.name = source.name;
+            if (ownUvs)
+            {
+                var own = new List<Vector2>();
+                mesh.GetUVs(1, own);
+                if (own.Count == mesh.vertexCount) mesh.SetUVs(0, own);
+            }
             var vertices = mesh.vertices;
             var normals = mesh.normals;
             var normalMatrix = m.inverse.transpose;

@@ -10,7 +10,6 @@ using GLTFast.Loading;
 using GLTFast.Logging;
 using GLTFast.Materials;
 using UnityEngine;
-using Debug = UnityEngine.Debug;
 using Object = UnityEngine.Object;
 
 /*
@@ -70,7 +69,7 @@ namespace PalaceMod.Builder.Assets
         private static async void Run(GltfModel model, string name, Action<GltfResult> done)
         {
             var result = new GltfResult();
-            var log = new Log(result.Warnings);
+            var log = new GltfLog(result.Warnings);
             GLTFast.Newtonsoft.GltfImport import = null;
             var watch = Stopwatch.StartNew();
             try
@@ -90,7 +89,7 @@ namespace PalaceMod.Builder.Assets
                 if (!ok) throw new AssetException(log.FirstError ?? "glTF couldn't be loaded");
                 var scene = new SceneRecorder();
                 if (!await import.InstantiateSceneAsync(scene, model.Scene)) throw new AssetException(log.FirstError ?? "glTF scene couldn't be built");
-                GltfMerge.Build(model, import, scene, name, result);
+                GltfMerge.Build(model, new GltfTextures(import.GetTexture), scene, name, result);
                 result.Summary += $", {watch.ElapsedMilliseconds} ms";
             }
             catch (AssetException e)
@@ -100,12 +99,12 @@ namespace PalaceMod.Builder.Assets
             catch (Exception e)
             {
                 result.Error = "glTF couldn't be read: " + e.Message;
-                Plugin.Logger.LogWarning($"Builder assets: {name}: glTF import failed: {e}");
+                Log.For<BuilderAssetsManager>().Warn($"{name}: glTF import failed", e);
             }
             finally
             {
                 try { import?.Dispose(); }
-                catch (Exception e) { Plugin.Logger.LogWarning($"Builder assets: {name}: glTF cleanup failed: {e.Message}"); }
+                catch (Exception e) { Log.For<BuilderAssetsManager>().Warn($"{name}: glTF cleanup failed", e); }
             }
             if (result.Error != null)
             {
@@ -115,12 +114,12 @@ namespace PalaceMod.Builder.Assets
                 result.Texture = null;
             }
             try { done(result); }
-            catch (Exception e) { Plugin.Logger.LogError($"Builder assets: {name}: glTF callback failed: {e}"); }
+            catch (Exception e) { Log.For<BuilderAssetsManager>().Caught($"{name}: glTF callback failed", e); }
         }
 
         /// <summary>glTFast's messages go to PalaceMod's log as warnings (never Unity errors); the first error
         /// becomes the player-facing reason when the import fails.</summary>
-        private sealed class Log(List<string> sink) : ICodeLogger
+        private sealed class GltfLog(List<string> sink) : ICodeLogger
         {
             public string FirstError;
 
@@ -128,6 +127,9 @@ namespace PalaceMod.Builder.Assets
             public void Warning(LogCode code, params string[] messages) => Add(LogType.Warning, code, messages);
             public void Info(LogCode code, params string[] messages) { }
             public void Log(LogType logType, LogCode code, params string[] messages) => Add(logType, code, messages);
+            public void Error(string message) => Add(LogType.Error, message);
+            public void Warning(string message) => Add(LogType.Warning, message);
+            public void Info(string message) { }
 
             private void Add(LogType type, LogCode code, string[] messages)
             {
@@ -135,6 +137,12 @@ namespace PalaceMod.Builder.Assets
                 string text;
                 try { text = LogMessages.GetFullMessage(code, messages); }
                 catch { text = code + (messages == null ? "" : ": " + string.Join(", ", messages)); }
+                Add(type, text);
+            }
+
+            private void Add(LogType type, string text)
+            {
+                if (type is LogType.Log) return;
                 if (type is LogType.Error or LogType.Exception or LogType.Assert) FirstError ??= "glTF: " + text;
                 if (sink.Count < 20) sink.Add(text);
             }
@@ -213,14 +221,22 @@ namespace PalaceMod.Builder.Assets
 
         public void SetNodeName(uint nodeIndex, string name) { }
 
+        // A node a file lists both as a scene root and as a child is instantiated twice; keep one copy (its
+        // transform is the last CreateNode's).
+        private readonly HashSet<(uint, int, int)> added = [];
+
         public void AddPrimitive(uint nodeIndex, string meshName, MeshResult meshResult, uint[] joints = null, uint? rootJoint = null,
-            float[] morphTargetWeights = null, int primitiveNumeration = 0) =>
-            Primitives.Add(new Primitive { Node = nodeIndex, Mesh = meshResult, Joints = joints });
+            float[] morphTargetWeights = null, int primitiveNumeration = 0)
+        {
+            if (added.Add((nodeIndex, meshResult.meshIndex, primitiveNumeration)))
+                Primitives.Add(new Primitive { Node = nodeIndex, Mesh = meshResult, Joints = joints });
+        }
 
         public void AddPrimitiveInstanced(uint nodeIndex, string meshName, MeshResult meshResult, uint instanceCount,
             Unity.Collections.NativeArray<Vector3>? positions, Unity.Collections.NativeArray<Quaternion>? rotations,
             Unity.Collections.NativeArray<Vector3>? scales, int primitiveNumeration = 0)
         {
+            if (!added.Add((nodeIndex, meshResult.meshIndex, primitiveNumeration))) return;
             var instances = new Matrix4x4[instanceCount];
             for (int i = 0; i < instanceCount; i++)
                 instances[i] = Matrix4x4.TRS(

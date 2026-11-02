@@ -36,6 +36,8 @@
     <Compile Include="../../src/PalaceMod/Features/Builder/Contracts/Contracts.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Sharing/ShareCodec.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Sharing/PackArchive.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Assets/GltfCheck.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Assets/Loaders.cs" />
     <EmbeddedResource Include="../../src/PalaceMod/Assets/builder-sample.json" LogicalName="builder-sample.json" />
   </ItemGroup>
 

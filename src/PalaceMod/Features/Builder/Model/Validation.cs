@@ -51,7 +51,7 @@ namespace PalaceMod.Builder.Model
         // File types the asset loader (WP5) reads, by use. Url assets have no extension; the loader checks their bytes.
         public static readonly string[] ImageExtensions = [".png"];
         public static readonly string[] AudioExtensions = [".wav", ".ogg"];
-        public static readonly string[] MeshExtensions = [".obj"];
+        public static readonly string[] MeshExtensions = [".obj", ".glb", ".gltf"];
 
         public static List<ValidationIssue> Validate(DesignPack pack, IValidationContext game = null)
         {

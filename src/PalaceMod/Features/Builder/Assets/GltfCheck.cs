@@ -93,6 +93,45 @@ namespace PalaceMod.Builder.Assets
             return model;
         }
 
+        /// <summary>Width and height from a PNG or JPEG header, without decoding.</summary>
+        internal static (int w, int h) ImageSize(byte[] b, int at, int length, string w)
+        {
+            if (length >= 24 && b[at] == 0x89 && b[at + 1] == 'P' && b[at + 2] == 'N' && b[at + 3] == 'G')
+            {
+                if (b[at + 12] != 'I' || b[at + 13] != 'H' || b[at + 14] != 'D' || b[at + 15] != 'R') throw new AssetException($"{w} is a damaged PNG");
+                return (BigEndian(b, at + 16), BigEndian(b, at + 20));
+            }
+            if (length >= 4 && b[at] == 0xFF && b[at + 1] == 0xD8)
+            {
+                int p = at + 2, end = at + length;
+                while (p + 4 <= end)
+                {
+                    if (b[p] != 0xFF) throw new AssetException($"{w} is a damaged JPEG");
+                    byte marker = b[p + 1];
+                    if (marker == 0xFF) { p++; continue; }
+                    if (marker is 0xD8 or 0x01 || (marker >= 0xD0 && marker <= 0xD7)) { p += 2; continue; }
+                    int segment = (b[p + 2] << 8) | b[p + 3];
+                    if (segment < 2) throw new AssetException($"{w} is a damaged JPEG");
+                    bool sof = marker >= 0xC0 && marker <= 0xCF && marker is not (0xC4 or 0xC8 or 0xCC);
+                    if (sof)
+                    {
+                        if (p + 9 > end) break;
+                        return ((b[p + 7] << 8) | b[p + 8], (b[p + 5] << 8) | b[p + 6]);
+                    }
+                    if (marker == 0xDA) break;   // start of scan before a frame header
+                    p += 2 + segment;
+                }
+                throw new AssetException($"{w} is a damaged JPEG (no size found)");
+            }
+            if (length >= 12 && Encoding.ASCII.GetString(b, at, 4) == "RIFF" && Encoding.ASCII.GetString(b, at + 8, 4) == "WEBP")
+                throw new AssetException($"{w} is a WebP image; use PNG or JPEG");
+            if (length >= 12 && b[at] == 0xAB && b[at + 1] == 'K' && b[at + 2] == 'T' && b[at + 3] == 'X')
+                throw new AssetException($"{w} is a KTX image; use PNG or JPEG");
+            throw new AssetException($"{w} isn't a PNG or JPEG image");
+        }
+
+        private static int BigEndian(byte[] b, int p) => (b[p] << 24) | (b[p + 1] << 16) | (b[p + 2] << 8) | b[p + 3];
+
         // ------------------------------------------------------------------ container
 
         private static string ReadGlb(byte[] b, out ArraySegment<byte>? bin)
@@ -384,6 +423,7 @@ namespace PalaceMod.Builder.Assets
                 var prims = m["primitives"] as JArray;
                 if (prims == null || prims.Count == 0) throw Bad($"{w} has no primitives");
                 long vertices = 0, triangles = 0;
+                var positions = new HashSet<long>();   // primitives often share one vertex list; count it once
                 for (int p = 0; p < prims.Count; p++)
                 {
                     string pw = $"{w}.primitives[{p}]";
@@ -411,7 +451,7 @@ namespace PalaceMod.Builder.Assets
                         elements = Int(acc, "count", pw);
                         CheckIndexValues(acc, count, pw);
                     }
-                    vertices += count;
+                    if (positions.Add(Num(attrs["POSITION"], pw))) vertices += count;
                     triangles += mode switch { 4 => elements / 3, 5 or 6 => Math.Max(0, elements - 2), _ => 0 };
                     if (mode is not (4 or 5 or 6)) model.Notes.Add($"{pw}: points and lines aren't shown");
                 }
@@ -499,44 +539,6 @@ namespace PalaceMod.Builder.Assets
                 }
             }
 
-            /// <summary>Width and height from a PNG or JPEG header, without decoding.</summary>
-            internal static (int w, int h) ImageSize(byte[] b, int at, int length, string w)
-            {
-                if (length >= 24 && b[at] == 0x89 && b[at + 1] == 'P' && b[at + 2] == 'N' && b[at + 3] == 'G')
-                {
-                    if (b[at + 12] != 'I' || b[at + 13] != 'H' || b[at + 14] != 'D' || b[at + 15] != 'R') throw new AssetException($"{w} is a damaged PNG");
-                    return (BigEndian(b, at + 16), BigEndian(b, at + 20));
-                }
-                if (length >= 4 && b[at] == 0xFF && b[at + 1] == 0xD8)
-                {
-                    int p = at + 2, end = at + length;
-                    while (p + 4 <= end)
-                    {
-                        if (b[p] != 0xFF) throw new AssetException($"{w} is a damaged JPEG");
-                        byte marker = b[p + 1];
-                        if (marker == 0xFF) { p++; continue; }
-                        if (marker is 0xD8 or 0x01 || (marker >= 0xD0 && marker <= 0xD7)) { p += 2; continue; }
-                        int segment = (b[p + 2] << 8) | b[p + 3];
-                        if (segment < 2) throw new AssetException($"{w} is a damaged JPEG");
-                        bool sof = marker >= 0xC0 && marker <= 0xCF && marker is not (0xC4 or 0xC8 or 0xCC);
-                        if (sof)
-                        {
-                            if (p + 9 > end) break;
-                            return ((b[p + 7] << 8) | b[p + 8], (b[p + 5] << 8) | b[p + 6]);
-                        }
-                        if (marker == 0xDA) break;   // start of scan before a frame header
-                        p += 2 + segment;
-                    }
-                    throw new AssetException($"{w} is a damaged JPEG (no size found)");
-                }
-                if (length >= 12 && Encoding.ASCII.GetString(b, at, 4) == "RIFF" && Encoding.ASCII.GetString(b, at + 8, 4) == "WEBP")
-                    throw new AssetException($"{w} is a WebP image; use PNG or JPEG");
-                if (length >= 12 && b[at] == 0xAB && b[at + 1] == 'K' && b[at + 2] == 'T' && b[at + 3] == 'X')
-                    throw new AssetException($"{w} is a KTX image; use PNG or JPEG");
-                throw new AssetException($"{w} isn't a PNG or JPEG image");
-            }
-
-            private static int BigEndian(byte[] b, int p) => (b[p] << 24) | (b[p + 1] << 16) | (b[p + 2] << 8) | b[p + 3];
 
             private void ReadMaterials()
             {
@@ -568,7 +570,7 @@ namespace PalaceMod.Builder.Assets
                             {
                                 info.Offset = tt["offset"] != null ? Numbers(tt["offset"], w) : null;
                                 info.Scale = tt["scale"] != null ? Numbers(tt["scale"], w) : null;
-                                info.Rotation = tt["rotation"] != null ? (float)Num(tt["rotation"], w) : 0f;
+                                info.Rotation = tt["rotation"] != null ? Float(tt["rotation"], w + ".KHR_texture_transform.rotation") : 0f;
                                 if (tt["texCoord"] != null) info.TexCoord = (int)Math.Max(0, Math.Min(7, Num(tt["texCoord"], w)));
                                 if ((info.Offset != null && info.Offset.Length != 2) || (info.Scale != null && info.Scale.Length != 2))
                                     throw Bad($"{w} has an invalid KHR_texture_transform");
@@ -667,11 +669,12 @@ namespace PalaceMod.Builder.Assets
                     {
                         long n = Num(r, $"scenes[{s}].nodes");
                         if (n < 0 || n >= nodes.Count) throw Bad($"scenes[{s}] points to a missing node");
-                        if (parent[n] >= 0) throw Bad($"scenes[{s}] lists nodes[{n}], which is another node's child");
                     }
                 }
                 var main = (JObject)scenes[model.Scene];
+                // Some exporters list a node both as a scene root and as a child; it's placed (and counted) once.
                 var stack = new Stack<int>();
+                var visited = new HashSet<int>();
                 if (main["nodes"] is JArray mainRoots) foreach (var r in mainRoots) stack.Push((int)Num(r, "scene"));
                 var children = new List<int>[nodes.Count];
                 for (int i = 0; i < nodes.Count; i++) if (parent[i] >= 0) (children[parent[i]] ??= []).Add(i);
@@ -679,6 +682,7 @@ namespace PalaceMod.Builder.Assets
                 while (stack.Count > 0)
                 {
                     int i = stack.Pop();
+                    if (!visited.Add(i)) continue;
                     var n = (JObject)nodes[i];
                     if (n["mesh"] != null)
                     {
@@ -749,6 +753,13 @@ namespace PalaceMod.Builder.Assets
                     if (d == Math.Floor(d) && Math.Abs(d) < 1e15) return (long)d;
                 }
                 throw Bad($"{w} isn't a whole number");
+            }
+
+            private static float Float(JToken t, string w)
+            {
+                if (t.Type is not (JTokenType.Integer or JTokenType.Float)) throw Bad($"{w} isn't a number");
+                float f = (float)(double)t;
+                return float.IsNaN(f) || float.IsInfinity(f) ? throw Bad($"{w} isn't a finite number") : f;
             }
 
             private static float[] Numbers(JToken t, string w)
