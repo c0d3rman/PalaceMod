@@ -64,9 +64,9 @@ Evidence comes from the decompiled `Assembly-CSharp`, `AstarPathfindingProject.d
 
 | WP | State |
 |---|---|
-| WP1 Data model and loader | **Landed.** `Model/`, `Contracts/`, `PackRepository`, `EditHistory`. |
-| WP2 Catalog and runtime | **Landed.** `Runtime/`, `builder` dev command, sample pack, interim `SessionLauncher`. |
-| WP3 Session and level select | Open. Interim launcher and isolation patches are in `Session/` (see below). |
+| WP1 Data model and loader | **Landed** (PR #8). `Model/`, `Contracts/`, `PackRepository`, `EditHistory`. |
+| WP2 Catalog and runtime | **Landed** (feat/builder-core). `Runtime/`, `BuilderManager`, `builder` dev command, sample pack, interim `SessionLauncher`, leaderboard guard. Enemies only: player units aren't in the catalog yet (see Spike results). |
+| WP3 Session and level select | In progress on feat/builder-session (rewrites `Session/`, including all-platform leaderboard guards that replace `BuilderManager.Leaderboard.cs`). |
 | WP4a Editor UI | Open. |
 | WP4b / WP4c Level overlay, placement editor | Stage 2. Data shape fixed (`LevelDef`), stub `ILevelOverlay`. |
 | WP5 Asset import | Open. Stub `IAssetProvider` returns null. |
@@ -195,9 +195,9 @@ Semantics worth knowing:
 
 - `LevelProgressManager.GetLevelDataForScene(host)` returns the session's own `LevelData` (`Current.Scores`), so highscores, "beaten", networth and quest state never reach the host's record.
 - `SaveLoadManager.SaveGame` is skipped. `MatchSaveLoadHandler.SaveRun` only converts in memory (retry day keeps working) and never writes the host's mid-match file.
-- `AchievementManager` unlock calls are skipped. Perk level and XP are snapshotted at launch and restored when the session ends.
+- `AchievementManager` unlock calls and the Steam leaderboard upload (`SteamGameServices.UploadHighscore`) are skipped. Perk level and XP are snapshotted at launch and restored when the session ends.
 - On load of the host, `GameplayImpact.Mark("Builder: custom content")` runs and a short notice says scores and saves aren't recorded.
-- The session ends when any other scene loads (single mode): menu, level select or another map.
+- The session ends when any other scene loads: menu, level select or another map. The game loads every scene additively, so only the persistent `_UI` scene is ignored.
 
 ### Dev commands
 
@@ -216,9 +216,17 @@ Semantics worth knowing:
 
 ## Spike results
 
-Run with `builder spike ...` and `builder play palacemod.sample` in dev launches (Rosetta), game version GAMEVER.
+Run on 2026-11-02 with `builder spike ...` and `builder play palacemod.sample` in a dev launch (pool instance, native arm64 loader).
 
-SPIKES_TBD
+| Spike | Result | Consequence |
+|---|---|---|
+| **Spawning cloned enemy templates** | **Works.** Templates are made under an inactive DontDestroyOnLoad root. The game's `Spawn.Update` instantiates them once its `scene.isLoaded` check is transpiled to exclude the template scene, and `GetComponentInChildren` to include inactive objects for templates. `builder live` during night 1 showed `8x E Racer [palacemod.sample/goblin-runner](Clone): name="Goblin Runner" maxHp=7 speed=9 ... scale=0.8` and `1x E Melee [palacemod.sample/iron-brute](Clone): maxHp=120 speed=2.5 cooldown=1.6 damage=[any:+6x1,Building:+0x3] scale=1.5 tags=[...,ArmoredAgainstRanged]`. They path to the castle and attack. The night preview in the pause menu lists them by line ("Forest: 8", "Main Bridge: 1") with the gold total. | The `IUnitFactory` contract stands as designed. |
+| **Cloning weapons before editing** | **Works.** `spike weapon`: the template's weapon is `E Melee#-988` with damage `+6x1,+0x3`; the vanilla prefab's is `E Melee#32002` with damage `+2.5x1`; `shared=False`. | Vanilla enemies are never affected by designs. |
+| **Wave injection before level start** | **Works.** A prefix on `EnemySpawner.Start` injected 3 nights and 68 enemies with starting gold 20. Perk modifiers then ran as normal. After leaving, a plain `level Nordfels` had 13 vanilla waves, starting gold 8 and no gameplay impact. | `IWaveInjector` stands. Spawn lines are resolved by name; names come from the spawner prefab, so the catalog needs no scene load. |
+| **Runtime pathfinding rescan** | `AstarPath.active.Scan()` of all 4 graphs on Nordfels took **954 ms** the first time and **426 ms** the second (native). | Fine once at level start (behind the loading clouds) for WP4b overlays. Too slow per edit: use `NavmeshCut` or `GraphUpdateObject` for live placement in WP4c. |
+| **How unit meshes are coloured** (tint/skin) | Enemy bodies use the shared material `Enemy`: shader `FlatKit/Stylized Surface`, `_BaseColor` (1, 0.90, 0.86), shadow colour `_ColorDim` (0.69, 0, 0.16), **no texture** (`_BaseMap` none), and `GPUInstanced` renderers. Meshes aren't readable, so vertex colours are unknown. | Tint = a per-template material clone with `_BaseColor` multiplied (works: goblins render green). The clone keeps the name `Enemy` so the elite swap still applies (elites then lose the tint). Skins need a texture-capable FlatKit setup (WP5: set `_BaseMap` on the clone) rather than palette tricks. |
+| **Session isolation** | On the host: `GameplayImpact` "Builder: custom content". `SaveGame` was skipped ("skipped writing the save file during a custom run"). Leaving to level select ended the session; perk level and XP were unchanged. | WP3 builds on this. Codex found that `builder end` mid-run and launches from the main menu needed work; WP3 has fixed both on its branch. |
+| **Catalog** | 39 enemies, 37 weapons and 36 hosts (10 main maps plus mini modes), built in 89 ms at the main menu. **0 player units**: player unit prefabs aren't loaded at the menu (they live inside building prefabs). | Gap: player-side designs won't validate until the catalog finds player units, either by scanning building prefabs (`UnitRespawnerForBuildings.units`) from `Resources` or by rebuilding inside a level. That's part of the "player units in buildings" work, which no package owns yet. |
 
 Not yet run (not needed for the interfaces): cloning a `BuildSlot` before Start (stage 2, WP4b) and loading glTFast (WP5).
 
@@ -260,7 +268,7 @@ Shared data types (also in `Contracts.cs`): `PackEntry {Pack, Folder, Source, Re
 **Already there (interim, by WP2):**
 
 - `Launch(SessionRequest)`: validates (errors block), pre-builds templates, `BuilderServices.Waves.SetPending`, sets Classic mode, sets `MatchSaveLoadHandler.OverwriteCurrentSave = true`, and calls `SceneTransitionManager.TransitionFromNullToLevel(host)`.
-- Ends on any non-host single scene load. Marks `GameplayImpact` on host load. Shows a `Notify` banner.
+- Ends on any non-host scene load (except `_UI`). Marks `GameplayImpact` on host load. Shows a `Notify` banner.
 - Isolation patches: host `LevelData` swapped for `Current.Scores`, `SaveGame` skipped, `SaveRun` in-memory only, achievements skipped, perk level and XP restored at session end.
 - Applies `BuilderServices.Overlay` for level sessions.
 

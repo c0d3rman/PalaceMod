@@ -47,8 +47,9 @@ namespace PalaceMod.Builder
         }
 
         public bool HasVanillaWeapon(string id) => FindWeapon(id) != null;
-        public bool HasHost(string scene) => FindHost(scene) != null;
-        public IReadOnlyCollection<string> SpawnLines(string scene) => FindHost(scene)?.SpawnLines.Select(l => l.Name).ToList();
+        // Host names must match the scene name exactly: scene loads and comparisons are case-sensitive.
+        public bool HasHost(string scene) => Hosts.Any(h => h.Scene == scene);
+        public IReadOnlyCollection<string> SpawnLines(string scene) => Hosts.FirstOrDefault(h => h.Scene == scene)?.SpawnLines.Select(l => l.Name).ToList();
         public bool HasPackUnit(string packId, string unitId) => PackUnitExists?.Invoke(packId, unitId) ?? false;
 
         private static T Find<T>(IReadOnlyList<T> list, Func<T, string> key, string id) where T : class

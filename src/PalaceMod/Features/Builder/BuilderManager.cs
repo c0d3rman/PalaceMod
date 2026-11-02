@@ -79,7 +79,9 @@ namespace PalaceMod
 
         private static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
-            if (mode != LoadSceneMode.Single) return;
+            // SceneTransitionManager loads every menu and level additively (then unloads the old one), so mode tells us
+            // nothing; skip only the persistent UI scene.
+            if (scene.name == (SceneTransitionManager.instance?.uiScene ?? "_UI")) return;
             try
             {
                 Launcher.OnSceneLoaded(scene);
