@@ -28,7 +28,7 @@ namespace PalaceMod
         private const string EternalTrialsKey = "Eternal Trials";
 
         // Records of runs whose save is on disk, by run. Mirrors the record file.
-        private static readonly Dictionary<string, List<string>> records = LoadRecords();
+        private static Dictionary<string, List<string>> records = LoadRecords();
         // Fresh runs whose first save hasn't been written yet. Until it is, the old save (and its record) still exists
         // and can be continued, so the old record stays in `records`.
         private static readonly Dictionary<string, List<string>> pending = [];
@@ -149,7 +149,23 @@ namespace PalaceMod
 
         // ---- Persistence: one line per run, "<run>\t<reason>\t<reason>...". ----
 
-        private static string RecordsPath => Path.Combine(Application.persistentDataPath, "PalaceMod", "GameplayImpact.txt");
+        // Top level of the save folder, beside the match saves it describes, so it's backed up and swapped with them
+        // (e.g. by save profiles).
+        private static string RecordsPath => Path.Combine(Application.persistentDataPath, "PalaceMod.GameplayImpact.txt");
+
+        // The save folder's contents may have changed under us (a profile switch): start over from the file.
+        internal static void ReloadRecords()
+        {
+            records = LoadRecords();
+            pending.Clear();
+            replacedSave = null;
+            freshEternalTrialsRun = null;
+            discardedEternalTrialsReasons = null;
+            bool had = reasons.Count > 0 || currentKey != null;
+            currentKey = null;
+            reasons = [];
+            if (had) Reset?.Invoke();
+        }
 
         private static Dictionary<string, List<string>> LoadRecords()
         {
@@ -239,16 +255,64 @@ namespace PalaceMod
             }
         }
 
+        // A run's save counts only if the game actually wrote a file: other patches (e.g. Builder's custom sessions)
+        // can skip the write, and Harmony still runs postfixes then.
+        private static bool savingRun, runWritten;
+
+        private static void StartSave()
+        {
+            savingRun = true;
+            runWritten = false;
+        }
+
+        [HarmonyPatch]
+        private class FileWritten_Patch
+        {
+            private static IEnumerable<System.Reflection.MethodBase> TargetMethods() =>
+                AccessTools.AllTypes()
+                    .Where(t => typeof(Thronefall.SaveServices.ISaveServices).IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
+                    .Select(t => AccessTools.Method(t, nameof(Thronefall.SaveServices.ISaveServices.WriteAllText), [typeof(string), typeof(string)]))
+                    .Where(m => m != null && m.DeclaringType != null && !m.DeclaringType.IsInterface)
+                    .Cast<System.Reflection.MethodBase>()
+                    .Distinct();
+
+            private static void Postfix()
+            {
+                if (savingRun) runWritten = true;
+            }
+        }
+
         [HarmonyPatch(typeof(MatchSaveLoadHandler), nameof(MatchSaveLoadHandler.SaveRun))]
         private class MatchSaved_Patch
         {
-            private static void Postfix() => GameplayImpact.MatchSaved(MatchSaveLoadHandler.CurrentSave);
+            [HarmonyPriority(Priority.First)]
+            private static void Prefix() => StartSave();
+
+            private static void Postfix()
+            {
+                savingRun = false;
+                if (runWritten) GameplayImpact.MatchSaved(MatchSaveLoadHandler.CurrentSave);
+            }
         }
 
         [HarmonyPatch(typeof(EternalTrialsRunManager), nameof(EternalTrialsRunManager.SaveRun))]
         private class EternalTrialsSaved_Patch
         {
-            private static void Postfix(EternalTrialsRun runToSave) => GameplayImpact.EternalTrialsRunSaved(runToSave);
+            [HarmonyPriority(Priority.First)]
+            private static void Prefix() => StartSave();
+
+            private static void Postfix(EternalTrialsRun runToSave)
+            {
+                savingRun = false;
+                if (runWritten) GameplayImpact.EternalTrialsRunSaved(runToSave);
+            }
+        }
+
+        // The game re-reads its save (startup, or a profile switch swapping the save folder): re-read the records too.
+        [HarmonyPatch(typeof(SaveLoadManager), "LoadGame")]
+        private class GameLoaded_Patch
+        {
+            private static void Postfix() => GameplayImpact.ReloadRecords();
         }
     }
 }
