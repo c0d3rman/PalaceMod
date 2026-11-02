@@ -208,7 +208,7 @@ namespace PalaceMod
 
         private void OpenMore()
         {
-            moreFrame ??= new ModFrame("More").SetContent(page =>
+            moreFrame ??= new ModFrame("Mods").SetContent(page =>
             {
                 foreach (var b in moreItems) page.Button(b.Label, () => b.OnClick?.Invoke());
             });
