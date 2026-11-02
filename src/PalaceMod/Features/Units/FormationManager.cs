@@ -30,7 +30,7 @@ namespace PalaceMod
 
     public class FormationManager : BaseManager
     {
-        public override string FeatureSection => "Unit placement";
+        public override string FeatureSection => "Formations";
         public override string FeatureDescription =>
             "Formations and finer control over where your units go: change formation, drop one unit at a time, and right-click to send units to the cursor.";
 
@@ -253,15 +253,9 @@ namespace PalaceMod
 
         private void ShowPreview(CommandUnits cu, PlacementRequest request)
         {
-            var units = cu.PlayerUnitsCommanding;
-            if (units.Count == 0) return;
-            FormationLayout.Compute(request.Formation, units.Count, request.Center, request.Forward, spacing.Value, request.Width, slots);
-            for (int i = 0; i < slots.Count; i++)
-            {
-                var slot = slots[i];
-                slot.Position = units[0].GetNearestGroundPosition(slot.Position);
-                slots[i] = slot;
-            }
+            if (!Assign(cu, cu.PlayerUnitsCommanding, request, assigned)) return;
+            slots.Clear();
+            foreach (var (_, position) in assigned) slots.Add(new FormationSlot { Position = position });
             previewMarkers.Show(slots, request.Center, request.Forward, request.Hold);
         }
 
@@ -331,9 +325,11 @@ namespace PalaceMod
 
             var spawner = EnemySpawner.instance;
             if (spawner == null) return false;
-            for (int w = spawner.Wavenumber; w <= spawner.Wavenumber + 1; w++)
+            // By day the counter still points at last night's wave; the coming one is next.
+            bool night = DayNightCycle.Instance != null && DayNightCycle.Instance.CurrentTimestate != DayNightCycle.Timestate.Day;
+            int w = night ? spawner.Wavenumber : spawner.Wavenumber + 1;
+            if (w >= 0 && w < spawner.waves.Count)
             {
-                if (w < 0 || w >= spawner.waves.Count) continue;
                 foreach (var spawn in spawner.waves[w].spawns)
                 {
                     var line = spawn.spawnLine;
@@ -374,11 +370,31 @@ namespace PalaceMod
         private static readonly List<int> rowSlots = [];
         private static readonly List<PathfindMovementPlayerunit> rowUnits = [];
 
+        private static readonly List<(PathfindMovementPlayerunit unit, Vector3 position)> assigned = [];
+
         private void Arrange(CommandUnits cu, List<PathfindMovementPlayerunit> units, PlacementRequest request)
         {
-            if (units.Count == 0) return;
             // Normal at the king is the game's own placement.
             if (request.Formation == FormationType.Normal && !request.HasCenter) return;
+            if (!Assign(cu, units, request, assigned)) return;
+            bool day = DayNightCycle.Instance != null && DayNightCycle.Instance.CurrentTimestate == DayNightCycle.Timestate.Day;
+            foreach (var (unit, position) in assigned)
+            {
+                unit.HomePosition = position;
+                // Matches the game: during the day placed units appear at their spot instead of walking there.
+                if (day)
+                {
+                    unit.transform.position = position;
+                    unit.ClearCurrentPath();
+                }
+            }
+        }
+
+        /// <summary>Works out where each unit stands (snapped to that unit's navmesh); shared by placement and preview.</summary>
+        private bool Assign(CommandUnits cu, List<PathfindMovementPlayerunit> units, PlacementRequest request, List<(PathfindMovementPlayerunit, Vector3)> result)
+        {
+            result.Clear();
+            if (units.Count == 0) return false;
 
             Vector3 center = request.HasCenter ? request.Center : cu.transform.position;
             Vector3 forward = request.Forward.sqrMagnitude > 1e-6f ? request.Forward : Facing(cu, center, awayFromKing: false);
@@ -405,7 +421,6 @@ namespace PalaceMod
                 return a < 0f ? a + 2f * Mathf.PI : a;
             }
 
-            bool day = DayNightCycle.Instance != null && DayNightCycle.Instance.CurrentTimestate == DayNightCycle.Timestate.Day;
             int next = 0;
             for (int start = 0; start < slots.Count;)
             {
@@ -417,27 +432,17 @@ namespace PalaceMod
                 rowUnits.Clear();
                 for (int i = start; i < end; i++) rowUnits.Add(byPriority[next++]);
                 rowUnits.Sort((a, b) => Key(a.transform.position).CompareTo(Key(b.transform.position)));
-                for (int i = 0; i < rowUnits.Count; i++) SetHome(rowUnits[i], slots[rowSlots[i]].Position, day);
+                for (int i = 0; i < rowUnits.Count; i++)
+                    result.Add((rowUnits[i], rowUnits[i].GetNearestGroundPosition(slots[rowSlots[i]].Position)));
                 start = end;
             }
+            return true;
         }
 
         private static bool IsMeleeOnly(PathfindMovementPlayerunit unit)
         {
             var tags = unit.GetComponent<TaggedObject>()?.Tags;
             return tags != null && tags.Contains(TagManager.ETag.MeeleFighter) && !tags.Contains(TagManager.ETag.RangedFighter);
-        }
-
-        private static void SetHome(PathfindMovementPlayerunit unit, Vector3 position, bool day)
-        {
-            position = unit.GetNearestGroundPosition(position);
-            unit.HomePosition = position;
-            // Matches the game: during the day placed units appear at their spot instead of walking there.
-            if (day)
-            {
-                unit.transform.position = position;
-                unit.ClearCurrentPath();
-            }
         }
 
         [HarmonyPatch(typeof(CommandUnits), nameof(CommandUnits.PlaceCommandedUnitsAndCalculateTargetPositions))]
