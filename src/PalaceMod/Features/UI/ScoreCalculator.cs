@@ -68,7 +68,7 @@ namespace PalaceMod
         public static int CurrentScore => ScoreManager.Instance != null ? ScoreManager.Instance.CurrentScore : 0;
 
         /// <summary>1-based number of the night in progress (at night) or the next night (by day); waves total.</summary>
-        public static int NightNumber => EnemySpawner.instance == null ? 0 : EnemySpawner.instance.Wavenumber + (IsNight ? 1 : 2);
+        public static int NightNumber => EnemySpawner.instance == null ? 0 : Mathf.Min(EnemySpawner.instance.Wavenumber + (IsNight ? 1 : 2), EnemySpawner.instance.WaveCount);
         public static int NightCount => EnemySpawner.instance == null ? 0 : EnemySpawner.instance.WaveCount;
 
         /// <summary>True during the last night of the level: surviving it wins.</summary>

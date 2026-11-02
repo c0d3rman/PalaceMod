@@ -43,7 +43,31 @@ namespace PalaceMod
             RegisterDevCommands();
         }
 
-        public override void Update() => ScoreCalculator.EnsureRecording();
+        private CanvasGroup pauseGroup;
+        private PerkSelectionTooltipHelper nativeTooltip;
+        private static readonly Vector3[] cornersA = new Vector3[4], cornersB = new Vector3[4];
+
+        public override void Update()
+        {
+            ScoreCalculator.EnsureRecording();
+            if (pausePanel != null && pausePanel.activeInHierarchy) AvoidNativeTooltip();
+        }
+
+        /// <summary>The pause menu's own selection tooltip (enemies, units, loadout) can open over the top-right corner; step aside while it's there.</summary>
+        private void AvoidNativeTooltip()
+        {
+            bool overlaps = false;
+            var bg = nativeTooltip != null ? nativeTooltip.background : null;
+            if (bg != null && bg.isActiveAndEnabled && (nativeTooltip.tooltipParent == null || nativeTooltip.tooltipParent.activeInHierarchy))
+            {
+                bg.rectTransform.GetWorldCorners(cornersA);
+                ((RectTransform)pausePanel.transform).GetWorldCorners(cornersB);
+                overlaps = cornersA[0].x < cornersB[2].x && cornersB[0].x < cornersA[2].x && cornersA[0].y < cornersB[2].y && cornersB[0].y < cornersA[2].y;
+            }
+            float target = overlaps ? 0f : 1f;
+            pauseGroup.alpha = Mathf.MoveTowards(pauseGroup.alpha, target, Time.unscaledDeltaTime * 8f);
+            if (overlaps) ScoreTooltip.Hide();
+        }
 
         protected override void OnFeatureDisabled()
         {
@@ -151,15 +175,16 @@ namespace PalaceMod
             var rect = (RectTransform)pausePanel.transform;
             rect.SetParent(helper.transform, false);
             rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(1f, 1f);
-            rect.anchoredPosition = new Vector2(-60f, -50f);
-            rect.sizeDelta = new Vector2(420f, 300f);
+            rect.anchoredPosition = new Vector2(-45f, -30f); // the dawn score panel's corner
             var layout = pausePanel.AddComponent<VerticalLayoutGroup>();
             layout.childAlignment = TextAnchor.UpperRight;
             layout.childControlWidth = layout.childControlHeight = true;
             layout.childForceExpandWidth = layout.childForceExpandHeight = false;
             layout.spacing = 6f;
             var fitter = pausePanel.AddComponent<ContentSizeFitter>();
-            fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            fitter.horizontalFit = fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            pauseGroup = pausePanel.AddComponent<CanvasGroup>();
+            nativeTooltip = helper.GetComponent<PerkSelectionTooltipHelper>();
 
             pauseHeader = CloneLabel(helper.nightPreviewText, pausePanel.transform, "Score", 1f);
             pauseNightLabel = CloneLabel(helper.nightPreviewText, pausePanel.transform, "Night label", 0.75f);
@@ -209,15 +234,17 @@ namespace PalaceMod
             endPanel = new GameObject("PalaceMod Final Night", typeof(RectTransform));
             var rect = (RectTransform)endPanel.transform;
             rect.SetParent(helper.mainFrameParent.transform, false);
-            rect.anchorMin = rect.anchorMax = new Vector2(0f, 1f);
+            // Left of the 600-wide centre column, level with the score list.
+            rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 1f);
             rect.pivot = new Vector2(1f, 1f);
-            rect.anchoredPosition = new Vector2(-40f, 0f);
-            rect.sizeDelta = new Vector2(420f, 300f);
+            rect.anchoredPosition = new Vector2(-340f, -330f);
             var layout = endPanel.AddComponent<VerticalLayoutGroup>();
             layout.childAlignment = TextAnchor.UpperRight;
             layout.childControlWidth = layout.childControlHeight = true;
             layout.childForceExpandWidth = layout.childForceExpandHeight = false;
             layout.spacing = 6f;
+            var endFitter = endPanel.AddComponent<ContentSizeFitter>();
+            endFitter.horizontalFit = endFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
             var label = CloneLabel(helper.baseScoreName, endPanel.transform, "Label", 1f);
             label.text = $"{Term("Menu/Night", "Night")} {last.Night}";
@@ -301,6 +328,7 @@ namespace PalaceMod
                     timeLabel = Find<TextMeshProUGUI>(ui.timeText),
                     baseLabel = Find<TextMeshProUGUI>(ui.nightSurviveText),
                 };
+                if (p.timeLabel != null) p.timeLabel.name = "Time Text";
 
                 // Undo the pop-up animation's start state: every row scaled to zero and the content collapsed.
                 foreach (var rt in new[] { ui.nightSurviveText, ui.nightSurviveNumber, ui.timeText, ui.timeNumber, ui.protectionText,
@@ -309,8 +337,16 @@ namespace PalaceMod
                     var c = Find<RectTransform>(rt);
                     if (c != null) c.localScale = Vector3.one;
                 }
+                // The panel stretches over the HUD with its content pinned 45 px into the top-right corner; pin it to our
+                // corner instead and size the root to the content plus the total bubble hanging below it.
                 var content = Find<RectTransform>(ui.content);
-                if (content != null) content.sizeDelta = new Vector2(content.sizeDelta.x, ExpandedContentHeight);
+                float width = 560f;
+                if (content != null)
+                {
+                    content.sizeDelta = new Vector2(content.sizeDelta.x, ExpandedContentHeight);
+                    content.anchoredPosition = Vector2.zero;
+                    width = content.sizeDelta.x;
+                }
                 var bg = Find<MPUIKIT.MPImage>(ui.backgroundImage);
                 if (bg != null) bg.enabled = true;
 
@@ -323,9 +359,10 @@ namespace PalaceMod
                 }
 
                 var element = root.GetComponent<LayoutElement>() ?? root.AddComponent<LayoutElement>();
-                var rootRect = (RectTransform)root.transform;
-                element.preferredWidth = rootRect.sizeDelta.x;
-                element.preferredHeight = Mathf.Max(rootRect.sizeDelta.y, ExpandedContentHeight + 70f);
+                var bubble = Find<RectTransform>(ui.overallScoreBG);
+                float below = bubble != null ? -bubble.anchoredPosition.y + bubble.sizeDelta.y : 70f;
+                element.preferredWidth = width;
+                element.preferredHeight = ExpandedContentHeight + below;
                 root.SetActive(true);
                 return p;
             }
@@ -417,13 +454,29 @@ namespace PalaceMod
             private static void Create(Transform canvas, TextMeshProUGUI style)
             {
                 if (shown != null) Object.Destroy(shown);
-                shown = new GameObject("PalaceMod Score Tooltip", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
-                shown.transform.SetParent(canvas, false);
-                var image = shown.GetComponent<Image>();
-                image.color = new Color(0.102f, 0.110f, 0.114f, 0.96f); // the game's panel charcoal
-                image.raycastTarget = false;
+                // The dawn score panel's rounded charcoal background, without its children.
+                var source = NightscoreUI.instance != null ? NightscoreUI.instance.backgroundImage : null;
+                if (source != null)
+                {
+                    shown = Object.Instantiate(source.gameObject, canvas, false);
+                    foreach (Transform child in shown.transform) Object.Destroy(child.gameObject);
+                    source = shown.GetComponent<MPUIKIT.MPImage>();
+                    source.raycastTarget = false;
+                    source.enabled = true;
+                }
+                else
+                {
+                    shown = new GameObject("bg", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                    shown.transform.SetParent(canvas, false);
+                    var image = shown.GetComponent<Image>();
+                    image.color = new Color(0.102f, 0.110f, 0.114f); // the game's panel charcoal
+                    image.raycastTarget = false;
+                }
+                shown.name = "PalaceMod Score Tooltip";
+                var shownRect = (RectTransform)shown.transform;
+                shownRect.anchorMin = shownRect.anchorMax = new Vector2(0.5f, 0.5f);
                 var layout = shown.AddComponent<VerticalLayoutGroup>();
-                layout.padding = new RectOffset(18, 18, 12, 12);
+                layout.padding = new RectOffset(22, 22, 14, 14);
                 layout.childControlWidth = layout.childControlHeight = true;
                 var fitter = shown.AddComponent<ContentSizeFitter>();
                 fitter.horizontalFit = fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
@@ -432,7 +485,8 @@ namespace PalaceMod
                 textObj.transform.SetParent(shown.transform, false);
                 shownText = textObj.GetComponent<TextMeshProUGUI>();
                 shownText.font = TMP_Settings.defaultFontAsset;
-                var body = Resources.Load<TMP_FontAsset>("fonts & materials/CormorantGaramond-SemiBold SDF");
+                var body = Resources.Load<TMP_FontAsset>("fonts & materials/CormorantGaramond-Light SDF");
+                body ??= Array.Find(Resources.FindObjectsOfTypeAll<TMP_FontAsset>(), f => f.name == "CormorantGaramond-Light SDF");
                 if (body != null) shownText.font = body;
                 shownText.fontSize = 24f;
                 shownText.color = style != null ? style.color : new Color(0.784f, 0.651f, 0.455f);
@@ -447,7 +501,7 @@ namespace PalaceMod
 
         private void RegisterDevCommands()
         {
-            DevCommands.Register("score", "score [wave <n>|killall|dump <pause|nightscore|end>|shownight|hover <score|time|protection|base|footer>]   score numbers and test helpers", args =>
+            DevCommands.Register("score", "score [wave <n>|mutator|killall|dump <pause|nightscore|end>|shownight|hover <score|time|protection|base|footer>]   score numbers and test helpers", args =>
             {
                 string sub = args.Length > 0 ? args[0].ToLowerInvariant() : "";
                 switch (sub)
@@ -464,6 +518,16 @@ namespace PalaceMod
                         AccessTools.Field(typeof(EnemySpawner), "wavenumber").SetValue(EnemySpawner.instance, n - 2);
                         GameplayImpact.Mark("Dev: skipped nights");
                         return $"next night is {n}/{count}";
+                    }
+                    case "mutator":
+                    {
+                        // Equips one more mutator (score multiplier only; its gameplay effect isn't applied mid-match).
+                        var equipped = PerkManager.instance.CurrentlyEquipped;
+                        var m = Array.Find(Resources.FindObjectsOfTypeAll<EquippableMutation>(), x => !equipped.Contains(x))
+                            ?? throw new InvalidOperationException("no unequipped mutator loaded");
+                        equipped.Add(m);
+                        GameplayImpact.Mark("Dev: added mutator");
+                        return $"equipped {m.displayName} (x{m.scoreMultiplyerOnWin})";
                     }
                     case "killall":
                         Hp.KillAllEnemyUnits();
@@ -511,6 +575,12 @@ namespace PalaceMod
             foreach (var n in ScoreCalculator.Nights)
                 sb.Append($"\nnight {n.Night}: base {n.Base} time {n.Time} ({n.SecondsAfterSpawning:0.0}s) protection {n.Protection} ({n.ProtectionPercent}%) = {n.Total}");
             sb.Append($"\nmutators x{ScoreCalculator.MutatorMultiplier():0.###}, no-retry x{ScoreCalculator.NoRetryMultiplier():0.###}");
+            if (!ScoreCalculator.IsNight)
+            {
+                var v = ScoreCalculator.Victory(ScoreCalculator.CurrentScore);
+                sb.Append($"\nvictory with current score and gold: score {v.Score} gold {v.Gold} mutators {v.Mutators} noretry {v.NoRetry} = {v.Total}");
+                if (SceneTransitionManager.instance != null) sb.Append($"; game's last end screen total {SceneTransitionManager.instance.TotalScoreFromLastMatch}");
+            }
             return sb.ToString();
         }
 
