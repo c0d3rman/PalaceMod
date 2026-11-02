@@ -451,6 +451,30 @@ namespace PalaceMod
         public TFUITextButton Button(string label, Action onClick, string tooltip = null) =>
             Row(label, null, tooltip, onClick).Button;
 
+        /// <summary>
+        /// A row whose value is changed with left/right (keyboard, controller) or by clicking the game's arrows
+        /// either side of the value (mouse). <paramref name="step"/> gets -1 or +1; the value is re-read after each
+        /// step. <paramref name="onClick"/> (optional) runs on apply, e.g. to act on the chosen value.
+        /// </summary>
+        public ModRow Stepper(string label, Func<string> value, Action<int> step, Action onClick = null, string tooltip = null, Sprite icon = null)
+        {
+            var row = Row(label, value(), tooltip, onClick, icon);
+            void Step(int delta)
+            {
+                try { step(delta); }
+                catch (Exception e) { Plugin.Logger.LogError($"Stepper \"{label}\" failed: {e}"); }
+                // A step may rebuild the page (Refresh), destroying this row.
+                if (row.Button != null) row.SetValue(value());
+            }
+            row.Button.onEmptyNavigate.AddListener(direction =>
+            {
+                if (direction == ThronefallUIElement.NavigationDirection.Left) Step(-1);
+                else if (direction == ThronefallUIElement.NavigationDirection.Right) Step(1);
+            });
+            row.AddArrows(() => Step(-1), () => Step(1));
+            return row;
+        }
+
         /// <summary>An empty full-width area of the given height for custom drawing (graphs, grids). Not selectable;
         /// add your own ThronefallUIElements under it only if you also wire their navigation.</summary>
         public RectTransform Custom(string name, float height)
@@ -475,6 +499,49 @@ namespace PalaceMod
     {
         public TFUITextButton Button { get; }
         private readonly TextMeshProUGUI value;
+
+        // Clickable arrows either side of the value, cloned from the pause menu's Night selector.
+        internal void AddArrows(Action decrease, Action increase)
+        {
+            var (left, right) = GameWidgets.Arrows;
+            if (left == null || right == null || value == null) return; // keyboard and controller still work
+            const float arrowSpace = 34f;
+            value.rectTransform.offsetMax = new Vector2(-arrowSpace, 0f);
+            var increaseButton = Arrow(right, increase, "Increase");
+            var increaseRect = (RectTransform)increaseButton.transform;
+            increaseRect.anchorMin = increaseRect.anchorMax = new Vector2(1f, 0.5f);
+            increaseRect.anchoredPosition = new Vector2(-arrowSpace / 2f + increaseRect.rect.width * (increaseRect.pivot.x - 0.5f), 0f);
+            var decreaseButton = Arrow(left, decrease, "Decrease");
+            var follower = decreaseButton.gameObject.AddComponent<ArrowFollower>();
+            follower.Value = value;
+        }
+
+        private TFUIEnumSelectorButton Arrow(TFUIEnumSelectorButton source, Action onClick, string name)
+        {
+            var arrow = GameWidgets.Clone(source, Button.transform, name).GetComponent<TFUIEnumSelectorButton>();
+            // Clicking an arrow acts on it without moving the selection off the row.
+            arrow.cannotBeSelected = true;
+            arrow.onApply.AddListener(() => onClick());
+            arrow.gameObject.SetActive(true);
+            return arrow;
+        }
+
+        // Keeps the decrease arrow just left of the value's visible text, whatever its length.
+        private class ArrowFollower : MonoBehaviour
+        {
+            public TextMeshProUGUI Value;
+
+            private void LateUpdate()
+            {
+                if (Value == null) return;
+                var bounds = Value.textBounds;
+                if (bounds.size.x <= 0f) return;
+                var rect = (RectTransform)transform;
+                var parent = (RectTransform)rect.parent;
+                var left = parent.InverseTransformPoint(Value.rectTransform.TransformPoint(new Vector3(bounds.min.x, bounds.center.y, 0f)));
+                rect.localPosition = new Vector3(left.x - 18f + rect.rect.width * (rect.pivot.x - 0.5f), left.y, 0f);
+            }
+        }
 
         internal ModRow(TFUITextButton button, TextMeshProUGUI value)
         {
