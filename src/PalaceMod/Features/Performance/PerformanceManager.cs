@@ -95,21 +95,21 @@ namespace PalaceMod
                 "Pace frames with the mod's own precise timer instead of VSync and Unity's frame limiter, which both " +
                 "oversleep by several frames on macOS and make the game stutter. Auto: on for macOS.");
             maxFrameRate = config.Bind(FrameRateSection, "Max frame rate", 0, new ConfigDescription(
-                "Frame rate cap while playing. 0 matches the display's refresh rate.", new AcceptableValueRange<int>(0, 240)));
+                "Frame rate cap while playing. 0 matches the display's refresh rate.", new AcceptableValueRange<int>(0, 240), new SettingTags { ZeroLabel = "Display", Unit = " fps", Step = 5 }));
             raiseRefreshRate = config.Bind(FrameRateSection, "Raise refresh rate (Hz)", 120, new ConfigDescription(
                 "macOS: while the game runs, switch the display to the highest refresh rate up to this, e.g. 120 on a " +
                 "ProMotion screen set to 60 Hz. macOS restores your setting when the game quits. 0 leaves it alone. " +
-                "Takes effect at launch.", new AcceptableValueList<int>(0, 90, 100, 120, 144)));
+                "Takes effect at launch.", new AcceptableValueList<int>(0, 90, 100, 120, 144), new SettingTags { ZeroLabel = "Off", Unit = " Hz" }));
             menuFrameRate = config.Bind(FrameRateSection, "Menu frame rate", 60, new ConfigDescription(
-                "Frame rate cap on the main menu and while paused. 0 for no extra cap.", new AcceptableValueRange<int>(0, 240)));
+                "Frame rate cap on the main menu and while paused. 0 for no extra cap.", new AcceptableValueRange<int>(0, 240), new SettingTags { ZeroLabel = "Off", Unit = " fps", Step = 5 }));
             lockToDisplay = config.Bind(FrameRateSection, "Lock to display refresh", true,
                 "Start each frame just after a display refresh so frames don't drift across refreshes, which looks like judder.");
 
             backgroundFrameRate = config.Bind(BatterySection, "Background frame rate", 15, new ConfigDescription(
                 "Frame rate cap while the game window isn't focused (if the game keeps running in the background). " +
-                "0 for no extra cap.", new AcceptableValueRange<int>(0, 240)));
+                "0 for no extra cap.", new AcceptableValueRange<int>(0, 240), new SettingTags { ZeroLabel = "Off", Unit = " fps", Step = 5 }));
             batteryFrameRate = config.Bind(BatterySection, "Battery frame rate", 60, new ConfigDescription(
-                "Frame rate cap while on battery power or in Low Power Mode. 0 for no extra cap.", new AcceptableValueRange<int>(0, 240)));
+                "Frame rate cap while on battery power or in Low Power Mode. 0 for no extra cap.", new AcceptableValueRange<int>(0, 240), new SettingTags { ZeroLabel = "Off", Unit = " fps", Step = 5 }));
             saveCpuOnBattery = config.Bind(BatterySection, "Save CPU on battery", true,
                 "On battery, sleep instead of busy-waiting for the exact frame time. Uses much less CPU; frame timing gets slightly less precise.");
             coolDownWhenHot = config.Bind(BatterySection, "Cool down when hot", true,
@@ -117,15 +117,15 @@ namespace PalaceMod
 
             idleFrameRate = config.Bind(BatterySection, "Idle frame rate", 30, new ConfigDescription(
                 "Frame rate cap when there's been no input for a while, outside of night battles. 0 for no extra cap.",
-                new AcceptableValueRange<int>(0, 240)));
+                new AcceptableValueRange<int>(0, 240), new SettingTags { ZeroLabel = "Off", Unit = " fps", Step = 5 }));
             idleAfterSeconds = config.Bind(BatterySection, "Idle after (s)", 60, new ConfigDescription(
-                "Seconds without keyboard, mouse or controller input before the idle frame rate applies.", new AcceptableValueRange<int>(5, 600)));
+                "Seconds without keyboard, mouse or controller input before the idle frame rate applies.", new AcceptableValueRange<int>(5, 600), new SettingTags { Unit = " s", Step = 5 }));
 
             heapReserveMb = config.Bind(MemorySection, "Minimum heap size (MB)", 512, new ConfigDescription(
                 "Grow the managed heap to at least this size at startup so it doesn't have to expand (and stall) during play. " +
-                "0 disables. Takes effect at launch.", new AcceptableValueRange<int>(0, 2048)));
+                "0 disables. Takes effect at launch.", new AcceptableValueRange<int>(0, 2048), new SettingTags { ZeroLabel = "Off", Unit = " MB", Step = 64 }));
             gcTimeSliceMs = config.Bind(MemorySection, "Incremental GC time slice (ms)", 0f, new ConfigDescription(
-                "Per-frame budget for the incremental garbage collector. 0 keeps the game's default (3 ms).", new AcceptableValueRange<float>(0f, 10f)));
+                "Per-frame budget for the incremental garbage collector. 0 keeps the game's default (3 ms).", new AcceptableValueRange<float>(0f, 10f), new SettingTags { ZeroLabel = "Default", Unit = " ms", Step = 0.5f }));
 
             collectWhenPaused = config.Bind(MemorySection, "Collect garbage when paused", true,
                 "Run a garbage collection when the game is paused or a menu opens, where the pause can't be felt, so " +
@@ -134,27 +134,27 @@ namespace PalaceMod
             spikeLogging = config.Bind(DiagnosticsSection, "Log frame spikes", true,
                 "Write frame-time spikes and a periodic frame-time summary to the BepInEx log. Takes effect at launch.");
             spikeThresholdMs = config.Bind(DiagnosticsSection, "Spike threshold (ms)", 25f, new ConfigDescription(
-                "A frame counts as a spike when it takes longer than this...", new AcceptableValueRange<float>(5f, 200f)));
+                "A frame counts as a spike when it takes longer than this...", new AcceptableValueRange<float>(5f, 200f), new SettingTags { Unit = " ms", Step = 5 }));
             spikeRatio = config.Bind(DiagnosticsSection, "Spike ratio", 2f, new ConfigDescription(
-                "...and longer than this multiple of the recent average frame time.", new AcceptableValueRange<float>(1f, 10f)));
+                "...and longer than this multiple of the recent average frame time.", new AcceptableValueRange<float>(1f, 10f), new SettingTags { Unit = "x", Step = 0.25f }));
             summaryIntervalSeconds = config.Bind(DiagnosticsSection, "Summary interval (s)", 60f, new ConfigDescription(
-                "How often to log the frame-time summary.", new AcceptableValueRange<float>(5f, 600f)));
+                "How often to log the frame-time summary.", new AcceptableValueRange<float>(5f, 600f), new SettingTags { Unit = " s", Step = 5 }));
 
             latencyCritical = config.Bind(AdvancedSection, "Latency-critical mode", Toggle.Auto,
                 "Ask macOS to treat the game as latency-critical while it's focused, which disables App Nap and timer " +
                 "coalescing so waits don't overshoot. Auto: on for macOS.");
             maxSpinMs = config.Bind(AdvancedSection, "Max busy-wait (ms)", 4f, new ConfigDescription(
                 "Longest the frame pacer busy-waits before each frame for exact timing. It adapts to how precisely this Mac " +
-                "wakes from sleep and only spins as long as needed.", new AcceptableValueRange<float>(0f, 8f)));
+                "wakes from sleep and only spins as long as needed.", new AcceptableValueRange<float>(0f, 8f), new SettingTags { ZeroLabel = "Off", Unit = " ms", Step = 0.5f }));
             vSync = config.Bind(AdvancedSection, "VSync override", VSyncMode.GameDefault,
                 "Override the game's VSync setting. Ignored while precise frame pacing is on.");
             targetFrameRate = config.Bind(AdvancedSection, "Unity frame limiter", 0, new ConfigDescription(
                 "Unity's own frame cap when VSync is off. 0 keeps the game's setting, -1 is uncapped. Ignored while precise " +
-                "frame pacing is on.", new AcceptableValueRange<int>(-1, 240)));
+                "frame pacing is on.", new AcceptableValueRange<int>(-1, 240), new SettingTags { ZeroLabel = "Game default", Unit = " fps", Step = 5 }));
             renderScale = config.Bind(AdvancedSection, "Render scale override", 0f, new ConfigDescription(
-                "Resolution multiplier for 3D rendering (UI stays sharp). 0 keeps the game's setting.", new AcceptableValueRange<float>(0f, 2f)));
+                "Resolution multiplier for 3D rendering (UI stays sharp). 0 keeps the game's setting.", new AcceptableValueRange<float>(0f, 2f), new SettingTags { ZeroLabel = "Game default", Unit = "x", Step = 0.05f }));
             msaa = config.Bind(AdvancedSection, "MSAA override", 0, new ConfigDescription(
-                "Anti-aliasing samples. 0 keeps the game's setting.", new AcceptableValueList<int>(0, 1, 2, 4, 8)));
+                "Anti-aliasing samples. 0 keeps the game's setting.", new AcceptableValueList<int>(0, 1, 2, 4, 8), new SettingTags { ZeroLabel = "Game default", Unit = "x" }));
             pathfindingThreads = config.Bind(AdvancedSection, "Pathfinding threads", PathfindingThreads.GameDefault,
                 "Threads A* uses to compute paths, applied when a level loads.");
 

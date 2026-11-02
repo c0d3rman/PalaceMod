@@ -361,7 +361,34 @@ def install(game, configuration):
 
 # --- Launch / verify --------------------------------------------------------
 
-def launch(game, timeout, fullscreen):
+GAME_BUNDLE = "com.grizzlygames.thronefall"
+
+
+def frontmost_bundle():
+    """Bundle ID of the frontmost app, via lsappinfo (needs no Accessibility permission)."""
+    asn = subprocess.run(["lsappinfo", "front"], capture_output=True, text=True).stdout.strip()
+    info = subprocess.run(["lsappinfo", "info", "-only", "bundleid", asn], capture_output=True, text=True).stdout
+    for line in info.splitlines():
+        line = line.strip()
+        if line.startswith('bundleID="'):
+            return line[len('bundleID="'):].rstrip('"')
+    return None
+
+
+class FocusKeeper:
+    """Hands focus back to the app that was in front whenever the game grabs it during startup."""
+
+    def __init__(self, enabled):
+        self.previous = frontmost_bundle() if enabled else None
+        if self.previous == GAME_BUNDLE:
+            self.previous = None
+
+    def check(self):
+        if self.previous and frontmost_bundle() == GAME_BUNDLE:
+            subprocess.run(["open", "-b", self.previous], capture_output=True)
+
+
+def launch(game, timeout, fullscreen, keep_focus=True):
     require_stopped()
     if fullscreen:
         restore_display()
@@ -382,15 +409,19 @@ def launch(game, timeout, fullscreen):
         subprocess.Popen(command, cwd=game, stdout=handle, stderr=subprocess.STDOUT,
                          stdin=subprocess.DEVNULL, start_new_session=True, env=env)
     claim_game()
+    focus = FocusKeeper(keep_focus and not fullscreen)
     arch = "natively" if is_native(game) else "under Rosetta"
     print(f"Launching Thronefall {arch} ({'fullscreen' if fullscreen else 'windowed'})...", flush=True)
     deadline = started + timeout
     while time.time() < deadline:
         time.sleep(1)
+        focus.check()
         if log.exists() and log.stat().st_mtime >= started:
             text = log.read_text(errors="replace")
             if "Chainloader startup complete" in text:
-                time.sleep(5)  # let managers run Start/Update before reporting
+                for _ in range(5):  # let managers run Start/Update before reporting
+                    time.sleep(1)
+                    focus.check()
                 report(game)
                 return
         if time.time() - started > 20 and not game_pids():
@@ -596,10 +627,16 @@ def main():
     parser.add_argument("--output", help="Screenshot: output PNG path")
     parser.add_argument("--force", action="store_true",
                         help="Run/stop: take over a game launched by another checkout")
+    parser.add_argument("--focus", action="store_true",
+                        help="Launch/run: let the game take focus (by default dev launches hand focus back to your app)")
+    parser.add_argument("--sound", action="store_true",
+                        help="Launch/run: keep the game's sound on (dev launches start muted)")
     parser.add_argument("--fullscreen", action="store_true",
                         help="Launch/run: use the player's display settings instead of windowed mode")
     args = parser.parse_args()
     game = game_root(args.game)
+    if args.sound:
+        os.environ["PALACEMOD_SOUND"] = "1"
     if args.command == "setup":
         setup(game)
     elif args.command == "build":
@@ -610,9 +647,9 @@ def main():
         build(args.configuration)
         stop(args.force)
         install(game, args.configuration)
-        launch(game, args.timeout, args.fullscreen)
+        launch(game, args.timeout, args.fullscreen, not args.focus)
     elif args.command == "launch":
-        launch(game, args.timeout, args.fullscreen)
+        launch(game, args.timeout, args.fullscreen, not args.focus)
     elif args.command == "stop":
         stop(args.force)
     elif args.command == "logs":

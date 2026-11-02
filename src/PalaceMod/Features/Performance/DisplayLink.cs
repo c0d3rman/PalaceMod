@@ -62,13 +62,10 @@ namespace PalaceMod
             long refresh = stopwatchNow - (long)((machNow - hostTime) * machToStopwatch);
             Interlocked.Exchange(ref lastRefresh, refresh);
 
-            double period = CVDisplayLinkGetActualOutputVideoRefreshPeriod(link);
-            if (period <= 0)
-            {
-                int scale = *(int*)((byte*)now + 4);
-                long refreshPeriod = *(long*)((byte*)now + 32);
-                period = scale > 0 ? (double)refreshPeriod / scale : 0;
-            }
+            // The nominal period from the timestamp is stable; the "actual" period is a jittery measurement.
+            int scale = *(int*)((byte*)now + 4);
+            long refreshPeriod = *(long*)((byte*)now + 32);
+            double period = scale > 0 && refreshPeriod > 0 ? (double)refreshPeriod / scale : CVDisplayLinkGetActualOutputVideoRefreshPeriod(link);
             if (period > 0) Interlocked.Exchange(ref periodTicks, (long)(period * Stopwatch.Frequency));
             return 0;
         }
