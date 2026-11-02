@@ -123,31 +123,52 @@ namespace PalaceMod
             });
             DevCommands.Register("upgv.units", "upgv.units             print the pause menu's unit list (name, count, stars, hover text)", _ =>
             {
-                var info = PlayerUnitsInfo.instance?.GetUnitsInfo() ?? throw new InvalidOperationException("not in a level");
+                if (PlayerInteraction.instance == null) throw new InvalidOperationException("not in a level");
+                // PlayerUnitsInfo lives on the pause frame and only registers once that has been opened.
+                var source = PlayerUnitsInfo.instance != null ? PlayerUnitsInfo.instance : Resources.FindObjectsOfTypeAll<PlayerUnitsInfo>().FirstOrDefault()
+                             ?? throw new InvalidOperationException("no PlayerUnitsInfo");
+                var info = source.GetUnitsInfo();
                 return string.Join("\n", info.Units.Select(u =>
                     $"{u.unitName} x{u.unitCount} stars={(infoBadges.TryGetValue(u, out var b) ? b.Stars : 0)} hp={u.maxHP}: {u.unitDescription.Replace("\n", " / ")}"));
             });
             DevCommands.Register("upgv.showtypes", "upgv.showtypes [off]   show the command-mode unit icons as if commanding (test helper)", args =>
             {
-                var command = CommandUnits.instance ?? throw new InvalidOperationException("not in a level");
-                bool on = !(args.Length > 0 && args[0] == "off");
-                command.commandingIndicator.SetActive(on);
-                return on ? "showing" : "hidden";
+                if (CommandUnits.instance == null) throw new InvalidOperationException("not in a level");
+                forceUnitTypes = !(args.Length > 0 && args[0] == "off");
+                return forceUnitTypes ? "showing" : "hidden";
             });
             DevCommands.Register("upgv.goto", "upgv.goto <slot>       teleport the king next to a build slot", args =>
             {
                 var slot = FindSlot(args.Length > 0 ? string.Join(" ", args) : throw new ArgumentException("slot name needed"));
                 var king = PlayerInteraction.instance ?? throw new InvalidOperationException("not in a level");
-                var target = slot.Interactor != null ? slot.Interactor.transform.position : slot.transform.position;
-                var dir = (king.transform.position - target); dir.y = 0;
-                if (dir.sqrMagnitude < 0.01f) dir = Vector3.back;
-                var pos = target + dir.normalized * 2.5f;
+                var collider = slot.Interactor != null ? slot.Interactor.GetComponent<Collider>() : null;
+                var target = collider != null ? collider.bounds.center : slot.transform.position;
+                // Of eight spots around the building, take one where it's the nearest interactor.
+                Vector3 pos = target + Vector3.back * 2.5f;
+                for (int i = 0; i < 8; i++)
+                {
+                    var dir = Quaternion.Euler(0f, i * 45f, 0f) * Vector3.back;
+                    var probe = target + dir * ((collider != null ? collider.bounds.extents.magnitude : 1.5f) + 0.8f);
+                    var nearest = Physics.OverlapSphere(probe, king.interactionRadius, king.interactorLayer)
+                        .Where(h => h.GetComponent<BuildingInteractor>() != null)
+                        .OrderBy(h => Vector3.Distance(probe, h.ClosestPoint(probe))).FirstOrDefault();
+                    if (nearest != null && nearest.GetComponent<BuildingInteractor>().targetBuilding == slot) { pos = probe; break; }
+                }
                 var mover = king.GetComponent<CharacterController>();
                 if (mover != null) mover.enabled = false;
                 king.transform.position = new Vector3(pos.x, king.transform.position.y, pos.z);
                 if (mover != null) mover.enabled = true;
                 return $"king at {king.transform.position}";
             });
+        }
+
+        // Dev only: show the command-mode unit icons without holding the command key.
+        private static bool forceUnitTypes;
+
+        [HarmonyLib.HarmonyPatch(typeof(CommandUnits), nameof(CommandUnits.ShouldShowUnitTypes), HarmonyLib.MethodType.Getter)]
+        private static class ForceUnitTypesPatch
+        {
+            private static void Postfix(ref bool __result) { if (forceUnitTypes) __result = true; }
         }
 
         private static BuildSlot FindSlot(string name)
