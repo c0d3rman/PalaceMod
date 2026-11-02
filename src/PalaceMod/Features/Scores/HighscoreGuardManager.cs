@@ -155,7 +155,7 @@ namespace PalaceMod
                 bool unranked = unrankedLevelData.Remove(__instance);
                 if (!unranked || !Feature<HighscoreGuardManager>.On || IsBuilderRecord(__instance)) return true;
                 if (__instance.highscore > __instance.highscoreBest || (_endOfMatch && __instance.beaten))
-                    Plugin.Logger.LogInfo($"Unranked run: not recording score {__instance.highscore} (best {__instance.highscoreBest}), beaten={__instance.beaten}");
+                    Log.For<HighscoreGuardManager>().Info($"Not recording score {__instance.highscore} (best {__instance.highscoreBest}), beaten={__instance.beaten}");
                 if (countWins.Value && __instance.beaten) __instance.beatenBest = true;
                 // The rest of what the original does: reset the current-run fields.
                 __instance.beaten = false;
@@ -223,10 +223,10 @@ namespace PalaceMod
             {
                 if (!Blocking)
                 {
-                    Plugin.Logger.LogInfo($"Ranked run: uploading {score} to leaderboard \"{leaderboardTableName}\"");
+                    Log.For<HighscoreGuardManager>().Info($"Ranked run: uploading {score} to leaderboard \"{leaderboardTableName}\"");
                     return true;
                 }
-                Plugin.Logger.LogInfo($"Unranked run: not uploading {score} to leaderboard \"{leaderboardTableName}\"");
+                Log.For<HighscoreGuardManager>().Info($"Not uploading {score} to leaderboard \"{leaderboardTableName}\"");
                 return false;
             }
         }
@@ -258,7 +258,7 @@ namespace PalaceMod
             {
                 eternalTrialsDefeatPending = false;
                 if (!Blocking || !InLevel || value <= __instance.EternalTrialsHighscore) return;
-                Plugin.Logger.LogInfo($"Unranked run: not recording Eternal Trials score {value}");
+                Log.For<HighscoreGuardManager>().Info($"Not recording Eternal Trials score {value}");
                 value = __instance.EternalTrialsHighscore;
             }
         }
@@ -269,7 +269,7 @@ namespace PalaceMod
             private static bool Prefix(AchievementManager.Achievements _achievement)
             {
                 if (!Blocking || !InLevel) return true;
-                Plugin.Logger.LogInfo($"Unranked run: holding back achievement {_achievement}");
+                Log.For<HighscoreGuardManager>().Info($"Holding back achievement {_achievement}");
                 return false;
             }
         }
@@ -304,7 +304,7 @@ namespace PalaceMod
                 }
                 catch (System.Exception e)
                 {
-                    Plugin.Logger.LogWarning($"Unranked Runs: couldn't build the badge: {e.Message}");
+                    Log.For<HighscoreGuardManager>().Warn($"Couldn't build the badge: {e.Message}");
                     return;
                 }
                 badges.Add(badge);

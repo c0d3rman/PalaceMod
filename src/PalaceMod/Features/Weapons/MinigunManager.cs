@@ -88,7 +88,7 @@ namespace PalaceMod
                 // After the last native weapon, so it sits at the end of the weapon row.
                 int index = pm.allEquippables.FindLastIndex(e => e is EquippableWeapon) + 1;
                 pm.allEquippables.Insert(index, minigun);
-                Plugin.Logger.LogInfo($"Minigun: added to the loadout at index {index}");
+                Log.For<MinigunManager>().Debug($"Added to the loadout at index {index}");
             }
         }
 
@@ -226,7 +226,7 @@ namespace PalaceMod
                     __instance.requiredWeapon = minigun;
                     var gun = MinigunGun.Install(__instance);
                     GameplayImpact.Mark("Minigun");
-                    Plugin.Logger.LogInfo($"Minigun: equipped ({gun.Describe()})");
+                    Log.For<MinigunManager>().Info($"Equipped ({gun.Describe()})");
                     if (!hintShown)
                     {
                         hintShown = true;
@@ -235,7 +235,7 @@ namespace PalaceMod
                 }
                 catch (Exception e)
                 {
-                    Plugin.Logger.LogError($"Minigun: couldn't set up the minigun: {e}");
+                    Log.For<MinigunManager>().Error($"Couldn't set up the minigun", e);
                 }
             }
         }

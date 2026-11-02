@@ -81,7 +81,7 @@ namespace PalaceMod
         private void Sync()
         {
             try { SyncButtons(); }
-            catch (Exception e) { Plugin.Logger.LogError($"Title menu: couldn't update the mod buttons: {e}"); }
+            catch (Exception e) { Log.For<TitleMenuManager>().Error($"Couldn't update the mod buttons", e); }
         }
 
         private void SyncButtons()
@@ -104,7 +104,7 @@ namespace PalaceMod
                     catch (Exception e)
                     {
                         failed.Add(b.Id);
-                        Plugin.Logger.LogError($"Title menu: couldn't add \"{b.Id}\": {e}");
+                        Log.For<TitleMenuManager>().Error($"Couldn't add \"{b.Id}\"", e);
                         continue;
                     }
                 }

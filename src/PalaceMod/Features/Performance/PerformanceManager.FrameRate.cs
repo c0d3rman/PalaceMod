@@ -161,7 +161,7 @@ namespace PalaceMod
             {
                 var watch = Stopwatch.StartNew();
                 GC.Collect();
-                Plugin.Logger.LogInfo($"Performance: collected garbage on pause in {watch.Elapsed.TotalMilliseconds:0.0} ms");
+                Log.For<PerformanceManager>().Debug($"Collected garbage on pause in {watch.Elapsed.TotalMilliseconds:0.0} ms");
             }
             wasInMenu = menu;
         }
@@ -184,13 +184,13 @@ namespace PalaceMod
                 if (!wanted) MacActivity.End();
                 else if (!MacActivity.Begin())
                 {
-                    Plugin.Logger.LogWarning("Performance: macOS refused latency-critical mode; turning it off");
+                    Log.For<PerformanceManager>().Warn("macOS refused latency-critical mode; turning it off");
                     latencyCritical.Value = Toggle.Off;
                 }
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogWarning($"Performance: couldn't change latency-critical mode: {e.Message}");
+                Log.For<PerformanceManager>().Warn($"Couldn't change latency-critical mode: {e.Message}");
                 latencyCritical.Value = Toggle.Off;
             }
         }

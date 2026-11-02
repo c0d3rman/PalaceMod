@@ -134,7 +134,7 @@ namespace PalaceMod
             catch (System.Exception e)
             {
                 failedAssets.Add(file);
-                Plugin.Logger.LogWarning($"UI: couldn't load {file}: {e.Message}");
+                Log.Core.Warn($"Couldn't load {file}: {e.Message}");
                 return null;
             }
         }

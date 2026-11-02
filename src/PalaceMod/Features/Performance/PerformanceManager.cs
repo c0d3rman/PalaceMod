@@ -79,7 +79,7 @@ namespace PalaceMod
             {
                 TryLog("display link", () => DisplayLink.Start() ? "running" : "unavailable");
                 PowerState.Refresh();
-                Plugin.Logger.LogInfo($"Performance: on battery {PowerState.OnBattery}, low power mode {PowerState.LowPowerMode}, thermal {PowerState.ThermalState}");
+                Log.For<PerformanceManager>().Debug($"On battery {PowerState.OnBattery}, low power mode {PowerState.LowPowerMode}, thermal {PowerState.ThermalState}");
             }
             AstarPath.OnAwakeSettings += ConfigurePathfinding;
             if (IsEnabled) ReserveHeap(heapReserveMb.Value);
@@ -90,7 +90,7 @@ namespace PalaceMod
             pacer.Install();
             if (IsEnabled && spikeLogging.Value) loopTimer.Install(); // after the pacer, so its wait shows up as its own entry
             lastGcCount = GC.CollectionCount(0);
-            Plugin.Logger.LogInfo($"Performance: GC incremental {GarbageCollector.isIncremental}, heap {Profiler.GetMonoHeapSizeLong() / 1048576} MB, " +
+            Log.For<PerformanceManager>().Debug($"GC incremental {GarbageCollector.isIncremental}, heap {Profiler.GetMonoHeapSizeLong() / 1048576} MB, " +
                 $"run in background {Application.runInBackground}, arch {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}");
         }
 
@@ -181,18 +181,19 @@ namespace PalaceMod
             if (old.Count == 0) return;
             foreach (var definition in old) orphans.Remove(definition);
             config.Save();
-            Plugin.Logger.LogInfo($"Performance: removed {old.Count} settings left over from an older version");
+            Log.For<PerformanceManager>().Info($"Removed {old.Count} settings left over from an older version");
         }
 
         private static void TryLog(string what, Func<string> action)
         {
             try
             {
-                Plugin.Logger.LogInfo($"Performance: {what} {action()}");
+                string result = action(); // always run it; only the log line depends on the level
+                Log.For<PerformanceManager>().Debug($"{what} {result}");
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogWarning($"Performance: {what} failed: {e.Message}");
+                Log.For<PerformanceManager>().Warn($"{what} failed: {e.Message}");
             }
         }
 
@@ -233,7 +234,7 @@ namespace PalaceMod
             {
                 astar.threadCount = (ThreadCount)Enum.Parse(typeof(ThreadCount), pathfindingThreads.Value.ToString());
             }
-            Plugin.Logger.LogInfo($"Performance: A* threads {original}{(astar.threadCount != original ? $" -> {astar.threadCount}" : "")}, " +
+            Log.For<PerformanceManager>().Debug($"A* threads {original}{(astar.threadCount != original ? $" -> {astar.threadCount}" : "")}, " +
                 $"max frame time {astar.maxFrameTime} ms, navmesh cut interval {astar.navmeshUpdates.updateInterval} s, graphs {astar.graphs?.Length ?? 0}");
         }
 
@@ -246,7 +247,7 @@ namespace PalaceMod
             var chunks = new List<byte[]>(missing);
             for (int i = 0; i < missing; i++) chunks.Add(new byte[1024 * 1024]);
             chunks.Clear();
-            Plugin.Logger.LogInfo($"Performance: grew managed heap {before / 1048576} MB -> {Profiler.GetMonoHeapSizeLong() / 1048576} MB");
+            Log.For<PerformanceManager>().Debug($"Grew managed heap {before / 1048576} MB -> {Profiler.GetMonoHeapSizeLong() / 1048576} MB");
         }
 
         private ulong gameGcTimeSlice;

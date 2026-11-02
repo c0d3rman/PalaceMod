@@ -168,7 +168,7 @@ namespace PalaceMod
         private void RegisterCommands()
         {
             DevCommands.Register("log",
-                "log [level <errors|warnings|info|debug> | debug <feature|*> [on|off] | names | bundle | throw [frames] | test]   logging settings and checks",
+                "log [level <errors|warnings|info|debug> | debug <feature|*> [on|off] | names | owner <Type>... | bundle | throw [frames] | test]   logging settings and checks",
                 args =>
                 {
                     string sub = args.Length > 0 ? args[0].ToLowerInvariant() : "";
@@ -191,6 +191,13 @@ namespace PalaceMod
                         }
                         case "names":
                             return string.Join(", ", Log.KnownNames);
+                        case "owner":
+                        {
+                            // Which feature an exception in these types' code would be logged under.
+                            var names = args.Skip(1).ToList();
+                            if (names.Count == 0) throw new ArgumentException("log owner <TypeName> [...]");
+                            return string.Join(", ", names.Select(n => Log.FindType(n) is { } t ? $"{n} -> {Log.Owner(t).Name}" : $"{n} -> ?"));
+                        }
                         case "bundle":
                             return CreateBundleAndNotify() ?? throw new InvalidOperationException("bundle failed; see the log");
                         case "throw":

@@ -113,7 +113,7 @@ namespace PalaceMod
             }
             try
             {
-                Plugin.Logger.LogInfo($"Retry earlier day: loading the dawn of day {state.NightNumber} ({state.Id})");
+                Log.For<RetryEarlierDayManager>().Info($"Loading the dawn of day {state.NightNumber} ({state.Id})");
                 SaveStates.Restore(state);
             }
             catch (InvalidOperationException e) { Notify.Show($"Can't retry: {e.Message}", NotifyKind.Warning, key: "retryearlierday"); }
@@ -212,7 +212,7 @@ namespace PalaceMod
                 var manager = Feature<RetryEarlierDayManager>.Instance;
                 if (manager == null) return;
                 try { manager.Sync(__instance); }
-                catch (Exception e) { Plugin.Logger.LogError($"Retry earlier day: couldn't update the retry popup: {e}"); }
+                catch (Exception e) { Log.For<RetryEarlierDayManager>().Error($"Couldn't update the retry popup", e); }
             }
         }
 

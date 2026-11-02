@@ -171,7 +171,7 @@ namespace PalaceMod
             arrivedPad = to;
             cooldownLeft = cooldown.Value;
             GameplayImpact.Mark("Teleporters");
-            Plugin.Logger.LogInfo($"Teleporters: jumped {pads.IndexOf(from) + 1} -> {pads.IndexOf(to) + 1}" + (moved > 0 ? $" with {moved} units" : ""));
+            Log.For<TeleporterManager>().Debug($"Jumped {pads.IndexOf(from) + 1} -> {pads.IndexOf(to) + 1}" + (moved > 0 ? $" with {moved} units" : ""));
         }
 
         // Followers keep their spot relative to the king, snapped to their navmesh, the way the game drops them in daytime.
@@ -248,7 +248,7 @@ namespace PalaceMod
             pad.Burst();
             pads.Add(pad);
             paid[pad] = paidFor;
-            Plugin.Logger.LogInfo($"Teleporters: placed #{pads.Count} at {at}");
+            Log.For<TeleporterManager>().Info($"Placed #{pads.Count} at {at}");
             return pad;
         }
 
@@ -337,7 +337,7 @@ namespace PalaceMod
             if (list.Count > 0)
             {
                 GameplayImpact.Mark("Teleporters");
-                Plugin.Logger.LogInfo($"Teleporters: restored {list.Count} from the match save");
+                Log.For<TeleporterManager>().Info($"Restored {list.Count} from the match save");
             }
         }
 

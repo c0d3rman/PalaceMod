@@ -70,7 +70,7 @@ namespace PalaceMod
             else
             {
                 try { v = value?.Invoke() ?? ""; }
-                catch (Exception e) { v = "?"; Plugin.Logger.LogWarning($"Field \"{Label}\": {e.Message}"); }
+                catch (Exception e) { v = "?"; Log.Core.Warn($"Field \"{Label}\": {e.Message}"); }
                 if (arrows && Selected) v = $"<color=#{ModStyle.Hex(ModStyle.Dim)}>‹</color>  {v}  <color=#{ModStyle.Hex(ModStyle.Dim)}>›</color>";
             }
             Row.SetValue(v);
@@ -124,7 +124,7 @@ namespace PalaceMod
                 };
                 if (sign == 0) return;
                 try { onStep(sign * repeat.Next()); }
-                catch (Exception e) { Plugin.Logger.LogError($"Field \"{label}\": step failed: {e}"); }
+                catch (Exception e) { Log.Core.Caught($"Field \"{label}\": step failed", e); }
                 field.Refresh();
             });
             field.Refresh();
@@ -250,7 +250,7 @@ namespace PalaceMod
             if (confirm)
             {
                 try { action?.Invoke(result); }
-                catch (Exception e) { Plugin.Logger.LogError($"Field \"{target.Label}\": commit failed: {e}"); }
+                catch (Exception e) { Log.Core.Caught($"Field \"{target.Label}\": commit failed", e); }
             }
             target.Refresh();
         }

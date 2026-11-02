@@ -36,7 +36,7 @@ namespace PalaceMod
             if (spike && spikesLoggedThisWindow < MaxSpikeLinesPerWindow)
             {
                 spikesLoggedThisWindow++;
-                Plugin.Logger.LogInfo($"Performance: spike {frameMs:0.0} ms (baseline {smoothedFrameMs:0.0} ms){(gcRan ? " during GC" : "")} " +
+                Log.For<PerformanceManager>().Debug($"Spike {frameMs:0.0} ms (baseline {smoothedFrameMs:0.0} ms){(gcRan ? " during GC" : "")} " +
                     $"in {SceneManager.GetActiveScene().name}, {DescribePhase()}, mono used {Profiler.GetMonoUsedSizeLong() / 1048576} MB; " +
                     $"slowest: {loopTimer.DescribeLastFrame()}");
             }
@@ -44,7 +44,7 @@ namespace PalaceMod
             if (Time.unscaledTime < nextSummary) return;
             if (stats.Frames > 0)
             {
-                Plugin.Logger.LogInfo($"Performance: {stats.Summarize()}, " +
+                Log.For<PerformanceManager>().Debug($"{stats.Summarize()}, " +
                     $"paced {(pacer.Enabled ? $"{pacer.TargetFps:0.#} fps ({FrameRateReason}){(pacer.LockedToDisplay ? " locked to display" : "")}, " +
                         $"spin margin {pacer.MarginMs:0.0} ms, latest start {pacer.WorstSleepMs:0.0} ms late, mistimed {pacer.MistimedFrames}/{pacer.Frames}" : $"off, vSync {QualitySettings.vSyncCount}, limiter {Application.targetFrameRate}")}, " +
                     $"display {DisplayRefreshRate():0.#} Hz, focused {Application.isFocused}, battery {PowerState.OnBattery}, " +
