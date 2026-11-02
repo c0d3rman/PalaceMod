@@ -1,257 +1,624 @@
-using UnityEngine;
 using System;
 using System.Collections.Generic;
-using HarmonyLib;
-using Rewired;
-using System.Reflection;
-using System.Reflection.Emit;
 using System.Linq;
+using BepInEx.Configuration;
+using HarmonyLib;
+using UnityEngine;
 
+/*
+    Unit placement: formations, dropping one unit at a time, and sending units to the mouse cursor.
+
+    The game places units in CommandUnits.PlaceCommandedUnitsAndCalculateTargetPositions: every commanded unit gets a
+    home position in a loose cluster around the king. This feature patches only that method:
+    - Prefix: for a "place N units" request, hides the other commanded units from the game's list for the duration of
+      the call (and re-hides their auto-attacks afterwards), and applies the Spacing setting.
+    - Postfix: overrides the home positions with the chosen formation, at the king or at a mouse-picked spot, and
+      optionally makes the placed units hold position.
+    Everything else (sounds, effects, the hold-position buffer, day-time teleport) stays the game's own.
+
+    Placements the mod starts (mouse, "place one", dev commands) go through Place(request); a plain Space-bar drop uses
+    the default request built from the settings.
+*/
 namespace PalaceMod
 {
+    public enum PlacementFacing
+    {
+        WalkingDirection,
+        Cursor,
+        NearestEnemies,
+    }
+
     public class FormationManager : BaseManager
     {
-        public override string FeatureSection => "Formations";
-        public override string FeatureDescription => "Lets you cycle unit formations (line, circle, dot, semicircle) and place commanded units one at a time.";
+        public override string FeatureSection => "Unit placement";
+        public override string FeatureDescription =>
+            "Formations and finer control over where your units go: change formation, drop one unit at a time, and right-click to send units to the cursor.";
 
-        private Keybind cycleFormationKey;
-        private Keybind placeOneUnitKey;
+        private ConfigEntry<FormationType> formation;
+        private ConfigEntry<float> spacing;
+        private ConfigEntry<PlacementFacing> facing;
+        private ConfigEntry<bool> mousePlacement, preview, hints;
+
+        private Keybind cycleKey, placeOneKey, mouseKey, holdKey;
+
+        /// <summary>One placement: which units, where, in what shape.</summary>
+        internal struct PlacementRequest
+        {
+            public FormationType Formation;
+            /// <summary>False: around the king, like the game.</summary>
+            public bool HasCenter;
+            public Vector3 Center;
+            /// <summary>Zero: from the Facing setting.</summary>
+            public Vector3 Forward;
+            /// <summary>Front-row width from a mouse drag; 0 = automatic.</summary>
+            public float Width;
+            /// <summary>Place at most this many of the commanded units; 0 = all.</summary>
+            public int MaxUnits;
+            public bool Hold;
+        }
+
+        private static PlacementRequest? pending;
+        private static readonly List<FormationSlot> slots = [];
 
         public override void Awake(Plugin plugin)
         {
             base.Awake(plugin);
-            cycleFormationKey = Keybinds.Register(FeatureSection, "cycle", "Cycle formation", new BepInEx.Configuration.KeyboardShortcut(KeyCode.F7),
-                "Switches the formation your commanded units are placed in.");
-            placeOneUnitKey = Keybinds.Register(FeatureSection, "place-one", "Place one unit", new BepInEx.Configuration.KeyboardShortcut(KeyCode.O),
-                "Places only the first of your commanded units; hold to make it hold position.");
+            var config = plugin.Config;
+            formation = config.Bind(FeatureSection, "Formation", FormationType.Normal, new ConfigDescription(
+                "How units line up when you place them. Normal is the game's own cluster; in the others melee units take the front."));
+            spacing = config.Bind(FeatureSection, "Spacing", 2f, new ConfigDescription(
+                "Distance between placed units. The game's default is 2.",
+                new AcceptableValueRange<float>(1f, 5f), new SettingTags { Step = 0.5f }));
+            facing = config.Bind(FeatureSection, "Facing", PlacementFacing.WalkingDirection, new ConfigDescription(
+                "Which way Line and Arc formations face: where the king walks, toward the mouse cursor, or toward the nearest enemies (or the next wave's spawn)."));
+            mousePlacement = config.Bind(FeatureSection, "Mouse placement", true, new ConfigDescription(
+                "While units follow you, right-click to send them to the cursor, or right-drag to draw a line for them. Hold the click, or Ctrl, to make them hold position."));
+            preview = config.Bind(FeatureSection, "Placement preview", true, new ConfigDescription(
+                "Shows markers on the ground where units will stand while you aim a mouse placement."));
+            hints = config.Bind(FeatureSection, "Hints", true, new ConfigDescription(
+                "Shows a short reminder of the placement keys the first time you lead units each session."));
+            preview.SettingChanged += (_, _) => { if (!preview.Value) previewMarkers.Hide(); };
+            mousePlacement.SettingChanged += (_, _) => { if (!mousePlacement.Value) CancelDrag(); };
+
+            cycleKey = Keybinds.Register(FeatureSection, "cycle", "Change formation", new KeyboardShortcut(KeyCode.F7),
+                "Switches to the next unit formation.");
+            placeOneKey = Keybinds.Register(FeatureSection, "place-one", "Place one unit", new KeyboardShortcut(KeyCode.O),
+                "Drops one of the units following you; hold to make it hold position.");
+            mouseKey = Keybinds.Register(FeatureSection, "mouse-place", "Place at cursor", new KeyboardShortcut(KeyCode.Mouse1),
+                "Sends the units following you to the cursor; drag to draw a line for them.");
+            holdKey = Keybinds.Register(FeatureSection, "mouse-hold", "Hold position (with cursor placement)", new KeyboardShortcut(KeyCode.LeftControl),
+                "Hold while placing at the cursor to make the units hold position.");
+
+            RegisterDevCommands();
         }
 
-        protected override void OnFeatureDisabled() => placeOnlyOneUnit = false;
-
-        public enum FormationType
+        protected override void OnFeatureDisabled()
         {
-            Normal,
-            Line,
-            Circle,
-            Dot,
-            Semicircle
+            CancelDrag();
+            placeOneActive = false;
         }
 
-        private FormationType currentFormation = FormationType.Normal;
+        public override void OnDestroy() => previewMarkers.Destroy();
 
-        // For press-and-hold tracking
-        private float timeSincePlaceOne = 0f;
-        private bool switchedToHold = false;
+        // ---- Input ------------------------------------------------------------------------------------------------
 
-        // Flag to indicate if we should place only one unit on next placement (used for PlaceCommandedUnitsAndCalculateTargetPositions)
-        public static bool placeOnlyOneUnit = false;
+        private bool wasLeading, hintShown;
+        private bool placeOneActive, placeOneHeld;
+        private float placeOneTime;
 
         public override void Update()
         {
-            if (CommandUnits.instance == null) return; // not in a level
+            var cu = CommandUnits.instance;
+            if (cu == null)
+            {
+                CancelDrag();
+                wasLeading = false;
+                return;
+            }
+            bool leading = cu.commanding && cu.PlayerUnitsCommanding.Count > 0;
+            if (leading && !wasLeading) OnStartLeading();
+            wasLeading = leading;
 
-            if (cycleFormationKey.Down)
-            {
-                CycleFormation();
-            }
+            if (cycleKey.Down) CycleFormation();
+            UpdatePlaceOne(cu, leading);
+            UpdateMouse(cu, leading);
+        }
 
-            // Place one unit key pressed
-            if (placeOneUnitKey.Down)
-            {
-                placeOnlyOneUnit = true;
-                CommandUnits.instance.PlaceCommandedUnitsAndCalculateTargetPositions(false);
-            }
-
-            // Place one unit key released
-            if (placeOneUnitKey.Up)
-            {
-                // Clear the buffer so press-and-holding O again doesn't cause the last unit to hold position
-                AccessTools.Field(typeof(CommandUnits), "playerUnitsCommandingBuffer").SetValue(CommandUnits.instance, new List<PathfindMovementPlayerunit>());
-            }
-
-            // Place one unit key held
-            if (placeOneUnitKey.Held)
-            {
-                timeSincePlaceOne += Time.deltaTime;
-                if (timeSincePlaceOne > CommandUnits.instance.holdToHoldPositionTime && !switchedToHold)
-                {
-                    switchedToHold = true;
-                    CommandUnits.instance.MakeUnitsInBufferHoldPosition();
-                }
-            }
-            else
-            {
-                timeSincePlaceOne = 0f;
-                switchedToHold = false;
-            }
+        private void OnStartLeading()
+        {
+            if (!hints.Value || hintShown) return;
+            hintShown = true;
+            var parts = new List<string>();
+            if (Bound(cycleKey)) parts.Add($"{KeyLabel(cycleKey)}: formation ({Words(formation.Value)})");
+            if (Bound(placeOneKey)) parts.Add($"{KeyLabel(placeOneKey)}: drop one unit");
+            if (mousePlacement.Value && Bound(mouseKey)) parts.Add($"{KeyLabel(mouseKey)}: send to cursor (drag for a line)");
+            if (parts.Count > 0) Notify.Show(string.Join("   ", parts), seconds: 7f, key: "placement-hint");
         }
 
         private void CycleFormation()
         {
-            currentFormation = (FormationType)(((int)currentFormation + 1) % Enum.GetValues(typeof(FormationType)).Length);
-            string formationName = Enum.GetName(typeof(FormationType), currentFormation);
-            Notify.Show($"Formation: {formationName}", key: "formation");
+            var values = (FormationType[])Enum.GetValues(typeof(FormationType));
+            formation.Value = values[(Array.IndexOf(values, formation.Value) + 1) % values.Length];
+            Notify.Show($"Formation: {Words(formation.Value)}", key: "formation");
         }
 
-        public void SetUnitPosition(PathfindMovementPlayerunit unit, Vector3 position)
+        private void UpdatePlaceOne(CommandUnits cu, bool leading)
         {
+            if (placeOneKey.Down && leading)
+            {
+                Place(new PlacementRequest { Formation = FormationType.Normal, MaxUnits = 1 });
+                placeOneActive = true;
+                placeOneHeld = false;
+                placeOneTime = 0f;
+            }
+            if (!placeOneActive) return;
+            if (!placeOneKey.Held)
+            {
+                placeOneActive = false;
+                return;
+            }
+            // Same long press as the game's own Command key: hold to make the dropped unit hold position.
+            placeOneTime += Time.deltaTime;
+            if (!placeOneHeld && placeOneTime > cu.holdToHoldPositionTime)
+            {
+                placeOneHeld = true;
+                cu.MakeUnitsInBufferHoldPosition();
+            }
+        }
+
+        // ---- Mouse placement --------------------------------------------------------------------------------------
+
+        private const float DragThreshold = 1.5f;
+
+        private readonly PlacementPreview previewMarkers = new();
+        private bool dragging, dragMoved;
+        private Vector3 dragStart;
+        private float dragStartTime;
+
+        // Dev-command stand-ins for the mouse, so placement can be driven without a real cursor.
+        private Vector2? devCursor;
+        private bool devPress, devHeld, devRelease;
+
+        private void UpdateMouse(CommandUnits cu, bool leading)
+        {
+            bool pressed = mouseKey.Down || devPress;
+            bool held = mouseKey.Held || devHeld;
+            bool released = mouseKey.Up || devRelease;
+            devPress = devRelease = false;
+
+            if (!mousePlacement.Value || !leading)
+            {
+                CancelDrag();
+                return;
+            }
+            if (pressed && !dragging && TryCursorWorld(out dragStart))
+            {
+                dragging = true;
+                dragMoved = false;
+                dragStartTime = Time.time;
+            }
+            if (!dragging) return;
+            if (!held && !released)
+            {
+                // Released while input was blocked (a menu opened): drop the placement.
+                CancelDrag();
+                return;
+            }
+
+            if (!TryCursorWorld(out var current)) current = dragStart;
+            var request = MouseRequest(cu, current);
+            if (released)
+            {
+                CancelDrag();
+                Place(request);
+                return;
+            }
+            if (preview.Value) ShowPreview(cu, request);
+        }
+
+        private PlacementRequest MouseRequest(CommandUnits cu, Vector3 current)
+        {
+            Vector3 chord = current - dragStart;
+            chord.y = 0f;
+            if (chord.magnitude >= DragThreshold) dragMoved = true;
+
+            bool hold = holdKey.Held || (!dragMoved && Time.time - dragStartTime >= cu.holdToHoldPositionTime);
+            if (!dragMoved)
+            {
+                return new PlacementRequest
+                {
+                    Formation = formation.Value,
+                    HasCenter = true,
+                    Center = dragStart,
+                    Forward = Facing(cu, dragStart, awayFromKing: true),
+                    Hold = hold,
+                };
+            }
+
+            // A drag draws the front of the formation: its middle, width and (perpendicular) facing.
+            Vector3 middle = (dragStart + current) / 2f;
+            Vector3 forward = Vector3.Cross(chord.normalized, Vector3.up);
+            if (Vector3.Dot(forward, Facing(cu, middle, awayFromKing: true)) < 0f) forward = -forward;
+            var shape = formation.Value is FormationType.Arc or FormationType.Circle ? formation.Value : FormationType.Line;
+            return new PlacementRequest
+            {
+                Formation = shape,
+                HasCenter = true,
+                Center = middle,
+                Forward = forward,
+                Width = chord.magnitude,
+                Hold = hold,
+            };
+        }
+
+        private void ShowPreview(CommandUnits cu, PlacementRequest request)
+        {
+            var units = cu.PlayerUnitsCommanding;
+            if (units.Count == 0) return;
+            FormationLayout.Compute(request.Formation, units.Count, request.Center, request.Forward, spacing.Value, request.Width, slots);
+            for (int i = 0; i < slots.Count; i++)
+            {
+                var slot = slots[i];
+                slot.Position = units[0].GetNearestGroundPosition(slot.Position);
+                slots[i] = slot;
+            }
+            previewMarkers.Show(slots, request.Center, request.Forward, request.Hold);
+        }
+
+        private void CancelDrag()
+        {
+            dragging = false;
+            previewMarkers.Hide();
+        }
+
+        /// <summary>The point on the ground under the mouse cursor.</summary>
+        private bool TryCursorWorld(out Vector3 point)
+        {
+            point = default;
+            var cam = Camera.main;
+            var cu = CommandUnits.instance;
+            if (cam == null || cu == null) return false;
+            Vector3 screen = devCursor.HasValue ? new Vector3(devCursor.Value.x * Screen.width, devCursor.Value.y * Screen.height) : Input.mousePosition;
+            var ray = cam.ScreenPointToRay(screen);
+            var units = cu.PlayerUnitsCommanding;
+            float height = cu.transform.position.y;
+            // Intersect a ground plane, snap to the navmesh, and repeat once at the snapped height for sloped ground.
+            for (int i = 0; i < 2; i++)
+            {
+                if (!new Plane(Vector3.up, new Vector3(0f, height, 0f)).Raycast(ray, out float distance)) return false;
+                point = ray.GetPoint(distance);
+                if (units.Count > 0) point = units[0].GetNearestGroundPosition(point);
+                height = point.y;
+            }
+            return true;
+        }
+
+        // ---- Facing -----------------------------------------------------------------------------------------------
+
+        private Vector3 Facing(CommandUnits cu, Vector3 center, bool awayFromKing)
+        {
+            Vector3 king = cu.transform.position;
+            switch (facing.Value)
+            {
+                case PlacementFacing.NearestEnemies when TryNearestThreat(center, out var threat):
+                    return Flat(threat - center);
+                case PlacementFacing.Cursor when !awayFromKing && TryCursorWorld(out var cursor) && Flat(cursor - center).magnitude > 1f:
+                    return Flat(cursor - center);
+            }
+            if (awayFromKing && Flat(center - king).magnitude > 1f) return Flat(center - king);
+            // CommandUnits sits on the king.
+            var player = cu.GetComponent<PlayerMovement>();
+            return player != null && player.meshParent != null ? Flat(player.meshParent.forward) : Vector3.forward;
+        }
+
+        private static Vector3 Flat(Vector3 v) => new(v.x, 0f, v.z);
+
+        /// <summary>The closest living enemy, or else the closest spawn point of the current or next wave.</summary>
+        private static bool TryNearestThreat(Vector3 from, out Vector3 threat)
+        {
+            threat = default;
+            float best = float.MaxValue;
+            if (TagManager.instance != null)
+            {
+                foreach (var enemy in TagManager.instance.EnemyUnits)
+                {
+                    if (enemy == null || enemy.Hp == null || !enemy.Hp.Alive) continue;
+                    float d = (enemy.transform.position - from).sqrMagnitude;
+                    if (d < best) (best, threat) = (d, enemy.transform.position);
+                }
+            }
+            if (best < float.MaxValue) return true;
+
+            var spawner = EnemySpawner.instance;
+            if (spawner == null) return false;
+            for (int w = spawner.Wavenumber; w <= spawner.Wavenumber + 1; w++)
+            {
+                if (w < 0 || w >= spawner.waves.Count) continue;
+                foreach (var spawn in spawner.waves[w].spawns)
+                {
+                    var line = spawn.spawnLine;
+                    if (line == null) continue;
+                    // Same spawn point the game marks on screen: the middle of the spawn line.
+                    Vector3 p = line.childCount > 0 ? (line.GetChild(0).position + line.GetChild(line.childCount - 1).position) / 2f : line.position;
+                    float d = (p - from).sqrMagnitude;
+                    if (d < best) (best, threat) = (d, p);
+                }
+            }
+            return best < float.MaxValue;
+        }
+
+        // ---- Placement --------------------------------------------------------------------------------------------
+
+        /// <summary>Places the commanded units as described; no-op if none are following the king.</summary>
+        internal void Place(PlacementRequest request)
+        {
+            var cu = CommandUnits.instance;
+            if (cu == null || !cu.commanding || cu.PlayerUnitsCommanding.Count == 0) return;
+            pending = request;
+            try
+            {
+                cu.PlaceCommandedUnitsAndCalculateTargetPositions(false);
+            }
+            finally
+            {
+                pending = null;
+            }
+            // The game only stops commanding when the Command key is released; a placement the mod made that emptied
+            // the group would otherwise swallow the next Command press.
+            if (cu.PlayerUnitsCommanding.Count == 0) cu.commanding = false;
+        }
+
+        private PlacementRequest DefaultRequest(CommandUnits cu) => new() { Formation = formation.Value };
+
+        private static readonly List<PathfindMovementPlayerunit> ordered = [];
+        private static readonly List<int> rowSlots = [];
+        private static readonly List<PathfindMovementPlayerunit> rowUnits = [];
+
+        private void Arrange(CommandUnits cu, List<PathfindMovementPlayerunit> units, PlacementRequest request)
+        {
+            if (units.Count == 0) return;
+            // Normal at the king is the game's own placement.
+            if (request.Formation == FormationType.Normal && !request.HasCenter) return;
+
+            Vector3 center = request.HasCenter ? request.Center : cu.transform.position;
+            Vector3 forward = request.Forward.sqrMagnitude > 1e-6f ? request.Forward : Facing(cu, center, awayFromKing: false);
+            forward = Flat(forward).normalized;
+            if (forward.sqrMagnitude < 1e-6f) forward = Vector3.forward;
+            Vector3 right = Vector3.Cross(Vector3.up, forward);
+            FormationLayout.Compute(request.Formation, units.Count, center, forward, spacing.Value, request.Width, slots);
+
+            // Melee units first, so they get the front rows (the outer ring of a circle).
+            ordered.Clear();
+            ordered.AddRange(units);
+            var melee = ordered.Select(IsMeleeOnly).ToList();
+            var indices = Enumerable.Range(0, ordered.Count).OrderBy(i => melee[i] ? 0 : 1).ThenBy(i => i).ToList();
+            var byPriority = indices.Select(i => ordered[i]).ToList();
+
+            // Within a row, match units to slots left-to-right (or by angle) so their paths don't cross.
+            bool ring = request.Formation == FormationType.Circle;
+            float Key(Vector3 p)
+            {
+                Vector3 d = p - center;
+                float x = Vector3.Dot(d, right);
+                if (!ring) return x;
+                float a = Mathf.Atan2(x, Vector3.Dot(d, forward));
+                return a < 0f ? a + 2f * Mathf.PI : a;
+            }
+
+            bool day = DayNightCycle.Instance != null && DayNightCycle.Instance.CurrentTimestate == DayNightCycle.Timestate.Day;
+            int next = 0;
+            for (int start = 0; start < slots.Count;)
+            {
+                int row = slots[start].Row, end = start;
+                while (end < slots.Count && slots[end].Row == row) end++;
+                rowSlots.Clear();
+                for (int i = start; i < end; i++) rowSlots.Add(i);
+                rowSlots.Sort((a, b) => slots[a].Order.CompareTo(slots[b].Order));
+                rowUnits.Clear();
+                for (int i = start; i < end; i++) rowUnits.Add(byPriority[next++]);
+                rowUnits.Sort((a, b) => Key(a.transform.position).CompareTo(Key(b.transform.position)));
+                for (int i = 0; i < rowUnits.Count; i++) SetHome(rowUnits[i], slots[rowSlots[i]].Position, day);
+                start = end;
+            }
+        }
+
+        private static bool IsMeleeOnly(PathfindMovementPlayerunit unit)
+        {
+            var tags = unit.GetComponent<TaggedObject>()?.Tags;
+            return tags != null && tags.Contains(TagManager.ETag.MeeleFighter) && !tags.Contains(TagManager.ETag.RangedFighter);
+        }
+
+        private static void SetHome(PathfindMovementPlayerunit unit, Vector3 position, bool day)
+        {
+            position = unit.GetNearestGroundPosition(position);
             unit.HomePosition = position;
-            if (DayNightCycle.Instance.CurrentTimestate == DayNightCycle.Timestate.Day)
+            // Matches the game: during the day placed units appear at their spot instead of walking there.
+            if (day)
             {
                 unit.transform.position = position;
+                unit.ClearCurrentPath();
             }
         }
 
-        // Helper function for the transpiler to call so we don't have to write IL code for it
-        public static void ModifyToBePlaced()
+        [HarmonyPatch(typeof(CommandUnits), nameof(CommandUnits.PlaceCommandedUnitsAndCalculateTargetPositions))]
+        private static class PlacePatch
         {
-            if (!placeOnlyOneUnit) return;
-
-            // Keep only the first unit
-            var toBePlacedField = AccessTools.Field(typeof(CommandUnits), "toBePlaced");
-            var toBePlaced = (List<PathfindMovementPlayerunit>)toBePlacedField.GetValue(CommandUnits.instance);
-            if (toBePlaced.Count > 0)
+            internal struct State
             {
-                toBePlaced = toBePlaced.Take(1).ToList();
-                toBePlacedField.SetValue(CommandUnits.instance, toBePlaced);
+                public bool Active;
+                public float VanillaSpacing;
+                public List<PathfindMovementPlayerunit> Held;
+                public List<AutoAttack> HeldAttacks;
             }
 
-            // Reset this flag for internals of CommandUnits
-            AccessTools.Field(typeof(CommandUnits), "commandUnitsButtonLast").SetValue(CommandUnits.instance, false);
+            private static void Prefix(CommandUnits __instance, List<PathfindMovementPlayerunit> ___playerUnitsCommanding,
+                List<AutoAttack> ___autoAttacksToEnable, out State __state)
+            {
+                __state = default;
+                var manager = Feature<FormationManager>.Instance;
+                if (manager == null || !__instance.commanding || ___playerUnitsCommanding.Count == 0) return;
+                __state.Active = true;
+                __state.VanillaSpacing = __instance.unitDistanceFromEachOther;
+                __instance.unitDistanceFromEachOther = manager.spacing.Value;
+
+                var request = pending ?? manager.DefaultRequest(__instance);
+                if (request.MaxUnits <= 0 || ___playerUnitsCommanding.Count <= request.MaxUnits) return;
+
+                // Hide the units that stay with the king, so the game places only the first MaxUnits.
+                __state.Held = ___playerUnitsCommanding.GetRange(request.MaxUnits, ___playerUnitsCommanding.Count - request.MaxUnits);
+                ___playerUnitsCommanding.RemoveRange(request.MaxUnits, __state.Held.Count);
+                // The game re-enables every pending auto-attack on placement; remember the held units' so they stay off.
+                __state.HeldAttacks = [];
+                foreach (var unit in __state.Held)
+                    foreach (var attack in unit.GetComponents<AutoAttack>())
+                        if (___autoAttacksToEnable.Contains(attack)) __state.HeldAttacks.Add(attack);
+            }
+
+            private static void Postfix(CommandUnits __instance, List<PathfindMovementPlayerunit> ___playerUnitsCommanding,
+                List<PathfindMovementPlayerunit> ___toBePlaced, List<AutoAttack> ___autoAttacksToEnable, State __state)
+            {
+                if (!__state.Active) return;
+                __instance.unitDistanceFromEachOther = __state.VanillaSpacing;
+                var manager = Feature<FormationManager>.Instance;
+                var request = pending ?? manager.DefaultRequest(__instance);
+
+                if (__state.Held != null)
+                {
+                    ___playerUnitsCommanding.AddRange(__state.Held);
+                    foreach (var attack in __state.HeldAttacks)
+                    {
+                        if (attack == null || ___autoAttacksToEnable.Contains(attack)) continue;
+                        attack.enabled = false;
+                        ___autoAttacksToEnable.Add(attack);
+                    }
+                }
+
+                manager.Arrange(__instance, ___toBePlaced, request);
+                if (request.Hold) __instance.MakeUnitsInBufferHoldPosition();
+            }
+
+            // Exceptions in the prefix must not leave units hidden from the game's list.
+            private static Exception Finalizer(Exception __exception, CommandUnits __instance, List<PathfindMovementPlayerunit> ___playerUnitsCommanding, State __state)
+            {
+                if (__exception != null && __state.Active)
+                {
+                    __instance.unitDistanceFromEachOther = __state.VanillaSpacing;
+                    if (__state.Held != null)
+                        foreach (var unit in __state.Held)
+                            if (!___playerUnitsCommanding.Contains(unit)) ___playerUnitsCommanding.Add(unit);
+                }
+                return __exception;
+            }
         }
 
-        [HarmonyPatch(typeof(CommandUnits), "PlaceCommandedUnitsAndCalculateTargetPositions")]
-        private class CommandUnits_PlaceCommandedUnits_Patch
+        // ---- Labels -----------------------------------------------------------------------------------------------
+
+        private static bool Bound(Keybind keybind) => keybind.Shortcut.MainKey != KeyCode.None;
+
+        private static string KeyLabel(Keybind keybind)
         {
-            static FormationManager Instance => Plugin.Instance.GetManager<FormationManager>();
-
-            // Transpiler that inserts a call to ModifyToBePlaced() after the foreach loop immediately after toBePlaced.Clear()
-            [HarmonyTranspiler]
-            private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+            var shortcut = keybind.Shortcut;
+            string Name(KeyCode key) => key switch
             {
-                var toBePlacedClearFound = false;
-                var codeInserted = false;
+                KeyCode.Mouse0 => "Left-click",
+                KeyCode.Mouse1 => "Right-click",
+                KeyCode.Mouse2 => "Middle-click",
+                KeyCode.LeftControl or KeyCode.RightControl => "Ctrl",
+                KeyCode.LeftShift or KeyCode.RightShift => "Shift",
+                KeyCode.LeftAlt or KeyCode.RightAlt => "Alt",
+                _ => key.ToString(),
+            };
+            return string.Join("+", shortcut.Modifiers.Select(Name).Append(Name(shortcut.MainKey)));
+        }
 
-                foreach (var instruction in instructions)
-                {
-                    // First continue until toBePlaced.Clear()
-                    if (!toBePlacedClearFound)
-                    {
-                        if (instruction.Calls(AccessTools.Method(typeof(List<PathfindMovementPlayerunit>), "Clear")))
-                        {
-                            toBePlacedClearFound = true;
-                        }
-                        yield return instruction;
-                        continue;
-                    }
+        private static string Words(Enum value) => value.ToString() switch
+        {
+            "WalkingDirection" => "Walking direction",
+            "NearestEnemies" => "Nearest enemies",
+            var s => s,
+        };
 
-                    // Then find the end of the foreach loop and insert our code
-                    if (!codeInserted && instruction.opcode == OpCodes.Endfinally)
-                    {
-                        yield return instruction;
+        // ---- Dev commands -----------------------------------------------------------------------------------------
 
-                        // Call FormationManager.ModifyToBePlaced()
-                        yield return new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(FormationManager), "ModifyToBePlaced"));
-                        codeInserted = true;
-                        continue;
-                    }
-
-                    yield return instruction;
-                }
-            }
-
-            // Postfix mostly handles placing units in formations
-            private static void Postfix(CommandUnits __instance, List<PathfindMovementPlayerunit> ___toBePlaced, float ___unitDistanceFromEachOther)
+        private void RegisterDevCommands()
+        {
+            DevCommands.Register("place-army", "place-army [n]         build unit buildings until there are n player units (default 10)", args =>
             {
-                // If we just placed one unit, don't do formations
-                if (placeOnlyOneUnit)
+                int want = args.Length > 0 ? int.Parse(args[0]) : 10;
+                RequireLevel();
+                int built = 0;
+                foreach (var respawner in UnityEngine.Object.FindObjectsOfType<UnitRespawnerForBuildings>(true))
                 {
-                    placeOnlyOneUnit = false;
-
-                    // Fix a glitch - if we placed the last unit, we should stop commanding
-                    var playerUnitsCommanding = (List<PathfindMovementPlayerunit>)AccessTools.Field(typeof(CommandUnits), "playerUnitsCommanding").GetValue(__instance);
-                    if (playerUnitsCommanding.Count == 0)
-                    {
-                        AccessTools.Field(typeof(CommandUnits), "commanding").SetValue(__instance, false);
-                    }
-                    return;
+                    if (TagManager.instance.PlayerUnits.Count >= want) break;
+                    var slot = respawner.myBuildSlot;
+                    if (slot == null || slot.Level > 0 || !slot.CanBeUpgraded) continue;
+                    slot.ActivateIgrnoringActivatorLevel();
+                    slot.TryToBuildOrUpgradeAndPay(null, _presentChoice: false);
+                    built++;
                 }
-
-                // If there are no units to place, don't do formations
-                if (___toBePlaced == null || ___toBePlaced.Count == 0) return;
-
-                // Handle formations
-                var player = PlayerManager.Instance.RegisteredPlayers[0];
-                float unitSpacing = ___unitDistanceFromEachOther;
-                Vector3 playerForward = player.meshParent.forward;
-
-                switch (Instance.currentFormation)
-                {
-                    case FormationType.Normal:
-                        return;
-                    case FormationType.Line:
-                        PlaceInLine(___toBePlaced, player, playerForward, unitSpacing);
-                        break;
-                    case FormationType.Circle:
-                        PlaceInCircle(___toBePlaced, player, unitSpacing);
-                        break;
-                    case FormationType.Dot:
-                        PlaceInDot(___toBePlaced, player);
-                        break;
-                    case FormationType.Semicircle:
-                        PlaceInSemicircle(___toBePlaced, player, playerForward, unitSpacing);
-                        break;
-                }
-            }
-
-            private static void PlaceInLine(List<PathfindMovementPlayerunit> units, PlayerMovement player, Vector3 playerForward, float spacing)
+                GameplayImpact.Mark("Dev: spawned units");
+                return $"built {built} buildings; {TagManager.instance.PlayerUnits.Count} player units";
+            });
+            DevCommands.Register("place-select", "place-select           make every player unit follow the king", _ =>
             {
-                float totalWidth = (units.Count - 1) * spacing;
-                Vector3 lineStart = player.transform.position - (playerForward * totalWidth / 2f);
-
-                for (int i = 0; i < units.Count; i++)
-                {
-                    Vector3 targetPos = lineStart + (playerForward * i * spacing);
-                    Instance.SetUnitPosition(units[i], targetPos);
-                }
-            }
-
-            private static void PlaceInCircle(List<PathfindMovementPlayerunit> units, PlayerMovement player, float spacing)
+                var cu = RequireLevel();
+                foreach (var unit in TagManager.instance.PlayerUnits.ToList()) cu.OnUnitAdd(unit, _smartCommand: false);
+                cu.commanding = cu.PlayerUnitsCommanding.Count > 0;
+                return $"{cu.PlayerUnitsCommanding.Count} units following";
+            });
+            DevCommands.Register("place-at", "place-at <dx> <dz> [hold]   place the following units at the king + (dx, dz), like a right-click", args =>
             {
-                float radius = spacing * 2f; // Make circle radius proportional to unit spacing
-                float angleStep = 360f / units.Count;
-
-                for (int i = 0; i < units.Count; i++)
+                var cu = RequireLevel();
+                if (args.Length < 2) throw new ArgumentException("usage: place-at <dx> <dz> [hold]");
+                Vector3 center = cu.transform.position + new Vector3(float.Parse(args[0]), 0f, float.Parse(args[1]));
+                Place(new PlacementRequest
                 {
-                    float angle = i * angleStep * Mathf.Deg2Rad;
-                    Vector3 offset = new Vector3(Mathf.Sin(angle) * radius, 0, Mathf.Cos(angle) * radius);
-                    Vector3 targetPos = player.transform.position + offset;
-                    Instance.SetUnitPosition(units[i], targetPos);
-                }
-            }
-
-            private static void PlaceInDot(List<PathfindMovementPlayerunit> units, PlayerMovement player)
+                    Formation = formation.Value, HasCenter = true, Center = center,
+                    Forward = Facing(cu, center, awayFromKing: true), Hold = args.Contains("hold"),
+                });
+                return Status(cu);
+            });
+            DevCommands.Register("place-key", "place-key [one] [hold]   drop the following units at the king like the Command key (one: just one)", args =>
             {
-                foreach (var unit in units)
+                var cu = RequireLevel();
+                if (args.Contains("one")) Place(new PlacementRequest { Formation = FormationType.Normal, MaxUnits = 1, Hold = args.Contains("hold") });
+                else
                 {
-                    Instance.SetUnitPosition(unit, player.transform.position);
+                    var request = DefaultRequest(cu);
+                    request.Hold = args.Contains("hold");
+                    Place(request);
                 }
-            }
-
-            private static void PlaceInSemicircle(List<PathfindMovementPlayerunit> units, PlayerMovement player, Vector3 playerForward, float spacing)
+                return Status(cu);
+            });
+            DevCommands.Register("place-mouse", "place-mouse press|move <x> <y> | release | off   drive cursor placement (x, y: 0-1 screen fractions)", args =>
             {
-                float radius = spacing * 2f;
-                float angleStep = 180f / (units.Count - 1); // 180 degrees for semicircle
-
-                for (int i = 0; i < units.Count; i++)
+                RequireLevel();
+                string action = args.Length > 0 ? args[0] : "";
+                if ((action == "press" || action == "move") && args.Length >= 3) devCursor = new Vector2(float.Parse(args[1]), float.Parse(args[2]));
+                switch (action)
                 {
-                    float angle = (-90f + (i * angleStep)) * Mathf.Deg2Rad; // Start from -90 degrees to center the semicircle
-                    Vector3 right = Vector3.Cross(playerForward, Vector3.up);
-                    Vector3 offset = playerForward * Mathf.Cos(angle) + right * Mathf.Sin(angle);
-                    Vector3 targetPos = player.transform.position + (offset * radius);
-                    Instance.SetUnitPosition(units[i], targetPos);
+                    case "press": devPress = devHeld = true; break;
+                    case "move": break;
+                    case "release": devHeld = false; devRelease = true; break;
+                    case "off": devCursor = null; devHeld = false; break;
+                    default: throw new ArgumentException("usage: place-mouse press|move <x> <y> | release | off");
                 }
-            }
+                return TryCursorWorld(out var p) ? $"cursor at ground {p}" : "cursor not over ground";
+            });
+            DevCommands.Register("place-status", "place-status           following units and every placed unit's home and hold state", _ => Status(RequireLevel()));
+        }
+
+        private static CommandUnits RequireLevel() =>
+            CommandUnits.instance != null && TagManager.instance != null ? CommandUnits.instance : throw new InvalidOperationException("not in a level");
+
+        private string Status(CommandUnits cu)
+        {
+            Vector3 king = cu.transform.position;
+            var lines = TagManager.instance.PlayerUnits
+                .Select(t => t.GetComponent<PathfindMovementPlayerunit>())
+                .Where(u => u != null && u.hp != null && u.hp.Alive)
+                .Select(u => $"  {u.name}: home {Flat(u.HomePosition - king)} from king{(u.FollowingPlayer ? ", following" : "")}{(u.HoldPosition ? ", holding" : "")}");
+            return $"formation {formation.Value}, {cu.PlayerUnitsCommanding.Count} following, commanding={cu.commanding}\n" + string.Join("\n", lines);
         }
     }
 }
