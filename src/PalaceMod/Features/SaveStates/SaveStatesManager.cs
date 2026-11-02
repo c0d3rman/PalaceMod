@@ -23,7 +23,7 @@ namespace PalaceMod
     {
         public override string FeatureSection => "Savestates";
         public override string FeatureDescription =>
-            "Save and load the whole game mid-level, for practice. Pause > Savestates lists them. Loading a state marks the run as modded.";
+            "Save and load the whole game mid-level, for practice. Pause > Savestates lists them. Loading a state makes the run unranked.";
 
         // The real-save guard must outlive the Enabled switch: turning savestates off after a load mustn't let the
         // practice run be saved. The other patches check IsEnabled themselves.
@@ -46,6 +46,7 @@ namespace PalaceMod
 
         private SaveStateBrowser browser;
         private string lastLevel;
+        private DayNightCycle lastCycle;
         private bool practiceRun, savesSkippedLogged;
         private float lastDefeatLoad = -100f;
 
@@ -55,8 +56,8 @@ namespace PalaceMod
             var config = plugin.Config;
             autoMode = config.Bind(FeatureSection, "Automatic states", AutoStateMode.Both, new ConfigDescription(
                 "When to save a state automatically: shortly after sunrise, right before the night starts, or both."));
-            autoHistory = config.Bind(FeatureSection, "Automatic history", 10, new ConfigDescription(
-                "How many automatic states to keep per level; older ones are deleted.", new AcceptableValueRange<int>(1, 30)));
+            autoHistory = config.Bind(FeatureSection, "Automatic history", 40, new ConfigDescription(
+                "How many automatic states (dawn and pre-night together) to keep per level; older ones are deleted. About 0.1 MB each.", new AcceptableValueRange<int>(1, 80)));
             confirmLoad = config.Bind(FeatureSection, "Confirm loads", true, new ConfigDescription(
                 "Ask before loading a state from the menu. The quick load key never asks; every load keeps an undo state."));
             loadOnDefeat = config.Bind(FeatureSection, "Load on defeat", false, new ConfigDescription(
@@ -79,7 +80,7 @@ namespace PalaceMod
 
             GameplayImpact.Reset += () =>
             {
-                if (practiceRun) Plugin.Logger.LogInfo("Savestates: new run; the game saves normally again");
+                if (practiceRun) Log.Info("New run; the game saves normally again");
                 practiceRun = savesSkippedLogged = false;
             };
 
@@ -98,6 +99,13 @@ namespace PalaceMod
             {
                 lastLevel = level;
                 if (SaveStates.Last != null && SaveStates.Last.Level != level) SaveStates.Last = null;
+            }
+            // Day 1 has no sunrise, so its dawn state is taken when a level starts fresh (not when a state loads).
+            var cycle = DayNightCycle.Instance;
+            if (cycle != lastCycle)
+            {
+                lastCycle = cycle;
+                if (cycle != null && !StateRestorer.Busy) Plugin.Instance.StartCoroutine(FirstDawnAfterDelay(cycle));
             }
             if (level == null) return;
             if (QuickSaveKey.Down) QuickSave();
@@ -122,7 +130,7 @@ namespace PalaceMod
             catch (InvalidOperationException e) { Notify.Show($"Can't save: {e.Message}", NotifyKind.Warning, key: "savestates"); }
             catch (Exception e)
             {
-                Plugin.Logger.LogError($"Savestates: quick save failed: {e}");
+                Log.Error($"Quick save failed", e);
                 Notify.Show("Quick save failed", NotifyKind.Error, key: "savestates");
             }
         }
@@ -150,17 +158,32 @@ namespace PalaceMod
             if (!wanted) return;
             if (!SaveStates.CanCapture(out string reason))
             {
-                Plugin.Logger.LogInfo($"Savestates: no {kind} state ({reason})");
+                Log.For<SaveStatesManager>().Debug($"No {kind} state ({reason})");
                 return;
             }
             try { SaveStates.Capture(null, kind); }
-            catch (Exception e) { Plugin.Logger.LogError($"Savestates: automatic {kind} state failed: {e}"); }
+            catch (Exception e) { Log.For<SaveStatesManager>().Error($"Automatic {kind} state failed", e); }
         }
 
         private static IEnumerator DawnAfterDelay()
         {
             // The game's own dawn save happens a few frames after sunrise; coins flying to the king count as banked.
             yield return new WaitForSeconds(1f);
+            TryAuto(SaveStateKind.AutoDawn);
+        }
+
+        private static IEnumerator FirstDawnAfterDelay(DayNightCycle cycle)
+        {
+            // Wait for the level to finish loading (the scene transition, then the game's match loader).
+            float deadline = Time.realtimeSinceStartup + 60f;
+            while (DayNightCycle.Instance == cycle && Time.realtimeSinceStartup < deadline &&
+                   (SceneTransitionManager.instance == null || SceneTransitionManager.instance.SceneTransitionIsRunning ||
+                    LocalMatchSaveLoad.CurrentlyLoadingMatch || LocalGamestate.Instance == null ||
+                    LocalGamestate.Instance.CurrentState != LocalGamestate.State.InMatch))
+                yield return null;
+            yield return new WaitForSeconds(1f);
+            if (DayNightCycle.Instance != cycle || StateRestorer.Busy || EnemySpawner.instance == null || EnemySpawner.instance.Wavenumber != -1 ||
+                cycle.CurrentTimestate != DayNightCycle.Timestate.Day) yield break;
             TryAuto(SaveStateKind.AutoDawn);
         }
 
@@ -196,7 +219,7 @@ namespace PalaceMod
                 if (!manager.savesSkippedLogged)
                 {
                     manager.savesSkippedLogged = true;
-                    Plugin.Logger.LogInfo("Savestates: a state was loaded this run, so the game's match save isn't written (Protect real save)");
+                    Log.For<SaveStatesManager>().Info("A state was loaded this run, so the game's match save isn't written (Protect real save)");
                 }
                 return false;
             }

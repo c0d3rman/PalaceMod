@@ -78,6 +78,8 @@ namespace PalaceMod.Builder
         public bool Flying, Large;
         /// <summary>Eternal Trials difficulty value (a balance hint), or 0 if unknown.</summary>
         public float Difficulty;
+        /// <summary>Player troops: names of the buildings that train it (BuildSlot.buildingName, e.g. "Archery Range").</summary>
+        public List<string> Buildings = [];
     }
 
     public sealed class CatalogWeapon
@@ -134,6 +136,12 @@ namespace PalaceMod.Builder
         GameObject Resolve(DesignPack context, string unitRef, out string error);
         /// <summary>Whether go is one of our templates (never activate or modify a template in place).</summary>
         bool IsTemplate(GameObject go);
+        /// <summary>
+        /// Applies a custom unit's overrides in place to an existing instance of its base unit that hasn't started yet
+        /// (e.g. a troop inside a building, on scene load). Weapons and materials are cloned once per unit design and
+        /// shared by every instance. Returns false and fills error if the ref isn't a custom unit or doesn't match.
+        /// </summary>
+        bool ApplyTo(GameObject instance, DesignPack context, string unitRef, out string error);
         /// <summary>Destroys all templates (they're rebuilt on demand). Call when packs change.</summary>
         void Clear();
     }
@@ -192,13 +200,42 @@ namespace PalaceMod.Builder
 
     // ---------------------------------------------------------------- WP5: assets
 
+    public enum AssetState
+    {
+        /// <summary>The ref isn't "asset:&lt;key&gt;", the key isn't in the pack, or the file doesn't exist.</summary>
+        Missing,
+        /// <summary>Downloading or decoding in the background; ask again later.</summary>
+        Loading,
+        Ready,
+        /// <summary>The file is malformed, too large or of the wrong type (see the message).</summary>
+        Failed,
+    }
+
     public interface IAssetProvider
     {
         /// <summary>Sprite for "asset:&lt;key&gt;" in pack, or null (callers then keep the base visuals).</summary>
         Sprite GetSprite(PackEntry pack, string assetRef);
+        /// <summary>WAV loads synchronously; OGG decodes in the background, so this is null until it's ready.</summary>
         AudioClip GetAudio(PackEntry pack, string assetRef);
-        /// <summary>Mesh plus material(s) to render it with, or null.</summary>
+        /// <summary>Mesh plus material(s) to render it with, or null. OBJ meshes come with no materials (an empty
+        /// array): the caller renders them with the unit's own material.</summary>
         (Mesh mesh, Material[] materials)? GetMesh(PackEntry pack, string assetRef);
+
+        // Added by WP5 (additive):
+        /// <summary>A PNG as a mipmapped, repeating texture (for skins), or null.</summary>
+        Texture2D GetTexture(PackEntry pack, string assetRef);
+        /// <summary>Whether an asset can be used, with a player-facing reason when it can't (for the editor).
+        /// <paramref name="use"/> is one of the AssetUse constants, or null for "any".</summary>
+        AssetState GetState(PackEntry pack, string assetRef, string use, out string message);
+        /// <summary>Starts downloads and background decodes for a pack's assets (also done automatically when
+        /// packs change and when a session starts).</summary>
+        void Prefetch(PackEntry pack);
+    }
+
+    /// <summary>What an asset is used as (IAssetProvider.GetState).</summary>
+    public static class AssetUse
+    {
+        public const string Sprite = "sprite", Texture = "texture", Audio = "audio", Mesh = "mesh";
     }
 
     // ---------------------------------------------------------------- WP6: sharing

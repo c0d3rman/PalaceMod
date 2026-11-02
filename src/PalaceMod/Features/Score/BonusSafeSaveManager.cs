@@ -201,7 +201,7 @@ namespace PalaceMod
             baselineBalance = SavedBalance() ?? PlayerInteraction.instance?.TrueBalance ?? 0;
             nextDiff = Time.unscaledTime + DiffInterval;
             if (baseline == null) MarkDirty("couldn't read the game state");
-            else Plugin.Logger.LogInfo($"Bonus-safe saves: tracking {sessionMap} from a clean start of day ({baseline.Count} saved values, {baselineBalance} gold)");
+            else Log.For<BonusSafeSaveManager>().Debug($"Tracking {sessionMap} from a clean start of day ({baseline.Count} saved values, {baselineBalance} gold)");
         }
 
         private static void MarkDirty(string reason)
@@ -210,7 +210,7 @@ namespace PalaceMod
             sessionClean = false;
             pendingBaseline = false;
             dirtyReason = reason;
-            Plugin.Logger.LogInfo($"Bonus-safe saves: {sessionMap} is no longer bonus-safe: {reason}");
+            Log.For<BonusSafeSaveManager>().Info($"{sessionMap} is no longer bonus-safe: {reason}");
             if (sessionMap != null && memoryMap == sessionMap && memoryHash != null)
                 WriteEntry(sessionMap, memoryHash, false, reason);
         }
@@ -233,7 +233,7 @@ namespace PalaceMod
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogWarning($"Bonus-safe saves: reading the game state failed: {e.Message}");
+                Log.For<BonusSafeSaveManager>().Warn($"Reading the game state failed: {e.Message}");
                 return null;
             }
             finally
@@ -307,7 +307,7 @@ namespace PalaceMod
                     dirtyReason = null;
                     pendingBaseline = false;
                     TakeBaseline();
-                    Plugin.Logger.LogInfo($"Bonus-safe saves: day {EnemySpawner.instance?.Wavenumber + 2} of {map} saved; bonus-safe until something changes");
+                    Log.For<BonusSafeSaveManager>().Debug($"Day {EnemySpawner.instance?.Wavenumber + 2} of {map} saved; bonus-safe until something changes");
                 }
                 else
                 {
@@ -347,7 +347,7 @@ namespace PalaceMod
                 {
                     loadOutcome = entry == null || entry.hash != memoryHash ? "lost (no bonus-safe record for this save)" : $"lost ({entry.reason ?? "not bonus-safe"})";
                 }
-                Plugin.Logger.LogInfo($"Bonus-safe saves: loaded {map}; no-restart bonus {loadOutcome}");
+                Log.For<BonusSafeSaveManager>().Info($"Loaded {map}; no-restart bonus {loadOutcome}");
             }
         }
 
@@ -454,7 +454,7 @@ namespace PalaceMod
             }
             catch (InvalidOperationException e)
             {
-                Plugin.Logger.LogWarning($"Bonus-safe saves: can't show the pause hint: {e.Message}");
+                Log.For<BonusSafeSaveManager>().Warn($"Can't show the pause hint: {e.Message}");
                 return;
             }
             hintObject = hintText.gameObject;
@@ -508,7 +508,7 @@ namespace PalaceMod
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogWarning($"Bonus-safe saves: couldn't read {SidecarFileName}, treating every save as not bonus-safe: {e.Message}");
+                Log.For<BonusSafeSaveManager>().Warn($"Couldn't read {SidecarFileName}, treating every save as not bonus-safe: {e.Message}");
             }
             return new Sidecar();
         }
@@ -531,7 +531,7 @@ namespace PalaceMod
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogWarning($"Bonus-safe saves: couldn't write {SidecarFileName}: {e.Message}");
+                Log.For<BonusSafeSaveManager>().Warn($"Couldn't write {SidecarFileName}: {e.Message}");
             }
         }
 
@@ -565,7 +565,7 @@ namespace PalaceMod
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogWarning($"Bonus-safe saves: couldn't read the save for {map}: {e.Message}");
+                Log.For<BonusSafeSaveManager>().Warn($"Couldn't read the save for {map}: {e.Message}");
                 return null;
             }
         }

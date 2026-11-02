@@ -9,6 +9,7 @@ python3 scripts/dev.py doctor        # check the environment; fix anything marke
 python3 scripts/dev.py setup         # once per checkout/worktree: restores tools, copies game DLLs into lib/
 python3 scripts/dev.py run           # build -> stop game -> install -> launch -> wait for BepInEx -> print errors
 python3 scripts/dev.py logs --errors # unique errors with stack traces from the current game session
+python3 scripts/dev.py logs --feature Savestates --level warn  # one feature's lines at a level or worse
 python3 scripts/dev.py screenshot    # in-game frame capture (works while unfocused); prints the PNG path
 python3 scripts/dev.py stop          # quit your game and release your pool instance (or the --real lease)
 python3 scripts/dev.py cmd "<command>"  # drive a dev launch: load levels, start nights, fake input, open/navigate menus
@@ -18,7 +19,7 @@ python3 scripts/dev.py land --body-file pr.md  # merge origin/main, push, open a
 
 Dev launches are windowed, muted (`--sound` to keep audio) and hand focus back to the app that was in front (`--focus` lets the game keep it). Don't launch `--fullscreen` unless you need to: it switches the user to a new Space.
 
-A feature is not done until `run` reports `PalaceMod loaded: yes` and no PalaceMod errors. The one expected error is `HookGenPatcher ... Could not load file or assembly 'MonoMod'`, which comes from a BepInEx patcher and is harmless.
+A feature is not done until `run` reports `PalaceMod loaded: yes` and no PalaceMod errors. (`run` looks for the line `PalaceMod startup complete v<version>`, which `Plugin.Awake` logs once every manager has started; don't change its text.) The one expected error is `HookGenPatcher ... Could not load file or assembly 'MonoMod'`, which comes from a BepInEx patcher and is harmless.
 
 Always finish with `dev.py stop`, so the game isn't left running and others can use the instance.
 
@@ -47,7 +48,7 @@ python3 scripts/dev.py land --body-file /path/to/pr-body.md [--title "Short titl
 
 - `libdoorstop.dylib` is x86\_64-only, so the game has to run under Rosetta. `launch` does this itself, and `setup` patches the game's `run_bepinex.sh` so Steam launches use Rosetta too.
 - `dev.py native on` (experimental) switches to Doorstop 4.6's universal dylib plus `PalaceMod.Bootstrap`, which makes MonoMod work under Apple Silicon W^X so the game runs natively; `native off` goes back to Rosetta. The bootstrap writes its status to `BepInEx/PalaceMod.Bootstrap.log`.
-- `setup` also adds GC tuning to `run_bepinex.sh` (`GC_FREE_SPACE_DIVISOR`, `GC_INITIAL_HEAP_SIZE`) and per-collection timings in `BepInEx/gc-stats.log`. `PerformanceManager` logs frame spikes and a frame-time summary to the BepInEx log.
+- `setup` also adds GC tuning to `run_bepinex.sh` (`GC_FREE_SPACE_DIVISOR`, `GC_INITIAL_HEAP_SIZE`) and per-collection timings in `BepInEx/gc-stats.log`. `PerformanceManager` logs frame spikes and a frame-time summary to the BepInEx log at Debug level (`dev.py cmd "log debug Performance"`).
 - Steam must be running. `launch` starts it if it isn't.
 - Dev launches set `PALACEMOD_DEV=1`, which turns on `Core/DevToolsManager.cs`: the game keeps running in the background and screenshots are taken on request. Dev launches are windowed unless you pass `--fullscreen`.
 - Every `--real` launch first backs up save files and preferences to `~/Documents/Misc/Thronefall Backup/PalaceMod dev/backups/saves/`, keeping the last 30.
@@ -65,23 +66,24 @@ python3 scripts/dev.py cmd settings          # open Settings on the Mods tab
 python3 scripts/dev.py cmd "ui down"         # navigate the open menu like a controller (up/down/left/right/apply/close)
 ```
 
-Then check the result with `dev.py logs` (log what features do with `Plugin.Logger.LogInfo`) and `dev.py screenshot`. `PerformanceManager` logs a frame-time summary (fps, percentiles, CPU work per frame, frame-rate cap and reason) every "Summary interval"; settings edited in `BepInEx/config/PalaceMod.cfg` are reloaded live within 2 s. Only ask the user to test what genuinely needs a human, like how motion looks.
+Then check the result with `dev.py logs` (see Logging) and `dev.py screenshot`. With Performance debug logging on (`dev.py cmd "log debug Performance"`), `PerformanceManager` logs a frame-time summary (fps, percentiles, CPU work per frame, frame-rate cap and reason) every "Summary interval"; settings edited in `BepInEx/config/PalaceMod.cfg` are reloaded live within 2 s. Only ask the user to test what genuinely needs a human, like how motion looks.
 
 ## Adding a feature
 
 - A feature is one `BaseManager` subclass in its own file under `src/PalaceMod/Features/<Area>/`. It's found automatically; never edit `Plugin.cs`. Harmony patch classes go nested inside the manager, and only those are applied. Managers in `Experimental/` (namespace `PalaceMod.Experimental`) are never loaded.
 - Override `FeatureSection` (its settings section, e.g. `"Formations"`) and `FeatureDescription`. That adds a `<Section>.Enabled` switch as the first row of its page in Settings > Mods. While the feature is disabled, `Update` isn't called and its patches are removed. `Awake` and `Start` always run. Undo anything visible in `OnFeatureDisabled()`; the hooks fire live when the setting changes. To keep patches applied, override `UnpatchWhenDisabled => false` and early-out with `if (!Feature<MyManager>.On) return;`. Use `Feature<T>.Instance` to reach a manager from static code. Infrastructure managers leave `FeatureSection` null.
 - Settings: bind `ConfigEntry`s in the feature's own section in `Awake`. Give every entry a real description, shown beside the selected row. Use bool, enum or `AcceptableValueList`, or `AcceptableValueRange` for sliders. Add a `SettingTags` for units, a label for 0, a slider step, or `Hidden`. A page shows 7 rows including `Enabled`; a longer section is split into pages, so keep it to 6 settings if you can.
-- Keys: `Keybinds.Register(FeatureSection, "id", "Display name", new KeyboardShortcut(KeyCode.X), "What it does")` returns a `Keybind`; poll `.Down`, `.Held` or `.Up`. These are inert while the feature is disabled, a menu is open (unless `KeybindFlags.AllowInMenus`), or a text field has focus. Never read raw `Input.GetKey` for a feature key.
+- Renaming a setting or section: a rename changes the config key, so the saved value would reset to the default. Add the old and new name to `Core/ConfigMigrations.cs` (`Sections` or `Keys`; `Defaults` for a changed default). It runs at startup before anything binds and moves the saved value to the new name, keybinds included.
+- Keys: `Keybinds.Register(FeatureSection, "id", "Display name", new KeyboardShortcut(KeyCode.X), "What it does")` returns a `Keybind`; poll `.Down`, `.Held` or `.Up`. These are inert while the feature is disabled, a menu is open (unless `KeybindFlags.AllowInMenus`), or a text field has focus. Never read raw `Input.GetKey` for a feature key. A key that only acts on one screen or in one mode passes `context:` (e.g. `KeybindContext.LoadoutScreen`, or any string); the Controls screen then only flags conflicts between keys that can act at the same time.
 - Messages to the player: `Notify.Show(text, kind, seconds, key)`. A message with the same `key` replaces the previous one. It shows as a small panel in the game's style at the top centre; `kind` only tints its emblem.
 - Menus, pause-menu buttons and tooltips: use the UI kit (below), never `new GameObject` + `AddComponent` UI or GameObject-path lookups.
 - If the feature changes gameplay (cheats, undo, save states, beyond-vanilla options), call `GameplayImpact.Mark("Reason")` when the player uses it. It resets on a fresh run.
 - Test hooks: `DevCommands.Register("name", "name <args>   what it does", args => "result")` in `Awake`. Throw to report a failure. `dev.py cmd features` shows each manager's enabled state and patch count, and `dev.py cmd impact` shows the run's gameplay impact.
-- Logging: `Plugin.Logger.LogInfo`, which `dev.py logs` shows. `LogError` is for real bugs; `run` reports them.
+- Logging: `Log.Info(...)` in a manager, `Log.For<MyManager>().Info(...)` elsewhere; see Logging below. Never `Plugin.Logger` directly.
 
 ## UI kit (src/PalaceMod/Core/UI)
 
-Everything is cloned from the game's own widgets (found through its UI scripts' fields, not GameObject paths) and carries PalaceMod's mark: a small verdigris diamond, and a thin verdigris edge on panels (`ModStyle.Accent`, `ModStyle.AddEmblem`, `ModStyle.MarkPanel`). Take the game's palette and fonts from `ModStyle` for anything custom.
+Everything is cloned from the game's own widgets (found through its UI scripts' fields, not GameObject paths) and carries PalaceMod's mark: a small verdigris gem (the emblem from the logo), and a thin verdigris edge on panels (`ModStyle.Accent`, `ModStyle.AddEmblem`, `ModStyle.MarkPanel`). The logo, palette and textures live in `branding/` (see its README; regenerate with `python3 branding/build.py`). Take the game's palette and fonts from `ModStyle` for anything custom.
 
 ```csharp
 // In Awake. The frame is built on first open; a tab's page is rebuilt each time it's shown.
@@ -124,9 +126,26 @@ SaveStates.Last, SaveStates.IsRestoring, Delete, Rename, Overwrite
 - Not restored: projectiles and effects in flight, enemy/unit AI targets and attack timers, units following the king (they stay where they were), buffs/slows, player units the level spawns at runtime (clones), level-scripted events beyond what the game's own save keeps.
 - Dev: `dev.py cmd "savestate save [name] | quick | load <id|name|quick|last> | list | dump | delete <id|name> | menu"`; `dump` prints a one-line summary of the live state (also logged on every capture and load) for comparing.
 
+## Logging (Core/Log.cs)
+
+Every line is written as `[Feature] message`, where Feature is the manager's `FeatureSection` (or the type name minus "Manager"), so `dev.py logs --feature <Name>` (repeatable or comma-separated) and `--level error|warn|info|debug` can filter it.
+
+```csharp
+Log.Info($"Loaded {state}");                           // in a manager (BaseManager.Log)
+Log.For<SaveStatesManager>().Warn($"Skipping {file}: {e.Message}");   // static code, helper classes
+Log.Error("Couldn't write the pack", e);               // full stack + scene/day/wave context, once
+log.Caught("Click handler failed", e);                 // a callback you called threw: names the feature it came from
+```
+
+- Levels: **Error** = a bug, something the player wanted didn't happen (pass the exception). **Warn** = unexpected but handled (bad file, missing prefab). **Info** = what the feature did, at most about once per player action or night. **Debug** = detail for chasing a bug: per-frame or per-unit chatter, layout/template dumps, timings.
+- Debug and Info take interpolated strings that aren't formatted when the level is off, so they're free in hot paths. That also means the `{...}` holes aren't evaluated: never put a call with side effects in one. Identical messages within 30 s collapse into one line plus a count; an exception's stack is written once per session, then only counted.
+- Settings (Settings > Mods > Diagnostics): "Log level" (default Info), "Create debug bundle"; the hidden `Diagnostics."Debug logging for"` takes comma-separated feature names or `*`. All apply live. Dev: `dev.py cmd "log debug Savestates"`, `log level debug`, `log names`, `log test`, `log throw [frames]` (throws in a Harmony patch).
+- Unity-logged exceptions whose stack runs through PalaceMod code are logged again as `[Feature] Unhandled exception in PalaceMod code: ...` with context and stack, once. A helper class outside its manager is attributed to the manager whose `Log.For<M>()` it uses (else the only feature manager it references); `dev.py cmd "log owner StateRestorer"` shows the mapping.
+- Debug bundle: "Create debug bundle" or `dev.py cmd "log bundle"` writes `BepInEx/PalaceMod/DebugBundles/PalaceMod-debug-<time>.zip` (info.txt with versions, commit, OS, features and plugins; recent.log, the last 2000 mod lines and all warnings/errors with timestamps; LogOutput.log; PalaceMod.cfg; home folder replaced by `~`) and tells the player where it is. Ask players for it with bug reports.
+
 ## Code conventions
 
-- `Plugin.Update` isolates managers from each other's exceptions, and each distinct error is logged once. A manager whose `Awake` or `Start` throws is dropped, along with its patches.
+- `Plugin.Update` isolates managers from each other's exceptions, and each distinct error is logged once (with its stack, then as counts). A manager whose `Awake` or `Start` throws is dropped, along with its patches.
 - Game singletons such as `CommandUnits.instance` are null outside a level. Null-check them in `Update`.
 - `Plugin.Input` (the Rewired player) is null until Rewired initializes. Use `?.`.
 - To read game code: `python3 scripts/dev.py decompile --type <TypeName>` writes `.decompiled/<TypeName>.decompiled.cs`. Leave out `--type` to decompile everything into a project, which is the way to grep for things like PlayerPrefs keys.

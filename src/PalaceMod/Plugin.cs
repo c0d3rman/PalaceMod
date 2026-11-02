@@ -27,12 +27,12 @@ public class Plugin : BaseUnityPlugin
     {
         Instance = this;
         Logger = base.Logger;
+        GameContext.CaptureMainThread();
+        BepInEx.Logging.Logger.Listeners.Add(LogManager.RecentLines.Instance);
+        Logger.LogMessage($"PalaceMod {DebugBundle.ModVersion} starting");
 
-        // Clear separator for logs
-        for (int i = 0; i < 10; i++)
-        {
-            Logger.LogInfo("==========================================================================");
-        }
+        // Renamed settings keep their saved values; must run before anything binds a setting.
+        ConfigMigrations.Apply(Config);
 
         // Every concrete BaseManager outside Experimental, ordered by [ManagerOrder] then name. Each one applies its
         // own nested Harmony patches (see BaseManager), so a feature is added just by adding its file.
@@ -54,7 +54,7 @@ public class Plugin : BaseUnityPlugin
             }
             catch (Exception e)
             {
-                Logger.LogError($"{type.Name} failed to load and is skipped: {e}");
+                Log.For(type).Error($"{type.Name} failed to load and is skipped", e);
             }
         }
 
@@ -62,17 +62,19 @@ public class Plugin : BaseUnityPlugin
         {
             Run(manager, "Awake", () => manager.Awake(this), removeOnError: true);
         }
-        Logger.LogInfo($"Managers: {string.Join(", ", managers.Select(m => m.IsEnabled ? m.GetType().Name : $"{m.GetType().Name} (disabled)"))}");
+        var disabled = managers.Where(m => !m.IsEnabled).Select(m => m.FeatureSection).ToList();
+        Log.Core.Info($"{managers.Count} managers loaded; disabled features: {(disabled.Count == 0 ? "none" : string.Join(", ", disabled))}");
+        Log.Core.Debug($"Managers: {string.Join(", ", managers.Select(m => m.GetType().Name))}");
 
         Notify.Show("PalaceMod loaded", seconds: 2.5f);
+        // Stable marker that the dev tooling waits for; keep the text as it is.
+        Logger.LogMessage($"PalaceMod startup complete v{DebugBundle.ModVersion}");
     }
 
     private void Start()
     {
         foreach (var manager in managers.ToList()) Run(manager, "Start", manager.Start, removeOnError: true);
     }
-
-    private readonly HashSet<string> reportedErrors = [];
 
     private void Update()
     {
@@ -94,16 +96,17 @@ public class Plugin : BaseUnityPlugin
             if (removeOnError)
             {
                 // A manager that couldn't initialise is dropped, along with its patches.
-                Logger.LogError($"{manager.GetType().Name}.{phase} failed; the manager is disabled: {e}");
+                Log.For(manager.GetType()).Error($"{manager.GetType().Name}.{phase} failed; the manager is disabled", e);
                 managers.Remove(manager);
                 managerCache.Clear();
                 manager.Retire();
                 typeof(Feature<>).MakeGenericType(manager.GetType()).GetProperty(nameof(Feature<BaseManager>.Instance))
                     .SetValue(null, null);
             }
-            else if (reportedErrors.Add($"{manager.GetType().Name}: {e}"))
+            else
             {
-                Logger.LogError($"{manager.GetType().Name}.{phase} failed (further identical errors suppressed): {e}");
+                // Log collapses repeats: the stack is written once, then only counts.
+                Log.For(manager.GetType()).Error($"{manager.GetType().Name}.{phase} failed", e);
             }
         }
     }

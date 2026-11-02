@@ -140,7 +140,7 @@ namespace PalaceMod
             var info = Write(level, kind, data);
             Last = info;
             Prune(level);
-            Plugin.Logger.LogInfo($"Savestates: captured {info} -> {info.JsonPath}; {StateRestorer.Summary()}");
+            Log.For<SaveStatesManager>().Info($"Captured {info} -> {info.JsonPath}; {StateRestorer.Summary()}");
             Captured?.Invoke(info);
             if (kind is SaveStateKind.AutoDawn or SaveStateKind.AutoDusk) AutoCaptured?.Invoke(info);
             Changed?.Invoke();
@@ -210,7 +210,7 @@ namespace PalaceMod
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogWarning($"Savestates: skipping unreadable {file}: {e.Message}");
+                Log.For<SaveStatesManager>().Warn($"Skipping unreadable {file}: {e.Message}");
                 return null;
             }
         }
@@ -252,14 +252,14 @@ namespace PalaceMod
         private static void TryDelete(string path)
         {
             try { if (File.Exists(path)) File.Delete(path); }
-            catch (Exception e) { Plugin.Logger.LogWarning($"Savestates: couldn't delete {path}: {e.Message}"); }
+            catch (Exception e) { Log.For<SaveStatesManager>().Warn($"Couldn't delete {path}: {e.Message}"); }
         }
 
         // Keeps the newest N automatic states (dawn and dusk together) and the newest few undo states.
         private static void Prune(string level)
         {
             var all = List(level);
-            int history = Feature<SaveStatesManager>.Instance?.AutoHistory ?? 10;
+            int history = Feature<SaveStatesManager>.Instance?.AutoHistory ?? 40;
             foreach (var old in all.Where(s => s.Kind is SaveStateKind.AutoDawn or SaveStateKind.AutoDusk).Skip(history)) Delete(old);
             foreach (var old in all.Where(s => s.Kind == SaveStateKind.BeforeLoad).Skip(3)) Delete(old);
         }

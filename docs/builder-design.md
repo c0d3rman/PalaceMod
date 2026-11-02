@@ -65,11 +65,12 @@ Evidence comes from the decompiled `Assembly-CSharp`, `AstarPathfindingProject.d
 | WP | State |
 |---|---|
 | WP1 Data model and loader | **Landed** (PR #8). `Model/`, `Contracts/`, `PackRepository`, `EditHistory`. |
-| WP2 Catalog and runtime | **Landed** (feat/builder-core). `Runtime/`, `BuilderManager`, `builder` dev command, sample pack, interim `SessionLauncher`, leaderboard guard. Enemies only: player units aren't in the catalog yet (see Spike results). |
+| WP2 Catalog and runtime | **Landed** (feat/builder-core). `Runtime/`, `BuilderManager`, `builder` dev command, sample pack, interim `SessionLauncher`, leaderboard guard. |
+| Player troops | **Landed** (feat/builder-player-units). `Troops/`: troops in the catalog, `waveSets[].troops` replacements, `IUnitFactory.ApplyTo`. See "Player troops". |
 | WP3 Session and level select | **Landed.** `Session/`: Custom runs entry in every map's pre-level menu, session lifecycle, isolation, `scores.json`, `builder-session` dev command. |
 | WP4a Editor UI | **Landed** (stage 1): `Editor/`, see "Editor (WP4a, as built)". Stage 2 is planned below. |
 | WP4b / WP4c Level overlay, placement editor | Stage 2. Data shape fixed (`LevelDef`), stub `ILevelOverlay`. |
-| WP5 Asset import | Open. Stub `IAssetProvider` returns null. |
+| WP5 Asset import | **Landed.** `Assets/`: PNG icons and skins, WAV/OGG sounds, OBJ meshes, url assets with sha256 cache. glTF deferred (see "glTF spike"). |
 | WP6 Sharing | **Landed.** `Sharing/`: `ShareCodec`, `PackArchive` (`.tfpack` and Thunderstore zips), import folder watcher, `SharingUI`, `builder-share` dev command, `tests/PalaceMod.Tests`. |
 
 ## Architecture (as built, WP1 and WP2)
@@ -92,6 +93,14 @@ Features/Builder/
   Session/SessionMenu.cs               WP3    "Custom runs" entry and the Custom Runs frame (UI kit)
   Session/ScoreStore.cs                WP3    scores.json: best/last run per design
   Session/SessionDevCommands.cs        WP3    `builder-session` dev command
+  Assets/AssetProvider.cs              WP5    IAssetProvider: resolve, cache, downloads, background OGG decode
+  Assets/Loaders.cs                    WP5    PNG/WAV/OGG/OBJ decoders with signature sniffing and limits
+  Assets/AssetVisuals.cs               WP5    mesh/texture/sound swaps on templates (called from UnitFactory)
+  Assets/BuilderAssetsManager.cs       WP5    installs the provider, pumps it, `builder-assets` dev command
+  Assets/BuilderManager.Assets.cs      WP5    patch: UnitAudio.Start (pack sounds)
+  Troops/TroopIndex.cs                 troops where troops live: troop buildings, ids, background prefetch
+  Troops/TroopManager.cs               troops applies `troops` on the host map, `builder-troops` dev command
+  Troops/BuilderManager.Troops.cs      troops patch: tinted materials follow the level colour scheme
 Assets/builder-sample.json             WP2    built-in sample pack (embedded resource)
 ```
 
@@ -147,6 +156,7 @@ The format is JSON, read with the game's own `Newtonsoft.Json` (13.x, already in
   }],
   "waveSets": [{
     "id": "goblin-night", "name": "Goblin Night", "host": "Nordfels", "startingGold": 20,
+    "troops": [{ "unit": "royal-guard", "building": "Barracks" }],   // player units standing in for vanilla troops
     "nights": [{ "difficulty": 1.0, "warning": "",
       "spawns": [{ "unit": "goblin-runner", "count": 8, "interval": 0.5, "delay": 0, "line": "Forest", "gold": 6, "elite": false }] }]
   }],
@@ -166,6 +176,7 @@ Semantics worth knowing:
 - **Movement tags are refused.** Adding or removing `Flying` or `LargeUnit` would need a pathfinding graph change. Pick a base that already has them.
 - **`warning` is shown by the Builder, not the game.** The game never displays `Wave.warningText`; during a session WP3 shows a night's `warning` with `Notify` when that night starts.
 - **`levels`** are validated for shape only. Applying them is WP4b; until then they produce a warning, and a level's `waveSet` still works.
+- **`troops`** (on a wave set) replace vanilla player troops for that run. Each entry names a custom player unit; its `base` is the troop it replaces (`vanilla:P Knight`), and an optional `building` (the game's building name, e.g. "Barracks") limits it to that building. Vanilla refs, enemy units, bases no building trains, buildings that don't train the base, and the same troop and building twice are errors.
 - **Behaviour modules** form a whitelist (`BehaviourTypes`). v1 has only `SpawnOnDeath {unit}`. To add one, add a constant, a validator case and a `UnitFactory.ApplyBehaviour` case.
 
 ### References
@@ -186,7 +197,7 @@ Semantics worth knowing:
 
 ### Runtime (WP2)
 
-- **Catalog.** Built lazily on first use from loaded assets, from the main menu on (no scene loads). It reads every `LevelInfo.enemySpawner` prefab's waves, every `EternalTrialEnemySet` (for `difficulty`), their `enemyToSpawnOnDeath`, the God of Afterlife enemy, loaded `PathfindMovementPlayerunit` prefabs, their weapons, and hosts (LevelInfos with a spawner, tutorial excluded) with spawn lines read from the spawner prefab's `EnemySpawnLine` children. `CatalogHost.VanillaWaves` gives each host's vanilla waves as a `WaveSetDef`, as an editor starting point.
+- **Catalog.** Built lazily on first use from loaded assets, from the main menu on (no scene loads). It reads every `LevelInfo.enemySpawner` prefab's waves, every `EternalTrialEnemySet` (for `difficulty`), their `enemyToSpawnOnDeath`, the God of Afterlife enemy, the player troops inside the troop buildings' Resources prefabs (see "Player troops"), their weapons, and hosts (LevelInfos with a spawner, tutorial excluded) with spawn lines read from the spawner prefab's `EnemySpawnLine` children. `CatalogHost.VanillaWaves` gives each host's vanilla waves as a `WaveSetDef`, as an editor starting point.
 - **Unit templates.** `IUnitFactory.Resolve(pack, ref)` returns the vanilla prefab, or for custom units a template: `Instantiate(basePrefab, inactiveDontDestroyOnLoadRoot)`, so no Awake, Start or OnEnable runs, with overrides written to serialized fields. Weapons and tinted materials are cloned per template, so vanilla assets are never modified. Templates are cached per `<pack>/<unit>` and rebuilt when the unit's JSON changes, and are cleared when packs change (outside sessions). The game spawns them with its normal `Object.Instantiate`, so the clone initialises itself and every perk and difficulty multiplier applies.
 - **Names.** A custom name or description sets the template's `ScreenMarkerIcon.locaKey` to `PalaceBuilder/<pack>/<unit>`, answered by a `TextTranslator.Translate` prefix. The night preview, the pause menu wave list and tooltips show it with no further work.
 - **Template-aware spawning** (a transpiler on `Spawn.Update`, `EnemySpawner.StartSpawning` and `EnemySpawner.GetWaveInfo`): `scene.isLoaded` becomes "loaded and not the template scene", and `GameObject.GetComponentInChildren<T>()` becomes `GetComponentInChildren<T>(true)` for templates only. Vanilla behaviour is unchanged. If a game update removes the `isLoaded` check, the transpiler logs an error.
@@ -248,9 +259,9 @@ Run on 2026-11-02 with `builder spike ...` and `builder play palacemod.sample` i
 | **Runtime pathfinding rescan** | `AstarPath.active.Scan()` of all 4 graphs on Nordfels took **954 ms** the first time and **426 ms** the second (native). | Fine once at level start (behind the loading clouds) for WP4b overlays. Too slow per edit: use `NavmeshCut` or `GraphUpdateObject` for live placement in WP4c. |
 | **How unit meshes are coloured** (tint/skin) | Enemy bodies use the shared material `Enemy`: shader `FlatKit/Stylized Surface`, `_BaseColor` (1, 0.90, 0.86), shadow colour `_ColorDim` (0.69, 0, 0.16), **no texture** (`_BaseMap` none), and `GPUInstanced` renderers. Meshes aren't readable, so vertex colours are unknown. | Tint = a per-template material clone with `_BaseColor` multiplied (works: goblins render green). The clone keeps the name `Enemy` so the elite swap still applies (elites then lose the tint). Skins need a texture-capable FlatKit setup (WP5: set `_BaseMap` on the clone) rather than palette tricks. |
 | **Session isolation** | On the host: `GameplayImpact` "Builder: custom content". `SaveGame` was skipped ("skipped writing the save file during a custom run"). Leaving to level select ended the session; perk level and XP were unchanged. | WP3 builds on this. Codex found that `builder end` mid-run and launches from the main menu needed work; WP3 has fixed both on its branch. |
-| **Catalog** | 39 enemies, 37 weapons and 36 hosts (10 main maps plus mini modes), built in 89 ms at the main menu. **0 player units**: player unit prefabs aren't loaded at the menu (they live inside building prefabs). | Gap: player-side designs won't validate until the catalog finds player units, either by scanning building prefabs (`UnitRespawnerForBuildings.units`) from `Resources` or by rebuilding inside a level. That's part of the "player units in buildings" work, which no package owns yet. |
+| **Catalog** | 39 enemies, 37 weapons and 36 hosts (10 main maps plus mini modes), built in 89 ms at the main menu. **0 player units**: player unit prefabs aren't loaded at the menu (they live inside building prefabs). | Fixed by the troops package: 14 troops from the troop buildings' Resources prefabs (see "Player troops"). |
 
-Not yet run (not needed for the interfaces): cloning a `BuildSlot` before Start (stage 2, WP4b) and loading glTFast (WP5).
+Not yet run (not needed for the interfaces): cloning a `BuildSlot` before Start (stage 2, WP4b). glTFast (WP5) is under "WP5: asset import", "glTF spike".
 
 ## Interfaces
 
@@ -260,17 +271,50 @@ All are in `Features/Builder/Contracts/Contracts.cs` and reached through `Builde
 |---|---|---|---|
 | `BuilderServices.Packs` | `IPackRepository`: `Root`, `Packs`, `Find`, `Refresh`, `Changed`, `Save`, `InstallNew(pack, sourceFolder)`, `Delete`, `Validate` | WP1 | `PackRepository` |
 | `BuilderServices.Catalog` | `ICatalog : IValidationContext`: `Units`, `Weapons`, `Hosts`, `FindUnit/Weapon/Host`, `ToJson` | WP2 | `Catalog` |
-| `BuilderServices.Units` | `IUnitFactory`: `Resolve(pack, unitRef, out error)`, `IsTemplate`, `Clear` | WP2 | `UnitFactory` |
+| `BuilderServices.Units` | `IUnitFactory`: `Resolve(pack, unitRef, out error)`, `IsTemplate`, `Clear`, `ApplyTo(instance, pack, unitRef, out error)` (added by troops) | WP2 | `UnitFactory` |
 | `BuilderServices.Waves` | `IWaveInjector`: `SetPending(pack, waveSet)`, `Pending`, `BuildWaves(...)` | WP2 | `WaveInjector` |
 | `BuilderServices.Sessions` | `ISessionLauncher`: `Current`, `Launch(SessionRequest, out error)`, `End`, `Started`, `Ended` | WP3 | `SessionLauncher` |
 | `BuilderServices.Overlay` | `ILevelOverlay`: `Apply(pack, level, issues)` | WP4b | `NullLevelOverlay` (warns) |
-| `BuilderServices.Assets` | `IAssetProvider`: `GetSprite`, `GetAudio`, `GetMesh(PackEntry, assetRef)` | WP5 | `NullAssetProvider` (null) |
+| `BuilderServices.Assets` | `IAssetProvider`: `GetSprite`, `GetAudio`, `GetMesh(PackEntry, assetRef)`; added by WP5: `GetTexture`, `GetState(pack, ref, use, out message)` (`AssetState` Missing/Loading/Ready/Failed, `AssetUse` constants), `Prefetch(pack)` | WP5 | `AssetProvider` |
 | `BuilderServices.Share` | `IShareCodec`: `Encode(pack)`, `Decode(code, issues)` | WP6 | `ShareCodec` |
 | `BuilderServices.Archives` | `IPackArchive`: `ExportFolder`, `Export(entry, path)`, `Import(path, issues)`, `ExportThunderstore(entry, path)` (**added by WP6**, additive; stub `NullPackArchive`) | WP6 | `PackArchive` |
 
 Interfaces are frozen. If a package needs a change, add a member (don't change existing signatures), keep the stub compiling, and note it in the PR and in this table.
 
-Shared data types (also in `Contracts.cs`): `PackEntry {Pack, Folder, Source, ReadOnly, Issues, HasErrors, Id}`, `PackSource {User, Plugin, BuiltIn}`, `CatalogUnit`, `CatalogWeapon`, `CatalogHost`, `CatalogSpawnLine`, `SessionRequest {Pack, WaveSetId, LevelId}`, `BuilderSessionInfo {Pack, WaveSet, Level, HostScene, StartedUtc, Scores}`. The model is in `Model/`: `DesignPack`, `UnitDef` (+ `VisualsDef`, `StatsDef`, `WeaponDef`, `DamageModDef`, `TagEditDef`, `BehaviourDef`), `WaveSetDef` (+ `NightDef`, `SpawnDef`), `LevelDef` (+ overlay types), `ContentRef`, `Ids`, `Validator`, `ValidationIssue`, `PackSerializer`, `Migrations`, `EditHistory`.
+Shared data types (also in `Contracts.cs`): `PackEntry {Pack, Folder, Source, ReadOnly, Issues, HasErrors, Id}`, `PackSource {User, Plugin, BuiltIn}`, `CatalogUnit`, `CatalogWeapon`, `CatalogHost`, `CatalogSpawnLine`, `SessionRequest {Pack, WaveSetId, LevelId}`, `BuilderSessionInfo {Pack, WaveSet, Level, HostScene, StartedUtc, Scores}`. The model is in `Model/`: `DesignPack`, `UnitDef` (+ `VisualsDef`, `StatsDef`, `WeaponDef`, `DamageModDef`, `TagEditDef`, `BehaviourDef`), `WaveSetDef` (+ `NightDef`, `SpawnDef`, `TroopDef`), `LevelDef` (+ overlay types), `ContentRef`, `Ids`, `Validator`, `ValidationIssue`, `PackSerializer`, `Migrations`, `EditHistory`.
+
+### Player troops (as built)
+
+**Where troops live.** Troops aren't standalone prefabs. Each building that trains them carries every troop it can field as inactive children, one set per upgrade choice, and `UpgradeBranch.objectsToActivate` switches a set on when the player picks it. `UnitRespawnerForBuildings` revives knocked-out ones. Level scenes hold instances of these building prefabs, and the building prefabs are also in Resources (`archer hut`, `swordsmen hut`, `heros quarter variant`; a UnityPy scan found no troop anywhere else, apart from `P Scarecrow`, which doesn't move or respawn). A troop's id is its GameObject name without Unity's ` (n)` suffix.
+
+| Building (`buildingName`) | Troops |
+|---|---|
+| Archery Range | P Archer, P Longbows, P Crossbows, P Hunters, P Fire Archer |
+| Barracks | P Melee, P Knight, P Speer, P Morningstar, P Berserk |
+| Hero's Quarter | P Melee, P Golem, P Support Mage, P Firewing, P Lizzard Rider |
+
+The level-1 choices in this game version are Longbow, Crossbow, Hunters, Fire Archers (Archery Range) and Knights, Spearmen, Flails, Berserks (Barracks). `P Archer` and `P Melee` are in the hierarchy but no main-map choice switches them on, so designs should replace the others.
+
+**Catalog.** `TroopIndex.Prefetch()` loads the three buildings with `Resources.LoadAsync`, because a synchronous load takes about 2 s. `BuilderManager` waits for it before it first validates packs (it finishes during boot). If anything asks the catalog earlier, the load finishes synchronously. Troops then cost about 140 ms of the catalog build. `CatalogUnit.Buildings` lists the buildings that train each troop, and `catalog.json` has it as `buildings`. `Catalog` also implements `ITroopValidationContext.TroopBuildings(id)` (in `Model/Validation.cs`) for the validator.
+
+**Runtime.** Nothing is spawned. When a session's host map loads (after Awake, before any Start), `TroopManager` finds every troop in the scene, picks the matching `troops` entry (a building-specific entry beats a general one) and calls `IUnitFactory.ApplyTo`. That writes the design's stats, weapon, tags, name, icon, scale, tint and WP5 visuals onto the scene object, cloning each weapon and material once per design. The game then starts the troops normally, so perks, blacksmith upgrades, respawning, commands and the pause menu's unit list all see the custom values. A restart or retry reloads the scene and applies the overrides again. Vanilla runs are never touched.
+
+- Tags on an enabled troop go through `TaggedObject.AddTag/RemoveTag`, so `TagManager` stays in sync.
+- A perk that swaps a troop's weapon (`PerkWeaponModifyer`, e.g. fire arrows) still replaces a design's weapon on Start.
+- Swapping one troop type for another (knights from an Archery Range) isn't supported: overrides are applied in place, so the design's base must be the troop it replaces.
+
+**Tint fix (affects enemies too).** `ColorAndLightManager` writes the level's colour scheme into the shared unit materials (`Enemy`, `Ally`, `Ally Ranged`, ...) in its `Start` and re-tints their outlines with the daylight. A tint clone is a snapshot, so a troop cloned on scene load came out black (`Ally Ranged` is all zeros until the scheme is applied), and enemy templates built at the menu kept the asset's default colours and outlines. `UnitFactory` now records each tint clone with its source, and a postfix on `ApplyColorScheme` and `AdjustAllOutlineColorsBasedOnLight` recopies the source and re-applies the tint. `TroopManager` also applies the level's scheme just before it clones, so WP5 skin clones start from the level's colours. WP5 skin clones aren't resynced afterwards, so their outlines don't follow the daylight. Fixing that would mean registering them the same way.
+
+**For WP4a (editor):** the editor has no troops section yet. It needs a "Troops" list on the wave set page: pick a custom player unit and optionally a building from `CatalogUnit.Buildings` of the unit's base.
+
+**Dev command** `builder-troops`:
+
+| Sub | Does |
+|---|---|
+| `list` | catalog troops with stats and the buildings that train them |
+| `scene` | every troop on the loaded map by type and building (active count), and which were overridden |
+| `live` | active troops grouped by name with their actual stats, weapon instance and material colours |
+| `build <building>[:<choice>]` | builds or upgrades the lowest-level matching building, picking the named upgrade choice (dev only) |
 
 ### File ownership rules
 
@@ -316,19 +360,48 @@ Shared data types (also in `Contracts.cs`): `PackEntry {Pack, Folder, Source, Re
 
 ### WP5: asset import
 
-**Goal:** packs bring their own icons, sounds and (later) meshes.
+**Status:** landed. Owns `Features/Builder/Assets/`. `BuilderAssetsManager` (infrastructure, `[ManagerOrder(-20)]`) installs `AssetProvider` and pumps it every frame.
 
-**Owns:** `Features/Builder/Assets/` (new). Install with `BuilderServices.Assets = new AssetProvider();` in your manager's `Awake`.
+**Pack fields** (all optional, additive, no version bump):
 
-**Contract:** `IAssetProvider.GetSprite(PackEntry pack, string assetRef)` resolves `"asset:<key>"` to `pack.Pack.Assets[key]` and returns null on any failure (callers keep base visuals). The same goes for `GetAudio` and `GetMesh` (mesh plus materials).
+```jsonc
+"assets": { "shroom": { "path": "assets/shroom.obj" }, "skin": { "path": "assets/skin.png" },
+            "hit": { "url": "https://.../hit.ogg", "sha256": "<64 hex>" } },
+"visuals": { "icon": "asset:icon", "mesh": "asset:shroom", "meshScale": null, "meshRotY": 45,
+             "texture": "asset:skin", "sounds": { "attack": "asset:hit", "hurt": "asset:...", "death": "asset:..." } }
+```
 
-- Local: `Path.Combine(pack.Folder, def.Path)`. `pack.Folder` is null for built-in packs, so built-in assets would need embedded resources if ever wanted. The validator already rejects rooted and `..` paths.
-- Remote: `def.Url` plus `def.Sha256`, cached at `BuilderServices.Packs.Root/cache/<sha256>`; verify the hash before use. Downloads are async. `GetSprite` is synchronous, so prefetch on pack load or session launch (subscribe to `BuilderServices.Packs.Changed` and `BuilderServices.Sessions.Started`) and return null until cached.
-- Cache loaded objects per `(packId, key, file mtime)`.
+**How it works:**
 
-**Hooks already wired:** `UnitFactory` calls `GetSprite(entry, visuals.icon)` and sets `ScreenMarkerIcon.sprite` (plus the arachnophobia sprites). `visuals.mesh` is validated but `UnitFactory` only notes "not supported yet". To wire it, add a branch in `UnitFactory.ApplyVisuals` (WP2's file: a small additive change is fine) that swaps `MeshFilter.sharedMesh` and materials, keeping the material named `Enemy` for elite swaps. Sounds: hook `UnitAudio` / `ThronefallAudioManager`; add a model field (`visuals.sounds`?) with no version bump (it's an additive optional field).
+- **Resolution.** `path` is relative to the pack folder and must resolve inside it (checked again at load, beyond the validator's `..` check). `url` assets download once (http/https, 30 s timeout, 24 MB cap) into `cache/<sha256>` and are used only if the hash matches; a mismatch is permanent, a network failure retries after a minute. Downloads and OGG decodes are async: the getters return null until ready, and finishing one clears templates (outside sessions) so they rebuild with it. Prefetch runs on `Packs.Changed` and when a session starts. Setting `Builder.Download pack assets` (default on) turns downloads off.
+- **Decoding.** The file type comes from its first bytes, not its extension. PNG ≤ 8 MB and ≤ 2048 px a side (read from the header before decoding). WAV: PCM 8/16/24/32-bit or float, 1 to 8 channels, ≤ 60 s, parsed by us. OGG: Vorbis only, ≤ 8 MB, every page's CRC verified before Unity's decoder sees it (Unity logs an FMOD error on damaged files otherwise). OBJ ≤ 16 MB, ≤ 100k vertices and 150k triangles: positions, UVs, normals, any polygon, negative indices and `v x y z r g b` vertex colours; `mtllib` is ignored. Malformed files produce a player-facing message (`GetState`) and a warning in the log, never an exception into the game. Loaded objects are cached by file path, size, mtime and use.
+- **Meshes.** Inside-out meshes are flipped automatically (signed volume), and normals that oppose the faces are flipped: the cel shader renders an inside-out mesh solid black. OBJ vertex colours are read but not shown: the `Enemy` material doesn't enable FlatKit's vertex-colour mode, so use a texture for colour. In the template, the biggest renderer with a body material keeps its renderer, `GPUInstanced` and material and gets the mesh, baked into its local space (so it bobs with the walk animation). It's scaled to fit inside the base model's box (or `meshScale`), turned by `meshRotY`, and stands where the model stood. The other parts get a one-triangle invisible mesh rather than being disabled, because `GPUInstanced` draws them even when the renderer is off. So tint, elite material and hit flashes still work.
+- **Texture.** Clones the body material (keeping its name, for the elite swap), sets `_BaseMap` (the shader multiplies it, `_TEXTUREBLENDINGMODE_MULTIPLY`) and resets `_BaseColor` to white. Vanilla meshes have UVs, but they're laid out for flat colour, so a texture is mainly for imported meshes. Elites switch to the elite material and lose the texture, as with tints.
+- **Sounds.** A `BuilderUnitSounds` marker on the template (pack id + refs) is copied to every spawned clone; a postfix on `UnitAudio.Start` replaces `soundOnAttack`, `soundOnDmg` and `soundOnDeath` with the pack clips. Footsteps keep the base unit's.
+- **Not supported:** animated or skinned imported meshes, multi-material OBJ (one submesh, one material), MTL colours, player-unit bodies (the catalog has no player units yet), assets in built-in packs (no folder).
 
-**Spike results that matter here:** see "Tint and skin" below (how unit meshes are coloured).
+**Dev command** `builder-assets`: `check <pack>` (loads every asset for each use and prints its state), `status` (cache), `inspect <vanilla unit>` (hierarchy, meshes, materials and shader keywords), `show <pack> <unit>...` (spawns base, custom and elite copies in front of the player), `sounds` (clips that live custom units will play), `gltf <file.glb> <dir>` / `gltf result` (the glTF spike, loading DLLs from a folder; nothing ships).
+
+### glTF spike
+
+**Verdict: glTFast works in the game, but isn't shipped yet; it's a follow-up.** Run with `builder-assets gltf` on a pool instance (Rosetta-free native launch, game 2.13, Unity 2022.3.62f2 Mono).
+
+- **Build.** `com.unity.cloud.gltfast` 6.8.0 (Apache-2.0) compiles outside Unity into one netstandard2.1 DLL (about 230 KB) against the game's own assemblies (Burst 1.8.25, Collections 2.6.2, Mathematics 1.3.2, URP 14), with no source patches. It needs the Unity player defines plus its asmdef version defines (`USING_URP`, `UNITY_ANIMATION`, `UNITY_IMAGECONVERSION`, ...), and Export, DOTS and Editor excluded.
+- **Blocker found and solved: JSON.** The default `GLTFast.GltfImport` parses with `JsonUtility`, which can't fill types from an assembly loaded after startup: the parse "succeeds" with every collection null, then instantiation throws a NullReferenceException. Building its `Newtonsoft` folder in (define `NEWTONSOFT_JSON`, reference the game's `Newtonsoft.Json`) and using `GLTFast.Newtonsoft.GltfImport` fixes it.
+- **Result.** A textured GLB cube (embedded PNG) loaded and rendered with the game's FlatKit look, through a 3-method `IMaterialGenerator` that clones the `Enemy` material and sets `_BaseMap` (glTFast's own shader-graph shaders aren't in the build). It took 563 ms the first time (JIT and Burst falling back to managed code) and 82 ms after that. A truncated GLB and 400 KB of random bytes both failed cleanly (`GltfNotBinary`, `ChunkJsonInvalid`), with no exception.
+- **Why not shipped.** One static cube isn't enough evidence for "robust": larger meshes, Burst-job paths (vertex conversion, skinning, morph targets) and odd exporter output are untested. Shipping also needs:
+  - a mesh-only path, because units take one `Mesh`: merge the scene's primitives into one mesh in node space;
+  - a quiet `ICodeLogger`, because `ConsoleLogger` writes Unity errors that `run` reports;
+  - lifetime management (`GltfImport.Dispose` destroys what it created);
+  - renaming the assembly so it can't clash with another mod's glTFast.
+- **Follow-up recipe.**
+  1. Bundle the DLL with the plugin (Apache-2.0: ship `LICENSE` and `NOTICE`).
+  2. Add `AssetKind.Glb` handling in `AssetProvider` as an async decode (like OGG), using `LoadGltfBinary(bytes)` with `UninterruptedDeferAgent` and `ImportSettings { AnimationMethod = None }`.
+  3. Merge the meshes, and return `(mesh, materials)` from `GetMesh` with each material's base colour and texture applied to an `Enemy` clone.
+  4. Add `.glb` to `Validator.MeshExtensions`.
+
+  The spike sources (csproj with the defines, the consumer and the material generator) are small; recreate them from these notes.
+- **UniGLTF** (MIT) was assessed from source only: more assemblies, and hard `Shader.Find` calls for texture conversion shaders that aren't in the game. glTFast is the better base.
 
 ### WP6: sharing (as built)
 
@@ -414,11 +487,11 @@ Not started. The plan, in order:
 
 | Asset | Method | Verdict |
 |---|---|---|
-| PNG icons and skins | `Texture2D.LoadImage` and `Sprite.Create` | **Robust**, MVP+1. Skins depend on how the game's meshes are textured (palette or vertex colour under FlatKit), so check that first. |
-| WAV/OGG | `UnityWebRequestMultimedia.GetAudioClip("file://...")` | **Robust**. Hook into `UnitAudio` / `ThronefallAudioManager`. |
+| PNG icons and skins | `Texture2D.LoadImage` and `Sprite.Create` | **Built (WP5).** Vanilla bodies are flat-coloured (no `_BaseMap`), so skins are for imported meshes. |
+| WAV/OGG | Own WAV parser; OGG via `UnityWebRequestMultimedia` after a page CRC check | **Built (WP5).** Postfix on `UnitAudio.Start`. |
 | Recolour and rescale | Per-design material clone, `transform.localScale` | **Robust**, MVP. Must update `GPUInstanced`. |
-| OBJ | Pure-C# parser (Dummiesman-style); assign the game's FlatKit material plus a tint or vertex colours | **Robust for static props and simple units**. No rigs and no animation, so it suits props and rigid units ("rolling", "hovering"). |
-| glTF/GLB | glTFast 5.x/6.x (2019.4+, netstandard). Its Burst, Mathematics and Collections dependencies already ship with the game, but versions must match. Its shaders are **not** in the build, so override material generation with game materials. | **Medium risk**: needs a spike. Nobody has proven it in a BepInEx mod. Animated skinned units would also need the game's animation setup (enemies use simple transform animation), so stage 3+. |
+| OBJ | Pure-C# parser (Dummiesman-style); assign the game's FlatKit material plus a tint or vertex colours | **Built (WP5)** for rigid units: the mesh replaces the body and bobs with its walk animation. No rigs and no animation, so it suits props and rigid units ("rolling", "hovering"). |
+| glTF/GLB | glTFast 5.x/6.x (2019.4+, netstandard). Its Burst, Mathematics and Collections dependencies already ship with the game, but versions must match. Its shaders are **not** in the build, so override material generation with game materials. | **Works** (spike, with its Newtonsoft parser) but not shipped yet; see "glTF spike". Animated skinned units would also need the game's animation setup (enemies use simple transform animation), so stage 3+. |
 | AssetBundles | Built in Unity 2022.3 with URP | **Robust but power-user only**. Support loading them, and document a template project. |
 
 ## MVP scope

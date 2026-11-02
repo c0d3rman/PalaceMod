@@ -72,7 +72,7 @@ namespace PalaceMod
                 // OnEnable plays the debris for debrisPlaytime seconds, then Update pauses it; Simulate ends paused there.
                 __instance.debrisParticles.Simulate(DebrisPlaytime(__instance), true, true);
                 __instance.smokeParticles.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-                Plugin.Logger.LogDebug($"Fixes: settled destroyed {__instance.transform.root.name} without replaying its collapse");
+                Log.For<FixesManager>().Debug($"Settled destroyed {__instance.transform.root.name} without replaying its collapse");
                 return false;
             }
         }
@@ -86,7 +86,7 @@ namespace PalaceMod
                 var particles = UpgradeParticles(__instance);
                 if (particles == null) return;
                 particles.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-                Plugin.Logger.LogDebug($"Fixes: cleared activation burst of loaded shrine {__instance.name}");
+                Log.For<FixesManager>().Debug($"Cleared activation burst of loaded shrine {__instance.name}");
             }
         }
 
@@ -99,7 +99,7 @@ namespace PalaceMod
                 ref float hp = ref HpValue(__instance);
                 // The save stored Mathf.RoundToInt(hp), so anything within 0.5 of max HP was saved from full health.
                 if (hp <= 0f || hp == __instance.maxHp || Mathf.Abs(hp - __instance.maxHp) > 0.5f) return;
-                Plugin.Logger.LogDebug($"Fixes: restored loaded HP of {__instance.name} from {hp} to {__instance.maxHp}");
+                Log.For<FixesManager>().Debug($"Restored loaded HP of {__instance.name} from {hp} to {__instance.maxHp}");
                 hp = __instance.maxHp;
                 __instance.OnHpChange.Invoke();
             }

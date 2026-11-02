@@ -8,9 +8,12 @@ using UnityEngine.UI;
     The game's UI palette and fonts, plus PalaceMod's visual signature.
 
     Everything PalaceMod draws uses the game's own look (charcoal panels, gold-tan Cormorant/Unifraktur text) with one
-    consistent mark that says "this is from the mod": a small verdigris diamond, and on panels a thin verdigris edge.
-    The game's UI has no cool colours at all, so the mark reads as foreign at a glance without any text. Use
-    ModStyle.AddEmblem / ModStyle.MarkPanel rather than inventing another accent.
+    consistent mark that says "this is from the mod": a small verdigris gem (the emblem from PalaceMod's logo), and on
+    panels a thin verdigris edge. The game's UI has no cool colours at all, so the mark reads as foreign at a glance
+    without any text. Use ModStyle.AddEmblem / ModStyle.MarkPanel rather than inventing another accent.
+
+    branding/ is the source of truth for the emblem and the accent colour: branding/build.py renders the textures in
+    Assets/ (palacemod_emblem*.png, palacemod_mark.png), and branding/README.md lists the palette.
 */
 namespace PalaceMod
 {
@@ -22,8 +25,8 @@ namespace PalaceMod
         public static readonly Color Panel = new(0.102f, 0.110f, 0.114f);       // #1A1C1D, every native panel and backdrop
         public static readonly Color Bright = new(1f, 0.906f, 0.769f);          // #FFE7C4, highlighted numbers
 
-        /// <summary>PalaceMod's signature colour (verdigris). Only for the emblem and panel edges.</summary>
-        public static readonly Color Accent = new(0.42f, 0.78f, 0.69f);         // #6BC7B0
+        /// <summary>PalaceMod's signature colour (verdigris, the emblem's main facet). Only for the emblem and panel edges.</summary>
+        public static readonly Color Accent = new(0.42f, 0.78f, 0.69f);         // #6BC7B0, see branding/README.md
 
         /// <summary>Emblem tint per notification kind; Info uses the signature colour.</summary>
         public static Color KindColor(NotifyKind kind) => kind switch
@@ -59,19 +62,81 @@ namespace PalaceMod
 
         // ---- Signature ------------------------------------------------------------------------------------------
 
-        /// <summary>Adds the mod emblem (a small diamond) as a child of <paramref name="parent"/>.</summary>
+        /// <summary>Adds the mod emblem (the logo's gem, about <paramref name="size"/> tall) as a child of <paramref name="parent"/>.</summary>
         public static RectTransform AddEmblem(Transform parent, float size = 10f, Color? color = null)
         {
             var obj = new GameObject("PalaceMod Emblem", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
             obj.transform.SetParent(parent, false);
             var image = obj.GetComponent<Image>();
-            image.color = color ?? Accent;
             image.raycastTarget = false;
+            image.preserveAspect = true;
             var rect = (RectTransform)obj.transform;
-            rect.sizeDelta = new Vector2(size, size) / Mathf.Sqrt(2f); // the rotated square's diagonal is `size`
-            rect.localRotation = Quaternion.Euler(0f, 0f, 45f);
+            if (EmblemSprite != null)
+                rect.sizeDelta = new Vector2(size, size) * 1.2f; // the gem is narrower than a square diamond; this matches its weight
+            else
+            {
+                // No texture: a plain diamond, i.e. a rotated square whose diagonal is `size`.
+                rect.sizeDelta = new Vector2(size, size) / Mathf.Sqrt(2f);
+                rect.localRotation = Quaternion.Euler(0f, 0f, 45f);
+            }
+            TintEmblem(image, color);
             obj.AddComponent<LayoutElement>().ignoreLayout = true;
             return rect;
+        }
+
+        /// <summary>
+        /// Colours an emblem made by <see cref="AddEmblem"/>. The signature colour shows the gem as the logo draws it;
+        /// any other colour tints a grey copy, so the facets keep their shading.
+        /// </summary>
+        public static void TintEmblem(Image emblem, Color? color = null)
+        {
+            if (emblem == null) return;
+            var c = color ?? Accent;
+            bool signature = c == Accent;
+            var sprite = signature ? EmblemSprite : EmblemTintSprite;
+            if (sprite == null || emblem.transform.localRotation != Quaternion.identity) // the plain-diamond fallback
+            {
+                emblem.color = c;
+                return;
+            }
+            emblem.sprite = sprite;
+            emblem.color = signature ? Color.white : c;
+        }
+
+        /// <summary>The emblem as the logo draws it (null if the texture didn't load).</summary>
+        public static Sprite EmblemSprite => emblemSprite ??= AssetSprite("palacemod_emblem.png");
+        /// <summary>The emblem in greys, for tinting.</summary>
+        public static Sprite EmblemTintSprite => emblemTintSprite ??= AssetSprite("palacemod_emblem_tint.png");
+        /// <summary>The full mark (the gate and gem), cut for 16-32 px.</summary>
+        public static Sprite MarkSprite => markSprite ??= AssetSprite("palacemod_mark.png");
+        private static Sprite emblemSprite, emblemTintSprite, markSprite;
+        private static readonly HashSet<string> failedAssets = [];
+
+        /// <summary>A sprite from an image embedded from src/PalaceMod/Assets, or null (logged once) if it can't load.</summary>
+        internal static Sprite AssetSprite(string file)
+        {
+            if (failedAssets.Contains(file)) return null;
+            try
+            {
+                using var stream = typeof(ModStyle).Assembly.GetManifestResourceStream("PalaceMod.Assets." + file)
+                    ?? throw new System.IO.FileNotFoundException("not embedded", file);
+                using var buffer = new System.IO.MemoryStream();
+                stream.CopyTo(buffer);
+                var texture = new Texture2D(2, 2, TextureFormat.RGBA32, true) { name = file };
+                if (!texture.LoadImage(buffer.ToArray())) throw new System.InvalidOperationException("not an image");
+                texture.filterMode = FilterMode.Trilinear;
+                texture.wrapMode = TextureWrapMode.Clamp;
+                texture.hideFlags = HideFlags.HideAndDontSave;
+                var sprite = Sprite.Create(texture, new Rect(0, 0, texture.width, texture.height), new Vector2(0.5f, 0.5f), 100f);
+                sprite.hideFlags = HideFlags.HideAndDontSave;
+                return sprite;
+            }
+            catch (System.Exception e)
+            {
+                failedAssets.Add(file);
+                Log.Core.Warn($"Couldn't load {file}: {e.Message}");
+                return null;
+            }
         }
 
         /// <summary>Gives a cloned game panel (an MPImage) the mod's edge: a thin verdigris outline.</summary>

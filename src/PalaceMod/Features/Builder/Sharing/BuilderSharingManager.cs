@@ -58,7 +58,7 @@ namespace PalaceMod
             }
             catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
             {
-                Plugin.Logger.LogWarning($"Builder sharing: can't read {folder}: {e.Message}");
+                Log.For<BuilderManager>().Warn($"Can't read {folder}: {e.Message}");
                 nextPoll = Time.unscaledTime + 30f;
             }
         }
@@ -91,7 +91,7 @@ namespace PalaceMod
             }
             catch (IOException)
             {
-                if (warnedLocked.Add(path)) Plugin.Logger.LogInfo($"Builder sharing: {Path.GetFileName(path)} is in use; retrying");
+                if (warnedLocked.Add(path)) Log.For<BuilderManager>().Debug($"{Path.GetFileName(path)} is in use; retrying");
                 return;
             }
 
@@ -110,7 +110,7 @@ namespace PalaceMod
             }
             catch (Exception e) when (!(e is OutOfMemoryException || e is StackOverflowException))
             {
-                Plugin.Logger.LogError($"Builder sharing: importing {path} failed: {e}");
+                Log.For<BuilderManager>().Error($"Importing {path} failed", e);
                 issues.Add(new ValidationIssue(Severity.Error, "", e.Message));
                 entry = null;
             }

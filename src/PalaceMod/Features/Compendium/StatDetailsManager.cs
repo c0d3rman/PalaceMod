@@ -282,7 +282,7 @@ namespace PalaceMod
         private static void LogHit(Hp __instance, float _amount, TaggedObject _damageComingFrom)
         {
             if (_amount <= 0f || __instance.HpValue <= 0f) return;
-            Plugin.Logger.LogInfo($"[hit] {DescribeHitParty(_damageComingFrom?.gameObject)} -> {DescribeHitParty(__instance.gameObject)}: {_amount:0.###} (hp {__instance.HpValue:0.#}/{__instance.maxHp:0.#})");
+            Log.For<StatDetailsManager>().Info($"[hit] {DescribeHitParty(_damageComingFrom?.gameObject)} -> {DescribeHitParty(__instance.gameObject)}: {_amount:0.###} (hp {__instance.HpValue:0.#}/{__instance.maxHp:0.#})");
         }
 
         private static string DescribeHitParty(GameObject go)

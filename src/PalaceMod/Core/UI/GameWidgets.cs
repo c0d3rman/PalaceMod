@@ -187,7 +187,7 @@ namespace PalaceMod
                 button.onApply.AddListener(() =>
                 {
                     try { onClick(); }
-                    catch (Exception e) { Plugin.Logger.LogError($"{name}: click handler failed: {e}"); }
+                    catch (Exception e) { Log.Core.Caught($"{name}: click handler failed", e); }
                 });
             }
             return button;

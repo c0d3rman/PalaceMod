@@ -108,7 +108,7 @@ namespace PalaceMod
                     history.spentSinceDawn = 0;
                     history.daySeconds = 0f;
                 }
-                Plugin.Logger.LogInfo($"Analytics: resumed {history.nights.Count} recorded nights from the save");
+                Log.Info($"Resumed {history.nights.Count} recorded nights from the save");
             }
             else
             {
@@ -163,7 +163,7 @@ namespace PalaceMod
             };
             history.nights.RemoveAll(r => r.night >= record.night);
             history.nights.Add(record);
-            Plugin.Logger.LogInfo($"Analytics: night {record.night} began; bank {bank}, spent {record.daySpent}, earned {record.dayEarned} during the day");
+            Log.Debug($"Night {record.night} began; bank {bank}, spent {record.daySpent}, earned {record.dayEarned} during the day");
         }
 
         private void OnNightScored(int baseScore, int timeBonus, float protectedFraction, int protectionBonus)
@@ -214,12 +214,12 @@ namespace PalaceMod
                 history.spentSinceDawn = 0;
                 history.daySeconds = 0f;
                 history.PendingDawnIncome = income;
-                Plugin.Logger.LogInfo($"Analytics: night {record.night} scored {record.ScoreTotal} ({baseScore}+{timeBonus}+{protectionBonus}), " +
+                Log.Info($"Night {record.night} scored {record.ScoreTotal} ({baseScore}+{timeBonus}+{protectionBonus}), " +
                     $"{record.afterSpawning:0}s after spawning, earned {record.nightEarned}, lost {record.unitsLost} units, {down}/{buildings} buildings down, dawn income {income}");
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogError($"Analytics: recording the night failed: {e}");
+                Log.Error($"Recording the night failed", e);
             }
         }
 

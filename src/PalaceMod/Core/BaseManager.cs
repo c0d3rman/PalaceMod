@@ -43,6 +43,11 @@ namespace PalaceMod
 
         public bool IsEnabled => EnabledEntry == null || EnabledEntry.Value;
 
+        private Log log;
+
+        /// <summary>This feature's logger, prefixed with its FeatureSection (see Core/Log.cs).</summary>
+        protected Log Log => log ??= Log.For(GetType());
+
         /// <summary>Runs when the Enabled setting changes to true at runtime (not at startup; check IsEnabled in Awake).</summary>
         protected virtual void OnFeatureEnabled() { }
 
@@ -58,6 +63,7 @@ namespace PalaceMod
         internal void Initialize(Plugin plugin)
         {
             Plugin = plugin;
+            Log.RegisterManager(this);
             harmony = new Harmony($"{MyPluginInfo.PLUGIN_GUID}.{GetType().Name}");
             if (FeatureSection != null)
             {
@@ -97,11 +103,11 @@ namespace PalaceMod
                 }
                 if (enabled) OnFeatureEnabled();
                 else OnFeatureDisabled();
-                Plugin.Logger.LogInfo($"{FeatureSection}: {(enabled ? "enabled" : "disabled")}");
+                Log.Info(enabled ? "Enabled" : "Disabled");
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogError($"{GetType().Name}: switching {(enabled ? "on" : "off")} failed: {e}");
+                Log.Error($"Switching {(enabled ? "on" : "off")} failed", e);
             }
         }
 

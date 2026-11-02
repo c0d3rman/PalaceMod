@@ -77,8 +77,8 @@ namespace PalaceMod.Builder
             }
             packs = found;
             foreach (var e in packs.Where(e => e.Issues.Count > 0))
-                Plugin.Logger.LogInfo($"Builder: pack {e.Id} ({e.Source}): {string.Join("; ", e.Issues)}");
-            Plugin.Logger.LogInfo($"Builder: {packs.Count} pack(s) loaded ({packs.Count(p => !p.HasErrors)} playable)");
+                Log.For<BuilderManager>().Info($"Pack {e.Id} ({e.Source}): {string.Join("; ", e.Issues)}");
+            Log.For<BuilderManager>().Info($"{packs.Count} pack(s) loaded ({packs.Count(p => !p.HasErrors)} playable)");
             Changed?.Invoke();
         }
 

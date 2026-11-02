@@ -13,9 +13,9 @@ using Object = UnityEngine.Object;
     Adds a "Mods" tab to the game's own Settings screen, generated from PalaceMod's BepInEx config entries:
     bools become checkboxes, enums and value lists become the game's arrow selectors, numeric ranges become sliders.
     A section selector at the top switches between config sections (the game's tabs don't scroll), and a line under
-    the rows describes the selected setting. The sections in SectionOrder come first, the rest alphabetically; a
-    feature's Enabled switch is its section's first row, and a section with more than RowsPerPage rows is split into
-    pages ("Name (1/2)").
+    the rows describes the selected setting. Feature sections come first, alphabetically, then the performance
+    sections in SectionOrder; a feature's Enabled switch is its section's first row, and a section with more than
+    RowsPerPage rows is split into pages ("Name (1/2)").
 
     Everything is cloned from the game's existing widgets, found through SettingsUIHelper's fields and by component
     type rather than by GameObject path, and the game's localisation and settings-binding components are stripped
@@ -28,7 +28,7 @@ namespace PalaceMod
     public class SettingsPaneManager : BaseManager
     {
         private const string TabLabel = "Mods";
-        private static readonly string[] SectionOrder = ["Frame rate", "Battery", "Optimizations", "Memory", "Diagnostics", "Advanced"];
+        private static readonly string[] SectionOrder = ["Performance", "Frame rate", "Battery", "Optimizations", "Memory", "Diagnostics", "Advanced"];
 
         private SettingsUIHelper helper;
         private bool injected;
@@ -84,7 +84,7 @@ namespace PalaceMod
             try
             {
                 Inject(created);
-                Plugin.Logger.LogInfo($"Settings pane: added \"{TabLabel}\" tab with {sections.Count} sections");
+                Log.For<SettingsPaneManager>().Debug($"Added \"{TabLabel}\" tab with {sections.Count} sections");
             }
             catch (Exception e)
             {
@@ -92,7 +92,7 @@ namespace PalaceMod
                 foreach (var obj in created) if (obj != null) Object.Destroy(obj);
                 tab = null;
                 description = null;
-                Plugin.Logger.LogError($"Settings pane: couldn't add the settings tab, use the config file or F1 instead: {e}");
+                Log.For<SettingsPaneManager>().Error($"Couldn't add the settings tab, use the config file or F1 instead", e);
             }
         }
 
@@ -236,7 +236,7 @@ namespace PalaceMod
             rect.pivot = source.pivot;
             rect.sizeDelta = source.rect.size;
             hintOffset = hint != null ? sliderTemplate.transform.InverseTransformPoint(source.position) : new Vector3(source.rect.width, 0f, 0f);
-            Plugin.Logger.LogInfo($"Settings pane: description template {(hint != null ? $"slider hint \"{hint.text}\"" : "row label")}, offset {hintOffset}, size {rect.sizeDelta}");
+            Log.For<SettingsPaneManager>().Debug($"Description template {(hint != null ? $"slider hint \"{hint.text}\"" : "row label")}, offset {hintOffset}, size {rect.sizeDelta}");
         }
 
         // ---- Rows ---------------------------------------------------------------------------------------------
@@ -245,7 +245,7 @@ namespace PalaceMod
         private List<string> CollectSections()
         {
             var present = Plugin.Config.Keys.Select(d => d.Section).Distinct().Where(s => Entries(s).Any()).ToList();
-            var ordered = SectionOrder.Where(present.Contains).Concat(present.Except(SectionOrder).OrderBy(s => s, StringComparer.OrdinalIgnoreCase));
+            var ordered = present.Except(SectionOrder).OrderBy(s => s, StringComparer.OrdinalIgnoreCase).Concat(SectionOrder.Where(present.Contains));
             var labels = new List<string>();
             pages = [];
             foreach (var section in ordered)

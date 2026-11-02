@@ -57,10 +57,11 @@ namespace PalaceMod
 
         public override void Update()
         {
-            // Packs are validated against the catalog, which needs the game's level data (there from the main menu on).
+            // Packs are validated against the catalog, which needs the game's level data (there from the main menu on)
+            // and the troop buildings, loaded in the background so the menu doesn't stall.
             if (!packsLoaded)
             {
-                if (!Catalog.GameReady) return;
+                if (!Catalog.GameReady || !TroopIndex.Prefetch()) return;
                 packsLoaded = true;
                 Repository.Refresh();
             }
@@ -88,7 +89,7 @@ namespace PalaceMod
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogError($"Builder: scene load handling failed: {e}");
+                Log.For<BuilderManager>().Error($"Scene load handling failed", e);
             }
         }
 

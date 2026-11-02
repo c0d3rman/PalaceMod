@@ -72,7 +72,7 @@ namespace PalaceMod
             File.Delete(CommandRequest);
             foreach (string stale in Directory.GetFiles(DevDir, "command-*.response*")) File.Delete(stale);
             RegisterCommands();
-            Plugin.Logger.LogInfo("Dev tools enabled");
+            Log.Info("Dev tools enabled");
         }
 
         public override void Update()
@@ -88,7 +88,7 @@ namespace PalaceMod
                 string output = File.ReadAllText(ScreenshotRequest).Trim();
                 File.Delete(ScreenshotRequest);
                 ScreenCapture.CaptureScreenshot(output);
-                Plugin.Logger.LogInfo($"Screenshot requested: {output}");
+                Log.Debug($"Screenshot requested: {output}");
             }
 
             if (File.Exists(CommandRequest))
@@ -109,13 +109,13 @@ namespace PalaceMod
                     {
                         text = Run(line.Split([' '], StringSplitOptions.RemoveEmptyEntries)) ?? "";
                         ok = true;
-                        Plugin.Logger.LogInfo($"Dev command done: {line}{(text.Length == 0 ? "" : $": {text}")}");
+                        Log.Info($"Dev command done: {line}{(text.Length == 0 ? "" : $": {text}")}");
                     }
                     catch (Exception e)
                     {
                         text = e is ArgumentException or InvalidOperationException or FormatException ? e.Message : e.ToString();
                         ok = false;
-                        Plugin.Logger.LogInfo($"Dev command failed: {line}: {text}");
+                        Log.Warn($"Dev command failed: {line}: {text}");
                     }
                     if (id != null) WriteResponse(id, ok, text);
                 }
@@ -266,7 +266,7 @@ namespace PalaceMod
             if (Time.unscaledTime >= inputUntil)
             {
                 inputActive = circling = false;
-                Plugin.Logger.LogInfo("Dev input finished");
+                Log.Debug("Dev input finished");
                 return;
             }
             if (circling)

@@ -147,7 +147,7 @@ namespace PalaceMod
         private static void Apply(Message m)
         {
             m.Label.text = m.Text;
-            m.Emblem.color = ModStyle.KindColor(m.Kind);
+            ModStyle.TintEmblem(m.Emblem, ModStyle.KindColor(m.Kind));
             m.Label.color = m.Kind == NotifyKind.Error ? Color.Lerp(ModStyle.Gold, ModStyle.KindColor(NotifyKind.Error), 0.35f) : ModStyle.Gold;
             var size = m.Label.GetPreferredValues(m.Text, MaxTextWidth, 0f);
             float width = Mathf.Min(Mathf.Ceil(size.x) + 2f, MaxTextWidth);
@@ -226,13 +226,13 @@ namespace PalaceMod
                 obj.AddComponent<CanvasGroup>().blocksRaycasts = false;
                 obj.SetActive(false);
                 template = obj;
-                Plugin.Logger.LogInfo("Notifications: using the game's tooltip panel");
+                Log.For<NotificationManager>().Debug("Using the game's tooltip panel");
                 return true;
             }
             catch (System.Exception e)
             {
                 if (obj != null) Object.Destroy(obj);
-                Plugin.Logger.LogError($"Notifications: couldn't build the panel from the game's tooltip: {e}");
+                Log.For<NotificationManager>().Error($"Couldn't build the panel from the game's tooltip", e);
                 nextTemplateCheck = float.PositiveInfinity; // don't retry every half second
                 return false;
             }

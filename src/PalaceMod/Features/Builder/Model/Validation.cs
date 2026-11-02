@@ -33,6 +33,13 @@ namespace PalaceMod.Builder.Model
         bool HasPackUnit(string packId, string unitId);
     }
 
+    /// <summary>Optional extra game context for troop replacements; ICatalog implements it.</summary>
+    public interface ITroopValidationContext
+    {
+        /// <summary>Building names that train the vanilla player troop, empty if no building does, null if unknown.</summary>
+        IReadOnlyCollection<string> TroopBuildings(string unitId);
+    }
+
     public static class Validator
     {
         // TagManager.ETag names. Changing Flying or LargeUnit would also need a pathfinding graph change, which v1 doesn't do.
@@ -40,6 +47,11 @@ namespace PalaceMod.Builder.Model
         private static readonly HashSet<string> MovementTags = ["Flying", "LargeUnit"];
 
         public static bool IsTag(string name) => TagNames.Contains(name);
+
+        // File types the asset loader (WP5) reads, by use. Url assets have no extension; the loader checks their bytes.
+        public static readonly string[] ImageExtensions = [".png"];
+        public static readonly string[] AudioExtensions = [".wav", ".ogg"];
+        public static readonly string[] MeshExtensions = [".obj"];
 
         public static List<ValidationIssue> Validate(DesignPack pack, IValidationContext game = null)
         {
@@ -83,8 +95,18 @@ namespace PalaceMod.Builder.Model
                 {
                     if (v.Tint != null && !TryParseColor(v.Tint, out _)) Error(p + ".visuals.tint", "must be \"#rrggbb\"");
                     if (v.Scale is float s && (s < 0.1f || s > 10f)) Error(p + ".visuals.scale", "must be between 0.1 and 10");
-                    CheckAsset(v.Icon, p + ".visuals.icon");
-                    CheckAsset(v.Mesh, p + ".visuals.mesh");
+                    CheckAsset(v.Icon, p + ".visuals.icon", ImageExtensions);
+                    CheckAsset(v.Mesh, p + ".visuals.mesh", MeshExtensions);
+                    CheckAsset(v.Texture, p + ".visuals.texture", ImageExtensions);
+                    if (v.MeshScale is float ms && (float.IsNaN(ms) || ms < 0.001f || ms > 1000f)) Error(p + ".visuals.meshScale", "must be between 0.001 and 1000");
+                    if (v.MeshRotY is float mr && (float.IsNaN(mr) || mr < -360f || mr > 360f)) Error(p + ".visuals.meshRotY", "must be between -360 and 360");
+                    if ((v.MeshScale != null || v.MeshRotY != null) && v.Mesh == null) Warn(p + ".visuals.mesh", "meshScale and meshRotY only apply with a mesh");
+                    if (v.Sounds != null)
+                    {
+                        CheckAsset(v.Sounds.Attack, p + ".visuals.sounds.attack", AudioExtensions);
+                        CheckAsset(v.Sounds.Hurt, p + ".visuals.sounds.hurt", AudioExtensions);
+                        CheckAsset(v.Sounds.Death, p + ".visuals.sounds.death", AudioExtensions);
+                    }
                 }
                 var st = u.Stats;
                 if (st != null)
@@ -167,6 +189,7 @@ namespace PalaceMod.Builder.Model
                         else if (lines != null && !lines.Contains(sp.Line)) Error(sp_ + ".line", $"no spawn line \"{sp.Line}\" on {ws.Host} (has: {string.Join(", ", lines)})");
                     }
                 }
+                CheckTroops(ws, p);
             }
 
             var levelIds = new HashSet<string>();
@@ -245,12 +268,14 @@ namespace PalaceMod.Builder.Model
                     if (list[j]?.Cost is int c && (c < 0 || c > 10000)) Error($"{path}[{j}].cost", "must be between 0 and 10000");
             }
 
-            void CheckAsset(string reference, string path)
+            void CheckAsset(string reference, string path, string[] extensions)
             {
                 if (reference == null) return;
                 var r = ContentRef.Parse(reference);
                 if (r.Kind != RefKind.Asset) Error(path, "must be \"asset:<key>\"");
-                else if (pack.Assets == null || !pack.Assets.ContainsKey(r.Id)) Error(path, $"no asset \"{r.Id}\" in this pack's \"assets\"");
+                else if (pack.Assets == null || !pack.Assets.TryGetValue(r.Id, out var def)) Error(path, $"no asset \"{r.Id}\" in this pack's \"assets\"");
+                else if (!string.IsNullOrEmpty(def?.Path) && !extensions.Contains(System.IO.Path.GetExtension(def.Path).ToLowerInvariant()))
+                    Error(path, $"asset \"{r.Id}\" ({def.Path}) must be a {string.Join(" or ", extensions)} file");
             }
 
             void CheckDamage(List<DamageModDef> mods, string path)
@@ -262,6 +287,31 @@ namespace PalaceMod.Builder.Model
                     foreach (var t in m.Tags ?? []) if (!IsTag(t)) Error($"{path}[{j}].tags", $"unknown tag \"{t}\"");
                     if (float.IsNaN(m.Add) || m.Add < -100000 || m.Add > 100000) Error($"{path}[{j}].add", "out of range");
                     if (float.IsNaN(m.Mult) || m.Mult < 0 || m.Mult > 1000) Error($"{path}[{j}].mult", "must be between 0 and 1000");
+                }
+            }
+
+            void CheckTroops(WaveSetDef ws, string p)
+            {
+                var troopGame = game as ITroopValidationContext;
+                var seen = new HashSet<string>();
+                for (int t = 0; t < (ws.Troops?.Count ?? 0); t++)
+                {
+                    var troop = ws.Troops[t];
+                    string tp = $"{p}.troops[{t}]";
+                    if (troop == null) { Error(tp, "is empty"); continue; }
+                    var r = ContentRef.Parse(troop.Unit);
+                    if (r.Kind == RefKind.Vanilla) { Error(tp + ".unit", "must be a custom player unit (its base is the troop it replaces)"); continue; }
+                    CheckUnitRef(troop.Unit, tp + ".unit", UnitSide.Player);
+                    // The base is only known for units in this pack; another pack's unit is checked when it loads.
+                    var def = r.Kind == RefKind.LocalUnit || (r.Kind == RefKind.PackUnit && r.Pack == pack.Id) ? pack.FindUnit(r.Id) : null;
+                    string baseId = def != null && def.Side == UnitSide.Player ? ContentRef.Parse(def.Base).Id : null;
+                    if (baseId == null) continue;
+                    var buildings = troopGame?.TroopBuildings(baseId);
+                    if (buildings != null && buildings.Count == 0) Error(tp + ".unit", $"no building trains \"{baseId}\" (`builder dump` lists troops and their buildings)");
+                    else if (troop.Building != null && buildings != null && !buildings.Any(b => string.Equals(b, troop.Building, StringComparison.OrdinalIgnoreCase)))
+                        Error(tp + ".building", $"\"{troop.Building}\" doesn't train {baseId} (trained by: {string.Join(", ", buildings)})");
+                    if (!seen.Add(baseId.ToLowerInvariant() + "|" + (troop.Building ?? "").ToLowerInvariant()))
+                        Error(tp, $"{baseId}{(troop.Building == null ? "" : " in " + troop.Building)} is replaced twice");
                 }
             }
 

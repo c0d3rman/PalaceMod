@@ -62,7 +62,7 @@ namespace PalaceMod
                     yield return ins;
                 }
                 if (scenes == 0 && original.Name != "GetWaveInfo")
-                    Plugin.Logger.LogError($"Builder: {original.DeclaringType.Name}.{original.Name} no longer checks scene.isLoaded; custom units may not spawn");
+                    Log.For<BuilderManager>().Error($"{original.DeclaringType.Name}.{original.Name} no longer checks scene.isLoaded; custom units may not spawn");
             }
 
             private static bool IsLoadedNotTemplate(ref Scene scene) => scene.isLoaded && !(UnitFactory.TemplateScene.IsValid() && scene == UnitFactory.TemplateScene);
