@@ -332,17 +332,33 @@ namespace PalaceMod
             return tmp;
         }
 
-        /// <summary>A selectable row: label on the left, optional value on the right, optional tooltip and action.</summary>
-        public ModRow Row(string label, string value = null, string tooltip = null, Action onClick = null) =>
-            Row(label, value, tooltip == null ? null : () => tooltip, onClick);
+        /// <summary>A selectable row: optional icon, label on the left, optional value on the right, optional tooltip
+        /// and action.</summary>
+        public ModRow Row(string label, string value = null, string tooltip = null, Action onClick = null, Sprite icon = null) =>
+            Row(label, value, tooltip == null ? null : () => tooltip, onClick, icon);
 
         /// <summary>A row whose tooltip text is built when it's shown.</summary>
-        public ModRow Row(string label, string value, Func<string> tooltip, Action onClick = null)
+        public ModRow Row(string label, string value, Func<string> tooltip, Action onClick = null, Sprite icon = null)
         {
             var button = GameWidgets.Button(GameWidgets.MenuButton, content, $"Row {label}", label, onClick);
             var text = button.GetComponent<TextMeshProUGUI>();
             text.alignment = TextAlignmentOptions.MidlineLeft;
             button.gameObject.AddComponent<LayoutElement>().preferredHeight = 46f;
+            if (icon != null)
+            {
+                const float size = 36f;
+                var iconObj = new GameObject("Icon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                iconObj.transform.SetParent(button.transform, false);
+                var image = iconObj.GetComponent<Image>();
+                image.sprite = icon;
+                image.preserveAspect = true;
+                image.raycastTarget = false;
+                var iconRect = (RectTransform)iconObj.transform;
+                iconRect.anchorMin = iconRect.anchorMax = new Vector2(0f, 0.5f);
+                iconRect.pivot = new Vector2(0f, 0.5f);
+                iconRect.sizeDelta = new Vector2(size, size);
+                text.margin = new Vector4(size + 12f, 0f, 0f, 0f);
+            }
             TextMeshProUGUI valueText = null;
             if (value != null)
             {
