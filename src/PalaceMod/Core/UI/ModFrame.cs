@@ -33,7 +33,32 @@ namespace PalaceMod
     {
         private const float Left = 200f, ContentWidth = 860f;
 
-        public string Title { get; }
+        public string Title { get; private set; }
+        private TextMeshProUGUI titleText;
+        private RectTransform ruleRect;
+
+        /// <summary>Renames the frame, also while it's open.</summary>
+        public void SetTitle(string title)
+        {
+            Title = title;
+            if (titleText != null)
+            {
+                titleText.text = title;
+                ruleRect.sizeDelta = new Vector2(Mathf.Clamp(titleText.GetPreferredValues(title).x, 240f, 900f), ruleRect.sizeDelta.y);
+            }
+        }
+
+        /// <summary>Runs each time the frame is shown and its selection set: on Open, and when the player comes back
+        /// from a menu opened on top of it. A good place to Refresh.</summary>
+        public event Action Activated;
+
+        internal void RaiseActivated()
+        {
+            try { Activated?.Invoke(); }
+            catch (Exception e) { Plugin.Logger.LogError($"ModFrame \"{Title}\": Activated handler failed: {e}"); }
+        }
+
+        internal static readonly Dictionary<UIFrame, ModFrame> Frames = [];
         private readonly List<(string Label, Action<ModPage> Build)> tabs = [];
         private Action<ModPage> content;
 
@@ -90,7 +115,7 @@ namespace PalaceMod
         public void Refresh()
         {
             if (root == null) return;
-            ShowTab(currentTab, select: true);
+            ShowTab(currentTab, select: true, keepScroll: true);
         }
 
         // ---- Build ----------------------------------------------------------------------------------------------
@@ -112,6 +137,7 @@ namespace PalaceMod
                 Stretch((RectTransform)obj.transform);
                 // Added while inactive: the frame registers itself with UIFrameManager when first activated.
                 frame = obj.AddComponent<UIFrame>();
+                Frames[frame] = this;
                 frame.freezeTime = true;
                 frame.freezePlayer = true;
                 frame.storeLastSelectedElementInFrameStack = true;
@@ -145,6 +171,7 @@ namespace PalaceMod
                 if (c is not (RectTransform or CanvasRenderer or TextMeshProUGUI or ContentSizeFitter)) Object.DestroyImmediate(c);
             }
             title.text = Title;
+            titleText = title;
             title.alignment = TextAlignmentOptions.TopLeft;
             title.raycastTarget = false;
             var titleRect = title.rectTransform;
@@ -155,7 +182,8 @@ namespace PalaceMod
             var follower = emblem.gameObject.AddComponent<EmblemFollower>();
             follower.Text = title;
             follower.Gap = 26f;
-            var rule = ModStyle.AddRule(root, 420f);
+            var rule = ModStyle.AddRule(root, Mathf.Clamp(title.GetPreferredValues(Title).x, 240f, 900f));
+            ruleRect = rule;
             TopLeft(rule, Left, -222f);
 
             // Tabs, like Settings' Video / Audio / ... row.
@@ -242,11 +270,12 @@ namespace PalaceMod
             back.gameObject.SetActive(true);
         }
 
-        private void ShowTab(int index, bool select)
+        private void ShowTab(int index, bool select, bool keepScroll = false)
         {
             if (frame == null) return;
             currentTab = Mathf.Clamp(index, 0, Math.Max(0, tabs.Count - 1));
             int selectedIndex = page?.Elements.IndexOf(frame.CurrentSelection) ?? -1;
+            string selectedName = selectedIndex >= 0 ? frame.CurrentSelection.name : null;
             // Don't leave the selection on an element that's about to be destroyed.
             if (select && selectedIndex >= 0) frame.Select(tabButtons.Count > 0 ? tabButtons[currentTab] : back);
 
@@ -274,20 +303,40 @@ namespace PalaceMod
             }
             back.topNav = elements.LastOrDefault() ?? up;
             frame.RefetchManagedElements();
-            scroll.ResetTo(0f);
-            if (select && selectedIndex >= 0 && elements.Count > 0) frame.Select(elements[Math.Min(selectedIndex, elements.Count - 1)]);
+            // Lay the page out now, so scrolling to the restored selection measures its real position.
+            LayoutRebuilder.ForceRebuildLayoutImmediate(contentRoot);
+            if (!keepScroll) scroll.ResetTo(0f);
+            else scroll.Clamp();
+            if (select && selectedIndex >= 0 && elements.Count > 0)
+            {
+                // The same row (by label) if it's still there, else the same position.
+                frame.Select(elements.FirstOrDefault(e => e.name == selectedName) ?? elements[Math.Min(selectedIndex, elements.Count - 1)]);
+            }
             UpdateTabMarker();
         }
 
         private void UpdateTabMarker()
         {
             if (tabMarker == null || tabButtons.Count == 0) return;
-            var tab = (RectTransform)tabButtons[currentTab].transform;
-            LayoutRebuilder.ForceRebuildLayoutImmediate((RectTransform)tab.parent);
-            var text = tab.GetComponent<TextMeshProUGUI>();
-            float width = Mathf.Max(24f, text.GetPreferredValues(text.text).x);
-            tabMarker.sizeDelta = new Vector2(width, 2f);
-            tabMarker.anchoredPosition = new Vector2(tab.anchoredPosition.x + (0.5f - tab.pivot.x) * tab.rect.width, -18f);
+            var follower = tabMarker.GetComponent<TabMarker>() ?? tabMarker.gameObject.AddComponent<TabMarker>();
+            follower.Tab = (RectTransform)tabButtons[currentTab].transform;
+        }
+
+        // Keeps the underline under the current tab; tabs resize while their selection animation plays, so this
+        // follows every frame rather than measuring once.
+        private class TabMarker : MonoBehaviour
+        {
+            public RectTransform Tab;
+
+            private void LateUpdate()
+            {
+                if (Tab == null) return;
+                var rect = (RectTransform)transform;
+                var row = (RectTransform)Tab.parent;
+                var center = row.InverseTransformPoint(Tab.TransformPoint(Tab.rect.center));
+                rect.sizeDelta = new Vector2(Mathf.Max(24f, Tab.rect.width * 0.9f), 2f);
+                rect.localPosition = new Vector3(center.x, center.y - 18f, 0f);
+            }
         }
 
         private static void Stretch(RectTransform rect)
@@ -305,6 +354,21 @@ namespace PalaceMod
         }
     }
 
+    /// <summary>Hosts the ModFrame hooks into the game's frame code.</summary>
+    [ManagerOrder(-44)]
+    public class ModFrameManager : BaseManager
+    {
+        // After Activate the frame has its selection (fresh or restored from the frame stack).
+        [HarmonyLib.HarmonyPatch(typeof(UIFrame), nameof(UIFrame.Activate))]
+        private class UIFrame_Activate_Patch
+        {
+            private static void Postfix(UIFrame __instance)
+            {
+                if (__instance != null && ModFrame.Frames.TryGetValue(__instance, out var frame)) frame.RaiseActivated();
+            }
+        }
+    }
+
     /// <summary>Builds the contents of one ModFrame page, top to bottom.</summary>
     public sealed class ModPage
     {
@@ -312,6 +376,13 @@ namespace PalaceMod
 
         /// <summary>The page's selectable elements, in navigation order.</summary>
         internal List<ThronefallUIElement> Elements { get; } = [];
+
+        /// <summary>The page's content area (a vertical layout), for parenting custom widgets.</summary>
+        public RectTransform Content => (RectTransform)content;
+
+        /// <summary>Adds a selectable you made yourself to the page's up/down navigation, after what's there.
+        /// Its topNav/botNav are overwritten; set leftNav/rightNav yourself.</summary>
+        public void AddElement(ThronefallUIElement element) => Elements.Add(element);
 
         internal ModPage(Transform content) => this.content = content;
 
@@ -328,6 +399,7 @@ namespace PalaceMod
         {
             var tmp = GameWidgets.Text(content, "Text", text, ModStyle.BodyFont, 25f, new Color(ModStyle.Gold.r, ModStyle.Gold.g, ModStyle.Gold.b, 0.85f));
             tmp.enableWordWrapping = true;
+            tmp.characterSpacing = 0f; // the tooltip text it's cloned from is letter-spaced; paragraphs read better without
             tmp.margin = new Vector4(0f, 2f, 0f, 6f);
             return tmp;
         }
@@ -351,6 +423,7 @@ namespace PalaceMod
                 iconObj.transform.SetParent(button.transform, false);
                 var image = iconObj.GetComponent<Image>();
                 image.sprite = icon;
+                image.color = ModStyle.Gold; // the game's icons are white and tinted gold in its menus
                 image.preserveAspect = true;
                 image.raycastTarget = false;
                 var iconRect = (RectTransform)iconObj.transform;
@@ -378,6 +451,30 @@ namespace PalaceMod
         public TFUITextButton Button(string label, Action onClick, string tooltip = null) =>
             Row(label, null, tooltip, onClick).Button;
 
+        /// <summary>
+        /// A row whose value is changed with left/right (keyboard, controller) or by clicking the game's arrows
+        /// either side of the value (mouse). <paramref name="step"/> gets -1 or +1; the value is re-read after each
+        /// step. <paramref name="onClick"/> (optional) runs on apply, e.g. to act on the chosen value.
+        /// </summary>
+        public ModRow Stepper(string label, Func<string> value, Action<int> step, Action onClick = null, string tooltip = null, Sprite icon = null)
+        {
+            var row = Row(label, value(), tooltip, onClick, icon);
+            void Step(int delta)
+            {
+                try { step(delta); }
+                catch (Exception e) { Plugin.Logger.LogError($"Stepper \"{label}\" failed: {e}"); }
+                // A step may rebuild the page (Refresh), destroying this row.
+                if (row.Button != null) row.SetValue(value());
+            }
+            row.Button.onEmptyNavigate.AddListener(direction =>
+            {
+                if (direction == ThronefallUIElement.NavigationDirection.Left) Step(-1);
+                else if (direction == ThronefallUIElement.NavigationDirection.Right) Step(1);
+            });
+            row.AddArrows(() => Step(-1), () => Step(1));
+            return row;
+        }
+
         /// <summary>An empty full-width area of the given height for custom drawing (graphs, grids). Not selectable;
         /// add your own ThronefallUIElements under it only if you also wire their navigation.</summary>
         public RectTransform Custom(string name, float height)
@@ -402,6 +499,53 @@ namespace PalaceMod
     {
         public TFUITextButton Button { get; }
         private readonly TextMeshProUGUI value;
+
+        // Clickable arrows either side of the value, cloned from the pause menu's Night selector.
+        internal void AddArrows(Action decrease, Action increase)
+        {
+            var (left, right) = GameWidgets.Arrows;
+            if (left == null || right == null || value == null) return; // keyboard and controller still work
+            const float arrowSpace = 34f;
+            value.rectTransform.offsetMax = new Vector2(-arrowSpace, 0f);
+            var increaseButton = Arrow(right, increase, "Increase");
+            var increaseRect = (RectTransform)increaseButton.transform;
+            increaseRect.anchorMin = increaseRect.anchorMax = new Vector2(1f, 0.5f);
+            increaseRect.anchoredPosition = new Vector2(-arrowSpace / 2f, 0f);
+            var decreaseButton = Arrow(left, decrease, "Decrease");
+            var follower = decreaseButton.gameObject.AddComponent<ArrowFollower>();
+            follower.Value = value;
+        }
+
+        private TFUIEnumSelectorButton Arrow(TFUIEnumSelectorButton source, Action onClick, string name)
+        {
+            var arrow = GameWidgets.Clone(source, Button.transform, name).GetComponent<TFUIEnumSelectorButton>();
+            // Clicking an arrow acts on it without moving the selection off the row.
+            arrow.cannotBeSelected = true;
+            // The game flips one arrow by rotating it 180 degrees around an edge pivot; pivot on the centre instead,
+            // so positions below are the arrow's centre whichever way it points.
+            var rect = (RectTransform)arrow.transform;
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            arrow.onApply.AddListener(() => onClick());
+            arrow.gameObject.SetActive(true);
+            return arrow;
+        }
+
+        // Keeps the decrease arrow just left of the value's visible text, whatever its length.
+        private class ArrowFollower : MonoBehaviour
+        {
+            public TextMeshProUGUI Value;
+
+            private void LateUpdate()
+            {
+                if (Value == null) return;
+                var bounds = Value.textBounds;
+                if (bounds.size.x <= 0f) return;
+                var rect = (RectTransform)transform;
+                var parent = (RectTransform)rect.parent;
+                var left = parent.InverseTransformPoint(Value.rectTransform.TransformPoint(new Vector3(bounds.min.x, bounds.center.y, 0f)));
+                rect.localPosition = new Vector3(left.x - 18f, left.y, 0f);
+            }
+        }
 
         internal ModRow(TFUITextButton button, TextMeshProUGUI value)
         {
@@ -430,6 +574,27 @@ namespace PalaceMod
             this.viewport = viewport;
             this.content = content;
             frame.onNewSelection.AddListener(KeepSelectionVisible);
+            // A thin scroll bar right of the page, in the game's slider colours; shown only when the page overflows.
+            track = Bar("Scroll Bar", viewport.parent, new Color(ModStyle.Dim.r, ModStyle.Dim.g, ModStyle.Dim.b, 0.6f), 2f);
+            track.anchorMin = track.anchorMax = new Vector2(0f, 1f);
+            track.pivot = new Vector2(0.5f, 1f);
+            thumb = Bar("Thumb", track, ModStyle.Gold, 4f);
+            thumb.anchorMin = thumb.anchorMax = new Vector2(0.5f, 1f);
+            thumb.pivot = new Vector2(0.5f, 1f);
+        }
+
+        private RectTransform track, thumb;
+
+        private static RectTransform Bar(string name, Transform parent, Color color, float width)
+        {
+            var obj = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            obj.transform.SetParent(parent, false);
+            var image = obj.GetComponent<Image>();
+            image.color = color;
+            image.raycastTarget = false;
+            var rect = (RectTransform)obj.transform;
+            rect.sizeDelta = new Vector2(width, 0f);
+            return rect;
         }
 
         public void ResetTo(float y)
@@ -439,11 +604,20 @@ namespace PalaceMod
             content.anchoredPosition = new Vector2(content.anchoredPosition.x, y);
         }
 
+        public void Clamp() => target = Mathf.Clamp(target, 0f, MaxScroll);
+
         private float MaxScroll => Mathf.Max(0f, content.rect.height - viewport.rect.height);
+
+        private ThronefallUIElement last;
+        private bool stepping;
+        private ThronefallUIElement pendingReselect;
 
         private void KeepSelectionVisible()
         {
+            if (stepping) return;
+            var previous = last;
             var selected = frame.CurrentSelection;
+            last = selected;
             if (selected == null || !selected.transform.IsChildOf(content)) return;
             var rect = (RectTransform)selected.transform;
             var corners = new Vector3[4];
@@ -451,20 +625,54 @@ namespace PalaceMod
             // Positions below the content's top edge (positive down), unaffected by the current scroll.
             float topEdge = -content.InverseTransformPoint(corners[1]).y + content.rect.yMax;
             float bottomEdge = -content.InverseTransformPoint(corners[0]).y + content.rect.yMax;
-            float margin = 40f, height = viewport.rect.height;
-            if (topEdge - margin < target) target = topEdge - margin;
-            else if (bottomEdge + margin > target + height) target = bottomEdge + margin - height;
-            target = Mathf.Clamp(target, 0f, MaxScroll);
+            float margin = 40f, height = viewport.rect.height, page = height - 2f * margin;
+            float wanted = target;
+            if (topEdge - margin < target) wanted = topEdge - margin;
+            else if (bottomEdge + margin > target + height) wanted = bottomEdge + margin - height;
+            wanted = Mathf.Clamp(wanted, 0f, MaxScroll);
+            // Moving between two rows that have tall non-selectable content (text, Custom blocks) between them:
+            // scroll one page towards the new row and keep the old selection, so keyboard and controller players
+            // see everything in between. The next press continues until the row is in view.
+            if (Mathf.Abs(wanted - target) > page && previous != null && previous.transform.IsChildOf(content) && previous.gameObject.activeInHierarchy)
+            {
+                target = Mathf.Clamp(target + Mathf.Sign(wanted - target) * page, 0f, MaxScroll);
+                // Can't re-select from inside the selection event (the game finishes styling the new row after it).
+                pendingReselect = previous;
+                last = previous;
+                return;
+            }
+            target = wanted;
         }
 
         private void Update()
         {
+            if (pendingReselect != null)
+            {
+                var element = pendingReselect;
+                pendingReselect = null;
+                if (element != null && element.gameObject.activeInHierarchy && UIFrameManager.instance?.ActiveFrame == frame)
+                {
+                    stepping = true;
+                    try { frame.Select(element); }
+                    finally { stepping = false; }
+                }
+            }
             if (UIFrameManager.instance?.ActiveFrame == frame && Input.mouseScrollDelta.y != 0f)
             {
                 target = Mathf.Clamp(target - Input.mouseScrollDelta.y * 60f, 0f, MaxScroll);
             }
             float y = Mathf.SmoothDamp(content.anchoredPosition.y, target, ref velocity, 0.12f, float.PositiveInfinity, Time.unscaledDeltaTime);
             content.anchoredPosition = new Vector2(content.anchoredPosition.x, y);
+
+            float max = MaxScroll, height = viewport.rect.height;
+            track.gameObject.SetActive(max > 1f);
+            if (max <= 1f) return;
+            // Track sits just right of the viewport, over its full height.
+            track.anchoredPosition = new Vector2(viewport.offsetMax.x + 16f, viewport.offsetMax.y);
+            track.sizeDelta = new Vector2(2f, height);
+            float thumbHeight = Mathf.Max(30f, height * height / content.rect.height);
+            thumb.sizeDelta = new Vector2(4f, thumbHeight);
+            thumb.anchoredPosition = new Vector2(0f, -(height - thumbHeight) * Mathf.Clamp01(y / max));
         }
     }
 }

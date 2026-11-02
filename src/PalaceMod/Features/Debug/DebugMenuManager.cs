@@ -120,27 +120,9 @@ namespace PalaceMod
 
         private static string Capitalize(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s.Substring(1);
 
-        private static string Arrows(string value) => $"<  {value}  >";
-
-        // A row whose value changes with left/right (step) and that acts on apply.
-        private ModRow Stepper(ModPage page, string label, Func<string> value, Action<int> step, Action apply, string tooltip, Sprite icon = null)
-        {
-            var row = page.Row(label, Arrows(value()), tooltip, apply, icon);
-            row.Button.onEmptyNavigate.AddListener(direction =>
-            {
-                int delta = direction switch
-                {
-                    ThronefallUIElement.NavigationDirection.Left => -1,
-                    ThronefallUIElement.NavigationDirection.Right => 1,
-                    _ => 0,
-                };
-                if (delta == 0) return;
-                step(delta);
-                // A step that ran an action has already rebuilt the page, destroying this row.
-                if (row.Button != null) row.SetValue(Arrows(value()));
-            });
-            return row;
-        }
+        // A row whose value changes with left/right or the arrows beside it (step) and that acts on apply.
+        private ModRow Stepper(ModPage page, string label, Func<string> value, Action<int> step, Action apply, string tooltip, Sprite icon = null) =>
+            page.Stepper(label, value, step, apply, tooltip, icon);
 
         private static string OnOff(bool on) => on ? "On" : "Off";
 

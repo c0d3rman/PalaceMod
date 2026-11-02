@@ -15,6 +15,7 @@ namespace PalaceMod
         private ModFrame demo;
         private int demoButtons;
         private int clicks;
+        private int stepValue = 5;
 
         public override void Awake(Plugin plugin)
         {
@@ -38,7 +39,10 @@ namespace PalaceMod
                         for (int i = 1; i <= Math.Max(n, demoButtons); i++)
                         {
                             int index = i;
-                            if (i <= n) PauseMenu.AddButton($"demo{i}", $"Demo {i}", () => Notify.Show($"Demo {index} clicked", key: "demo-click"), order: i);
+                            // Demo 1 opens the demo frame, the rest just say they were clicked.
+                            if (i <= n) PauseMenu.AddButton($"demo{i}", $"Demo {i}", index == 1
+                                ? () => (demo ??= BuildDemo()).Open()
+                                : () => Notify.Show($"Demo {index} clicked", key: "demo-click"), order: i);
                             else PauseMenu.RemoveButton($"demo{i}");
                         }
                         demoButtons = n;
@@ -69,6 +73,8 @@ namespace PalaceMod
                 page.Text("Body text wraps to the page width. It uses the game's Cormorant Garamond in the game's gold, slightly dimmed so rows stand out.");
                 page.Text("A second paragraph, to show spacing.");
                 page.Row("A row after text", "42", tooltip: "Rows and text mix freely.");
+                var tall = page.Custom("Tall block", 1100f);
+                GameWidgets.Text(tall, "Tall label", "A tall custom block: keyboard and controller scroll through it a page at a time.", ModStyle.BodyFont, 25f, ModStyle.Dim);
                 var icon = PerkManager.instance?.allEquippables?.FirstOrDefault(e => e != null && e.icon != null)?.icon;
                 if (icon != null) page.Row("A row with an icon", "7", tooltip: "Icons sit left of the label.", icon: icon);
             })
@@ -79,6 +85,8 @@ namespace PalaceMod
                 page.Button("Success notification", () => Notify.Show("It worked", NotifyKind.Success));
                 page.Button("Warning notification", () => Notify.Show("Careful", NotifyKind.Warning));
                 page.Button("Error notification", () => Notify.Show("It failed", NotifyKind.Error));
+                page.Stepper("Stepper", () => $"{stepValue}", d => stepValue = Math.Max(0, Math.Min(10, stepValue + d)),
+                    () => Notify.Show($"Applied {stepValue}", key: "demo-stepper"), "Left/right or click the arrows; apply to use it.");
                 page.Row("Clicks", clicks.ToString(), tooltip: "Rebuilt by Refresh", onClick: () =>
                 {
                     clicks++;

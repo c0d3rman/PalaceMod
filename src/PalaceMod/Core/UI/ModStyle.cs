@@ -79,7 +79,7 @@ namespace PalaceMod
         {
             if (panel == null) return;
             panel.OutlineWidth = width;
-            panel.OutlineColor = new Color(Accent.r, Accent.g, Accent.b, 0.75f);
+            panel.OutlineColor = new Color(Accent.r, Accent.g, Accent.b, 0.65f);
         }
 
         /// <summary>A thin horizontal rule in the accent colour, e.g. under a mod frame's title.</summary>
