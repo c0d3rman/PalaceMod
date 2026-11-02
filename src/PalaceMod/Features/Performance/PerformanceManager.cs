@@ -141,7 +141,8 @@ namespace PalaceMod
                 "fewer collections happen mid-battle.");
 
             spikeLogging = config.Bind(DiagnosticsSection, "Log frame spikes", true,
-                "Write frame-time spikes and a periodic frame-time summary to the BepInEx log. Takes effect at launch.");
+                "Write frame-time spikes and a periodic frame-time summary to the BepInEx log. They're debug lines, so they " +
+                "only appear when \"Log level\" is Debug (or Performance debug logging is on). Takes effect at launch.");
             spikeThresholdMs = config.Bind(DiagnosticsSection, "Spike threshold", 25f, new ConfigDescription(
                 "A frame counts as a spike when it takes longer than this...", new AcceptableValueRange<float>(5f, 200f), new SettingTags { Unit = " ms", Step = 5 }));
             spikeRatio = config.Bind(DiagnosticsSection, "Spike ratio", 2f, new ConfigDescription(

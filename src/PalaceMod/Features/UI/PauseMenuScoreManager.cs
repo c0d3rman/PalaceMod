@@ -513,7 +513,7 @@ namespace PalaceMod
             if (root == null) throw new InvalidOperationException("not found");
             var sb = new StringBuilder();
             DumpRec(root, 0, sb);
-            Plugin.Logger.LogInfo("UI dump " + what + ":\n" + sb);
+            Log.For<PauseMenuScoreManager>().Debug($"UI dump {what}:\n{sb}");
             return sb.ToString();
         }
 

@@ -57,7 +57,7 @@ namespace PalaceMod
         private void RegisterDevCommand()
         {
             DevCommands.Register("builder-level",
-                "builder-level edit <pack> <level> | state | add slot <type|slot> <x> <z> [yaw] | add prop <n|mesh> <x> <z> | select <key> | move <key> <x> <z> | rotate <key> <deg> | remove <key> | cost <key> <level> <gold|base> | cursor <x> <z>|off | tool <id>|none | click | cam <x> <z> [zoom] [yaw] | menu | details | check | play | leave | json | spike ...   level layout editor", args =>
+                "builder-level edit <pack> <level> | state | add slot <type|slot> <x> <z> [yaw] | add prop <n|mesh> <x> <z> | select <key> | move <key> <x> <z> | rotate <key> <deg> | remove <key> | cost <key> <level> <gold|base> | cursor <x> <z>|off | tool <id>|none | click | cam <x> <z> [zoom] [yaw] | menu | details | check | paths | graphs | play | leave | json | spike ...   level layout editor", args =>
             {
                 string sub = args.FirstOrDefault()?.ToLowerInvariant();
                 switch (sub)
@@ -177,6 +177,8 @@ namespace PalaceMod
                         var scene = LayoutScene.Host(BuilderServices.Sessions.Current?.HostScene);
                         return PathCheck.Describe(PathCheck.Check(scene));
                     }
+                    case "graphs":
+                        return "\n" + PathCheck.DescribeGraphs() + "\n" + string.Join("\n", PathCheck.Check(LayoutEditor.Active ? LayoutEditor.Scene : LayoutScene.Host(BuilderServices.Sessions.Current?.HostScene)).Select(r => $"{r.Line} on {r.Graph}: {r.Detail}"));
                     case "spike":
                         return LevelSpike.Run(args.Length > 1 ? args[1] : "");
                     default:

@@ -103,15 +103,34 @@ namespace PalaceMod.Builder
             }
 
             // Troops are children of building prefabs, named after their troop type.
-            foreach (var (proto, buildings) in TroopIndex.Prototypes())
+            foreach (var (proto, buildings, troopName) in TroopIndex.Prototypes())
             {
                 string id = TroopIndex.TroopId(proto);
-                if (unitList.Any(u => u.Id == id)) continue;
-                var unit = Describe(proto, weaponMap);
-                if (unit == null || unit.Side != UnitSide.Player) continue;
-                unit.Id = id;
-                unit.Buildings = buildings;
-                unitList.Add(unit);
+                var unit = unitList.FirstOrDefault(u => u.Id == id);
+                if (unit == null)
+                {
+                    unit = Describe(proto, weaponMap);
+                    if (unit == null || unit.Side != UnitSide.Player) continue;
+                    unit.Id = id;
+                    unit.Buildings = buildings;
+                    unitList.Add(unit);
+                }
+                // A troop's own marker name can be missing (P Melee) or name its building ("Archery Range" for the
+                // archers); the upgrade choice that recruits it (or the starting-troop name) is what the player knows.
+                if (!string.IsNullOrEmpty(troopName) && (unit.DisplayName == Humanize(id) || buildings.Contains(unit.DisplayName))) unit.DisplayName = troopName;
+            }
+
+            // Two prefabs can share a player-facing name (E Melee and E Defensive Melee Variant are both "Swordsman"):
+            // tell them apart by the words their ids don't share.
+            foreach (var group in unitList.GroupBy(u => (u.Side, u.DisplayName)).Where(g => g.Count() > 1).ToList())
+            {
+                var shortest = group.OrderBy(u => u.Id.Length).First();
+                var common = new HashSet<string>(Words(shortest.Id));
+                foreach (var u in group.Where(u => u != shortest))
+                {
+                    var extra = Words(u.Id).Where(w => !common.Contains(w) && w != "Variant").ToList();
+                    u.DisplayName += $" ({(extra.Count > 0 ? string.Join(" ", extra) : u.Id)})";
+                }
             }
 
             // Names must be unique to work as ids; vanilla has a few duplicate prefab names, which get a suffix.
@@ -150,7 +169,7 @@ namespace PalaceMod.Builder
                 Side = enemy ? UnitSide.Enemy : UnitSide.Player,
                 Prefab = prefab,
                 Icon = icon?.sprite,
-                DisplayName = SafeTranslate(() => icon?.UnitName) ?? prefab.name,
+                DisplayName = UnitName(icon) ?? Humanize(prefab.name),
                 Description = SafeTranslate(() => icon?.UnitDescription),
                 MaxHp = hp.maxHp,
                 MoveSpeed = enemyMove?.movementSpeed ?? playerMove?.movementSpeed ?? 0,
@@ -171,6 +190,22 @@ namespace PalaceMod.Builder
             }
             return unit;
         }
+
+        /// <summary>The marker icon's translated name, or null when it has none: an empty or missing locaKey translates
+        /// to the bare suffix (" Name") or the key itself.</summary>
+        private static string UnitName(ScreenMarkerIcon icon)
+        {
+            if (icon == null || string.IsNullOrWhiteSpace(icon.locaKey)) return null;
+            string name = SafeTranslate(() => icon.UnitName)?.Trim();
+            string key = icon.locaKey.Trim();
+            return string.IsNullOrEmpty(name) || name == key || name == key + " Name" || name == "Name" ? null : name;
+        }
+
+        /// <summary>A prefab name as a fallback display name: "P Melee" becomes "Melee".</summary>
+        internal static string Humanize(string prefabName) =>
+            prefabName.StartsWith("P ") || prefabName.StartsWith("E ") ? prefabName.Substring(2).Trim() : prefabName;
+
+        private static IEnumerable<string> Words(string id) => Humanize(id).Split([' '], StringSplitOptions.RemoveEmptyEntries);
 
         private static string SafeTranslate(Func<string> f)
         {
