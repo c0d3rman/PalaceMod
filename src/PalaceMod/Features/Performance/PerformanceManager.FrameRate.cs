@@ -231,7 +231,9 @@ namespace PalaceMod
         {
             var pipeline = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
             if (msaa.Value <= 0 || pipeline == null || SettingsManager.Instance == null) return;
-            SetIfDifferent(pipeline.GetType().GetProperty("msaaSampleCount"), pipeline, (int)SettingsManager.Instance.AntiAliasing);
+            // AntiAliasing is URP's MsaaQuality (sample count), which isn't referenced at compile time.
+            var quality = typeof(SettingsManager).GetProperty("AntiAliasing")?.GetValue(SettingsManager.Instance);
+            if (quality != null) SetIfDifferent(pipeline.GetType().GetProperty("msaaSampleCount"), pipeline, Convert.ToInt32(quality));
         }
 
         // No override any more (e.g. plugged back in): restore the game's current setting, which the player may have
