@@ -394,6 +394,8 @@ def launch(game, timeout, fullscreen, keep_focus=True):
         restore_display()
     else:
         apply_windowed()
+    # Remember the app in front before Steam or the game can take focus.
+    focus = FocusKeeper(keep_focus and not fullscreen)
     ensure_steam()
     saved = backup_saves()
     if saved:
@@ -409,7 +411,6 @@ def launch(game, timeout, fullscreen, keep_focus=True):
         subprocess.Popen(command, cwd=game, stdout=handle, stderr=subprocess.STDOUT,
                          stdin=subprocess.DEVNULL, start_new_session=True, env=env)
     claim_game()
-    focus = FocusKeeper(keep_focus and not fullscreen)
     arch = "natively" if is_native(game) else "under Rosetta"
     print(f"Launching Thronefall {arch} ({'fullscreen' if fullscreen else 'windowed'})...", flush=True)
     deadline = started + timeout
