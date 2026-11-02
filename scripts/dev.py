@@ -1030,7 +1030,7 @@ BASE_FINGERPRINT_FILES = ["Thronefall.app/Contents/Info.plist", "Thronefall.app/
                           "Thronefall.app/Contents/Resources/Data/globalgamemanagers", "run_bepinex.sh",
                           "libdoorstop.dylib", "doorstop_config.ini", "BepInEx/core/BepInEx.dll",
                           "BepInEx/core/BepInEx.Preloader.dll", "BepInEx/core/PalaceMod.Bootstrap.dll",
-                          "BepInEx/core/libpalacejit.dylib", "BepInEx/config/BepInEx.cfg"]
+                          "BepInEx/core/libpalacejit.dylib"]  # not BepInEx.cfg: BepInEx rewrites it every launch
 
 
 class Instance:
@@ -1424,6 +1424,30 @@ def launch_instance(instance, timeout, keep_focus=True):
     wait_for_load(instance.game, started, timeout, focus, instance.pids, out)
 
 
+@contextlib.contextmanager
+def reserved(instance, command):
+    """Hold an instance (unless another checkout leases it) while managing it, so nobody acquires it mid-way.
+    Yields whether it's held; a lease this checkout already had is kept afterwards."""
+    with pool_lock():
+        lease = instance.lease()
+        if lease is not None and lease["root"] != str(ROOT) and not lease_stale(lease):
+            print(f"Skipping pool {instance}: leased by {describe_holder(lease)}.")
+            yield False
+            return
+        if lease is None or lease["root"] != str(ROOT):
+            now = time.time()
+            instance.write_lease({"root": str(ROOT), "branch": current_branch(), "pid": os.getpid(),
+                                  "command": command, "acquired": now, "heartbeat": now,
+                                  "instance": instance.number, "seeded": False})
+            lease = None
+    try:
+        yield True
+    finally:
+        if lease is None:
+            with pool_lock():
+                instance.lease_file.unlink(missing_ok=True)
+
+
 def instances_command(base, action, targets):
     """`dev.py instances create [COUNT] | list | reset [N|all] | remove [N|all]`."""
     if action in (None, "list"):
@@ -1435,12 +1459,9 @@ def instances_command(base, action, targets):
             write_atomic(POOL_CONFIG, json.dumps({"size": max(1, int(targets[0]))}) + "\n")
         for number in range(1, pool_size() + 1):
             instance = Instance(number)
-            lease = instance.lease()
-            if lease is not None and lease["root"] != str(ROOT) and not lease_stale(lease):
-                print(f"Pool {instance} is leased by {describe_holder(lease)}; it updates on its next run.")
-                continue
-            if ensure_instance(instance, base) or not instance.saves.exists():
-                seed_instance(instance)
+            with reserved(instance, "instances create") as ok:
+                if ok and (ensure_instance(instance, base) or not instance.saves.exists()):
+                    seed_instance(instance)
         extra = [n for n in pool_numbers() if n > pool_size() and Instance(n).dir.exists()]
         if extra:
             instances_command(base, "remove", [str(n) for n in extra])
@@ -1454,17 +1475,9 @@ def instances_command(base, action, targets):
         numbers = [int(t) for t in targets]
     for number in numbers:
         instance = Instance(number)
-        with pool_lock():
-            lease = instance.lease()
-            if lease is not None and lease["root"] != str(ROOT) and not lease_stale(lease):
-                print(f"Skipping pool {instance}: leased by {describe_holder(lease)}.")
+        with reserved(instance, f"instances {action}") as ok:
+            if not ok:
                 continue
-            # Hold it while working so nobody acquires it mid-way.
-            now = time.time()
-            instance.write_lease({"root": str(ROOT), "branch": current_branch(), "pid": os.getpid(),
-                                  "command": f"instances {action}", "acquired": now, "heartbeat": now,
-                                  "instance": number, "seeded": False})
-        try:
             stop_instance(instance)
             if action == "reset":
                 if instance.game.is_dir():
@@ -1475,10 +1488,6 @@ def instances_command(base, action, targets):
                     shutil.rmtree(instance.dir, ignore_errors=True)
                     subprocess.run(["defaults", "delete", instance.bundle], capture_output=True)
                 print(f"Removed pool {instance}.")
-        finally:
-            with pool_lock():
-                if lease is None or lease["root"] != str(ROOT):
-                    instance.lease_file.unlink(missing_ok=True)
 
 
 def pool_status():
@@ -1804,6 +1813,7 @@ def main():
         """The real install's lease, after draining the pool for --solo."""
         if args.solo:
             drain_pool(args.wait)
+        LAST_INSTANCE.unlink(missing_ok=True)  # `logs` follows the real install from now on
         try:
             with game_lease(game, command, args.wait, args.force):
                 yield
@@ -1848,6 +1858,8 @@ def main():
         else:
             with pool_session("launch", args.wait) as inst:
                 prepare_instance(inst, game)
+                if not (inst.game / "BepInEx/plugins/PalaceMod/PalaceMod.dll").is_file():
+                    install(inst.game, args.configuration, inst.pids, backup=False)  # recloned, or never installed
                 prepare_config(inst.game)
                 launch_instance(inst, args.timeout, not args.focus)
     elif args.command == "stop":
