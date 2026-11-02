@@ -35,12 +35,17 @@ namespace PalaceMod
 
         public string Title { get; private set; }
         private TextMeshProUGUI titleText;
+        private RectTransform ruleRect;
 
         /// <summary>Renames the frame, also while it's open.</summary>
         public void SetTitle(string title)
         {
             Title = title;
-            if (titleText != null) titleText.text = title;
+            if (titleText != null)
+            {
+                titleText.text = title;
+                ruleRect.sizeDelta = new Vector2(Mathf.Clamp(titleText.GetPreferredValues(title).x, 240f, 900f), ruleRect.sizeDelta.y);
+            }
         }
 
         /// <summary>Runs each time the frame is shown and its selection set: on Open, and when the player comes back
@@ -177,7 +182,8 @@ namespace PalaceMod
             var follower = emblem.gameObject.AddComponent<EmblemFollower>();
             follower.Text = title;
             follower.Gap = 26f;
-            var rule = ModStyle.AddRule(root, 420f);
+            var rule = ModStyle.AddRule(root, Mathf.Clamp(title.GetPreferredValues(Title).x, 240f, 900f));
+            ruleRect = rule;
             TopLeft(rule, Left, -222f);
 
             // Tabs, like Settings' Video / Audio / ... row.
@@ -312,9 +318,12 @@ namespace PalaceMod
             var tab = (RectTransform)tabButtons[currentTab].transform;
             LayoutRebuilder.ForceRebuildLayoutImmediate((RectTransform)tab.parent);
             var text = tab.GetComponent<TextMeshProUGUI>();
-            float width = Mathf.Max(24f, text.GetPreferredValues(text.text).x);
-            tabMarker.sizeDelta = new Vector2(width, 2f);
-            tabMarker.anchoredPosition = new Vector2(tab.anchoredPosition.x + (0.5f - tab.pivot.x) * tab.rect.width, -18f);
+            text.ForceMeshUpdate();
+            var bounds = text.textBounds; // the visible glyphs, in the tab's local space
+            float width = bounds.size.x > 0f ? bounds.size.x : text.GetPreferredValues(text.text).x;
+            float center = bounds.size.x > 0f ? bounds.center.x : (0.5f - tab.pivot.x) * tab.rect.width;
+            tabMarker.sizeDelta = new Vector2(Mathf.Max(24f, width), 2f);
+            tabMarker.anchoredPosition = new Vector2(tab.anchoredPosition.x + center, -18f);
         }
 
         private static void Stretch(RectTransform rect)
