@@ -16,8 +16,8 @@ using UnityEngine.SceneManagement;
     - Units in the king's command radius (the ones a command press would pick up), and every unit while the hold
       key is held: rings around each unit where it stands.
 
-    A unit's attack ranges are each AutoAttack's longest target-priority range (the shorter priorities of one attack
-    are target filters inside that reach), deduplicated. Its engage range (how far it walks to fight once placed) is
+    A unit's attack ranges are each AutoAttack's longest target-priority range, ignoring priorities that only target
+    flying enemies (longbows have a longer anti-air priority) unless the attack has nothing else, deduplicated. Its engage range (how far it walks to fight once placed) is
     an optional lighter ring, shown when it's beyond the attack range (around its post, capped at 7, while it holds
     position). Ranges are read once when a unit starts
     showing and reused until it stops.
@@ -125,7 +125,7 @@ namespace PalaceMod
             if (showCommanded.Value && command.PlayerUnitsCommanding.Count > 0) WantGroup(command, handler);
 
             bool all = showAllKey.Held;
-            if (all || (showNearby.Value && !command.commanding))
+            if (all || (showNearby.Value && command.PlayerUnitsCommanding.Count == 0))
             {
                 Vector3 king = command.transform.position;
                 foreach (var tagged in tags.PlayerUnits)
@@ -224,8 +224,15 @@ namespace PalaceMod
             foreach (var attack in attacks)
             {
                 if (attack == null) continue;
-                float reach = 0f;
-                foreach (var priority in attack.targetPriorities) reach = Mathf.Max(reach, priority.range);
+                // Longbows reach flying enemies from further (50) than everything else (40): show the general
+                // reach, and fall back to flying-only priorities only for attacks that have nothing else.
+                float reach = 0f, flyingOnlyReach = 0f;
+                foreach (var priority in attack.targetPriorities)
+                {
+                    if (priority.mustHaveTags.Contains(TagManager.ETag.Flying)) flyingOnlyReach = Mathf.Max(flyingOnlyReach, priority.range);
+                    else reach = Mathf.Max(reach, priority.range);
+                }
+                if (reach <= 0f) reach = flyingOnlyReach;
                 if (reach > 0f) AddDistinct(scratchRanges, reach);
             }
             info.count = Math.Min(scratchRanges.Count, MaxAttackRanges);
@@ -341,6 +348,7 @@ namespace PalaceMod
                     return $"commanding {command.PlayerUnitsCommanding.Count}";
                 case "release":
                     command.ForceCommandingEnd();
+                    command.commanding = false;
                     return $"commanding {command.PlayerUnitsCommanding.Count}";
                 case "dump":
                     foreach (var tagged in TagManager.instance.PlayerUnits)
