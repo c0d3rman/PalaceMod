@@ -11,6 +11,9 @@ namespace PalaceMod
 {
     public class IncomeDisplayManager : BaseManager
     {
+        public override string FeatureSection => "Income display";
+        public override string FeatureDescription => "Adds a per-building breakdown to the pause menu's income tooltip.";
+
         private struct BuildingIdentifierParams
         {
             public string BaseName;

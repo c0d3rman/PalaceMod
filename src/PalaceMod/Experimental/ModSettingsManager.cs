@@ -9,7 +9,7 @@
 // using System.Linq;
 // using System.Reflection;
 
-// namespace PalaceMod
+// namespace PalaceMod.Experimental
 // {
 //     public static class ModSettingsManager
 //     {

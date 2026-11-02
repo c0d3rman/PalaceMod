@@ -13,6 +13,9 @@ namespace PalaceMod
     */
     public class BuildingDestructionEffectBugFixManager : BaseManager
     {
+        public override string FeatureSection => "Destruction effect fix";
+        public override string FeatureDescription => "Stops destroyed buildings and shrines from replaying their destruction or activation effects when a day is retried or a save is loaded.";
+
         [HarmonyPatch(typeof(BuildingDestructionHandler), "OnEnable")]
         private class BuildingDestructionHandler_OnEnable_Patch
         {

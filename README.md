@@ -47,7 +47,7 @@ loop for coding agents.
 - `src/PalaceMod/Assets/`: embedded assets
 - `scripts/dev.py`: setup, build, install, launch, logs, screenshot and decompile commands
 
-Active managers are registered in `src/PalaceMod/Plugin.cs`. The wiki feature is
+Every `BaseManager` outside `Experimental/` is registered automatically. The wiki feature is
 unfinished. Builds target .NET Standard 2.1; compilation alone does not establish
 compatibility with a particular game version or BepInEx runtime; use `dev.py run` to
 verify in-game.

@@ -11,9 +11,22 @@ namespace PalaceMod
 {
     public class FormationManager : BaseManager
     {
-        // Key constants
-        private const KeyCode CYCLE_FORMATION_KEY = KeyCode.F7;
-        private const KeyCode PLACE_ONE_UNIT_KEY = KeyCode.O;
+        public override string FeatureSection => "Formations";
+        public override string FeatureDescription => "Lets you cycle unit formations (line, circle, dot, semicircle) and place commanded units one at a time.";
+
+        private Keybind cycleFormationKey;
+        private Keybind placeOneUnitKey;
+
+        public override void Awake(Plugin plugin)
+        {
+            base.Awake(plugin);
+            cycleFormationKey = Keybinds.Register(FeatureSection, "cycle", "Cycle formation", new BepInEx.Configuration.KeyboardShortcut(KeyCode.F7),
+                "Switches the formation your commanded units are placed in.");
+            placeOneUnitKey = Keybinds.Register(FeatureSection, "place-one", "Place one unit", new BepInEx.Configuration.KeyboardShortcut(KeyCode.O),
+                "Places only the first of your commanded units; hold to make it hold position.");
+        }
+
+        protected override void OnFeatureDisabled() => placeOnlyOneUnit = false;
 
         public enum FormationType
         {
@@ -35,27 +48,29 @@ namespace PalaceMod
 
         public override void Update()
         {
-            if (Input.GetKeyDown(CYCLE_FORMATION_KEY))
+            if (CommandUnits.instance == null) return; // not in a level
+
+            if (cycleFormationKey.Down)
             {
                 CycleFormation();
             }
 
             // Place one unit key pressed
-            if (Input.GetKeyDown(PLACE_ONE_UNIT_KEY))
+            if (placeOneUnitKey.Down)
             {
                 placeOnlyOneUnit = true;
                 CommandUnits.instance.PlaceCommandedUnitsAndCalculateTargetPositions(false);
             }
 
             // Place one unit key released
-            if (Input.GetKeyUp(PLACE_ONE_UNIT_KEY))
+            if (placeOneUnitKey.Up)
             {
                 // Clear the buffer so press-and-holding O again doesn't cause the last unit to hold position
                 AccessTools.Field(typeof(CommandUnits), "playerUnitsCommandingBuffer").SetValue(CommandUnits.instance, new List<PathfindMovementPlayerunit>());
             }
 
             // Place one unit key held
-            if (Input.GetKey(PLACE_ONE_UNIT_KEY))
+            if (placeOneUnitKey.Held)
             {
                 timeSincePlaceOne += Time.deltaTime;
                 if (timeSincePlaceOne > CommandUnits.instance.holdToHoldPositionTime && !switchedToHold)
@@ -75,7 +90,7 @@ namespace PalaceMod
         {
             currentFormation = (FormationType)(((int)currentFormation + 1) % Enum.GetValues(typeof(FormationType)).Length);
             string formationName = Enum.GetName(typeof(FormationType), currentFormation);
-            Plugin.ShowMessage($"Formation: {formationName}");
+            Notify.Show($"Formation: {formationName}", key: "formation");
         }
 
         public void SetUnitPosition(PathfindMovementPlayerunit unit, Vector3 position)

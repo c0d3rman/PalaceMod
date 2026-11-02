@@ -9,7 +9,68 @@ namespace PalaceMod
 {
     public class EnemyPreviewManager : BaseManager
     {
+        public override string FeatureSection => "Enemy previews";
+        public override string FeatureDescription => "Replaces the pause menu's enemy preview with a list of the coming night's enemies and their counts, grouped by spawn location.";
+
         private List<GameObject> createdObjects = new List<GameObject>();
+
+        // The pause menu's vanilla layout, captured before the first change so disabling the feature can put it back.
+        private class Original
+        {
+            public PauseUILoadoutHelper Helper;
+            public GridLayoutGroup.Constraint Constraint;
+            public int ConstraintCount;
+            public Vector2 Spacing, AnchorMin, AnchorMax, Pivot, Position;
+            public readonly List<(RectTransform Rect, Vector2 Position, Vector2 Size)> TitleChildren = [];
+            public readonly List<Component> Added = [];
+        }
+
+        private Original original;
+
+        private void Capture(PauseUILoadoutHelper helper)
+        {
+            if (original != null && original.Helper == helper) return;
+            var grid = helper.enemyPreview.GetComponent<GridLayoutGroup>();
+            var rect = helper.enemyPreview.GetComponent<RectTransform>();
+            original = new Original
+            {
+                Helper = helper,
+                Constraint = grid.constraint,
+                ConstraintCount = grid.constraintCount,
+                Spacing = grid.spacing,
+                AnchorMin = rect.anchorMin,
+                AnchorMax = rect.anchorMax,
+                Pivot = rect.pivot,
+                Position = rect.anchoredPosition,
+            };
+        }
+
+        protected override void OnFeatureDisabled()
+        {
+            foreach (var obj in createdObjects) if (obj != null) Object.Destroy(obj);
+            createdObjects.Clear();
+            var saved = original;
+            original = null;
+            if (saved?.Helper == null) return;
+            var grid = saved.Helper.enemyPreview.GetComponent<GridLayoutGroup>();
+            grid.constraint = saved.Constraint;
+            grid.constraintCount = saved.ConstraintCount;
+            grid.spacing = saved.Spacing;
+            var rect = saved.Helper.enemyPreview.GetComponent<RectTransform>();
+            rect.anchorMin = saved.AnchorMin;
+            rect.anchorMax = saved.AnchorMax;
+            rect.pivot = saved.Pivot;
+            rect.anchoredPosition = saved.Position;
+            foreach (var component in saved.Added) if (component != null) Object.DestroyImmediate(component);
+            foreach (var (child, position, size) in saved.TitleChildren)
+            {
+                if (child == null) continue;
+                child.anchoredPosition = position;
+                child.sizeDelta = size;
+            }
+            // The patches are already removed, so this redraws the vanilla preview.
+            if (saved.Helper.isActiveAndEnabled) AccessTools.Method(typeof(PauseUILoadoutHelper), "RefreshOnlyEnemyPreview").Invoke(saved.Helper, null);
+        }
 
         [HarmonyPatch(typeof(NightPreviewElement))]
         [HarmonyPatch("SetData")]
@@ -36,6 +97,7 @@ namespace PalaceMod
 
             private static void Postfix(PauseUILoadoutHelper __instance)
             {
+                Instance.Capture(__instance);
                 CreateTitleContainerIfNeeded(__instance);
 
                 var currentPreviewWavenumber = (int)AccessTools.Field(__instance.GetType(), "currentPreviewWavenumber").GetValue(__instance);
@@ -58,8 +120,14 @@ namespace PalaceMod
                         return;
                     }
 
+                    foreach (RectTransform child in titleContainer)
+                    {
+                        Instance.original.TitleChildren.Add((child, child.anchoredPosition, child.sizeDelta));
+                    }
+
                     // Convert the title container into a vertical layout group so we can resize items and they will be properly positioned
                     layoutGroup = titleContainer.gameObject.AddComponent<VerticalLayoutGroup>();
+                    Instance.original.Added.Add(layoutGroup);
                     layoutGroup.name = "Title ";
                     layoutGroup.spacing = 48;
 
@@ -77,6 +145,7 @@ namespace PalaceMod
                         if (tooltipLayout == null)
                         {
                             tooltipLayout = tooltip.gameObject.AddComponent<LayoutElement>();
+                            Instance.original.Added.Add(tooltipLayout);
                             tooltipLayout.name = "ModTooltipLayout";
                         }
                         tooltipLayout.ignoreLayout = true;

@@ -3,6 +3,7 @@ using BepInEx.Logging;
 using HarmonyLib;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using Rewired;
 using System;
 
@@ -12,19 +13,20 @@ namespace PalaceMod;
 public class Plugin : BaseUnityPlugin
 {
     internal static new ManualLogSource Logger;
-    private Harmony harmony;
     internal static Plugin Instance { get; private set; }
     private static Player input;
     // Rewired initializes after plugins load, so resolve the player on first use.
     internal static Player Input => input ??= ReInput.isReady ? ReInput.players.GetPlayer(0) : null;
-    private readonly List<IManager> managers = [];
+    private readonly List<BaseManager> managers = [];
+    internal IReadOnlyList<BaseManager> Managers => managers;
+
+    // Managers in this namespace (src/PalaceMod/Experimental/) are never registered.
+    private const string ExperimentalNamespace = "PalaceMod.Experimental";
 
     private void Awake()
     {
         Instance = this;
         Logger = base.Logger;
-
-        harmony = new Harmony(MyPluginInfo.PLUGIN_GUID);
 
         // Clear separator for logs
         for (int i = 0; i < 10; i++)
@@ -32,63 +34,42 @@ public class Plugin : BaseUnityPlugin
             Logger.LogInfo("==========================================================================");
         }
 
-        // Add managers
-        managers.Add(new DevToolsManager());
-        managers.Add(new PerformanceManager());
-        managers.Add(new UIManager());
-        managers.Add(new SettingsPaneManager());
-        managers.Add(new GoldManager());
-        managers.Add(new BuildPreviewManager());
-        managers.Add(new FormationManager());
-        managers.Add(new EnemyPreviewManager());
-        managers.Add(new BuildingDestructionEffectBugFixManager());
-        managers.Add(new IncomeDisplayManager());
-        managers.Add(new PauseMenuScoreManager());
-        managers.Add(new HealthFixManager());
-        managers.Add(new LoadoutRandomizerManager());
-        managers.Add(new UnitRangeManager());
-        managers.Add(new WikiDataManager());
-
-        // Apply patches only for loaded manager types
-        var loadedManagerTypes = managers.Select(m => m.GetType()).ToList();
-        var allTypes = typeof(Plugin).Assembly.GetTypes();
-
-        foreach (var type in allTypes)
+        // Every concrete BaseManager outside Experimental, ordered by [ManagerOrder] then name. Each one applies its
+        // own nested Harmony patches (see BaseManager), so a feature is added just by adding its file.
+        var types = AccessTools.GetTypesFromAssembly(typeof(Plugin).Assembly)
+            .Where(t => t.IsClass && !t.IsAbstract && typeof(BaseManager).IsAssignableFrom(t))
+            .Where(t => t.Namespace != ExperimentalNamespace && t.Namespace?.StartsWith(ExperimentalNamespace + ".") != true)
+            .OrderBy(t => t.GetCustomAttribute<ManagerOrderAttribute>()?.Order ?? 0)
+            .ThenBy(t => t.Name, StringComparer.Ordinal);
+        foreach (var type in types)
         {
-            bool shouldPatch = false;
-
-            // If it's a manager type we've loaded
-            if (loadedManagerTypes.Contains(type))
+            try
             {
-                shouldPatch = true;
+                var manager = (BaseManager)Activator.CreateInstance(type);
+                manager.Initialize(this);
+                typeof(Feature<>).MakeGenericType(type).GetProperty(nameof(Feature<BaseManager>.Instance))
+                    .SetValue(null, manager);
+                Keybinds.RegisterFeature(manager);
+                managers.Add(manager);
             }
-            // If it's nested within a manager type we've loaded
-            else if (type.IsNested)
+            catch (Exception e)
             {
-                Type declaringType = type.DeclaringType;
-                while (declaringType != null)
-                {
-                    if (loadedManagerTypes.Contains(declaringType))
-                    {
-                        shouldPatch = true;
-                        break;
-                    }
-                    declaringType = declaringType.DeclaringType; // Handle nested types within nested types
-                }
+                Logger.LogError($"{type.Name} failed to load and is skipped: {e}");
             }
-
-            if (shouldPatch) harmony.PatchAll(type);
         }
 
-        // Initialize managers
-        foreach (var manager in managers) manager.Awake(this);
+        foreach (var manager in managers.ToList())
+        {
+            Run(manager, "Awake", () => manager.Awake(this), removeOnError: true);
+        }
+        Logger.LogInfo($"Managers: {string.Join(", ", managers.Select(m => m.IsEnabled ? m.GetType().Name : $"{m.GetType().Name} (disabled)"))}");
 
         ShowMessage("PalaceMod loaded!");
     }
 
     private void Start()
     {
-        foreach (var manager in managers) manager.Start();
+        foreach (var manager in managers.ToList()) Run(manager, "Start", manager.Start, removeOnError: true);
     }
 
     private readonly HashSet<string> reportedErrors = [];
@@ -98,42 +79,56 @@ public class Plugin : BaseUnityPlugin
         // Isolate managers so one failing feature does not stop the others from updating.
         foreach (var manager in managers)
         {
-            try
+            if (manager.IsEnabled) Run(manager, "Update", manager.Update, removeOnError: false);
+        }
+    }
+
+    private void Run(BaseManager manager, string phase, Action action, bool removeOnError)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception e)
+        {
+            if (removeOnError)
             {
-                manager.Update();
+                // A manager that couldn't initialise is dropped, along with its patches.
+                Logger.LogError($"{manager.GetType().Name}.{phase} failed; the manager is disabled: {e}");
+                managers.Remove(manager);
+                managerCache.Clear();
+                manager.UnpatchAll();
+                typeof(Feature<>).MakeGenericType(manager.GetType()).GetProperty(nameof(Feature<BaseManager>.Instance))
+                    .SetValue(null, null);
             }
-            catch (Exception e)
+            else if (reportedErrors.Add($"{manager.GetType().Name}: {e}"))
             {
-                if (reportedErrors.Add($"{manager.GetType().Name}: {e}"))
-                {
-                    Logger.LogError($"{manager.GetType().Name}.Update failed (further identical errors suppressed): {e}");
-                }
+                Logger.LogError($"{manager.GetType().Name}.{phase} failed (further identical errors suppressed): {e}");
             }
         }
     }
 
-    internal void ShowMessage(string message)
-    {
-        Logger.LogInfo(message);
-        GetManager<UIManager>()?.ShowMessage(message);
-    }
+    internal void ShowMessage(string message) => Notify.Show(message);
 
-    private readonly Dictionary<Type, IManager> managerCache = [];
+    private readonly Dictionary<Type, BaseManager> managerCache = [];
 
-    // Called from per-frame Harmony patches, so cache instead of scanning with LINQ each time.
+    // Prefer Feature<T>.Instance; kept for existing callers.
     internal T GetManager<T>() where T : class, IManager
     {
         if (!managerCache.TryGetValue(typeof(T), out var manager))
         {
-            manager = managers.OfType<T>().FirstOrDefault();
+            manager = managers.OfType<T>().FirstOrDefault() as BaseManager;
             managerCache[typeof(T)] = manager;
         }
-        return (T)manager;
+        return manager as T;
     }
 
     private void OnDestroy()
     {
-        harmony?.UnpatchSelf();
-        foreach (var manager in managers) manager.OnDestroy();
+        foreach (var manager in managers)
+        {
+            manager.UnpatchAll();
+            manager.OnDestroy();
+        }
     }
 }

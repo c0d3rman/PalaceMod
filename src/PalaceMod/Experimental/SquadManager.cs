@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using HarmonyLib;
 
-namespace PalaceMod
+namespace PalaceMod.Experimental
 {
     public static class SquadManager
     {

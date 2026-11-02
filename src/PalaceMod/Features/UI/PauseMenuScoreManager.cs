@@ -8,6 +8,10 @@ namespace PalaceMod
 {
     public class PauseMenuScoreManager : BaseManager
     {
+        public override string FeatureSection => "Pause menu score";
+        public override string FeatureDescription => "Shows the current and potential score of the level in the pause menu.";
+        protected override void OnFeatureDisabled() => OnDestroy();
+
         private List<GameObject> createdObjects = [];
         private static readonly TMP_FontAsset titleFont = Resources.Load<TMP_FontAsset>("fonts & materials/CormorantGaramond-SemiBold SDF");
         private static readonly TMP_FontAsset numberFont = Resources.Load<TMP_FontAsset>("fonts & materials/UnifrakturCook-Bold SDF");
