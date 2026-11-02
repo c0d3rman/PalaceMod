@@ -451,6 +451,16 @@ namespace PalaceMod
         public TFUITextButton Button(string label, Action onClick, string tooltip = null) =>
             Row(label, null, tooltip, onClick).Button;
 
+        /// <summary>An empty full-width area of the given height for custom drawing (graphs, grids). Not selectable;
+        /// add your own ThronefallUIElements under it only if you also wire their navigation.</summary>
+        public RectTransform Custom(string name, float height)
+        {
+            var obj = new GameObject(name, typeof(RectTransform), typeof(LayoutElement));
+            obj.transform.SetParent(content, false);
+            obj.GetComponent<LayoutElement>().preferredHeight = height;
+            return (RectTransform)obj.transform;
+        }
+
         /// <summary>Vertical space.</summary>
         public void Space(float height = 20f)
         {
