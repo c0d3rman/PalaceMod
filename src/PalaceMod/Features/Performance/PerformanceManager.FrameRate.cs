@@ -222,14 +222,19 @@ namespace PalaceMod
                 overridingRenderScale = true;
                 SetIfDifferent(scaleProperty, pipeline, scale);
             }
-            else if (overridingRenderScale)
-            {
-                // No override any more (e.g. plugged back in): restore the game's current setting, which the player
-                // may have changed in Video settings meanwhile.
-                overridingRenderScale = false;
-                if (SettingsManager.Instance != null) SetIfDifferent(scaleProperty, pipeline, SettingsManager.Instance.Renderscale);
-            }
+            else RestoreRenderScale();
             if (msaa.Value > 0) SetIfDifferent(type.GetProperty("msaaSampleCount"), pipeline, msaa.Value);
+        }
+
+        // No override any more (e.g. plugged back in): restore the game's current setting, which the player may have
+        // changed in Video settings meanwhile.
+        private void RestoreRenderScale()
+        {
+            if (!overridingRenderScale) return;
+            overridingRenderScale = false;
+            var pipeline = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
+            if (pipeline != null && SettingsManager.Instance != null)
+                SetIfDifferent(pipeline.GetType().GetProperty("renderScale"), pipeline, SettingsManager.Instance.Renderscale);
         }
 
         private static void SetIfDifferent(System.Reflection.PropertyInfo property, object target, object value)

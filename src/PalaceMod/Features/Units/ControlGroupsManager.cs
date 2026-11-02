@@ -17,7 +17,7 @@ namespace PalaceMod
 {
     public class ControlGroupsManager : BaseManager
     {
-        public override string FeatureSection => "Control Groups";
+        public override string FeatureSection => "Control groups";
         public override string FeatureDescription =>
             "Keeps the game's control groups (Settings > Gameplay > Control Groups) assigned when you continue a saved run.";
 
