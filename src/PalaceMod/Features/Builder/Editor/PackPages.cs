@@ -58,7 +58,7 @@ namespace PalaceMod.Builder.Editor
             if (draft?.Dirty == true) value = Accent("unsaved") + "   " + value;
             if (entry.ReadOnly) value += "   " + Dim(entry.Source == PackSource.BuiltIn ? "built in" : "mod");
             string tip = (string.IsNullOrWhiteSpace(pack.Description) ? "" : pack.Description + "\n") +
-                (pack.Author != null ? $"By {pack.Author}. " : "") +
+                (pack.Author != null ? $"By {pack.Author}. " : "") + $"Id: {id}. " +
                 (errors > 0 ? $"<color=#{ModStyle.Hex(ModStyle.KindColor(NotifyKind.Error))}>{Count(errors, "problem")} to fix before it can be played.</color>" : "Ready to play.");
             var field = Marked(page, string.IsNullOrWhiteSpace(pack.Name) ? id : pack.Name, () => value, tip, null, () => BuilderEditor.OpenPack(id));
             field.SetMarker(errors > 0 ? ModFieldMarker.Error : ModFieldMarker.None);
