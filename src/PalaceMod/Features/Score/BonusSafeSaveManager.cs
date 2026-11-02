@@ -46,7 +46,7 @@ namespace PalaceMod
 
         private static bool On => Feature<BonusSafeSaveManager>.On;
 
-        private const string SidecarFileName = "PalaceMod.BonusSafeSaves.json";
+        private const string SidecarFileName = "PalaceMod.BonusSafeSaves.txt";
         private const float DiffInterval = 0.5f;
 
         private ConfigEntry<bool> pauseHint;
@@ -65,6 +65,7 @@ namespace PalaceMod
         private static string sessionMap;
         private static bool sessionClean;
         private static bool pendingBaseline;
+        private static bool sessionHasSave;
         private static string dirtyReason = "no save yet";
         private static int baselineBalance;
         private static Dictionary<string, string> baseline;
@@ -286,6 +287,7 @@ namespace PalaceMod
                 {
                     WriteEntry(map, hash, true, null);
                     sessionClean = true;
+                    sessionHasSave = true;
                     dirtyReason = null;
                     pendingBaseline = false;
                     TakeBaseline();
@@ -344,6 +346,7 @@ namespace PalaceMod
                 baseline = null;
                 sessionClean = false;
                 pendingBaseline = false;
+                sessionHasSave = LocalMatchSaveLoad.CurrentlyLoadingMatch;
                 dirtyReason = "no save yet";
                 if (!Applicable) return;
                 if (!On)
@@ -414,7 +417,7 @@ namespace PalaceMod
             var save = MatchSaveLoadHandler.CurrentSave;
             if (saveLoad == null || !Applicable || save == null || save.hadRestarts) return null;
             // No save for this run yet (day 1): quitting just starts the level over, which costs nothing.
-            if (memoryMap != sessionMap || memoryHash == null || (EnemySpawner.instance != null && EnemySpawner.instance.Wavenumber < 0)) return null;
+            if (!sessionHasSave || memoryMap != sessionMap || memoryHash == null) return null;
             if (sessionClean) return "<color=#9fd08a>Bonus-safe:</color> nothing has changed since this day began, so you can quit and continue later without losing the no-restart bonus.";
             return $"<color=#e0a060>Quitting now forfeits the no-restart bonus</color> ({dirtyReason ?? "this day is under way"}).";
         }
@@ -452,7 +455,7 @@ namespace PalaceMod
 
         // ---- Sidecar ----
 
-        [Serializable]
+        // One line per level: map, save hash, clean (1/0), reason, time written; tab-separated.
         private class SidecarEntry
         {
             public string map;
@@ -462,10 +465,8 @@ namespace PalaceMod
             public string written;
         }
 
-        [Serializable]
         private class Sidecar
         {
-            public int version = 1;
             public List<SidecarEntry> entries = [];
         }
 
@@ -475,8 +476,15 @@ namespace PalaceMod
         {
             try
             {
-                if (File.Exists(SidecarPath))
-                    return JsonUtility.FromJson<Sidecar>(File.ReadAllText(SidecarPath)) ?? new Sidecar();
+                var sidecar = new Sidecar();
+                if (!File.Exists(SidecarPath)) return sidecar;
+                foreach (var line in File.ReadAllLines(SidecarPath))
+                {
+                    var f = line.Split('\t');
+                    if (f.Length < 3 || line.StartsWith("#", StringComparison.Ordinal)) continue;
+                    sidecar.entries.Add(new SidecarEntry { map = f[0], hash = f[1], clean = f[2] == "1", reason = f.Length > 3 && f[3].Length > 0 ? f[3] : null, written = f.Length > 4 ? f[4] : null });
+                }
+                return sidecar;
             }
             catch (Exception e)
             {
@@ -495,7 +503,9 @@ namespace PalaceMod
                 sidecar.entries.Add(new SidecarEntry { map = map, hash = hash, clean = clean, reason = reason, written = DateTime.UtcNow.ToString("o") });
                 string path = SidecarPath;
                 string temp = path + ".tmp";
-                File.WriteAllText(temp, JsonUtility.ToJson(sidecar, true));
+                var lines = new List<string> { "# PalaceMod bonus-safe saves: level, match save hash, bonus-safe (1/0), reason, written (UTC)" };
+                lines.AddRange(sidecar.entries.Select(e => string.Join("\t", e.map, e.hash, e.clean ? "1" : "0", Clean(e.reason), e.written)));
+                File.WriteAllLines(temp, lines);
                 if (File.Exists(path)) File.Delete(path);
                 File.Move(temp, path);
             }
@@ -504,6 +514,8 @@ namespace PalaceMod
                 Plugin.Logger.LogWarning($"Bonus-safe saves: couldn't write {SidecarFileName}: {e.Message}");
             }
         }
+
+        private static string Clean(string text) => (text ?? "").Replace('\t', ' ').Replace('\n', ' ').Replace('\r', ' ');
 
         // SaveRun swallows write failures, so check the file now holds exactly what it was asked to write.
         private static bool SaveWritten(string map)
