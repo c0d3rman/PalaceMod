@@ -239,8 +239,13 @@ namespace PalaceMod
                         Actual = DamageAgainst(weapon.directDamage, tags, prefabDamageMulti * dmgM * armor),
                     });
                 var king = targets[0].Tags;
-                b.Damage = stats.DamageByTarget[0].Base;
-                a.Damage = stats.DamageByTarget[0].Actual;
+                // The row shows damage against you; siege weapons that only hit buildings show their building damage.
+                var main = stats.DamageByTarget[0];
+                if (main.Actual == 0f)
+                    foreach (var vs in stats.DamageByTarget)
+                        if (vs.Actual > main.Actual) main = vs;
+                b.Damage = main.Base;
+                a.Damage = main.Actual;
                 stats.SplashBase = DamageAgainst(weapon.splashDamage, king, prefabDamageMulti);
                 stats.SplashActual = DamageAgainst(weapon.splashDamage, king, prefabDamageMulti * dmgM * armor);
             }

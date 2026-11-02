@@ -1115,6 +1115,18 @@ def decompile(game, type_name):
         print(f"Decompiled project written to {output} (ignored by Git)")
 
 
+def dump_data(game, scene_filter):
+    """Dev-only: dump every level's waves and enemy stats to .local/gamedata/ (never commit or ship it)."""
+    venv = ROOT / ".local/venv-dump"
+    python = venv / "bin/python"
+    if not python.exists():
+        run(sys.executable, "-m", "venv", venv)
+        run(python, "-m", "pip", "install", "-q", "UnityPy==1.25.4", "TypeTreeGeneratorAPI")
+    data = managed_dir(game).parent
+    out = ROOT / ".local/gamedata"
+    run(python, "-I", ROOT / "scripts/dump_data.py", data, out, *([scene_filter] if scene_filter else []))
+
+
 def file_hash(path):
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
 
@@ -1160,9 +1172,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["setup", "build", "install", "run", "launch", "stop", "logs",
                                             "screenshot", "backup-saves", "watch", "decompile", "doctor", "native",
-                                            "cmd", "config", "lease", "land"])
+                                            "cmd", "config", "lease", "land", "dump-data"])
     parser.add_argument("args", nargs="*",
-                        help="native: on|off. cmd: the command, e.g. \"level Neuland\". "
+                        help="native: on|off. dump-data: [scene filter]. cmd: the command, e.g. \"level Neuland\". "
                              "config: get [Section[.Key]] | set Section.Key value. lease: acquire|release|status")
     parser.add_argument("--game", help="Game directory or Thronefall.app; otherwise saved config or THRONEFALL_DIR")
     parser.add_argument("--configuration", default="Debug", choices=["Debug", "Release"])
@@ -1269,6 +1281,8 @@ def main():
             raise RuntimeError("Usage: dev.py lease acquire|release|status")
     elif args.command == "land":
         land(args.title, args.body_file, args.dry_run)
+    elif args.command == "dump-data":
+        dump_data(game, mode)
     elif args.command == "native":
         if mode not in (None, "on", "off"):
             raise RuntimeError("Usage: dev.py native [on|off]")
