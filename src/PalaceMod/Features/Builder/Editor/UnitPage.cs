@@ -70,7 +70,9 @@ namespace PalaceMod.Builder.Editor
                 picker: () => Picker.One("Base Unit", BaseItems(Pack, Unit.Side), ContentRef.Parse(Unit.Base).Id,
                     id => Edit("Change base unit", unit => unit.Base = ContentRef.Vanilla(id), structural: true)),
                 display: () => BaseUnit?.DisplayName ?? ContentRef.Parse(Unit?.Base).Id ?? "none");
-            Choice(page, "Side", P + ".side", [(UnitSide.Enemy, "Enemy"), (UnitSide.Player, "Player")], () => Unit?.Side,
+            // Player units aren't in the catalog yet (they live inside building prefabs), so only show Side for packs
+            // that already have one.
+            if (u.Side != UnitSide.Enemy) Choice(page, "Side", P + ".side", [(UnitSide.Enemy, "Enemy"), (UnitSide.Player, "Player")], () => Unit?.Side,
                 (p, v) => p.Units[Index].Side = v, "Enemies come in wave sets. Player units can't be placed in buildings yet.");
             Text(page, "Description", P + ".description", () => Unit?.Description, (p, v) => p.Units[Index].Description = v,
                 "One or two sentences for its tooltip.", 300);

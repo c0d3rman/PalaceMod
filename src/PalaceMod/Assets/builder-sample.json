@@ -13,7 +13,7 @@
       "name": "Goblin Runner",
       "description": "Fast and fragile. Comes in packs.",
       "visuals": { "tint": "#8fd14f", "scale": 0.8 },
-      "stats": { "maxHp": 7, "moveSpeed": 9 }
+      "stats": { "maxHp": 7, "moveSpeed": 12 }
     },
     {
       "id": "iron-brute",

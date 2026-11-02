@@ -25,7 +25,7 @@ namespace PalaceMod.Builder
             var (pack, waveSet) = Pending;
             if (waveSet == null) return false;
             string scene = spawner.gameObject.scene.name;
-            if (scene != waveSet.Host)
+            if (!string.Equals(scene, waveSet.Host, System.StringComparison.OrdinalIgnoreCase))
             {
                 Plugin.Logger.LogWarning($"Builder: wave set {pack.Id}/{waveSet.Id} is for {waveSet.Host} but {scene} loaded; playing vanilla waves");
                 return false;
