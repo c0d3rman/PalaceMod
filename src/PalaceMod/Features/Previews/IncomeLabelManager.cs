@@ -7,11 +7,9 @@ using UnityEngine.UI;
 
 /*
     Floats a small coin + amount label over every building that earns gold, while build previews are shown and/or
-    while a hold key is down. The amount is BuildSlot.GoldIncome: at dawn each BuildingInteractor harvests exactly
-    that (BuildingInteractor.Harvest) before income modifiers (mines running dry, harbours gaining boats, ...) adjust
-    it for the next day, so during the day it is precisely what the building pays next dawn. Slots that upgrade
-    together with their activator (a mill's fields) are summed into the activator's label. A building knocked out
-    tonight pays nothing next dawn, so its label is dimmed.
+    while a hold key is down. Amounts come from IncomeCalculator (what each building pays at the coming dawn). Slots
+    that upgrade together with their activator (a mill's fields) are summed into the activator's label. Labels only
+    show by day, so knock-outs (a night-only state) don't apply; Denied is kept for completeness.
 
     Labels live on one screen-space canvas, are pooled, and are sized from the camera's pixels per world unit at
     each building, so they follow zoom within readable bounds.
@@ -155,11 +153,10 @@ namespace PalaceMod
                 e.Denied = false;
                 e.Focussed = false;
             }
-            foreach (var bi in TagManager.instance.playerBuildingInteractors)
+            foreach (var income in IncomeCalculator.All())
             {
-                if (bi == null || bi.targetBuilding == null) continue;
-                var slot = bi.targetBuilding;
-                if (slot.State != BuildSlot.BuildingState.Built || slot.GoldIncome <= 0) continue;
+                if (income.IncomeIfStanding <= 0) continue;
+                var slot = income.Slot;
                 var root = Root(slot);
                 if (!entries.TryGetValue(root, out var e))
                 {
@@ -167,10 +164,11 @@ namespace PalaceMod
                     entries[root] = e;
                     entryList.Add(e);
                 }
-                if (root == slot || e.Interactor == null) e.Interactor = root == slot ? bi : (root.buildingInteractor ?? bi);
-                e.Amount += slot.GoldIncome;
-                if (bi.harvestIsDenied) e.Denied = true;
-                if (bi.Focussed) e.Focussed = true;
+                var bi = slot.buildingInteractor;
+                if (e.Interactor == null || root == slot) e.Interactor = root.buildingInteractor != null ? root.buildingInteractor : bi;
+                e.Amount += income.IncomeIfStanding;
+                if (income.KnockedOut) e.Denied = true;
+                if (bi != null && bi.Focussed) e.Focussed = true;
             }
             // Drop buildings from a previous level.
             for (int i = entryList.Count - 1; i >= 0; i--)
