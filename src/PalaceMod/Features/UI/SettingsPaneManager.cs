@@ -272,6 +272,15 @@ namespace PalaceMod
 
         private void BuildRows()
         {
+            // The section arrows can be clicked while another row is selected (they aren't selectable themselves).
+            // Move the selection to the section row first, or it would be left on a destroyed row and keyboard or
+            // controller navigation would stop.
+            var selected = helper.targetFrame.CurrentSelection;
+            if (selected != null && sectionRow != null && selected.transform.IsChildOf(tab.childContainer.transform)
+                && !selected.transform.IsChildOf(sectionRow.transform))
+            {
+                helper.targetFrame.Select(sectionRow.GetComponent<ThronefallUIElement>());
+            }
             foreach (Transform child in tab.childContainer.transform.Cast<Transform>().ToList())
             {
                 if (child.gameObject != sectionRow) Object.DestroyImmediate(child.gameObject);
