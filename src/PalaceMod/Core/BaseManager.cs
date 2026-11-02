@@ -63,14 +63,28 @@ namespace PalaceMod
             {
                 EnabledEntry = plugin.Config.Bind(FeatureSection, "Enabled", EnabledByDefault, new ConfigDescription(
                     FeatureDescription ?? $"Turns {FeatureSection} on or off."));
-                EnabledEntry.SettingChanged += (_, _) => ApplyEnabled();
+                EnabledEntry.SettingChanged += OnEnabledChanged;
             }
             lastEnabled = IsEnabled;
             if (IsEnabled || !UnpatchWhenDisabled) Patch();
         }
 
+        private void OnEnabledChanged(object sender, EventArgs e) => ApplyEnabled();
+
+        private bool retired;
+
+        /// <summary>Called by Plugin when this manager failed to start: remove its patches for good, so toggling
+        /// its Enabled setting can't patch the game for a manager that no longer runs.</summary>
+        internal void Retire()
+        {
+            retired = true;
+            if (EnabledEntry != null) EnabledEntry.SettingChanged -= OnEnabledChanged;
+            Unpatch();
+        }
+
         private void ApplyEnabled()
         {
+            if (retired) return;
             bool enabled = IsEnabled;
             if (enabled == lastEnabled) return;
             lastEnabled = enabled;
