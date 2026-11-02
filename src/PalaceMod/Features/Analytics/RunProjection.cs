@@ -102,8 +102,10 @@ namespace PalaceMod
             float afterSpawning = Mathf.Max(0f, p.AssumedAfterSpawning - scenario.FasterSeconds);
 
             int score = rules.CurrentScore;
-            int bank = PlayerInteraction.instance.TrueBalance;
+            // During sunrise the night is scored but buildings haven't paid yet.
+            int bank = PlayerInteraction.instance.TrueBalance + (IsNight ? 0 : history.PendingDawnIncome);
             int first = NextNight, last = NightCount;
+            int extraFrom = Mathf.Clamp(scenario.ExtraFromNight, first, Mathf.Max(first, last));
             bool night = IsNight;
             int incomeSinceLastDay = 0, previousDawnIncome = 0;
 
@@ -174,7 +176,7 @@ namespace PalaceMod
 
                 // Dawn.
                 int dawnsAhead = k - first;
-                pn.BuildingIncome = IncomeCalculator.Total(dawnsAhead) + (scenario.ExtraIncome != 0 && k >= scenario.ExtraFromNight ? scenario.ExtraIncome : 0);
+                pn.BuildingIncome = IncomeCalculator.Total(dawnsAhead) + (scenario.ExtraIncome != 0 && k >= extraFrom ? scenario.ExtraIncome : 0);
                 bank += pn.BuildingIncome;
                 pn.BankAtDawn = bank;
                 incomeSinceLastDay = pn.EnemyGold + pn.BuildingIncome + pn.Interest;

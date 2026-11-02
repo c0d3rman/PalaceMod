@@ -61,6 +61,9 @@ namespace PalaceMod
         public int spentSinceDawn;
         public float daySeconds;
 
+        /// <summary>Building income scored at this dawn but not yet paid (the 2.5 s sunrise); not saved.</summary>
+        [JsonIgnore] public int PendingDawnIncome;
+
         [JsonIgnore] public NightRecord Current => nights.Count > 0 && !nights[nights.Count - 1].complete ? nights[nights.Count - 1] : null;
 
         [JsonIgnore] public int CompletedCount

@@ -76,6 +76,7 @@ namespace PalaceMod
             if (night && !wasNight) OnDusk();
             wasNight = night;
             if (!night && UIFrameManager.instance?.ActiveFrame == null) history.daySeconds += Time.deltaTime;
+            if (DayNightCycle.Instance.AfterSunrise) history.PendingDawnIncome = 0;
         }
 
         // ---- Recording --------------------------------------------------------------------------------------------
@@ -98,6 +99,15 @@ namespace PalaceMod
             {
                 history = loaded;
                 if (history.Current != null) history.nights.RemoveAt(history.nights.Count - 1);
+                // The save may be newer than the history in it (nights played with the feature off): keep what
+                // matches the loaded world and start the day's tallies from now.
+                int played = EnemySpawner.instance.Wavenumber + 1;
+                if (history.nights.RemoveAll(r => r.night > played) > 0 || history.nights.Count == 0 || history.nights[history.nights.Count - 1].night != played)
+                {
+                    history.dawnBank = PlayerInteraction.instance != null ? PlayerInteraction.instance.TrueBalance : 0;
+                    history.spentSinceDawn = 0;
+                    history.daySeconds = 0f;
+                }
                 Plugin.Logger.LogInfo($"Analytics: resumed {history.nights.Count} recorded nights from the save");
             }
             else
@@ -203,6 +213,7 @@ namespace PalaceMod
                 history.dawnBank = bank;
                 history.spentSinceDawn = 0;
                 history.daySeconds = 0f;
+                history.PendingDawnIncome = income;
                 Plugin.Logger.LogInfo($"Analytics: night {record.night} scored {record.ScoreTotal} ({baseScore}+{timeBonus}+{protectionBonus}), " +
                     $"{record.afterSpawning:0}s after spawning, earned {record.nightEarned}, lost {record.unitsLost} units, {down}/{buildings} buildings down, dawn income {income}");
             }
@@ -261,7 +272,7 @@ namespace PalaceMod
         private void Open()
         {
             if (!Rules.Available || history == null) return;
-            if (scenario.ExtraFromNight < RunProjection.NextNight) scenario.ExtraFromNight = RunProjection.NextNight;
+            scenario.ExtraFromNight = Mathf.Clamp(scenario.ExtraFromNight, RunProjection.NextNight, Mathf.Max(RunProjection.NextNight, RunProjection.NightCount));
             frame ??= new ModFrame("Run Analytics")
                 .AddTab("Score", page => AnalyticsPages.Score(page, history, Rules, scenario))
                 .AddTab("Economy", page => AnalyticsPages.Economy(page, history, Rules, scenario))
