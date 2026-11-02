@@ -282,11 +282,14 @@ namespace PalaceMod
                 }
             }
 
+            // A shortcut only Unity Input can read isn't in the maps, so it stays primary unless a key replaced it.
             KeyboardShortcut primary;
+            bool mouseIsExtra = keyboard != null || UnityOnly(keybind);
             if (keyboard != null) primary = new KeyboardShortcut(keyboard.keyCode, FromFlags(keyboard.modifierKeyFlags));
+            else if (UnityOnly(keybind)) primary = keybind.Shortcut;
             else if (mouse != null) primary = new KeyboardShortcut(KeyCode.Mouse0 + (mouse.elementIdentifierId - FirstMouseButtonId));
-            else primary = UnityOnly(keybind) ? keybind.Shortcut : KeyboardShortcut.Empty;
-            if (keyboard != null && mouse != null) rest.Insert(0, (MouseMap, mouse));
+            else primary = KeyboardShortcut.Empty;
+            if (mouseIsExtra && mouse != null) rest.Insert(0, (MouseMap, mouse));
 
             // Bindings for controllers that aren't plugged in stay as they were.
             var connected = new HashSet<(ControllerType, Guid)>(EditableMaps().Select(m => (m.controllerType, HardwareOf(m))));
