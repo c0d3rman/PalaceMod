@@ -9,8 +9,9 @@ using UnityEngine;
     The game has native control groups (Settings > Gameplay > Control Groups): three groups, set by holding a group key
     while commanding units and recalled by tapping it, with a flag on the HUD and a marker over each unit. Group
     membership is a tag on the unit's TaggedObject, and units revive at dawn as the same objects, so groups already
-    survive deaths and days. What the game doesn't do is keep them through a save: the units' tags are saved, but
-    TaggedObject.OnLoad strips Group1-3 when a run is continued. This feature puts them back.
+    survive deaths and days. What the game doesn't do is keep them through a save: TaggedObject.OnLoad strips Group1-3
+    when a run is continued (its per-unit key isn't unique within a building). This feature saves each unit's group
+    under its own key and puts it back after loading.
 */
 namespace PalaceMod
 {
@@ -29,7 +30,7 @@ namespace PalaceMod
         {
             base.Awake(plugin);
             DevCommands.Register("groups",
-                "groups [list|keys|build|set <1-3>|save|fresh <scene>|continue <scene>]   inspect and test control groups",
+                "groups [list|keys|build|set <1-3> [odd|even]|save|fresh <scene>|continue <scene>]   inspect and test control groups",
                 RunDevCommand);
         }
 
@@ -55,20 +56,40 @@ namespace PalaceMod
                 Notify.Show("Control groups restored", NotifyKind.Info, 0, "control-groups");
         }
 
+        // Vanilla saves each unit's tags under "<building guid>_<unit name>_tags", but a building's units share a name,
+        // so that key can't tell them apart. Save the group per unit under its sibling-index path inside the building.
+        private static string GroupKey(TaggedObject unit)
+        {
+            var path = new List<int>();
+            for (var t = unit.transform; t != null && t.GetComponent<SaveLoadEntity>() == null; t = t.parent)
+                path.Add(t.GetSiblingIndex());
+            path.Reverse();
+            return "PalaceMod_group_" + string.Join(".", path);
+        }
+
+        [HarmonyPatch(typeof(TaggedObject), nameof(TaggedObject.OnSave))]
+        private static class TaggedObject_OnSave
+        {
+            private static void Postfix(TaggedObject __instance, string guid)
+            {
+                if (!__instance.Tags.Contains(TagManager.ETag.PlayerUnit)) return;
+                int group = 0;
+                foreach (var tag in GroupTags)
+                    if (__instance.Tags.Contains(tag)) group = (int)tag;
+                // Always written (0 = none) so a unit taken out of its group doesn't keep an older checkpoint's group.
+                MatchSaveLoadHandler.SaveValue(guid, GroupKey(__instance), group);
+            }
+        }
+
         [HarmonyPatch(typeof(TaggedObject), nameof(TaggedObject.OnLoad))]
         private static class TaggedObject_OnLoad
         {
             private static void Postfix(TaggedObject __instance, string guid)
             {
-                TagManager.ETag[] saved = [];
-                MatchSaveLoadHandler.TryLoadValue(guid, __instance.gameObject.name + "_tags", ref saved);
-                if (saved == null) return;
-                foreach (var tag in GroupTags)
-                {
-                    if (Array.IndexOf(saved, tag) < 0) continue;
-                    pending.Add((__instance, tag));
-                    return; // a unit is in at most one group
-                }
+                int saved = 0;
+                if (!MatchSaveLoadHandler.TryLoadValue(guid, GroupKey(__instance), ref saved)) return;
+                var group = (TagManager.ETag)saved;
+                if (Array.IndexOf(GroupTags, group) >= 0) pending.Add((__instance, group));
             }
         }
 
@@ -81,6 +102,12 @@ namespace PalaceMod
             {
                 case "list":
                     return ListGroups();
+                case "dump":
+                    // Each unit's save identity and group, sorted, to diff before a save and after continuing.
+                    return string.Join("\n", (TagManager.instance ?? throw new InvalidOperationException("not in a level")).PlayerUnits
+                        .Select(u => $"{u.GetComponentInParent<SaveLoadEntity>()?.GUID}/{GroupKey(u)} {u.gameObject.name}: " +
+                                     string.Join(",", GroupTags.Where(u.Tags.Contains)))
+                        .OrderBy(line => line, StringComparer.Ordinal));
                 case "keys":
                     return ListKeys();
                 case "build":
@@ -88,16 +115,12 @@ namespace PalaceMod
                 case "set":
                     {
                         if (args.Length < 2 || !int.TryParse(args[1], out int n) || n < 1 || n > 3)
-                            throw new ArgumentException("usage: groups set <1-3>");
-                        var commander = CommandUnits.instance ?? throw new InvalidOperationException("not in a level");
-                        var units = commander.PlayerUnitsCommanding;
-                        if (units.Count == 0)
-                        {
-                            // Command every living unit, as "Select All Army" would.
-                            foreach (var unit in TagManager.instance.PlayerUnits.ToList()) commander.OnUnitAdd(unit, false);
-                            commander.commanding = units.Count > 0;
-                        }
-                        commander.AddUnitsToGroup(GroupTags[n - 1]);
+                            throw new ArgumentException("usage: groups set <1-3> [odd|even]");
+                        var tagManager = TagManager.instance ?? throw new InvalidOperationException("not in a level");
+                        // Every unit, or every other one (so a building's units end up in different groups).
+                        int parity = args.Length > 2 ? (args[2] == "odd" ? 1 : 0) : -1;
+                        var units = tagManager.PlayerUnits.Where((_, i) => parity < 0 || i % 2 == parity).ToList();
+                        foreach (var unit in units) unit.AddUnitGroupTag(GroupTags[n - 1]);
                         ControlGroupUIHelper.instance?.OnGroupSet(GroupTags[n - 1]);
                         return $"group {n}: {units.Count} unit(s)\n{ListGroups()}";
                     }
@@ -155,16 +178,17 @@ namespace PalaceMod
             return string.Join("\n", lines);
         }
 
-        // Builds every unit-producing building on the map, free, so there are units to group.
+        // Builds and fully upgrades every building on the map for free (repeating, since upgrades unlock more), so there
+        // are units to group.
         private static string BuildUnitBuildings()
         {
             int built = 0;
-            foreach (var slot in UnityEngine.Object.FindObjectsOfType<BuildSlot>())
+            for (int pass = 0; pass < 6; pass++)
             {
-                if (slot.GetComponentInChildren<UnitRespawnerForBuildings>(true) == null) continue;
-                if (!slot.CanBeUpgraded || slot.Level > 0) continue;
-                slot.TryToBuildOrUpgradeAndPay(null, false);
-                built++;
+                var slots = UnityEngine.Object.FindObjectsOfType<BuildSlot>().Where(s => s.CanBeUpgraded).ToList();
+                if (slots.Count == 0) break;
+                foreach (var slot in slots) slot.DEBUGUpgradeToMax();
+                built += slots.Count;
             }
             if (built > 0) GameplayImpact.Mark("Dev: free unit buildings");
             return $"built {built} building(s)";
