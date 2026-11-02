@@ -1,0 +1,81 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Unity glTFast (com.unity.cloud.gltfast, Apache-2.0) built from its unmodified UPM package into
+    PalaceMod.glTFast.dll, the Builder's glTF/GLB importer.
+
+    - The package is downloaded once from Unity's registry into lib/ (ignored by Git) and checked against GltfSha256,
+      so nothing third-party is committed and the build is reproducible.
+    - The assembly is renamed (glTFast -> PalaceMod.glTFast) so it can't clash with another mod's copy of glTFast:
+      Mono identifies types by assembly, so both can be loaded side by side.
+    - Defines are what a Unity 2022.3 macOS Mono player build sets, plus the package's asmdef version defines that
+      the game satisfies (image conversion) and NEWTONSOFT_JSON for its Newtonsoft parser (JsonUtility can't fill
+      types from an assembly loaded after startup). URP, shader graph, animation, physics, web-request textures,
+      Draco, KTX and meshopt are left out: PalaceMod supplies its own material generator, instantiator and download
+      provider and only needs static meshes and PNG/JPEG images. DEBUG is never defined, so glTFast's debug-only
+      Debug.Log calls compile out. Export, DOTS and Editor code are excluded.
+    - LICENSE.md (from the package) and NOTICE are copied next to the DLL and installed with it.
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>PalaceMod.glTFast</AssemblyName>
+    <RootNamespace>GLTFast</RootNamespace>
+    <LangVersion>9.0</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <Optimize>true</Optimize>
+    <DisableImplicitConfigurationDefines>true</DisableImplicitConfigurationDefines>
+    <DebugType>none</DebugType>
+    <NoWarn>$(NoWarn);CS0618;CS0414;CS0649;CS0169;CS0067;CS1591;CS0162;CS8632;CS0219</NoWarn>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <RestoreAdditionalProjectSources>https://api.nuget.org/v3/index.json</RestoreAdditionalProjectSources>
+    <DefineConstants>UNITY_2017_1_OR_NEWER;UNITY_2018_1_OR_NEWER;UNITY_2019_1_OR_NEWER;UNITY_2020_1_OR_NEWER;UNITY_2020_2_OR_NEWER;UNITY_2020_3_OR_NEWER;UNITY_2021_1_OR_NEWER;UNITY_2021_2_OR_NEWER;UNITY_2021_3_OR_NEWER;UNITY_2022_1_OR_NEWER;UNITY_2022_2_OR_NEWER;UNITY_2022_3_OR_NEWER;UNITY_2022_3;UNITY_2022;UNITY_5_3_OR_NEWER;UNITY_5_4_OR_NEWER;UNITY_5_5_OR_NEWER;UNITY_5_6_OR_NEWER;UNITY_STANDALONE_OSX;UNITY_STANDALONE;ENABLE_MONO;NET_STANDARD_2_1;NET_STANDARD;UNITY_IMAGECONVERSION;NEWTONSOFT_JSON;GLTFAST_REPORT</DefineConstants>
+
+    <GltfVersion>6.8.0</GltfVersion>
+    <GltfUrl>https://download.packages.unity.com/com.unity.cloud.gltfast/-/com.unity.cloud.gltfast-$(GltfVersion).tgz</GltfUrl>
+    <GltfSha256>56a8e67788d48540a580e1dcbc25f1f0f0de0c95269a996f71d3093c53eef27d</GltfSha256>
+    <LibDir>$(MSBuildThisFileDirectory)../../lib/</LibDir>
+    <GltfDir>$(LibDir)glTFast-$(GltfVersion)/</GltfDir>
+    <GltfScripts>$(GltfDir)package/Runtime/Scripts/</GltfScripts>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="UnityEngine.Modules" Version="2022.3.50" IncludeAssets="compile" PrivateAssets="all" />
+    <Reference Include="Unity.Burst"><HintPath>$(LibDir)Unity.Burst.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Unity.Collections"><HintPath>$(LibDir)Unity.Collections.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Unity.Mathematics"><HintPath>$(LibDir)Unity.Mathematics.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Newtonsoft.Json"><HintPath>$(LibDir)Newtonsoft.Json.dll</HintPath><Private>false</Private></Reference>
+    <Compile Include="AssemblyInfo.cs" />
+    <None Include="NOTICE" CopyToOutputDirectory="PreserveNewest" Link="PalaceMod.glTFast.NOTICE.txt" />
+  </ItemGroup>
+
+  <Target Name="FetchGltfast" BeforeTargets="BeforeBuild" Condition="!Exists('$(GltfDir).complete')">
+    <PropertyGroup>
+      <GltfArchive>$(LibDir)com.unity.cloud.gltfast-$(GltfVersion).tgz</GltfArchive>
+      <GltfStaging>$(GltfDir).staging/</GltfStaging>
+    </PropertyGroup>
+    <MakeDir Directories="$(LibDir)" />
+    <DownloadFile SourceUrl="$(GltfUrl)" DestinationFolder="$(LibDir)" DestinationFileName="com.unity.cloud.gltfast-$(GltfVersion).tgz" Condition="!Exists('$(GltfArchive)')" />
+    <GetFileHash Files="$(GltfArchive)" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="GltfActualHash" />
+    </GetFileHash>
+    <Delete Files="$(GltfArchive)" Condition="'$(GltfActualHash.ToLowerInvariant())' != '$(GltfSha256)'" />
+    <Error Condition="'$(GltfActualHash.ToLowerInvariant())' != '$(GltfSha256)'" Text="glTFast $(GltfVersion) download has sha256 $(GltfActualHash), expected $(GltfSha256). Deleted it; build again to retry." />
+    <RemoveDir Directories="$(GltfDir)" />
+    <MakeDir Directories="$(GltfStaging)" />
+    <Exec Command="tar -xzf &quot;$(GltfArchive)&quot; -C &quot;$(GltfStaging)&quot;" />
+    <ItemGroup><_GltfExtracted Include="$(GltfStaging)**/*" /></ItemGroup>
+    <Copy SourceFiles="@(_GltfExtracted)" DestinationFiles="@(_GltfExtracted->'$(GltfDir)%(RecursiveDir)%(Filename)%(Extension)')" />
+    <RemoveDir Directories="$(GltfStaging)" />
+    <Touch Files="$(GltfDir).complete" AlwaysCreate="true" />
+  </Target>
+
+  <Target Name="AddGltfastSources" AfterTargets="FetchGltfast" BeforeTargets="BeforeBuild">
+    <ItemGroup>
+      <Compile Include="$(GltfScripts)**/*.cs" Exclude="$(GltfScripts)Export/**;$(GltfScripts)DOTS/**;$(GltfScripts)AssemblyInfo.cs" />
+      <None Include="$(GltfDir)package/LICENSE.md" Link="PalaceMod.glTFast.LICENSE.md" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
+</Project>

@@ -68,7 +68,7 @@ namespace PalaceMod
         private static void RegisterDevCommands()
         {
             DevCommands.Register("builder-assets",
-                "builder-assets check <pack>|status|inspect <vanilla unit>|show <pack> <unit>...|sounds|gltf <file.glb> [dir]|gltf result   Builder asset import tools", args =>
+                "builder-assets check <pack>|status|inspect <vanilla unit>|show <pack> <unit>...|sounds|gltf <file or folder>|gltf result   Builder asset import tools", args =>
             {
                 if (args.Length == 0) throw new ArgumentException("usage: builder-assets check <pack>|status|inspect <unit>|gltf <file>");
                 switch (args[0].ToLowerInvariant())
@@ -82,7 +82,7 @@ namespace PalaceMod
                     case "inspect": return Inspect(string.Join(" ", args.Skip(1)));
                     case "show": return Show(args);
                     case "sounds": return Sounds();
-                    case "gltf": return GltfSpike(args);
+                    case "gltf": return GltfTest(args);
                     default: throw new ArgumentException("unknown builder-assets subcommand");
                 }
             });
@@ -187,33 +187,77 @@ namespace PalaceMod
             return string.Join("\n", lines);
         }
 
-        // glTF runtime import spike (docs/builder-design.md, "glTF spike"): loads glTFast and a consumer from a
-        // folder by reflection and imports a .glb under a new object in front of the camera. Not shipped code.
-        private static string GltfSpike(string[] args)
+        // `gltf <file or folder>`: validates and imports .glb/.gltf files one after another (outside any pack; a file's
+        // own folder bounds its adjacent files) and records the outcome of each, for robustness testing. `gltf result`
+        // prints them. The imported meshes are destroyed straight away.
+        private static readonly List<string> gltfResults = [];
+        private static readonly Queue<string> gltfQueue = new();
+        private static string gltfRoot;
+
+        private static string GltfTest(string[] args)
         {
-            if (args.Length < 2) throw new ArgumentException("usage: builder-assets gltf <file.glb> [dir with glTFast.dll and consumer.dll] | gltf result");
-            var entryType = Type.GetType("SpikeConsumer.SpikeEntry, consumer");
+            if (args.Length < 2) throw new ArgumentException("usage: builder-assets gltf <file or folder> | gltf result");
             if (args[1] == "result")
-                return entryType == null ? "not loaded" : (string)(entryType.GetMethod("Result")?.Invoke(null, null) ?? entryType.GetField("Last").GetValue(null));
-            if (entryType == null)
+                return (gltfQueue.Count > 0 || gltfRunning ? $"{gltfQueue.Count + 1} still to go\n" : "done\n") + string.Join("\n", gltfResults);
+            string path = Path.GetFullPath(string.Join(" ", args.Skip(1)));
+            if (gltfRunning) throw new InvalidOperationException("a glTF test is still running; see `gltf result`");
+            var files = Directory.Exists(path)
+                ? Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories)
+                    .Where(f => f.EndsWith(".glb", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(f => f, StringComparer.Ordinal).ToList()
+                : File.Exists(path) ? [path] : throw new ArgumentException($"no file or folder {path}");
+            gltfResults.Clear();
+            gltfQueue.Clear();
+            gltfRoot = Directory.Exists(path) ? path : Path.GetDirectoryName(path);
+            foreach (var f in files) gltfQueue.Enqueue(f);
+            NextGltf();
+            return $"testing {files.Count} file(s); `builder-assets gltf result` for the outcome";
+        }
+
+        private static bool gltfRunning;
+
+        private static void NextGltf()
+        {
+            gltfRunning = false;
+            while (gltfQueue.Count > 0)
             {
-                string dir = args.Length > 2 ? args[2] : throw new ArgumentException("first call needs the dll folder");
-                Assembly.LoadFrom(Path.Combine(dir, "glTFast.dll"));
-                var consumer = Assembly.LoadFrom(Path.Combine(dir, "consumer.dll"));
-                entryType = consumer.GetType("SpikeConsumer.SpikeEntry", true);
+                string file = gltfQueue.Dequeue();
+                string rel = file.StartsWith(gltfRoot) ? file.Substring(gltfRoot.Length).TrimStart(Path.DirectorySeparatorChar) : file;
+                GltfModel model;
+                var watch = System.Diagnostics.Stopwatch.StartNew();
+                try
+                {
+                    if (new FileInfo(file).Length > AssetLimits.MaxModelBytes) throw new AssetException($"file is larger than {AssetLimits.Mb(AssetLimits.MaxModelBytes)}");
+                    model = GltfCheck.Read(File.ReadAllBytes(file), file, Path.GetDirectoryName(file));
+                }
+                catch (AssetException e)
+                {
+                    gltfResults.Add($"{rel}: refused: {e.Message}");
+                    continue;
+                }
+                long checkMs = watch.ElapsedMilliseconds;
+                gltfRunning = true;
+                try
+                {
+                    GltfLoader.Start(model, "PalaceBuilder test " + Path.GetFileName(file), r =>
+                    {
+                        var notes = model.Notes.Concat(r.Warnings).Distinct().ToList();
+                        gltfResults.Add(r.Error != null
+                            ? $"{rel}: failed: {r.Error}"
+                            : $"{rel}: ok: {r.Summary} (check {checkMs} ms){(notes.Count > 0 ? "; notes: " + string.Join("; ", notes) : "")}");
+                        if (r.Mesh != null) UnityEngine.Object.Destroy(r.Mesh);
+                        if (r.Texture != null) UnityEngine.Object.Destroy(r.Texture);
+                        NextGltf();
+                    });
+                }
+                catch (Exception e)
+                {
+                    gltfRunning = false;
+                    gltfResults.Add($"{rel}: CRASH: {e}");
+                    continue;
+                }
+                return;
             }
-            var cam = Camera.main;
-            var go = new GameObject("PalaceBuilder glTF spike");
-            if (cam != null)
-            {
-                var ray = new Ray(cam.transform.position, cam.transform.forward);
-                go.transform.position = Physics.Raycast(ray, out var hit, 500f) ? hit.point : cam.transform.position + cam.transform.forward * 20f;
-            }
-            go.transform.localScale = Vector3.one * 3f;
-            var template = BuilderServices.Catalog.FindUnit("E Melee")?.Prefab.GetComponentsInChildren<Renderer>(true)
-                .SelectMany(r => r.sharedMaterials).FirstOrDefault(AssetVisuals.IsBodyMaterial)
-                ?? throw new InvalidOperationException("no Enemy material to use as template");
-            return (string)entryType.GetMethod("Start").Invoke(null, [args[1], go.transform, template]) + $" at {go.transform.position}";
         }
     }
 }

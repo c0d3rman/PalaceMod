@@ -15,6 +15,8 @@ using Object = UnityEngine.Object;
     - Remote assets: def.Url + def.Sha256, downloaded once into PalaceBuilder/cache/<sha256> and verified before use.
       Downloads are asynchronous; the Get* methods return null until the file is cached (Prefetch starts them).
     - OGG decoding goes through UnityWebRequestMultimedia and is asynchronous too; WAV, PNG and OBJ decode inline.
+    - glTF/GLB models are validated inline (GltfCheck), then imported asynchronously by glTFast (GltfLoader) into one
+      mesh plus the texture that carries their colours (GetMeshTexture).
 
     Loaded objects are cached by (file path, size, mtime, use), so editing a file and changing the pack picks up the
     new version. Every failure is caught: the caller gets null (base visuals stay) and the reason is logged once and
@@ -27,6 +29,7 @@ namespace PalaceMod.Builder.Assets
         private sealed class Loaded
         {
             public Object Value;          // Sprite, Texture2D, AudioClip or Mesh
+            public Texture2D Texture;     // a glTF mesh's colours (its baked texture)
             public string Error;
             public bool Pending;          // async decode in flight
         }
@@ -55,6 +58,8 @@ namespace PalaceMod.Builder.Assets
         private readonly Dictionary<string, (float until, string reason, string url, string label)> retryAfter = [];  // transient failures, retried by Update
         private readonly List<AudioDecode> decodes = [];
         private readonly HashSet<string> warned = [];
+        private bool modelsArrived;
+        private static readonly Log log = Log.For<BuilderManager>();
 
         public AssetProvider(Func<string> root) { this.root = root; }
 
@@ -62,15 +67,20 @@ namespace PalaceMod.Builder.Assets
 
         // ------------------------------------------------------------------ IAssetProvider
 
-        public Sprite GetSprite(PackEntry pack, string assetRef) => Get<Sprite>(pack, assetRef, AssetUse.Sprite);
-        public Texture2D GetTexture(PackEntry pack, string assetRef) => Get<Texture2D>(pack, assetRef, AssetUse.Texture);
-        public AudioClip GetAudio(PackEntry pack, string assetRef) => Get<AudioClip>(pack, assetRef, AssetUse.Audio);
+        public Sprite GetSprite(PackEntry pack, string assetRef) => Get(pack, assetRef, AssetUse.Sprite)?.Value as Sprite;
+        public Texture2D GetTexture(PackEntry pack, string assetRef) => Get(pack, assetRef, AssetUse.Texture)?.Value as Texture2D;
+        public AudioClip GetAudio(PackEntry pack, string assetRef) => Get(pack, assetRef, AssetUse.Audio)?.Value as AudioClip;
 
         public (Mesh mesh, Material[] materials)? GetMesh(PackEntry pack, string assetRef)
         {
-            var mesh = Get<Mesh>(pack, assetRef, AssetUse.Mesh);
+            var mesh = Get(pack, assetRef, AssetUse.Mesh)?.Value as Mesh;
             return mesh == null ? null : (mesh, Array.Empty<Material>());
         }
+
+        /// <summary>The texture that colours a glTF mesh (its materials baked into one image, matching the mesh's
+        /// UVs), or null (OBJ meshes). The model's own first UV set is in the mesh's UV2, for painting it with a
+        /// separate texture instead.</summary>
+        internal Texture2D GetMeshTexture(PackEntry pack, string assetRef) => Get(pack, assetRef, AssetUse.Mesh)?.Texture;
 
         public AssetState GetState(PackEntry pack, string assetRef, string use, out string message)
         {
@@ -83,8 +93,8 @@ namespace PalaceMod.Builder.Assets
                 var kind = Sniff(file, out message);
                 if (kind == AssetKind.Unknown) return AssetState.Failed;
                 if (use == null) { message = AssetSniffer.Name(kind); return AssetState.Ready; }
-                var loaded = Load(file, kind, use, Label(pack, assetRef));
-                if (loaded.Pending) { message = "decoding"; return AssetState.Loading; }
+                var loaded = Load(file, kind, use, Label(pack, assetRef), FolderFor(pack, file));
+                if (loaded.Pending) { message = kind is AssetKind.Glb or AssetKind.Gltf ? "importing" : "decoding"; return AssetState.Loading; }
                 message = loaded.Error;
                 return loaded.Value != null ? AssetState.Ready : AssetState.Failed;
             }
@@ -103,8 +113,10 @@ namespace PalaceMod.Builder.Assets
                 try
                 {
                     var file = Locate(pack, ContentRef.Asset(kv.Key), out _, out _);
-                    // Start background decodes (OGG) now, so sounds are ready when the first unit spawns.
-                    if (file != null && Sniff(file, out _) == AssetKind.Ogg) Load(file, AssetKind.Ogg, AssetUse.Audio, Label(pack, ContentRef.Asset(kv.Key)));
+                    // Start background decodes (OGG, glTF) now, so they're ready when the first unit is built.
+                    var kind = file == null ? AssetKind.Unknown : Sniff(file, out _);
+                    if (kind == AssetKind.Ogg) Load(file, kind, AssetUse.Audio, Label(pack, ContentRef.Asset(kv.Key)), null);
+                    else if (kind is AssetKind.Glb or AssetKind.Gltf) Load(file, kind, AssetUse.Mesh, Label(pack, ContentRef.Asset(kv.Key)), FolderFor(pack, file));
                 }
                 catch (Exception e)
                 {
@@ -115,7 +127,7 @@ namespace PalaceMod.Builder.Assets
 
         // ------------------------------------------------------------------ resolution
 
-        private T Get<T>(PackEntry pack, string assetRef, string use) where T : Object
+        private Loaded Get(PackEntry pack, string assetRef, string use)
         {
             if (pack == null || assetRef == null) return null;
             try
@@ -128,9 +140,9 @@ namespace PalaceMod.Builder.Assets
                 }
                 var kind = Sniff(file, out why);
                 if (kind == AssetKind.Unknown) { WarnOnce("kind " + file, $"{Label(pack, assetRef)}: {why}"); return null; }
-                var loaded = Load(file, kind, use, Label(pack, assetRef));
+                var loaded = Load(file, kind, use, Label(pack, assetRef), FolderFor(pack, file));
                 if (loaded.Error != null) WarnOnce(CacheKey(file, use) + loaded.Error, $"{Label(pack, assetRef)}: {loaded.Error}");
-                return loaded.Value as T;
+                return loaded;
             }
             catch (Exception e)
             {
@@ -182,8 +194,18 @@ namespace PalaceMod.Builder.Assets
         {
             why = null;
             var kind = AssetSniffer.DetectFile(file);
-            if (kind == AssetKind.Unknown) why = "not a PNG, WAV, OGG or OBJ file";
+            if (kind == AssetKind.Unknown) why = "not a PNG, WAV, OGG, OBJ or glTF file";
             return kind;
+        }
+
+        /// <summary>The folder a model's adjacent files may come from: the pack's, for its own files; none for a
+        /// downloaded file in the cache (it must embed everything).</summary>
+        private string FolderFor(PackEntry pack, string file)
+        {
+            if (pack?.Folder == null) return null;
+            string cache = CacheDir;
+            if (cache != null && Path.GetFullPath(file).StartsWith(Path.GetFullPath(cache) + Path.DirectorySeparatorChar, StringComparison.Ordinal)) return null;
+            return pack.Folder;
         }
 
         private static string Label(PackEntry pack, string assetRef) => $"{pack.Id}/{ContentRef.Parse(assetRef).Id}";
@@ -196,7 +218,7 @@ namespace PalaceMod.Builder.Assets
 
         // ------------------------------------------------------------------ decoding
 
-        private Loaded Load(string file, AssetKind kind, string use, string label)
+        private Loaded Load(string file, AssetKind kind, string use, string label, string folder)
         {
             string key = CacheKey(file, use);
             if (cache.TryGetValue(key, out var hit) && (hit.Pending || hit.Error != null || hit.Value != null)) return hit;
@@ -208,7 +230,7 @@ namespace PalaceMod.Builder.Assets
                 {
                     AssetUse.Sprite or AssetUse.Texture => kind == AssetKind.Png ? null : "an image (PNG)",
                     AssetUse.Audio => kind is AssetKind.Wav or AssetKind.Ogg ? null : "a sound (WAV or OGG)",
-                    AssetUse.Mesh => kind == AssetKind.Obj ? null : kind == AssetKind.Glb ? "an OBJ mesh (glTF isn't supported yet)" : "a mesh (OBJ)",
+                    AssetUse.Mesh => kind is AssetKind.Obj or AssetKind.Glb or AssetKind.Gltf ? null : "a mesh (OBJ, glTF or GLB)",
                     _ => null,
                 };
                 if (expected != null) throw new AssetException($"is a {AssetSniffer.Name(kind)}, not {expected}");
@@ -258,6 +280,14 @@ namespace PalaceMod.Builder.Assets
                         loaded.Value = mesh;
                         break;
                     }
+                    case AssetKind.Glb:
+                    case AssetKind.Gltf:
+                    {
+                        var model = GltfCheck.Read(File.ReadAllBytes(file), file, folder);
+                        loaded.Pending = true;
+                        StartModel(model, name, label, key, loaded);
+                        break;
+                    }
                 }
                 if (loaded.Value != null) Log.For<BuilderManager>().Debug($"Assets: loaded {label} ({AssetSniffer.Name(kind)}, {Describe(loaded.Value)})");
             }
@@ -270,6 +300,37 @@ namespace PalaceMod.Builder.Assets
                 loaded.Error = "couldn't be read: " + e.Message;
             }
             return loaded;
+        }
+
+        private void StartModel(GltfModel model, string name, string label, string key, Loaded loaded)
+        {
+            foreach (var note in model.Notes.Distinct()) log.Debug($"Assets: {label}: {note}");
+            try
+            {
+                GltfLoader.Start(model, name, result =>
+                {
+                    // Cleared or replaced while importing (packs changed, the file was edited): drop the result.
+                    if (!cache.TryGetValue(key, out var current) || current != loaded)
+                    {
+                        if (result.Mesh != null) Object.Destroy(result.Mesh);
+                        if (result.Texture != null) Object.Destroy(result.Texture);
+                        return;
+                    }
+                    loaded.Pending = false;
+                    loaded.Value = result.Mesh;
+                    loaded.Texture = result.Texture;
+                    loaded.Error = result.Error;
+                    foreach (var w in result.Warnings.Distinct()) log.Debug($"Assets: {label}: glTF: {w}");
+                    if (result.Error != null) WarnOnce(key + result.Error, $"{label}: {result.Error}");
+                    else log.Debug($"Assets: loaded {label} (glTF model, {result.Summary})");
+                    modelsArrived = true;
+                });
+            }
+            catch (Exception e) when (e is FileNotFoundException or FileLoadException or TypeLoadException or BadImageFormatException)
+            {
+                loaded.Pending = false;
+                throw new AssetException("glTF support is missing: PalaceMod.glTFast.dll isn't installed next to PalaceMod.dll");
+            }
         }
 
         private static string Describe(Object o) => o switch
@@ -326,8 +387,13 @@ namespace PalaceMod.Builder.Assets
         public void Update()
         {
             RetryDue();
-            if (downloads.Count == 0 && decodes.Count == 0) return;
-            bool arrived = false;
+            bool arrived = modelsArrived;
+            modelsArrived = false;
+            if (downloads.Count == 0 && decodes.Count == 0)
+            {
+                if (arrived) AssetsArrived?.Invoke();
+                return;
+            }
             foreach (var d in downloads.Values.ToList())
             {
                 var req = d.Request;
@@ -435,13 +501,14 @@ namespace PalaceMod.Builder.Assets
                 if (!stale) continue; // errors stay cached until the file changes (no re-decoding a bad file on every rescan)
                 cache.Remove(key);
                 Destroy(loaded.Value);
+                Destroy(loaded.Texture);
             }
         }
 
         /// <summary>Destroys every loaded object and cancels background work.</summary>
         public void Clear()
         {
-            foreach (var loaded in cache.Values) Destroy(loaded.Value);
+            foreach (var loaded in cache.Values) { Destroy(loaded.Value); Destroy(loaded.Texture); }
             cache.Clear();
             foreach (var d in downloads.Values) d.Request.Dispose();
             downloads.Clear();
@@ -462,7 +529,8 @@ namespace PalaceMod.Builder.Assets
         {
             foreach (var kv in cache)
                 yield return $"{kv.Key.Split('|')[0]} {Path.GetFileName(kv.Key.Substring(kv.Key.LastIndexOf('|') + 1))}: " +
-                    (kv.Value.Pending ? "decoding" : kv.Value.Error ?? (kv.Value.Value == null ? "null" : Describe(kv.Value.Value)));
+                    (kv.Value.Pending ? "decoding" : kv.Value.Error ?? (kv.Value.Value == null ? "null" : Describe(kv.Value.Value) +
+                        (kv.Value.Texture != null ? $", texture {kv.Value.Texture.width}x{kv.Value.Texture.height}" : "")));
             foreach (var d in downloads.Values) yield return $"download {d.Label}: {d.Request.downloadedBytes} bytes";
             foreach (var kv in failedDownloads) yield return $"download {kv.Key}: failed: {kv.Value}";
         }
