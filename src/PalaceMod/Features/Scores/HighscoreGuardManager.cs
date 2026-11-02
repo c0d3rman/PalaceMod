@@ -30,7 +30,7 @@ namespace PalaceMod
 {
     public class HighscoreGuardManager : BaseManager
     {
-        public override string FeatureSection => "Unranked Runs";
+        public override string FeatureSection => "Unranked runs";
         public override string FeatureDescription =>
             "Runs that use gameplay-changing mod features (cheats, undo, save states...) don't record high scores, " +
             "leaderboard entries, quests or achievements.";

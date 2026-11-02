@@ -84,6 +84,18 @@ namespace PalaceMod
             return slot != null && slot.Level < slot.OwnUpgrades.Count && !slot.OwnUpgrades[slot.Level].disableInThisMode;
         }
 
+        /// <summary>The highest level this slot can reach right now: its current level plus every tier after it up
+        /// to the first one this mode disables (the Level 4 buildings setting and some maps clear that flag).</summary>
+        internal static int MaxLevel(BuildSlot slot)
+        {
+            slot = Owner(slot);
+            if (slot == null) return 0;
+            var upgrades = slot.OwnUpgrades;
+            int max = Mathf.Min(slot.Level, upgrades.Count);
+            while (max < upgrades.Count && !upgrades[max].disableInThisMode) max++;
+            return max;
+        }
+
         internal static string BuildingName(BuildSlot slot)
         {
             slot = Owner(slot);

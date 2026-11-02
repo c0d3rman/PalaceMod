@@ -69,6 +69,13 @@ namespace PalaceMod.Builder.Level
                 var b = AstarPath.active.GetNearest(to, nn).node;
                 route.Reachable = a != null && b != null && PathUtilities.IsPathPossible(a, b);
                 route.Detail = $"from {from} -> node {(Vector3?)a?.position} area {a?.Area}; to {to} -> node {(Vector3?)b?.position} area {b?.Area}";
+                // The nearest walkable node can lie outside a ring of props that closes in the spawn point (the inside
+                // is too small to be walkable), which would make a walled-in spawn look connected.
+                if (route.Reachable && a != null && WalledIn(from, (Vector3)a.position))
+                {
+                    route.Reachable = false;
+                    route.Detail += "; spawn point walled in by props";
+                }
                 if (withPoints && a != null && b != null)
                 {
                     var path = ABPath.Construct(from, to);
@@ -84,6 +91,26 @@ namespace PalaceMod.Builder.Level
                 Log.For<BuilderManager>().Warn($"path check for {name} failed: {e.Message}");
             }
             return route;
+        }
+
+        // A spawn this close to its nearest node is on the walkable area itself (vanilla spawns are, or nearly).
+        private const float OnGraphDistance = 1.5f;
+
+        /// <summary>Whether a solid layout prop stands between the spawn point and the walkable node it snaps to, i.e.
+        /// the spawn's own spot is cut off from the graph. Only the editor's prop blockers count, never the map's own
+        /// scenery, so a vanilla spawn just off the walkable area still passes.</summary>
+        private static bool WalledIn(Vector3 spawn, Vector3 node)
+        {
+            var flat = node - spawn;
+            flat.y = 0f;
+            if (flat.magnitude <= OnGraphDistance) return false;
+            Physics.SyncTransforms();
+            // Cast from the node back to the spawn, so a spawn inside a prop still hits that prop's face.
+            var lift = Vector3.up * 0.5f;
+            var origin = node + lift;
+            var toSpawn = spawn + lift - origin;
+            return Physics.RaycastAll(origin, toSpawn.normalized, toSpawn.magnitude, 1 << LayoutScene.ObstacleLayer, QueryTriggerInteraction.Collide)
+                .Any(h => h.collider != null && h.collider.name == LayoutScene.BlockerName);
         }
 
         /// <summary>What each recast graph rasterizes (dev).</summary>

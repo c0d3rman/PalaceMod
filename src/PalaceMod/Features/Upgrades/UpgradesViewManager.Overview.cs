@@ -51,11 +51,11 @@ namespace PalaceMod
                 foreach (var slot in group)
                 {
                     index++;
-                    int maxLevel = slot.OwnUpgrades.Count(u => !u.disableInThisMode);
+                    int maxLevel = UpgradeInfo.MaxLevel(slot);
                     var taken = UpgradeInfo.TakenChoices(slot);
                     string label = count > 1 ? $"{group.Key} {index}" : group.Key;
                     label += $"  <size=75%>Lv {slot.Level}/{maxLevel}</size>";
-                    string value = taken.Count > 0 ? string.Join(", ", taken.Select(t => UpgradeInfo.ChoiceName(slot, t.choice))) : "—";
+                    string value = taken.Count > 0 ? string.Join(", ", taken.Select(t => UpgradeInfo.ChoiceName(slot, t.choice))) : "";
                     // Rows without a choice get a blank icon so every label starts at the same place.
                     var icon = taken.Count > 0 ? UpgradeInfo.Icon(taken[taken.Count - 1].choice) : BlankSprite;
                     var captured = slot;

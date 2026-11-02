@@ -123,7 +123,7 @@ namespace PalaceMod.Builder.Level
             return go;
         }
 
-        private const string BlockerName = AddedPrefix + "blocker";
+        internal const string BlockerName = AddedPrefix + "blocker";
         private static Mesh blockerMesh;
 
         /// <summary>Makes a prop block pathfinding and movement, or not. The host's recast graphs rasterize renderer

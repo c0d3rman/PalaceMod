@@ -24,6 +24,8 @@ namespace PalaceMod
         [
             ("Control Groups", "Control groups"),
             ("Debug Menu", "Debug menu"),
+            ("Retry Earlier Day", "Retry earlier day"),
+            ("Unranked Runs", "Unranked runs"),
         ];
 
         private static readonly (string section, string from, string to)[] Keys =

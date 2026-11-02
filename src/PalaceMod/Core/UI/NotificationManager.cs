@@ -151,11 +151,17 @@ namespace PalaceMod
             m.Label.color = m.Kind == NotifyKind.Error ? Color.Lerp(ModStyle.Gold, ModStyle.KindColor(NotifyKind.Error), 0.35f) : ModStyle.Gold;
             var size = m.Label.GetPreferredValues(m.Text, MaxTextWidth, 0f);
             float width = Mathf.Min(Mathf.Ceil(size.x) + 2f, MaxTextWidth);
-            size = m.Label.GetPreferredValues(m.Text, width, 0f);
             var label = m.Label.rectTransform;
-            label.sizeDelta = new Vector2(width, Mathf.Ceil(size.y));
             label.anchoredPosition = new Vector2(PadLeft, -PadY);
-            m.Panel.sizeDelta = new Vector2(PadLeft + width + PadRight, Mathf.Ceil(size.y) + 2f * PadY);
+            // Lay the text out at its final width and measure what it actually draws: the line metrics alone
+            // (GetPreferredValues) leave out the glyphs' descenders on the last line, which then hang past the panel.
+            label.sizeDelta = new Vector2(width, 10000f);
+            m.Label.ForceMeshUpdate(true, true);
+            float height = m.Label.preferredHeight;
+            if (m.Label.textInfo.characterCount > 0) height = Mathf.Max(height, -m.Label.textBounds.min.y);
+            height = Mathf.Ceil(height);
+            label.sizeDelta = new Vector2(width, height);
+            m.Panel.sizeDelta = new Vector2(PadLeft + width + PadRight, height + 2f * PadY);
             var emblem = (RectTransform)m.Emblem.transform;
             emblem.anchoredPosition = new Vector2(PadLeft * 0.5f + 2f, -m.Panel.sizeDelta.y * 0.5f);
             if (m.Shown < Time.unscaledTime - FadeIn) m.Shown = Time.unscaledTime - FadeIn; // replaced: stay fully visible
