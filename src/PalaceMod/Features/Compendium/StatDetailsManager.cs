@@ -89,6 +89,27 @@ namespace PalaceMod
                 GameplayImpact.Mark("Dev: skipped to a night");
                 return $"next night: {n}";
             });
+            DevCommands.Register("build", "build <name part> [levels] [branch]   build/upgrade every matching building for free (dev only)", args =>
+            {
+                if (args.Length == 0) throw new System.ArgumentException("usage: build <name part> [levels] [branch]");
+                int levels = args.Length > 1 ? int.Parse(args[1]) : 1;
+                int branch = args.Length > 2 ? int.Parse(args[2]) : 0;
+                int count = 0;
+                foreach (var slot in Resources.FindObjectsOfTypeAll<BuildSlot>().Where(b => b.gameObject.scene.isLoaded && !b.ActivatorUpgradesThis))
+                {
+                    var name = CompendiumStats.Translate(slot.LOCIDENTIFIER_NAME);
+                    if (name.IndexOf(args[0], System.StringComparison.OrdinalIgnoreCase) < 0 && slot.buildingName.IndexOf(args[0], System.StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    slot.ActivateIgrnoringActivatorLevel();
+                    for (int i = 0; i < levels && slot.Level < slot.OwnUpgrades.Count; i++)
+                    {
+                        var branches = slot.OwnUpgrades[slot.Level].upgradeBranches;
+                        slot.ForceManualUpgradeWithoutFeedbackEffects(branches[Mathf.Min(branch, branches.Count - 1)]);
+                    }
+                    count++;
+                }
+                GameplayImpact.Mark("Dev: free buildings");
+                return $"{count} buildings";
+            });
             DevCommands.Register("tooltip", "tooltip                print the pause menu's open tooltip (title, description, stat rows)", _ => DescribeTooltip());
         }
 
