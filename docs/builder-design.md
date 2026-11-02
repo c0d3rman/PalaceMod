@@ -66,11 +66,11 @@ Evidence comes from the decompiled `Assembly-CSharp`, `AstarPathfindingProject.d
 |---|---|
 | WP1 Data model and loader | **Landed** (PR #8). `Model/`, `Contracts/`, `PackRepository`, `EditHistory`. |
 | WP2 Catalog and runtime | **Landed** (feat/builder-core). `Runtime/`, `BuilderManager`, `builder` dev command, sample pack, interim `SessionLauncher`, leaderboard guard. Enemies only: player units aren't in the catalog yet (see Spike results). |
-| WP3 Session and level select | In progress on feat/builder-session (rewrites `Session/`, including all-platform leaderboard guards that replace `BuilderManager.Leaderboard.cs`). |
-| WP4a Editor UI | Open. |
+| WP3 Session and level select | **Landed.** `Session/`: Custom runs entry in every map's pre-level menu, session lifecycle, isolation, `scores.json`, `builder-session` dev command. |
+| WP4a Editor UI | **Landed** (stage 1): `Editor/`, see "Editor (WP4a, as built)". Stage 2 is planned below. |
 | WP4b / WP4c Level overlay, placement editor | Stage 2. Data shape fixed (`LevelDef`), stub `ILevelOverlay`. |
-| WP5 Asset import | Open. Stub `IAssetProvider` returns null. |
-| WP6 Sharing | Open. Stub `IShareCodec` refuses. |
+| WP5 Asset import | **Landed.** `Assets/`: PNG icons and skins, WAV/OGG sounds, OBJ meshes, url assets with sha256 cache. glTF deferred (see "glTF spike"). |
+| WP6 Sharing | **Landed.** `Sharing/`: `ShareCodec`, `PackArchive` (`.tfpack` and Thunderstore zips), import folder watcher, `SharingUI`, `builder-share` dev command, `tests/PalaceMod.Tests`. |
 
 ## Architecture (as built, WP1 and WP2)
 
@@ -87,8 +87,16 @@ Features/Builder/
   Runtime/UnitFactory.cs               WP2    IUnitFactory: custom unit templates
   Runtime/WaveInjector.cs              WP2    IWaveInjector: custom waves into EnemySpawner
   Runtime/BuilderManager.Spawning.cs   WP2    patches: EnemySpawner.Start, template-aware spawning, unit names
-  Session/SessionLauncher.cs           WP3    ISessionLauncher (interim minimal version by WP2)
-  Session/BuilderManager.Session.cs    WP3    patches: score/save/achievement isolation during a session
+  Session/SessionLauncher.cs           WP3    ISessionLauncher: Launch, Arm (pre-level menu), End, results
+  Session/BuilderManager.Session.cs    WP3    patches: isolation, end screen, leaderboards, pre-level menu
+  Session/SessionMenu.cs               WP3    "Custom runs" entry and the Custom Runs frame (UI kit)
+  Session/ScoreStore.cs                WP3    scores.json: best/last run per design
+  Session/SessionDevCommands.cs        WP3    `builder-session` dev command
+  Assets/AssetProvider.cs              WP5    IAssetProvider: resolve, cache, downloads, background OGG decode
+  Assets/Loaders.cs                    WP5    PNG/WAV/OGG/OBJ decoders with signature sniffing and limits
+  Assets/AssetVisuals.cs               WP5    mesh/texture/sound swaps on templates (called from UnitFactory)
+  Assets/BuilderAssetsManager.cs       WP5    installs the provider, pumps it, `builder-assets` dev command
+  Assets/BuilderManager.Assets.cs      WP5    patch: UnitAudio.Start (pack sounds)
 Assets/builder-sample.json             WP2    built-in sample pack (embedded resource)
 ```
 
@@ -102,6 +110,10 @@ BepInEx/PalaceBuilder/                       IPackRepository.Root
   packs/<packId>/assets/...                  files the pack's "assets" entries point at (WP5 loads them)
   trash/<packId>-<yyyyMMdd-HHmmss>/          Delete() moves packs here; nothing is ever deleted outright
   cache/<sha256>                             downloaded assets (WP5)
+  import/                                    drop .tfpack/.zip/.txt (share code) files here; moved to import/imported or
+                                             import/failed (with <file>.why.txt) once handled (WP6)
+  exports/                                   .tfpack and Thunderstore zips written by Export (WP6)
+  staging/<guid>/                            temporary extraction folder during an import (WP6, removed after)
   scores.json                                per-design results (WP3)
   catalog.json                               written by `builder dump`
 BepInEx/plugins/<mod>/PalaceBuilder/packs/<packId>/   read-only "Plugin" packs shipped as Thunderstore mods
@@ -157,7 +169,7 @@ Semantics worth knowing:
 - **There is no per-unit gold stat.** The game overwrites `Hp.coinCount` from the spawn group's `gold` at spawn time, so gold belongs to `SpawnDef.gold`.
 - **`weapon.damage` replaces the whole direct-damage list.** Each entry applies if the target has all its `tags`: damage = (damage + add) × mult, in order. The base's list is in `catalog.json`, to copy and edit.
 - **Movement tags are refused.** Adding or removing `Flying` or `LargeUnit` would need a pathfinding graph change. Pick a base that already has them.
-- **`warning` is stored but not shown.** The game never displays `Wave.warningText`. WP3 or WP4a may show it with `Notify` at dusk.
+- **`warning` is shown by the Builder, not the game.** The game never displays `Wave.warningText`; during a session WP3 shows a night's `warning` with `Notify` when that night starts.
 - **`levels`** are validated for shape only. Applying them is WP4b; until then they produce a warning, and a level's `waveSet` still works.
 - **Behaviour modules** form a whitelist (`BehaviourTypes`). v1 has only `SpawnOnDeath {unit}`. To add one, add a constant, a validator case and a `UnitFactory.ApplyBehaviour` case.
 
@@ -185,15 +197,22 @@ Semantics worth knowing:
 - **Template-aware spawning** (a transpiler on `Spawn.Update`, `EnemySpawner.StartSpawning` and `EnemySpawner.GetWaveInfo`): `scene.isLoaded` becomes "loaded and not the template scene", and `GameObject.GetComponentInChildren<T>()` becomes `GetComponentInChildren<T>(true)` for templates only. Vanilla behaviour is unchanged. If a game update removes the `isLoaded` check, the transpiler logs an error.
 - **Wave injection.** A prefix on `EnemySpawner.Start` replaces `waves` and `goldBalanceAtStart` when a wave set is pending, the scene is its host, and the mode is Classic. Spawn lines are resolved by GameObject name among the spawner's `EnemySpawnLine` children; unresolvable spawns are skipped with a logged issue. The game's own Start logic then applies Elite God, Rat God, Loan, Royal Mint and Cheese God to the custom waves.
 
-### Session isolation (interim, WP3 owns)
+### Sessions (WP3)
 
-`SessionLauncher.Launch` validates, pre-builds every template (so errors surface before loading), queues the wave set, sets Classic mode, sets `MatchSaveLoadHandler.OverwriteCurrentSave` and calls `TransitionFromNullToLevel(host)`. While `Current != null`:
+A session is one custom run of a design (a pack's wave set or level) on its host map. `SessionLauncher` has two ways in:
 
-- `LevelProgressManager.GetLevelDataForScene(host)` returns the session's own `LevelData` (`Current.Scores`), so highscores, "beaten", networth and quest state never reach the host's record.
-- `SaveLoadManager.SaveGame` is skipped. `MatchSaveLoadHandler.SaveRun` only converts in memory (retry day keeps working) and never writes the host's mid-match file.
-- `AchievementManager` unlock calls and the Steam leaderboard upload (`SteamGameServices.UploadHighscore`) are skipped. Perk level and XP are snapshotted at launch and restored when the session ends.
-- On load of the host, `GameplayImpact.Mark("Builder: custom content")` runs and a short notice says scores and saves aren't recorded.
-- The session ends when any other scene loads: menu, level select or another map. The game loads every scene additively, so only the persistent `_UI` scene is ignored.
+- **`Launch(request)`** (editor "Test", `builder play`): validates (errors block), pre-builds every template, queues the wave set, sets Classic mode, points the match-save context at the host (`MatchSaveLoadHandler` `currentMap` = host, no current save, `OverwriteCurrentSave`), and calls `TransitionFromNullToLevel(host)`. It accepts any in-memory pack (it needn't be saved) and works from the main menu, the overworld or the in-match pause menu. Launching while a session runs replaces it.
+- **The pre-level menu** (players): walking onto a map shows the game's pre-level menu with an extra **Custom runs** entry under "Show Leaderboard" (the panel grows by one row). It opens the **Custom Runs** frame (UI kit `ModFrame`): this map's designs first, then other maps', each with its custom best and a tooltip (pack, author, nights, description, best, plays and wins, or the errors that block it; packs with errors are dimmed and can't be picked). Picking one "arms" the pre-level menu (`SessionLauncher.Arm`): the title gets "Custom: <name>", the highscore box shows the design's custom best, there is no "Continue" save, and Play starts the session (a `TransitionFromLevelSelectToLevel` prefix calls `BeginArmed`, which re-reads the pack and refuses if it now has errors or another host). Picking a design for another map switches the pre-level menu to that map. "Play <map> normally" in the frame, walking onto a map, or closing the menus disarms. The game's in-map perk selection applies as usual. The entry shows on main maps, and on challenge maps only when a design targets them.
+
+While `Current != null`:
+
+- `GetLevelDataForScene(host)` returns the session's `LevelData` (`Current.Scores`), seeded with the design's custom best, so "new record" and the end-screen highscore compare against custom runs only. Its `beatenBest` stays the host's vanilla value (also after a win), because campaign unlocks (`Equippable.IsUnlocked`) read it.
+- `SaveLoadManager.SaveGame` is skipped. `MatchSaveLoadHandler.SaveRun` only converts in memory, so retry and retry day work without writing the host's mid-match file.
+- Achievements and every platform's `UploadHighscore(int, string)` are skipped. The end screen gives no XP (`FillUpXPBar`) and no "map beaten" unlock rewards (`ShowCampaignLevelBeatenRewards`). Perk level and XP are also snapshotted at launch and restored at the end, as a backstop.
+- `GameplayImpact.Mark("Builder: custom content")` on host load, plus a short notice. A night's `warning` text shows when it starts.
+- On `TransitionFromGameplayToEndScreen` (Classic), the result goes to `ScoreStore`: `BepInEx/PalaceBuilder/scores.json`, one record per design key (`<pack>/<waveSet>` or `<pack>/level:<level>`) with `plays`, `wins`, `best` and `last` (`score`, `beaten`, `dateUtc`, `perks`, `nights` reached, and `assists`: other GameplayImpact reasons). A notice shows the score and whether it's a new custom best.
+- Restart and retry keep the session (same host). The session ends when any other scene loads (the game loads scenes additively, so only `_UI` is ignored). `End()` with the host still loaded first takes the player to level select and keeps isolation until the map has unloaded. At the end the match-save context is left on "overwrite" and GameplayImpact's level is cleared, so the next vanilla run on the host starts clean.
+- Perks are allowed: they're the game's own difficulty and score system and apply to custom waves; the result records them.
 
 ### Dev commands
 
@@ -210,6 +229,18 @@ Semantics worth knowing:
 | `live` | live enemies grouped by name with their actual stats (to check overrides after spawn) |
 | `spike scan\|weapon\|material` | reruns the feasibility spikes below |
 
+`python3 scripts/dev.py cmd "builder-session <sub>"` (WP3):
+
+| Sub | Does |
+|---|---|
+| `prelevel <map>` | opens a map's pre-level menu (in level select) as if the king walked onto it |
+| `menu` | opens the Custom Runs frame |
+| `arm <pack> <waveSet>` / `disarm` | arms or disarms a design for the pre-level menu |
+| `play` | presses the pre-level menu's Play |
+| `finish win\|lose` | ends the match now (end screen) |
+| `scores` | prints `scores.json` |
+| `state` | session, armed design, scene, frame, host LevelData, perk level and XP, match-save flag, impact, loadout |
+
 ## Spike results
 
 Run on 2026-11-02 with `builder spike ...` and `builder play palacemod.sample` in a dev launch (pool instance, native arm64 loader).
@@ -224,7 +255,7 @@ Run on 2026-11-02 with `builder spike ...` and `builder play palacemod.sample` i
 | **Session isolation** | On the host: `GameplayImpact` "Builder: custom content". `SaveGame` was skipped ("skipped writing the save file during a custom run"). Leaving to level select ended the session; perk level and XP were unchanged. | WP3 builds on this. Codex found that `builder end` mid-run and launches from the main menu needed work; WP3 has fixed both on its branch. |
 | **Catalog** | 39 enemies, 37 weapons and 36 hosts (10 main maps plus mini modes), built in 89 ms at the main menu. **0 player units**: player unit prefabs aren't loaded at the menu (they live inside building prefabs). | Gap: player-side designs won't validate until the catalog finds player units, either by scanning building prefabs (`UnitRespawnerForBuildings.units`) from `Resources` or by rebuilding inside a level. That's part of the "player units in buildings" work, which no package owns yet. |
 
-Not yet run (not needed for the interfaces): cloning a `BuildSlot` before Start (stage 2, WP4b) and loading glTFast (WP5).
+Not yet run (not needed for the interfaces): cloning a `BuildSlot` before Start (stage 2, WP4b). glTFast (WP5) is under "WP5: asset import", "glTF spike".
 
 ## Interfaces
 
@@ -236,10 +267,11 @@ All are in `Features/Builder/Contracts/Contracts.cs` and reached through `Builde
 | `BuilderServices.Catalog` | `ICatalog : IValidationContext`: `Units`, `Weapons`, `Hosts`, `FindUnit/Weapon/Host`, `ToJson` | WP2 | `Catalog` |
 | `BuilderServices.Units` | `IUnitFactory`: `Resolve(pack, unitRef, out error)`, `IsTemplate`, `Clear` | WP2 | `UnitFactory` |
 | `BuilderServices.Waves` | `IWaveInjector`: `SetPending(pack, waveSet)`, `Pending`, `BuildWaves(...)` | WP2 | `WaveInjector` |
-| `BuilderServices.Sessions` | `ISessionLauncher`: `Current`, `Launch(SessionRequest, out error)`, `End`, `Started`, `Ended` | WP3 | `SessionLauncher` (interim) |
+| `BuilderServices.Sessions` | `ISessionLauncher`: `Current`, `Launch(SessionRequest, out error)`, `End`, `Started`, `Ended` | WP3 | `SessionLauncher` |
 | `BuilderServices.Overlay` | `ILevelOverlay`: `Apply(pack, level, issues)` | WP4b | `NullLevelOverlay` (warns) |
-| `BuilderServices.Assets` | `IAssetProvider`: `GetSprite`, `GetAudio`, `GetMesh(PackEntry, assetRef)` | WP5 | `NullAssetProvider` (null) |
-| `BuilderServices.Share` | `IShareCodec`: `Encode(pack)`, `Decode(code, issues)` | WP6 | `NullShareCodec` (refuses) |
+| `BuilderServices.Assets` | `IAssetProvider`: `GetSprite`, `GetAudio`, `GetMesh(PackEntry, assetRef)`; added by WP5: `GetTexture`, `GetState(pack, ref, use, out message)` (`AssetState` Missing/Loading/Ready/Failed, `AssetUse` constants), `Prefetch(pack)` | WP5 | `AssetProvider` |
+| `BuilderServices.Share` | `IShareCodec`: `Encode(pack)`, `Decode(code, issues)` | WP6 | `ShareCodec` |
+| `BuilderServices.Archives` | `IPackArchive`: `ExportFolder`, `Export(entry, path)`, `Import(path, issues)`, `ExportThunderstore(entry, path)` (**added by WP6**, additive; stub `NullPackArchive`) | WP6 | `PackArchive` |
 
 Interfaces are frozen. If a package needs a change, add a member (don't change existing signatures), keep the stub compiling, and note it in the PR and in this table.
 
@@ -260,19 +292,11 @@ Shared data types (also in `Contracts.cs`): `PackEntry {Pack, Folder, Source, Re
 
 **Owns:** `Features/Builder/Session/` (`SessionLauncher.cs`, `BuilderManager.Session.cs`), plus any new files there. Replace or extend `SessionLauncher` freely; keep it implementing `ISessionLauncher`.
 
-**Already there (interim, by WP2):**
+**Built** (see "Sessions (WP3)" above): the Custom runs entry and frame, armed pre-level menu, direct `Launch`, isolation, end-screen and leaderboard guards, `scores.json`, night warnings, `builder-session` dev command. Verified in game: arm from the menu, play, custom waves spawn, victory records the result with no XP or save written, Try Again keeps the session, `builder end` leaves the map first, vanilla runs are unaffected, and turning the Builder off hides the entry.
 
-- `Launch(SessionRequest)`: validates (errors block), pre-builds templates, `BuilderServices.Waves.SetPending`, sets Classic mode, sets `MatchSaveLoadHandler.OverwriteCurrentSave = true`, and calls `SceneTransitionManager.TransitionFromNullToLevel(host)`.
-- Ends on any non-host scene load (except `_UI`). Marks `GameplayImpact` on host load. Shows a `Notify` banner.
-- Isolation patches: host `LevelData` swapped for `Current.Scores`, `SaveGame` skipped, `SaveRun` in-memory only, achievements skipped, perk level and XP restored at session end.
-- Applies `BuilderServices.Overlay` for level sessions.
+**Hooks for other packages:** the editor sets `SessionMenu.EditorAvailable`, `SessionMenu.OpenEditor` and `SessionMenu.OpenPackInEditor` to get "Create your own" and per-pack "Edit" rows; `SessionMenu.Open()` opens the list from anywhere (a pick then launches directly). `ScoreStore.Get(ScoreStore.Key(pack, waveSet, level))` gives a design's record.
 
-**To build:**
-
-1. A "Custom" entry in level select. The doc's recommendation is a UI frame (from the pre-level menu or a single overworld interactor) listing playable packs, wave sets and levels from `BuilderServices.Packs.Packs`, with entries that have `HasErrors` greyed out and their issues shown. It launches through `Launch`, and should use the loadout and perk selection of the host's pre-level menu if feasible. Today `Launch` keeps whatever perks are equipped.
-2. Results: on `TransitionFromGameplayToEndScreen` during a session, record `{packId, waveSetId/levelId, score, beaten, date, perks}` into `BepInEx/PalaceBuilder/scores.json` (best per design), and make the end screen return to level select. Check which end-screen XP, quest and crown paths still run: XP is restored by the interim code, but verify crowns and quests via `LevelInfo.QuestsComplete`.
-3. Restart and retry day: verify that `RestartCurrentLevel` keeps the session (it should: same host) and that retry-day uses the in-memory match save.
-4. Decide whether perks should be allowed. They are now, and the game applies them to custom waves.
+**Open:** level-overlay sessions (`LevelId`) are wired but untested until WP4b. Retry day was not exercised in game (it uses the in-memory match save, unchanged from the interim). A changed design keeps its old best (records aren't versioned by content).
 
 **Interfaces consumed:** `IPackRepository`, `IWaveInjector.SetPending`, `IUnitFactory.Resolve`, `ILevelOverlay.Apply`.
 
@@ -290,43 +314,115 @@ Shared data types (also in `Contracts.cs`): `PackEntry {Pack, Folder, Source, Re
 - `Validator` issues carry a JSON path (`units[0].stats.maxHp`): map them to the field to highlight it.
 - `Ids.FromName(name)` for ids, and `Validator.IsTag` for tag pickers (names are `TagManager.ETag`).
 - Test button: `BuilderServices.Packs.Save(pack)` then `BuilderServices.Sessions.Launch(new SessionRequest { Pack = pack, WaveSetId = id }, out err)`.
-- Export and import buttons: `BuilderServices.Share.Encode/Decode` (WP6), then `Packs.InstallNew(decoded)`.
+- Export and import buttons: call `PalaceMod.Builder.Sharing.SharingUI` (WP6): `Open()` (the "Share designs" frame: paste a code, import folder, export a pack), `OpenPack(entry)` (one pack's export actions), `CopyCode(pack)` and `ImportFromClipboard()`. They notify the player themselves. For custom flows use `BuilderServices.Share` and `BuilderServices.Archives` directly.
 - Live preview model: instantiate `IUnitFactory.Resolve(pack, unitId)` with `Object.Instantiate` under a preview camera, and destroy it after. Never activate or modify the returned template itself.
 
 **Not stubbed:** everything it needs exists except share codes (stub refuses) and icons (stub returns null).
 
 ### WP5: asset import
 
-**Goal:** packs bring their own icons, sounds and (later) meshes.
+**Status:** landed. Owns `Features/Builder/Assets/`. `BuilderAssetsManager` (infrastructure, `[ManagerOrder(-20)]`) installs `AssetProvider` and pumps it every frame.
 
-**Owns:** `Features/Builder/Assets/` (new). Install with `BuilderServices.Assets = new AssetProvider();` in your manager's `Awake`.
+**Pack fields** (all optional, additive, no version bump):
 
-**Contract:** `IAssetProvider.GetSprite(PackEntry pack, string assetRef)` resolves `"asset:<key>"` to `pack.Pack.Assets[key]` and returns null on any failure (callers keep base visuals). The same goes for `GetAudio` and `GetMesh` (mesh plus materials).
+```jsonc
+"assets": { "shroom": { "path": "assets/shroom.obj" }, "skin": { "path": "assets/skin.png" },
+            "hit": { "url": "https://.../hit.ogg", "sha256": "<64 hex>" } },
+"visuals": { "icon": "asset:icon", "mesh": "asset:shroom", "meshScale": null, "meshRotY": 45,
+             "texture": "asset:skin", "sounds": { "attack": "asset:hit", "hurt": "asset:...", "death": "asset:..." } }
+```
 
-- Local: `Path.Combine(pack.Folder, def.Path)`. `pack.Folder` is null for built-in packs, so built-in assets would need embedded resources if ever wanted. The validator already rejects rooted and `..` paths.
-- Remote: `def.Url` plus `def.Sha256`, cached at `BuilderServices.Packs.Root/cache/<sha256>`; verify the hash before use. Downloads are async. `GetSprite` is synchronous, so prefetch on pack load or session launch (subscribe to `BuilderServices.Packs.Changed` and `BuilderServices.Sessions.Started`) and return null until cached.
-- Cache loaded objects per `(packId, key, file mtime)`.
+**How it works:**
 
-**Hooks already wired:** `UnitFactory` calls `GetSprite(entry, visuals.icon)` and sets `ScreenMarkerIcon.sprite` (plus the arachnophobia sprites). `visuals.mesh` is validated but `UnitFactory` only notes "not supported yet". To wire it, add a branch in `UnitFactory.ApplyVisuals` (WP2's file: a small additive change is fine) that swaps `MeshFilter.sharedMesh` and materials, keeping the material named `Enemy` for elite swaps. Sounds: hook `UnitAudio` / `ThronefallAudioManager`; add a model field (`visuals.sounds`?) with no version bump (it's an additive optional field).
+- **Resolution.** `path` is relative to the pack folder and must resolve inside it (checked again at load, beyond the validator's `..` check). `url` assets download once (http/https, 30 s timeout, 24 MB cap) into `cache/<sha256>` and are used only if the hash matches; a mismatch is permanent, a network failure retries after a minute. Downloads and OGG decodes are async: the getters return null until ready, and finishing one clears templates (outside sessions) so they rebuild with it. Prefetch runs on `Packs.Changed` and when a session starts. Setting `Builder.Download pack assets` (default on) turns downloads off.
+- **Decoding.** The file type comes from its first bytes, not its extension. PNG ≤ 8 MB and ≤ 2048 px a side (read from the header before decoding). WAV: PCM 8/16/24/32-bit or float, 1 to 8 channels, ≤ 60 s, parsed by us. OGG: Vorbis only, ≤ 8 MB, every page's CRC verified before Unity's decoder sees it (Unity logs an FMOD error on damaged files otherwise). OBJ ≤ 16 MB, ≤ 100k vertices and 150k triangles: positions, UVs, normals, any polygon, negative indices and `v x y z r g b` vertex colours; `mtllib` is ignored. Malformed files produce a player-facing message (`GetState`) and a warning in the log, never an exception into the game. Loaded objects are cached by file path, size, mtime and use.
+- **Meshes.** Inside-out meshes are flipped automatically (signed volume), and normals that oppose the faces are flipped: the cel shader renders an inside-out mesh solid black. OBJ vertex colours are read but not shown: the `Enemy` material doesn't enable FlatKit's vertex-colour mode, so use a texture for colour. In the template, the biggest renderer with a body material keeps its renderer, `GPUInstanced` and material and gets the mesh, baked into its local space (so it bobs with the walk animation). It's scaled to fit inside the base model's box (or `meshScale`), turned by `meshRotY`, and stands where the model stood. The other parts get a one-triangle invisible mesh rather than being disabled, because `GPUInstanced` draws them even when the renderer is off. So tint, elite material and hit flashes still work.
+- **Texture.** Clones the body material (keeping its name, for the elite swap), sets `_BaseMap` (the shader multiplies it, `_TEXTUREBLENDINGMODE_MULTIPLY`) and resets `_BaseColor` to white. Vanilla meshes have UVs, but they're laid out for flat colour, so a texture is mainly for imported meshes. Elites switch to the elite material and lose the texture, as with tints.
+- **Sounds.** A `BuilderUnitSounds` marker on the template (pack id + refs) is copied to every spawned clone; a postfix on `UnitAudio.Start` replaces `soundOnAttack`, `soundOnDmg` and `soundOnDeath` with the pack clips. Footsteps keep the base unit's.
+- **Not supported:** animated or skinned imported meshes, multi-material OBJ (one submesh, one material), MTL colours, player-unit bodies (the catalog has no player units yet), assets in built-in packs (no folder).
 
-**Spike results that matter here:** see "Tint and skin" below (how unit meshes are coloured).
+**Dev command** `builder-assets`: `check <pack>` (loads every asset for each use and prints its state), `status` (cache), `inspect <vanilla unit>` (hierarchy, meshes, materials and shader keywords), `show <pack> <unit>...` (spawns base, custom and elite copies in front of the player), `sounds` (clips that live custom units will play), `gltf <file.glb> <dir>` / `gltf result` (the glTF spike, loading DLLs from a folder; nothing ships).
 
-### WP6: sharing
+### glTF spike
 
-**Goal:** trade designs as copy/paste codes and files.
+**Verdict: glTFast works in the game, but isn't shipped yet; it's a follow-up.** Run with `builder-assets gltf` on a pool instance (Rosetta-free native launch, game 2.13, Unity 2022.3.62f2 Mono).
 
-**Owns:** `Features/Builder/Sharing/` (new). Install with `BuilderServices.Share = new ShareCodec();`.
+- **Build.** `com.unity.cloud.gltfast` 6.8.0 (Apache-2.0) compiles outside Unity into one netstandard2.1 DLL (about 230 KB) against the game's own assemblies (Burst 1.8.25, Collections 2.6.2, Mathematics 1.3.2, URP 14), with no source patches. It needs the Unity player defines plus its asmdef version defines (`USING_URP`, `UNITY_ANIMATION`, `UNITY_IMAGECONVERSION`, ...), and Export, DOTS and Editor excluded.
+- **Blocker found and solved: JSON.** The default `GLTFast.GltfImport` parses with `JsonUtility`, which can't fill types from an assembly loaded after startup: the parse "succeeds" with every collection null, then instantiation throws a NullReferenceException. Building its `Newtonsoft` folder in (define `NEWTONSOFT_JSON`, reference the game's `Newtonsoft.Json`) and using `GLTFast.Newtonsoft.GltfImport` fixes it.
+- **Result.** A textured GLB cube (embedded PNG) loaded and rendered with the game's FlatKit look, through a 3-method `IMaterialGenerator` that clones the `Enemy` material and sets `_BaseMap` (glTFast's own shader-graph shaders aren't in the build). It took 563 ms the first time (JIT and Burst falling back to managed code) and 82 ms after that. A truncated GLB and 400 KB of random bytes both failed cleanly (`GltfNotBinary`, `ChunkJsonInvalid`), with no exception.
+- **Why not shipped.** One static cube isn't enough evidence for "robust": larger meshes, Burst-job paths (vertex conversion, skinning, morph targets) and odd exporter output are untested. Shipping also needs:
+  - a mesh-only path, because units take one `Mesh`: merge the scene's primitives into one mesh in node space;
+  - a quiet `ICodeLogger`, because `ConsoleLogger` writes Unity errors that `run` reports;
+  - lifetime management (`GltfImport.Dispose` destroys what it created);
+  - renaming the assembly so it can't clash with another mod's glTFast.
+- **Follow-up recipe.**
+  1. Bundle the DLL with the plugin (Apache-2.0: ship `LICENSE` and `NOTICE`).
+  2. Add `AssetKind.Glb` handling in `AssetProvider` as an async decode (like OGG), using `LoadGltfBinary(bytes)` with `UninterruptedDeferAgent` and `ImportSettings { AnimationMethod = None }`.
+  3. Merge the meshes, and return `(mesh, materials)` from `GetMesh` with each material's base colour and texture applied to an `Enemy` clone.
+  4. Add `.glb` to `Validator.MeshExtensions`.
 
-**Contract:** `Encode(DesignPack)` returns `"TFB1:" + base64url(raw deflate(PackSerializer.WriteCompact(pack)))`; asset entries keep only `url` and `sha256` (drop `path`-only assets, or keep them so the receiver sees "missing"). `Decode(code, issues)` tolerates whitespace and line breaks, rejects unknown prefixes, inflates, then calls `PackSerializer.Read(json, issues)` (which migrates and validates the format). Return null on failure.
+  The spike sources (csproj with the defines, the consumer and the material generator) are small; recreate them from these notes.
+- **UniGLTF** (MIT) was assessed from source only: more assemblies, and hard `Shader.Find` calls for texture conversion shaders that aren't in the game. glTFast is the better base.
 
-**Also:**
+### WP6: sharing (as built)
 
-- Clipboard via `GUIUtility.systemCopyBuffer`.
-- `.tfpack` zip (`System.IO.Compression`, already in `Managed/`; add a csproj `Reference` with `Private=false` like `Newtonsoft.Json`; `dev.py build` copies new references into `lib/`) holding `pack.json` and `assets/`. Import through `BuilderServices.Packs.InstallNew(pack, extractedFolder)`, which never overwrites and renames clashing ids to `<id>-2`. Zip-slip check every entry path.
-- A Thunderstore template: `manifest.json` plus `PalaceBuilder/packs/<id>/pack.json` inside the mod folder, which `PackRepository` already scans read-only.
-- Keep codes under about 2,000 characters for typical packs. Measure with the sample pack.
+**Goal:** trade designs as copy/paste codes and files, with no server.
 
-**Not stubbed:** nothing else is needed. `PackSerializer.WriteCompact`, `Read` and `InstallNew` exist.
+**Owns:** `Features/Builder/Sharing/`: `ShareCodec.cs`, `PackArchive.cs` (no Unity references, unit-tested), `BuilderSharingManager.cs` (installs `BuilderServices.Share` and `BuilderServices.Archives`, the import folder watcher, the `builder-share` dev command), `SharingUI.cs` (the frames). Tests: `tests/PalaceMod.Tests` (`dotnet run --project tests/PalaceMod.Tests`; needs `dev.py setup` for `lib/`). It follows `Builder.Enabled` (`Feature<BuilderManager>.On`); its one setting is `Builder.Import folder`.
+
+**Share code:** `TFB1:` + base64url(raw deflate(`PackSerializer.WriteCompact(pack)`) ++ CRC-32 of the JSON, 4 bytes big-endian). The digit is the code format version (a newer one is refused with "update PalaceMod"); the pack schema version is inside the JSON and migrated by `PackSerializer`. Assets keep `path`, `url` and `sha256`, never bytes, so a receiver without the file falls back to base visuals. The sample pack (2,500 bytes of JSON) is a 1,051-character code; `SharingUI.CopyCode` suggests a `.tfpack` above 2,000.
+
+Gotcha for anyone using `System.IO.Compression` in the game: Unity's Mono `DeflateStream` throws `IOException` ("Corrupted data ReadInternal") on bad input, where .NET throws `InvalidDataException`. Catch both. `builder-share selftest` checks this path in-game.
+
+Decoding treats input as hostile and never throws: it finds the `TFB<n>:` prefix anywhere in the text (so a whole chat message can be pasted), skips whitespace and line breaks, stops at the first non-base64 character (closing quotes or backticks), and accepts the standard base64 alphabet too. It caps the code at 512K characters and the inflated JSON at 2 MB (counted while inflating), checks the CRC, requires strict UTF-8, parses with a JSON depth cap of 32, then migrates and reads. Null lists become empty. Any failure is one player-facing error issue. Decode doesn't validate against the catalog; installing does (`InstallNew` → `Refresh`), and a pack with errors still installs so the editor can fix it.
+
+**.tfpack:** a zip of `tfpack.json` (`{"format":"tfpack","version":1,"pack":"<id>"}`, the archive layout version), `pack.json` and `assets/...`. Export writes to `PalaceBuilder/exports/<id>.tfpack` (never overwriting: `-2`, `-3`, ...) and only includes assets with media extensions (`PackArchive.AssetExtensions`: png, jpg, wav, ogg, mp3, obj, mtl, gltf, glb, bin, json, txt; WP5: add any new type there). Because `InstallNew` copies only `assets/`, an `assets` entry whose `path` points elsewhere in the pack folder (e.g. `art/skin.png`) is moved to `assets/art/skin.png` in the archive and its path is rewritten. Export also checks the finished file against the import limits, so anything it writes imports again. Import:
+
+- Caps: 64 MB archive, 1,000 entries, 32 MB per entry, 128 MB total, 2 MB `pack.json`. Sizes are counted while inflating, never taken from the headers, and a partial file is deleted.
+- Zip-slip: every entry name is checked first, and one bad name rejects the whole archive: no rooted paths, drive letters or `:`, `\`, `..`, `.` or empty segments, trailing dots or spaces, or control characters. Each target path is also checked to resolve inside the staging folder.
+- Layout: exactly one `pack.json` anywhere in the archive; its folder is the pack root. So a zip of a pack folder and a Thunderstore package (`PalaceBuilder/packs/<id>/pack.json`) import too. Only `assets/` files with known extensions are unpacked; anything else is skipped with a warning.
+- Migration hooks: `PackArchive.Steps[n]` upgrades an extracted staging folder from layout n to n+1, and a newer layout is refused. A missing `tfpack.json` counts as layout 1.
+- It extracts to `PalaceBuilder/staging/<guid>`, then `InstallNew(pack, staging)` (never overwrites; a clashing id becomes `<id>-2`, reported as a warning), then deletes staging.
+
+**Thunderstore:** `ExportThunderstore` writes `exports/<Name>-thunderstore.zip` with `manifest.json` (name made Thunderstore-safe, `version_number` 1.0.0, empty `dependencies`), a README with a publishing checklist, a generated 256x256 `icon.png` and `PalaceBuilder/packs/<id>/`. Mod managers install loose files to `BepInEx/plugins/<package>/`, where `PackRepository` finds the pack read-only. Creators must add PalaceMod's Thunderstore id to `dependencies` (it isn't published yet; see `PackArchive.ThunderstoreManifest`).
+
+**Import UX:** `SharingUI.Open()` is a "Share designs" frame with two tabs. **Import** has "Paste code from clipboard", the import folder (an "Open import folder" button and a row per waiting file) and the last result. **Export** lists packs, and each opens `OpenPack(entry)`: copy share code, save `.tfpack`, save for Thunderstore, open exports folder. With `Builder.Import folder` on (the default), files dropped into `PalaceBuilder/import` (`.tfpack`, `.zip`, or `.txt` holding a code) are imported within about 2 s (paused during a custom session and while the Builder is off). The watcher waits until a file has been unchanged for 1.5 s and isn't locked, then moves it to `import/imported/` or `import/failed/` (with `<file>.why.txt`). Every result is a `Notify`. There is no pause-menu entry of its own: WP4a's Builder menu opens it.
+
+**Dev command** `builder-share`: `code <pack>` (copies too), `decode [code]` (clipboard by default; doesn't install), `paste` (installs the clipboard), `export <pack>`, `thunderstore <pack>`, `import <path>`, `ui [pack]`, `selftest` (codec round trip, rejections and the clipboard under the game's Mono).
+
+### Editor (WP4a, as built)
+
+Open it from **Builder** in the title menu or the in-match pause menu, from WP3's custom-runs menu ("Create your own", "Edit"), or with `builder-ui open`. Files in `Features/Builder/Editor/`:
+
+| File | Does |
+|---|---|
+| `BuilderEditorManager.cs` | menu entries, undo/redo keys (Cmd+Z, Cmd+Shift+Z, Ctrl+Z/Ctrl+Y), first-use hint, `builder-ui` dev command, sets WP3's `SessionMenu` hooks |
+| `BuilderEditor.cs` | public entry points `Open()`, `OpenPack(id)`, `IsAvailable`; drafts; save, undo, test-play, share code, problem navigation |
+| `PackDraft.cs` | the working copy of one pack: `EditHistory`, dirty state, validation (`Packs.Validate` plus editor-only warnings), save / save a copy / id rename |
+| `EditorPage.cs` | base screen: fields bound to JSON paths, so issues mark the field and its tooltip; `Picker` (full-screen pick-one / toggle-many list) |
+| `PackPages.cs` | pack list; pack screen with Units, Wave Sets, Pack (details and actions) and Problems tabs |
+| `UnitPage.cs` | unit property panel: identity and base prefab, stats (generated from `StatsDef` by reflection, base values from `CatalogUnit`), weapon and damage modifier lists, tags, look (tint, size, icon), behaviours, test, duplicate, delete |
+| `WavePage.cs` | wave set timeline: map, starting gold, nights as rows with their groups as chips; applying a night or chip opens its fields underneath |
+| `EditorCatalog.cs` | never-throwing catalog lookups, and `Schema` (labels, help, ranges and steps for every numeric field) |
+
+Behaviour worth knowing:
+
+- **Drafts.** Opening a pack copies it into a `PackDraft` kept until the game quits, so closing the editor never loses work; the pack list shows "unsaved". Built-in and plugin packs are editable and saved as a new user pack (`InstallNew`). Changing a saved pack's id saves the new folder, then moves the old one to trash. A draft with no unsaved changes picks up edits made on disk.
+- **Undo.** Every change goes through `PackDraft.Edit(label, change)`, which calls `EditHistory.Record` first. Held steppers coalesce into one step per field (1.5 s window).
+- **Fields** (UI kit `Core/UI/ModFields.cs`, additive): `Stepper` (left/right, accelerating while held), `Choice`, `Toggle` and `TextInput`, all `ModPage.Row`s. Text entry blocks the game's menu input while typing (prefixes on `UIFrame.Update` and `UIFrameManager.Update`), and `Keybinds` treats it as a focused text field. A null override shows the base value dimmed ("100 (base)"); typing an empty value resets it.
+- **Validation feedback.** Issues are matched to fields by path prefix: a red (error) or amber (warning) diamond on the label, the message in the tooltip, and a Problems tab whose rows jump to the field. Editor-only warning: a group on a spawn line that doesn't allow its unit (flying on ground lines, large on small-only lines).
+- **Entry points.** "Builder" in the title menu (UI kit `Core/UI/TitleMenu.cs`, added for this: `TitleMenu.AddButton(id, label, onClick, visible)`) and the in-match pause menu; both hide while `Builder.Enabled` is off, and switching it off closes an open editor.
+- **Test play.** Wave sets: save (writable packs without errors), then `Sessions.Launch` with the draft. Units: an unsaved copy of the pack with a generated two-night wave set "editor-test" on the pack's first map (or Nordfels). The editor closes before the map loads.
+- **Share codes.** "Copy share code" and "Import share code" call `BuilderServices.Share` (WP6) and `Packs.InstallNew`; with WP6's stub they explain that codes aren't available yet.
+- **Not built:** the live 3D preview model (planned: a preview camera rendering a stripped `Instantiate` of the template into a `RawImage`; components other than renderers removed before activation so no game script runs); editing `warning` text is stored but not yet shown in play.
+
+### Stage 2 plan: level overlay editor (WP4b/WP4c)
+
+Not started. The plan, in order:
+
+1. **Data first, no 3D.** A Levels tab on the pack screen: host, wave set, and the `buildSlots.edit` list (per vanilla slot: upgrade costs, income, HP) as property panels, using `catalog.json`-style host data (slot names and their upgrade trees) that WP2's catalog would need to add (`CatalogHost.BuildSlots`). This needs `ILevelOverlay` to apply edits, but no placement UI.
+2. **Placement mode** inside the host scene (launched like a test play, with a flag that makes the session an edit session): a free camera, a palette (build slot bases, spawn lines, props from the catalog), a ghost that snaps to the navmesh (`AstarPath.active.GetNearest`), move/rotate gizmos, and the same property panel docked on the right for the selected object. Editing writes `LevelDef` through `PackDraft.Edit`, so undo and validation work unchanged.
+3. **Play from edit mode**: save, reload the host with the overlay (WP4b applies it before `Start`, then rescans).
 
 ### WP4b / WP4c (stage 2)
 
@@ -352,11 +448,11 @@ Shared data types (also in `Contracts.cs`): `PackEntry {Pack, Folder, Source, Re
 
 | Asset | Method | Verdict |
 |---|---|---|
-| PNG icons and skins | `Texture2D.LoadImage` and `Sprite.Create` | **Robust**, MVP+1. Skins depend on how the game's meshes are textured (palette or vertex colour under FlatKit), so check that first. |
-| WAV/OGG | `UnityWebRequestMultimedia.GetAudioClip("file://...")` | **Robust**. Hook into `UnitAudio` / `ThronefallAudioManager`. |
+| PNG icons and skins | `Texture2D.LoadImage` and `Sprite.Create` | **Built (WP5).** Vanilla bodies are flat-coloured (no `_BaseMap`), so skins are for imported meshes. |
+| WAV/OGG | Own WAV parser; OGG via `UnityWebRequestMultimedia` after a page CRC check | **Built (WP5).** Postfix on `UnitAudio.Start`. |
 | Recolour and rescale | Per-design material clone, `transform.localScale` | **Robust**, MVP. Must update `GPUInstanced`. |
-| OBJ | Pure-C# parser (Dummiesman-style); assign the game's FlatKit material plus a tint or vertex colours | **Robust for static props and simple units**. No rigs and no animation, so it suits props and rigid units ("rolling", "hovering"). |
-| glTF/GLB | glTFast 5.x/6.x (2019.4+, netstandard). Its Burst, Mathematics and Collections dependencies already ship with the game, but versions must match. Its shaders are **not** in the build, so override material generation with game materials. | **Medium risk**: needs a spike. Nobody has proven it in a BepInEx mod. Animated skinned units would also need the game's animation setup (enemies use simple transform animation), so stage 3+. |
+| OBJ | Pure-C# parser (Dummiesman-style); assign the game's FlatKit material plus a tint or vertex colours | **Built (WP5)** for rigid units: the mesh replaces the body and bobs with its walk animation. No rigs and no animation, so it suits props and rigid units ("rolling", "hovering"). |
+| glTF/GLB | glTFast 5.x/6.x (2019.4+, netstandard). Its Burst, Mathematics and Collections dependencies already ship with the game, but versions must match. Its shaders are **not** in the build, so override material generation with game materials. | **Works** (spike, with its Newtonsoft parser) but not shipped yet; see "glTF spike". Animated skinned units would also need the game's animation setup (enemies use simple transform animation), so stage 3+. |
 | AssetBundles | Built in Unity 2022.3 with URP | **Robust but power-user only**. Support loading them, and document a template project. |
 
 ## MVP scope

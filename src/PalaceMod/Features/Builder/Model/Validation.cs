@@ -48,6 +48,11 @@ namespace PalaceMod.Builder.Model
 
         public static bool IsTag(string name) => TagNames.Contains(name);
 
+        // File types the asset loader (WP5) reads, by use. Url assets have no extension; the loader checks their bytes.
+        public static readonly string[] ImageExtensions = [".png"];
+        public static readonly string[] AudioExtensions = [".wav", ".ogg"];
+        public static readonly string[] MeshExtensions = [".obj"];
+
         public static List<ValidationIssue> Validate(DesignPack pack, IValidationContext game = null)
         {
             var issues = new List<ValidationIssue>();
@@ -90,8 +95,18 @@ namespace PalaceMod.Builder.Model
                 {
                     if (v.Tint != null && !TryParseColor(v.Tint, out _)) Error(p + ".visuals.tint", "must be \"#rrggbb\"");
                     if (v.Scale is float s && (s < 0.1f || s > 10f)) Error(p + ".visuals.scale", "must be between 0.1 and 10");
-                    CheckAsset(v.Icon, p + ".visuals.icon");
-                    CheckAsset(v.Mesh, p + ".visuals.mesh");
+                    CheckAsset(v.Icon, p + ".visuals.icon", ImageExtensions);
+                    CheckAsset(v.Mesh, p + ".visuals.mesh", MeshExtensions);
+                    CheckAsset(v.Texture, p + ".visuals.texture", ImageExtensions);
+                    if (v.MeshScale is float ms && (float.IsNaN(ms) || ms < 0.001f || ms > 1000f)) Error(p + ".visuals.meshScale", "must be between 0.001 and 1000");
+                    if (v.MeshRotY is float mr && (float.IsNaN(mr) || mr < -360f || mr > 360f)) Error(p + ".visuals.meshRotY", "must be between -360 and 360");
+                    if ((v.MeshScale != null || v.MeshRotY != null) && v.Mesh == null) Warn(p + ".visuals.mesh", "meshScale and meshRotY only apply with a mesh");
+                    if (v.Sounds != null)
+                    {
+                        CheckAsset(v.Sounds.Attack, p + ".visuals.sounds.attack", AudioExtensions);
+                        CheckAsset(v.Sounds.Hurt, p + ".visuals.sounds.hurt", AudioExtensions);
+                        CheckAsset(v.Sounds.Death, p + ".visuals.sounds.death", AudioExtensions);
+                    }
                 }
                 var st = u.Stats;
                 if (st != null)
@@ -202,12 +217,14 @@ namespace PalaceMod.Builder.Model
                 if (value is float f && (float.IsNaN(f) || f < min || f > max)) Error(path, $"must be between {min.ToString(CultureInfo.InvariantCulture)} and {max.ToString(CultureInfo.InvariantCulture)}");
             }
 
-            void CheckAsset(string reference, string path)
+            void CheckAsset(string reference, string path, string[] extensions)
             {
                 if (reference == null) return;
                 var r = ContentRef.Parse(reference);
                 if (r.Kind != RefKind.Asset) Error(path, "must be \"asset:<key>\"");
-                else if (pack.Assets == null || !pack.Assets.ContainsKey(r.Id)) Error(path, $"no asset \"{r.Id}\" in this pack's \"assets\"");
+                else if (pack.Assets == null || !pack.Assets.TryGetValue(r.Id, out var def)) Error(path, $"no asset \"{r.Id}\" in this pack's \"assets\"");
+                else if (!string.IsNullOrEmpty(def?.Path) && !extensions.Contains(System.IO.Path.GetExtension(def.Path).ToLowerInvariant()))
+                    Error(path, $"asset \"{r.Id}\" ({def.Path}) must be a {string.Join(" or ", extensions)} file");
             }
 
             void CheckDamage(List<DamageModDef> mods, string path)

@@ -200,13 +200,42 @@ namespace PalaceMod.Builder
 
     // ---------------------------------------------------------------- WP5: assets
 
+    public enum AssetState
+    {
+        /// <summary>The ref isn't "asset:&lt;key&gt;", the key isn't in the pack, or the file doesn't exist.</summary>
+        Missing,
+        /// <summary>Downloading or decoding in the background; ask again later.</summary>
+        Loading,
+        Ready,
+        /// <summary>The file is malformed, too large or of the wrong type (see the message).</summary>
+        Failed,
+    }
+
     public interface IAssetProvider
     {
         /// <summary>Sprite for "asset:&lt;key&gt;" in pack, or null (callers then keep the base visuals).</summary>
         Sprite GetSprite(PackEntry pack, string assetRef);
+        /// <summary>WAV loads synchronously; OGG decodes in the background, so this is null until it's ready.</summary>
         AudioClip GetAudio(PackEntry pack, string assetRef);
-        /// <summary>Mesh plus material(s) to render it with, or null.</summary>
+        /// <summary>Mesh plus material(s) to render it with, or null. OBJ meshes come with no materials (an empty
+        /// array): the caller renders them with the unit's own material.</summary>
         (Mesh mesh, Material[] materials)? GetMesh(PackEntry pack, string assetRef);
+
+        // Added by WP5 (additive):
+        /// <summary>A PNG as a mipmapped, repeating texture (for skins), or null.</summary>
+        Texture2D GetTexture(PackEntry pack, string assetRef);
+        /// <summary>Whether an asset can be used, with a player-facing reason when it can't (for the editor).
+        /// <paramref name="use"/> is one of the AssetUse constants, or null for "any".</summary>
+        AssetState GetState(PackEntry pack, string assetRef, string use, out string message);
+        /// <summary>Starts downloads and background decodes for a pack's assets (also done automatically when
+        /// packs change and when a session starts).</summary>
+        void Prefetch(PackEntry pack);
+    }
+
+    /// <summary>What an asset is used as (IAssetProvider.GetState).</summary>
+    public static class AssetUse
+    {
+        public const string Sprite = "sprite", Texture = "texture", Audio = "audio", Mesh = "mesh";
     }
 
     // ---------------------------------------------------------------- WP6: sharing
@@ -217,5 +246,25 @@ namespace PalaceMod.Builder
         string Encode(DesignPack pack);
         /// <summary>Parses a share code (whitespace tolerated). Returns null and fills issues on failure.</summary>
         DesignPack Decode(string code, List<ValidationIssue> issues);
+    }
+
+    /// <summary>
+    /// .tfpack files: a zip of pack.json plus the pack's assets/ folder (WP6; added after the freeze, additive).
+    /// Imports always go through IPackRepository.InstallNew, so they never overwrite an existing pack.
+    /// </summary>
+    public interface IPackArchive
+    {
+        /// <summary>Folder exports go to by default: PalaceBuilder/exports.</summary>
+        string ExportFolder { get; }
+        /// <summary>Writes the pack and its assets to a .tfpack (default ExportFolder/&lt;id&gt;.tfpack, never
+        /// overwriting). Returns the file written. Throws IOException/InvalidOperationException with a player-facing
+        /// message on failure.</summary>
+        string Export(PackEntry pack, string path = null);
+        /// <summary>Imports a .tfpack (or a Thunderstore zip holding one pack) as a new user pack. Returns null and
+        /// fills issues on failure; warnings (skipped files, renamed id) are added on success too.</summary>
+        PackEntry Import(string path, List<ValidationIssue> issues);
+        /// <summary>Writes a Thunderstore-ready zip (manifest.json, README.md, icon.png and
+        /// PalaceBuilder/packs/&lt;id&gt;/) to ExportFolder. Returns the file written.</summary>
+        string ExportThunderstore(PackEntry pack, string path = null);
     }
 }
