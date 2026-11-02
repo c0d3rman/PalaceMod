@@ -147,6 +147,7 @@ namespace PalaceMod
                 if (mover != null) mover.enabled = false;
                 king.transform.position = new Vector3(pos.x, king.transform.position.y, pos.z);
                 if (mover != null) mover.enabled = true;
+                GameplayImpact.Mark("Dev: teleport");
                 return $"king at {king.transform.position}";
             });
         }

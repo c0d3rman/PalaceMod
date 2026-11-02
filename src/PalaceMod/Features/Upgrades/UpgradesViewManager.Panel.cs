@@ -99,8 +99,24 @@ namespace PalaceMod
         {
             // The deficit is shown ("need 6 more"), so it's part of the key; once affordable the balance no longer matters.
             int cost = slot.NextUpgradeOrBuildCost;
-            int deficit = UpgradeInfo.Next(slot) == null ? 0 : Mathf.Max(0, cost - PlayerInteraction.instance.Balance);
+            int deficit = UpgradeInfo.Next(slot) == null ? 0 : Mathf.Max(0, cost - Purse(slot));
             return $"{slot.GetInstanceID()}|{slot.Level}|{string.Join(",", slot.AppliedUpgrades)}|{cost}|{deficit}|{slot.CanBeUpgraded}|{ShowFuture.Value}";
+        }
+
+        private static readonly AccessTools.FieldRef<CostDisplay, int> FilledCoins =
+            AccessTools.FieldRefAccess<CostDisplay, int>("currentlyFilledCoins");
+
+        /// <summary>Coins the king has toward the slot's next step, counting ones already paid into it while holding
+        /// Interact (the game takes them from the balance one at a time).</summary>
+        private static int Purse(BuildSlot slot)
+        {
+            var king = PlayerInteraction.instance;
+            if (king == null) return 0;
+            int paid = 0;
+            var interactor = slot.buildingInteractor;
+            if (interactor != null && interactor.costDisplay != null)
+                paid = FilledCoins(interactor.costDisplay);
+            return king.Balance + paid;
         }
 
         // ---------- Construction ----------
@@ -186,7 +202,7 @@ namespace PalaceMod
             if (next is { } n)
             {
                 int cost = slot.NextUpgradeOrBuildCost;
-                int balance = PlayerInteraction.instance != null ? PlayerInteraction.instance.Balance : 0;
+                int balance = Purse(slot);
                 bool affordable = balance >= cost;
                 string label = slot.Level < 1 ? "Build" : "Next";
                 string costText = affordable

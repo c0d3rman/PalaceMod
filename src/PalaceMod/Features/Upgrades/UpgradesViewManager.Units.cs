@@ -122,8 +122,22 @@ namespace PalaceMod
         private static void RefreshOpenPauseUnits()
         {
             var frame = GameWidgets.PauseFrame;
-            if (frame == null || !frame.gameObject.activeInHierarchy) return;
-            GameWidgets.PauseHelper?.Refresh();
+            var helper = GameWidgets.PauseHelper;
+            if (frame == null || helper == null || !frame.gameObject.activeInHierarchy) return;
+            // Refresh rebuilds the unit, enemy and loadout grids; a selection inside them goes with it.
+            var selected = frame.CurrentSelection;
+            bool selectionRebuilt = selected is TFUIPlayerUnit || selected is TFUIEnemy || selected is TFUIEquippable || selected is TFUIIncomeDisplay;
+            helper.Refresh();
+            Plugin.Instance.StartCoroutine(AfterRebuild(frame, helper, selectionRebuilt));
+        }
+
+        // The old grid buttons are destroyed at the end of the frame; register the new ones after that.
+        private static System.Collections.IEnumerator AfterRebuild(UIFrame frame, PauseUILoadoutHelper helper, bool reselect)
+        {
+            yield return null;
+            if (frame == null) yield break;
+            frame.RefetchManagedElements();
+            if (reselect && helper.continueElement != null && frame.gameObject.activeInHierarchy) frame.Select(helper.continueElement);
         }
 
         // ---------- Stars ----------
