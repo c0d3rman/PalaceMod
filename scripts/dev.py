@@ -1012,11 +1012,16 @@ def land():
                                f"{INTEGRATION_BRANCH}`), resolve, build, commit, then `dev.py land` again.")
         try:
             if not (target / "lib/Assembly-CSharp.dll").is_file():
-                subprocess.run([sys.executable, str(target / "scripts/dev.py"), "setup"], cwd=target, check=True)
+                subprocess.run([sys.executable, str(target / "scripts/dev.py"), "setup"], cwd=target, check=True,
+                               capture_output=True, text=True)
             print(f"Building {INTEGRATION_BRANCH}...", flush=True)
-            subprocess.run([sys.executable, str(target / "scripts/dev.py"), "build"], cwd=target, check=True)
-        except (subprocess.CalledProcessError, OSError):
+            subprocess.run([sys.executable, str(target / "scripts/dev.py"), "build"], cwd=target, check=True,
+                           capture_output=True, text=True)
+        except (subprocess.CalledProcessError, OSError) as error:
             git("reset", "--hard", before, cwd=target)
+            output = getattr(error, "stdout", None) or ""
+            errors = "\n".join(sorted({line.strip() for line in output.splitlines() if ": error " in line}))
+            print(errors or output[-3000:], file=sys.stderr)
             raise RuntimeError(f"{INTEGRATION_BRANCH} doesn't build with {branch} merged in, so the merge was undone.\n"
                                f"Fix it in your worktree: `git merge {INTEGRATION_BRANCH}`, fix the build, commit, then "
                                "`dev.py land` again.")
