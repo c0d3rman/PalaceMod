@@ -61,7 +61,11 @@ namespace PalaceMod
         {
             if (!Buttons.TryGetValue(id, out var button)) return;
             Buttons.Remove(id);
-            if (button.Widget != null) Object.Destroy(button.Widget.gameObject);
+            if (button.Widget != null)
+            {
+                Feature<PauseMenuManager>.Instance?.Hide(button.Widget);
+                Object.Destroy(button.Widget.gameObject);
+            }
             button.Widget = null;
             Feature<PauseMenuManager>.Instance?.SyncIfOpen();
         }
@@ -105,11 +109,30 @@ namespace PalaceMod
 
         internal void SyncIfOpen()
         {
-            if (hookedFrame != null && UIFrameManager.instance?.ActiveFrame == hookedFrame)
+            if (hookedFrame == null) return;
+            if (UIFrameManager.instance?.ActiveFrame == hookedFrame)
             {
                 Sync();
                 hookedFrame.RefetchManagedElements();
             }
+            else if (moreFrame != null && moreFrame.IsOpen)
+            {
+                // The overflow list is built from the registry; rebuild it so removed or hidden buttons go away.
+                Sync();
+                moreFrame.Refresh();
+            }
+        }
+
+        // Hides one of our buttons; if it's selected, the selection moves to Settings first so keyboard and
+        // controller navigation don't get stuck on an inactive or destroyed element.
+        internal void Hide(TFUITextButton widget)
+        {
+            if (widget == null) return;
+            if (hookedFrame != null && hookedFrame.CurrentSelection == widget && GameWidgets.PauseHelper?.settingsElement is { } settings)
+            {
+                hookedFrame.Select(settings);
+            }
+            widget.gameObject.SetActive(false);
         }
 
         private void Sync()
@@ -148,11 +171,11 @@ namespace PalaceMod
                     visible = false;
                 }
                 if (visible) shown.Add(b);
-                else if (b.Widget != null) b.Widget.gameObject.SetActive(false);
+                else Hide(b.Widget);
             }
             var inline = shown.Count > MaxInline ? shown.Take(MaxInline - 1).ToList() : shown;
             var overflow = shown.Skip(inline.Count).ToList();
-            foreach (var b in overflow) if (b.Widget != null) b.Widget.gameObject.SetActive(false);
+            foreach (var b in overflow) Hide(b.Widget);
 
             // Build what's missing (each button on its own, so one failure doesn't take the others down).
             var widgets = new List<TFUITextButton>();
@@ -176,7 +199,11 @@ namespace PalaceMod
                 widgets.Add(moreWidget);
                 moreItems = overflow;
             }
-            else if (moreWidget != null) moreWidget.gameObject.SetActive(false);
+            else
+            {
+                Hide(moreWidget);
+                moreItems = [];
+            }
 
             SaveLayout(helper);
 
@@ -208,7 +235,7 @@ namespace PalaceMod
 
         private void OpenMore()
         {
-            moreFrame ??= new ModFrame("More").SetContent(page =>
+            moreFrame ??= new ModFrame("Mods").SetContent(page =>
             {
                 foreach (var b in moreItems) page.Button(b.Label, () => b.OnClick?.Invoke());
             });
@@ -277,6 +304,21 @@ namespace PalaceMod
             rect.pivot = new Vector2(savedPivot.x, 1f);
             rect.anchoredPosition = new Vector2(savedPosition.x, top);
             group.spacing = pitch - rowHeight;
+        }
+
+        // Coming back from a menu opened on top, the game restores the old selection, which may be one of our buttons
+        // that has since been hidden or removed; move it to Settings so the highlight isn't lost.
+        [HarmonyPatch(typeof(UIFrame), nameof(UIFrame.Activate))]
+        private class UIFrame_Activate_Patch
+        {
+            private static void Postfix(UIFrame __instance)
+            {
+                var manager = Feature<PauseMenuManager>.Instance;
+                if (manager == null || __instance != manager.hookedFrame) return;
+                var selected = __instance.CurrentSelection;
+                if (selected != null && selected.gameObject.activeInHierarchy) return;
+                if (GameWidgets.PauseHelper?.settingsElement is { } settings && settings.gameObject.activeInHierarchy) __instance.Select(settings);
+            }
         }
 
         // The game points the menu's right arrow at the loadout grid each time it refreshes; ours follow Settings.
