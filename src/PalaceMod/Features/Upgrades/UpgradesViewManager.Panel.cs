@@ -97,9 +97,10 @@ namespace PalaceMod
 
         private string PanelKey(BuildSlot slot)
         {
-            var next = UpgradeInfo.Next(slot);
-            bool affordable = next == null || PlayerInteraction.instance.Balance >= slot.NextUpgradeOrBuildCost;
-            return $"{slot.GetInstanceID()}|{slot.Level}|{string.Join(",", slot.AppliedUpgrades)}|{slot.NextUpgradeOrBuildCost}|{affordable}|{slot.CanBeUpgraded}|{ShowFuture.Value}";
+            // The deficit is shown ("need 6 more"), so it's part of the key; once affordable the balance no longer matters.
+            int cost = slot.NextUpgradeOrBuildCost;
+            int deficit = UpgradeInfo.Next(slot) == null ? 0 : Mathf.Max(0, cost - PlayerInteraction.instance.Balance);
+            return $"{slot.GetInstanceID()}|{slot.Level}|{string.Join(",", slot.AppliedUpgrades)}|{cost}|{deficit}|{slot.CanBeUpgraded}|{ShowFuture.Value}";
         }
 
         // ---------- Construction ----------
@@ -311,6 +312,32 @@ namespace PalaceMod
             }
         }
 
+        private static GameObject tileStaging;
+
+        /// <summary>
+        /// A visual-only copy of the popup's tile. GameWidgets.Clone can't strip it: the tile's TFUIAudioHelper
+        /// requires the TFUIUpgradeChoice it would remove, so drop the helper first, then the game's other scripts.
+        /// </summary>
+        private static GameObject CloneTile(TFUIUpgradeChoice prefab, Transform parent)
+        {
+            if (tileStaging == null)
+            {
+                tileStaging = new GameObject("PalaceMod Tile Staging");
+                tileStaging.SetActive(false);
+                Object.DontDestroyOnLoad(tileStaging);
+            }
+            var obj = Object.Instantiate(prefab.gameObject, tileStaging.transform, false);
+            obj.name = "Choice";
+            foreach (var helper in obj.GetComponentsInChildren<TFUIAudioHelper>(true)) Object.DestroyImmediate(helper);
+            var gameAssembly = typeof(TFUIUpgradeChoice).Assembly;
+            foreach (var behaviour in obj.GetComponentsInChildren<MonoBehaviour>(true))
+            {
+                if (behaviour != null && behaviour.GetType().Assembly == gameAssembly) Object.DestroyImmediate(behaviour);
+            }
+            obj.transform.SetParent(parent, false);
+            return obj;
+        }
+
         /// <summary>A copy of the choice popup's tile showing <paramref name="choice"/>, scaled to <paramref name="size"/>.</summary>
         internal static RectTransform AddTile(Transform parent, Choice choice, float size, bool dim)
         {
@@ -327,7 +354,7 @@ namespace PalaceMod
             var prefab = TilePrefab;
             if (prefab != null)
             {
-                var tile = GameWidgets.Clone(prefab, holder.transform, "Choice");
+                var tile = CloneTile(prefab, holder.transform);
                 var icon = GameWidgets.Corresponding(prefab.transform, Traverse.Create(prefab).Field("iconImg").GetValue<Image>().transform, tile.transform).GetComponent<Image>();
                 var bgSource = Traverse.Create(prefab).Field("backgroundImg").GetValue<MPUIKIT.MPImageBasic>();
                 var bg = bgSource != null ? GameWidgets.Corresponding(prefab.transform, bgSource.transform, tile.transform).GetComponent<MPUIKIT.MPImageBasic>() : null;

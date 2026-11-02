@@ -114,7 +114,14 @@ namespace PalaceMod
         {
             ClearCommandStars();
             infoBadges.Clear();
-            // Pause-menu icons are rebuilt by the game every time it opens, so nothing else lingers.
+        }
+
+        /// <summary>Rebuilds the pause menu's unit list if it's showing, so marks appear or go away right away.</summary>
+        private static void RefreshOpenPauseUnits()
+        {
+            var frame = GameWidgets.PauseFrame;
+            if (frame == null || !frame.gameObject.activeInHierarchy) return;
+            GameWidgets.PauseHelper?.Refresh();
         }
 
         // ---------- Stars ----------

@@ -24,6 +24,11 @@ namespace PalaceMod
             RefreshPauseButton();
         }
 
+        private void CloseOverview()
+        {
+            if (overview != null && overview.IsOpen) overview.Close();
+        }
+
         private void RefreshPauseButton()
         {
             if (overview == null) return;

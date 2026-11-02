@@ -42,8 +42,16 @@ namespace PalaceMod
                 "Stars on unit icons show how many times their building was upgraded; the pause menu lists differently upgraded units separately and names their upgrades."));
 
             NearBuilding.SettingChanged += (_, _) => { if (!NearBuilding.Value) HidePanel(); };
-            MarkUnits.SettingChanged += (_, _) => { if (!MarkUnits.Value) ClearUnitMarks(); };
-            PauseOverview.SettingChanged += (_, _) => RefreshPauseButton();
+            MarkUnits.SettingChanged += (_, _) =>
+            {
+                if (!MarkUnits.Value) ClearUnitMarks();
+                RefreshOpenPauseUnits();
+            };
+            PauseOverview.SettingChanged += (_, _) =>
+            {
+                if (!PauseOverview.Value) CloseOverview();
+                RefreshPauseButton();
+            };
 
             RegisterDevCommands();
             StartPauseOverview();
@@ -59,10 +67,16 @@ namespace PalaceMod
         {
             HidePanel();
             ClearUnitMarks();
+            CloseOverview();
             RefreshPauseButton();
+            RefreshOpenPauseUnits();
         }
 
-        protected override void OnFeatureEnabled() => RefreshPauseButton();
+        protected override void OnFeatureEnabled()
+        {
+            RefreshPauseButton();
+            RefreshOpenPauseUnits();
+        }
 
         public override void OnDestroy()
         {
