@@ -144,15 +144,8 @@ namespace PalaceMod.Builder.Editor
             OpenPack(draft.SourceId);
         }
 
-        private static string SafeSteamName()
-        {
-            try
-            {
-                string name = Steamworks.SteamClient.IsValid ? Steamworks.SteamClient.Name : null;
-                return string.IsNullOrWhiteSpace(name) ? null : name.Trim();
-            }
-            catch (Exception) { return null; }
-        }
+        // The game has no player name we can read without Steam's API; packs start without an author.
+        private static string SafeSteamName() => null;
 
         // ---- Actions shared by pages ----------------------------------------------------------------------------
 

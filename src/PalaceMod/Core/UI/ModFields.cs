@@ -244,6 +244,15 @@ namespace PalaceMod
             target.Refresh();
         }
 
+        /// <summary>Dev-command hook: types <paramref name="s"/> into the active field and confirms.</summary>
+        internal static void Debug(string s)
+        {
+            if (!Active) return;
+            text.Clear().Append(s);
+            replaceAll = false;
+            End(confirm: true);
+        }
+
         internal static void Tick()
         {
             if (!Active) return;
