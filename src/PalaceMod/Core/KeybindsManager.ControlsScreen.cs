@@ -245,7 +245,7 @@ namespace PalaceMod
 
         /// <summary>Names of the visible actions sharing a binding with this one, where at least one side is a mod key.
         /// Compares across every map of the same controller (the game keeps some keys, like WASD, in other map
-        /// categories). Menu-only (UI) actions don't count against a mod key that is inert in menus.</summary>
+        /// categories). Only actions that can act at the same time count (see Clashes).</summary>
         internal static List<string> Conflicts(int actionId, Pole? pole = null)
         {
             var names = new List<string>();
@@ -277,15 +277,32 @@ namespace PalaceMod
             return names;
         }
 
+        // Menu actions the game only reads on particular screens (the Settings and wardrobe tabs).
+        private static readonly HashSet<string> ScreenSpecificMenuActions = ["NextTab", "PrevTab"];
+
+        /// <summary>Whether two actions sharing a binding can both act at the same moment. A mod key with a context acts
+        /// only there: on a menu screen (AllowInMenus) that excludes gameplay keys and other screens' menu keys.</summary>
         private static bool Clashes(int a, int b, int uiCategory)
         {
             bool aMine = byAction.TryGetValue(a, out var ka), bMine = byAction.TryGetValue(b, out var kb);
             if (!aMine && !bMine) return false;
-            if (aMine && bMine) return true;
+            if (aMine && bMine)
+            {
+                if (ka.Context != null && kb.Context != null) return ka.Context == kb.Context;
+                var scoped = ka.Context != null ? ka : kb.Context != null ? kb : null;
+                var other = scoped == ka ? kb : ka;
+                return scoped == null || !InMenus(scoped) || InMenus(other);
+            }
             var mod = aMine ? ka : kb;
             var native = ReInput.mapping.GetAction(aMine ? b : a);
-            return native != null && (native.categoryId != uiCategory || (mod.Flags & KeybindFlags.AllowInMenus) != 0);
+            if (native == null) return false;
+            bool menuAction = native.categoryId == uiCategory;
+            if (mod.Context == null) return !menuAction || InMenus(mod);
+            if (!InMenus(mod)) return !menuAction;
+            return menuAction && !ScreenSpecificMenuActions.Contains(native.name);
         }
+
+        private static bool InMenus(Keybind keybind) => (keybind.Flags & KeybindFlags.AllowInMenus) != 0;
 
         private static string ActionLabel(ActionElementMap element)
         {
@@ -388,7 +405,10 @@ namespace PalaceMod
             }
             var conflicts = k.ActionId >= 0 ? Conflicts(k.ActionId) : [];
             string more = moreEntries.TryGetValue(k, out var entry) && entry.Value != "" ? $" more=[{entry.Value}]" : "";
-            return $"{Keybinds.ConfigKey(k)}  action={k.ActionId}  config={k.Shortcut}{more}  rewired=[{elements}]" +
+            // A switched-off feature keeps its action, but its keys aren't mapped (and its row is hidden) until it's on.
+            string off = Keybinds.FeatureEnabled(k.Section) ? "" : " (feature off: mapped when enabled)";
+            string context = k.Context != null ? $"  context={k.Context}" : "";
+            return $"{Keybinds.ConfigKey(k)}  action={k.ActionId}{context}  config={k.Shortcut}{more}  rewired=[{elements}]{off}" +
                 (conflicts.Count > 0 ? $"  conflicts=[{string.Join(", ", conflicts)}]" : "");
         }
 

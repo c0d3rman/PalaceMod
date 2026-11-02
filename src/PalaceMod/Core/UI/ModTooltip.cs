@@ -59,7 +59,8 @@ namespace PalaceMod
             source.Init(element, () => (titleText, bodyText?.Invoke()));
         }
 
-        /// <summary>Shows a tooltip while the mouse is over <paramref name="target"/>'s rect (no menu element needed).</summary>
+        /// <summary>Shows a tooltip while the mouse is over <paramref name="target"/>'s rect (no menu element needed).
+        /// Nothing shows while both title and body are empty.</summary>
         public static void AttachHover(GameObject target, string titleText, Func<string> bodyText)
         {
             var source = target.GetComponent<HoverSource>() ?? target.AddComponent<HoverSource>();
@@ -185,7 +186,9 @@ namespace PalaceMod
                 if (over)
                 {
                     var (t, b) = Content();
-                    Show(t, b, rect, this);
+                    // Nothing to say right now (the content can change): stay hidden.
+                    if (string.IsNullOrEmpty(t) && string.IsNullOrEmpty(b)) over = false;
+                    else Show(t, b, rect, this);
                 }
                 else Hide(this);
             }
