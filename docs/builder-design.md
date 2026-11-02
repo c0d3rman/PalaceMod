@@ -64,9 +64,9 @@ Evidence comes from the decompiled `Assembly-CSharp`, `AstarPathfindingProject.d
 
 | WP | State |
 |---|---|
-| WP1 Data model and loader | **Landed** (contracts PR). `Model/`, `Contracts/`, `PackRepository`, `EditHistory`. |
-| WP2 Catalog and runtime | **In progress** (feat/builder-core): `Runtime/`, `BuilderManager`, `builder` dev command, sample pack, interim `SessionLauncher`. Until it lands, `BuilderServices.Catalog/Units/Waves` throw and `Packs` is a stub. |
-| WP3 Session and level select | Open. Interim launcher and isolation patches are in `Session/` (see below). |
+| WP1 Data model and loader | **Landed** (PR #8). `Model/`, `Contracts/`, `PackRepository`, `EditHistory`. |
+| WP2 Catalog and runtime | **Landed** (feat/builder-core). `Runtime/`, `BuilderManager`, `builder` dev command, sample pack, interim `SessionLauncher`, leaderboard guard. Enemies only: player units aren't in the catalog yet (see Spike results). |
+| WP3 Session and level select | **Landed.** `Session/`: Custom runs entry in every map's pre-level menu, session lifecycle, isolation, `scores.json`, `builder-session` dev command. |
 | WP4a Editor UI | Open. |
 | WP4b / WP4c Level overlay, placement editor | Stage 2. Data shape fixed (`LevelDef`), stub `ILevelOverlay`. |
 | WP5 Asset import | Open. Stub `IAssetProvider` returns null. |
@@ -87,8 +87,11 @@ Features/Builder/
   Runtime/UnitFactory.cs               WP2    IUnitFactory: custom unit templates
   Runtime/WaveInjector.cs              WP2    IWaveInjector: custom waves into EnemySpawner
   Runtime/BuilderManager.Spawning.cs   WP2    patches: EnemySpawner.Start, template-aware spawning, unit names
-  Session/SessionLauncher.cs           WP3    ISessionLauncher (interim minimal version by WP2)
-  Session/BuilderManager.Session.cs    WP3    patches: score/save/achievement isolation during a session
+  Session/SessionLauncher.cs           WP3    ISessionLauncher: Launch, Arm (pre-level menu), End, results
+  Session/BuilderManager.Session.cs    WP3    patches: isolation, end screen, leaderboards, pre-level menu
+  Session/SessionMenu.cs               WP3    "Custom runs" entry and the Custom Runs frame (UI kit)
+  Session/ScoreStore.cs                WP3    scores.json: best/last run per design
+  Session/SessionDevCommands.cs        WP3    `builder-session` dev command
 Assets/builder-sample.json             WP2    built-in sample pack (embedded resource)
 ```
 
@@ -157,7 +160,7 @@ Semantics worth knowing:
 - **There is no per-unit gold stat.** The game overwrites `Hp.coinCount` from the spawn group's `gold` at spawn time, so gold belongs to `SpawnDef.gold`.
 - **`weapon.damage` replaces the whole direct-damage list.** Each entry applies if the target has all its `tags`: damage = (damage + add) × mult, in order. The base's list is in `catalog.json`, to copy and edit.
 - **Movement tags are refused.** Adding or removing `Flying` or `LargeUnit` would need a pathfinding graph change. Pick a base that already has them.
-- **`warning` is stored but not shown.** The game never displays `Wave.warningText`. WP3 or WP4a may show it with `Notify` at dusk.
+- **`warning` is shown by the Builder, not the game.** The game never displays `Wave.warningText`; during a session WP3 shows a night's `warning` with `Notify` when that night starts.
 - **`levels`** are validated for shape only. Applying them is WP4b; until then they produce a warning, and a level's `waveSet` still works.
 - **Behaviour modules** form a whitelist (`BehaviourTypes`). v1 has only `SpawnOnDeath {unit}`. To add one, add a constant, a validator case and a `UnitFactory.ApplyBehaviour` case.
 
@@ -185,15 +188,22 @@ Semantics worth knowing:
 - **Template-aware spawning** (a transpiler on `Spawn.Update`, `EnemySpawner.StartSpawning` and `EnemySpawner.GetWaveInfo`): `scene.isLoaded` becomes "loaded and not the template scene", and `GameObject.GetComponentInChildren<T>()` becomes `GetComponentInChildren<T>(true)` for templates only. Vanilla behaviour is unchanged. If a game update removes the `isLoaded` check, the transpiler logs an error.
 - **Wave injection.** A prefix on `EnemySpawner.Start` replaces `waves` and `goldBalanceAtStart` when a wave set is pending, the scene is its host, and the mode is Classic. Spawn lines are resolved by GameObject name among the spawner's `EnemySpawnLine` children; unresolvable spawns are skipped with a logged issue. The game's own Start logic then applies Elite God, Rat God, Loan, Royal Mint and Cheese God to the custom waves.
 
-### Session isolation (interim, WP3 owns)
+### Sessions (WP3)
 
-`SessionLauncher.Launch` validates, pre-builds every template (so errors surface before loading), queues the wave set, sets Classic mode, sets `MatchSaveLoadHandler.OverwriteCurrentSave` and calls `TransitionFromNullToLevel(host)`. While `Current != null`:
+A session is one custom run of a design (a pack's wave set or level) on its host map. `SessionLauncher` has two ways in:
 
-- `LevelProgressManager.GetLevelDataForScene(host)` returns the session's own `LevelData` (`Current.Scores`), so highscores, "beaten", networth and quest state never reach the host's record.
-- `SaveLoadManager.SaveGame` is skipped. `MatchSaveLoadHandler.SaveRun` only converts in memory (retry day keeps working) and never writes the host's mid-match file.
-- `AchievementManager` unlock calls are skipped. Perk level and XP are snapshotted at launch and restored when the session ends.
-- On load of the host, `GameplayImpact.Mark("Builder: custom content")` runs and a short notice says scores and saves aren't recorded.
-- The session ends when any other scene loads (single mode): menu, level select or another map.
+- **`Launch(request)`** (editor "Test", `builder play`): validates (errors block), pre-builds every template, queues the wave set, sets Classic mode, points the match-save context at the host (`MatchSaveLoadHandler` `currentMap` = host, no current save, `OverwriteCurrentSave`), and calls `TransitionFromNullToLevel(host)`. It accepts any in-memory pack (it needn't be saved) and works from the main menu, the overworld or the in-match pause menu. Launching while a session runs replaces it.
+- **The pre-level menu** (players): walking onto a map shows the game's pre-level menu with an extra **Custom runs** entry under "Show Leaderboard" (the panel grows by one row). It opens the **Custom Runs** frame (UI kit `ModFrame`): this map's designs first, then other maps', each with its custom best and a tooltip (pack, author, nights, description, best, plays and wins, or the errors that block it; packs with errors are dimmed and can't be picked). Picking one "arms" the pre-level menu (`SessionLauncher.Arm`): the title gets "Custom: <name>", the highscore box shows the design's custom best, there is no "Continue" save, and Play starts the session (a `TransitionFromLevelSelectToLevel` prefix calls `BeginArmed`, which re-reads the pack and refuses if it now has errors or another host). Picking a design for another map switches the pre-level menu to that map. "Play <map> normally" in the frame, walking onto a map, or closing the menus disarms. The game's in-map perk selection applies as usual. The entry shows on main maps, and on challenge maps only when a design targets them.
+
+While `Current != null`:
+
+- `GetLevelDataForScene(host)` returns the session's `LevelData` (`Current.Scores`), seeded with the design's custom best, so "new record" and the end-screen highscore compare against custom runs only. Its `beatenBest` stays the host's vanilla value (also after a win), because campaign unlocks (`Equippable.IsUnlocked`) read it.
+- `SaveLoadManager.SaveGame` is skipped. `MatchSaveLoadHandler.SaveRun` only converts in memory, so retry and retry day work without writing the host's mid-match file.
+- Achievements and every platform's `UploadHighscore(int, string)` are skipped. The end screen gives no XP (`FillUpXPBar`) and no "map beaten" unlock rewards (`ShowCampaignLevelBeatenRewards`). Perk level and XP are also snapshotted at launch and restored at the end, as a backstop.
+- `GameplayImpact.Mark("Builder: custom content")` on host load, plus a short notice. A night's `warning` text shows when it starts.
+- On `TransitionFromGameplayToEndScreen` (Classic), the result goes to `ScoreStore`: `BepInEx/PalaceBuilder/scores.json`, one record per design key (`<pack>/<waveSet>` or `<pack>/level:<level>`) with `plays`, `wins`, `best` and `last` (`score`, `beaten`, `dateUtc`, `perks`, `nights` reached, and `assists`: other GameplayImpact reasons). A notice shows the score and whether it's a new custom best.
+- Restart and retry keep the session (same host). The session ends when any other scene loads (the game loads scenes additively, so only `_UI` is ignored). `End()` with the host still loaded first takes the player to level select and keeps isolation until the map has unloaded. At the end the match-save context is left on "overwrite" and GameplayImpact's level is cleared, so the next vanilla run on the host starts clean.
+- Perks are allowed: they're the game's own difficulty and score system and apply to custom waves; the result records them.
 
 ### Dev commands
 
@@ -210,11 +220,31 @@ Semantics worth knowing:
 | `live` | live enemies grouped by name with their actual stats (to check overrides after spawn) |
 | `spike scan\|weapon\|material` | reruns the feasibility spikes below |
 
+`python3 scripts/dev.py cmd "builder-session <sub>"` (WP3):
+
+| Sub | Does |
+|---|---|
+| `prelevel <map>` | opens a map's pre-level menu (in level select) as if the king walked onto it |
+| `menu` | opens the Custom Runs frame |
+| `arm <pack> <waveSet>` / `disarm` | arms or disarms a design for the pre-level menu |
+| `play` | presses the pre-level menu's Play |
+| `finish win\|lose` | ends the match now (end screen) |
+| `scores` | prints `scores.json` |
+| `state` | session, armed design, scene, frame, host LevelData, perk level and XP, match-save flag, impact, loadout |
+
 ## Spike results
 
-Run with `builder spike ...` and `builder play palacemod.sample` in dev launches (Rosetta), game version GAMEVER.
+Run on 2026-11-02 with `builder spike ...` and `builder play palacemod.sample` in a dev launch (pool instance, native arm64 loader).
 
-SPIKES_TBD
+| Spike | Result | Consequence |
+|---|---|---|
+| **Spawning cloned enemy templates** | **Works.** Templates are made under an inactive DontDestroyOnLoad root. The game's `Spawn.Update` instantiates them once its `scene.isLoaded` check is transpiled to exclude the template scene, and `GetComponentInChildren` to include inactive objects for templates. `builder live` during night 1 showed `8x E Racer [palacemod.sample/goblin-runner](Clone): name="Goblin Runner" maxHp=7 speed=9 ... scale=0.8` and `1x E Melee [palacemod.sample/iron-brute](Clone): maxHp=120 speed=2.5 cooldown=1.6 damage=[any:+6x1,Building:+0x3] scale=1.5 tags=[...,ArmoredAgainstRanged]`. They path to the castle and attack. The night preview in the pause menu lists them by line ("Forest: 8", "Main Bridge: 1") with the gold total. | The `IUnitFactory` contract stands as designed. |
+| **Cloning weapons before editing** | **Works.** `spike weapon`: the template's weapon is `E Melee#-988` with damage `+6x1,+0x3`; the vanilla prefab's is `E Melee#32002` with damage `+2.5x1`; `shared=False`. | Vanilla enemies are never affected by designs. |
+| **Wave injection before level start** | **Works.** A prefix on `EnemySpawner.Start` injected 3 nights and 68 enemies with starting gold 20. Perk modifiers then ran as normal. After leaving, a plain `level Nordfels` had 13 vanilla waves, starting gold 8 and no gameplay impact. | `IWaveInjector` stands. Spawn lines are resolved by name; names come from the spawner prefab, so the catalog needs no scene load. |
+| **Runtime pathfinding rescan** | `AstarPath.active.Scan()` of all 4 graphs on Nordfels took **954 ms** the first time and **426 ms** the second (native). | Fine once at level start (behind the loading clouds) for WP4b overlays. Too slow per edit: use `NavmeshCut` or `GraphUpdateObject` for live placement in WP4c. |
+| **How unit meshes are coloured** (tint/skin) | Enemy bodies use the shared material `Enemy`: shader `FlatKit/Stylized Surface`, `_BaseColor` (1, 0.90, 0.86), shadow colour `_ColorDim` (0.69, 0, 0.16), **no texture** (`_BaseMap` none), and `GPUInstanced` renderers. Meshes aren't readable, so vertex colours are unknown. | Tint = a per-template material clone with `_BaseColor` multiplied (works: goblins render green). The clone keeps the name `Enemy` so the elite swap still applies (elites then lose the tint). Skins need a texture-capable FlatKit setup (WP5: set `_BaseMap` on the clone) rather than palette tricks. |
+| **Session isolation** | On the host: `GameplayImpact` "Builder: custom content". `SaveGame` was skipped ("skipped writing the save file during a custom run"). Leaving to level select ended the session; perk level and XP were unchanged. | WP3 builds on this. Codex found that `builder end` mid-run and launches from the main menu needed work; WP3 has fixed both on its branch. |
+| **Catalog** | 39 enemies, 37 weapons and 36 hosts (10 main maps plus mini modes), built in 89 ms at the main menu. **0 player units**: player unit prefabs aren't loaded at the menu (they live inside building prefabs). | Gap: player-side designs won't validate until the catalog finds player units, either by scanning building prefabs (`UnitRespawnerForBuildings.units`) from `Resources` or by rebuilding inside a level. That's part of the "player units in buildings" work, which no package owns yet. |
 
 Not yet run (not needed for the interfaces): cloning a `BuildSlot` before Start (stage 2, WP4b) and loading glTFast (WP5).
 
@@ -228,7 +258,7 @@ All are in `Features/Builder/Contracts/Contracts.cs` and reached through `Builde
 | `BuilderServices.Catalog` | `ICatalog : IValidationContext`: `Units`, `Weapons`, `Hosts`, `FindUnit/Weapon/Host`, `ToJson` | WP2 | `Catalog` |
 | `BuilderServices.Units` | `IUnitFactory`: `Resolve(pack, unitRef, out error)`, `IsTemplate`, `Clear` | WP2 | `UnitFactory` |
 | `BuilderServices.Waves` | `IWaveInjector`: `SetPending(pack, waveSet)`, `Pending`, `BuildWaves(...)` | WP2 | `WaveInjector` |
-| `BuilderServices.Sessions` | `ISessionLauncher`: `Current`, `Launch(SessionRequest, out error)`, `End`, `Started`, `Ended` | WP3 | `SessionLauncher` (interim) |
+| `BuilderServices.Sessions` | `ISessionLauncher`: `Current`, `Launch(SessionRequest, out error)`, `End`, `Started`, `Ended` | WP3 | `SessionLauncher` |
 | `BuilderServices.Overlay` | `ILevelOverlay`: `Apply(pack, level, issues)` | WP4b | `NullLevelOverlay` (warns) |
 | `BuilderServices.Assets` | `IAssetProvider`: `GetSprite`, `GetAudio`, `GetMesh(PackEntry, assetRef)` | WP5 | `NullAssetProvider` (null) |
 | `BuilderServices.Share` | `IShareCodec`: `Encode(pack)`, `Decode(code, issues)` | WP6 | `NullShareCodec` (refuses) |
@@ -252,19 +282,11 @@ Shared data types (also in `Contracts.cs`): `PackEntry {Pack, Folder, Source, Re
 
 **Owns:** `Features/Builder/Session/` (`SessionLauncher.cs`, `BuilderManager.Session.cs`), plus any new files there. Replace or extend `SessionLauncher` freely; keep it implementing `ISessionLauncher`.
 
-**Already there (interim, by WP2):**
+**Built** (see "Sessions (WP3)" above): the Custom runs entry and frame, armed pre-level menu, direct `Launch`, isolation, end-screen and leaderboard guards, `scores.json`, night warnings, `builder-session` dev command. Verified in game: arm from the menu, play, custom waves spawn, victory records the result with no XP or save written, Try Again keeps the session, `builder end` leaves the map first, vanilla runs are unaffected, and turning the Builder off hides the entry.
 
-- `Launch(SessionRequest)`: validates (errors block), pre-builds templates, `BuilderServices.Waves.SetPending`, sets Classic mode, sets `MatchSaveLoadHandler.OverwriteCurrentSave = true`, and calls `SceneTransitionManager.TransitionFromNullToLevel(host)`.
-- Ends on any non-host single scene load. Marks `GameplayImpact` on host load. Shows a `Notify` banner.
-- Isolation patches: host `LevelData` swapped for `Current.Scores`, `SaveGame` skipped, `SaveRun` in-memory only, achievements skipped, perk level and XP restored at session end.
-- Applies `BuilderServices.Overlay` for level sessions.
+**Hooks for other packages:** the editor sets `SessionMenu.EditorAvailable`, `SessionMenu.OpenEditor` and `SessionMenu.OpenPackInEditor` to get "Create your own" and per-pack "Edit" rows; `SessionMenu.Open()` opens the list from anywhere (a pick then launches directly). `ScoreStore.Get(ScoreStore.Key(pack, waveSet, level))` gives a design's record.
 
-**To build:**
-
-1. A "Custom" entry in level select. The doc's recommendation is a UI frame (from the pre-level menu or a single overworld interactor) listing playable packs, wave sets and levels from `BuilderServices.Packs.Packs`, with entries that have `HasErrors` greyed out and their issues shown. It launches through `Launch`, and should use the loadout and perk selection of the host's pre-level menu if feasible. Today `Launch` keeps whatever perks are equipped.
-2. Results: on `TransitionFromGameplayToEndScreen` during a session, record `{packId, waveSetId/levelId, score, beaten, date, perks}` into `BepInEx/PalaceBuilder/scores.json` (best per design), and make the end screen return to level select. Check which end-screen XP, quest and crown paths still run: XP is restored by the interim code, but verify crowns and quests via `LevelInfo.QuestsComplete`.
-3. Restart and retry day: verify that `RestartCurrentLevel` keeps the session (it should: same host) and that retry-day uses the in-memory match save.
-4. Decide whether perks should be allowed. They are now, and the game applies them to custom waves.
+**Open:** level-overlay sessions (`LevelId`) are wired but untested until WP4b. Retry day was not exercised in game (it uses the in-memory match save, unchanged from the interim). A changed design keeps its old best (records aren't versioned by content).
 
 **Interfaces consumed:** `IPackRepository`, `IWaveInjector.SetPending`, `IUnitFactory.Resolve`, `ILevelOverlay.Apply`.
 
