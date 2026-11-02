@@ -91,7 +91,10 @@ namespace PalaceMod
             {
                 if (args.Length == 0) throw new ArgumentException("usage: fixes <god|build|kill|shrines|save|retry|hp|units>");
                 var tags = TagManager.instance ?? throw new InvalidOperationException("not in a level");
-                switch (args[0].ToLowerInvariant())
+                string sub = args[0].ToLowerInvariant();
+                if (sub is "god" && args.Length > 1 || sub is "build" or "kill" or "shrines")
+                    GameplayImpact.Mark("Fixes test command");
+                switch (sub)
                 {
                     case "god":
                     {
@@ -101,6 +104,7 @@ namespace PalaceMod
                     }
                     case "build":
                     {
+                        if (ChoiceManager.instance.ChoiceCoroutineRunning) throw new InvalidOperationException("close the upgrade choice first");
                         int built = 0;
                         for (int pass = 0; pass < 4; pass++)
                             foreach (var slot in UnityEngine.Object.FindObjectsOfType<BuildSlot>())
@@ -113,7 +117,15 @@ namespace PalaceMod
                         var killed = PlayerObjects(tags, TagManager.ETag.Building)
                             .Where(t => !t.Tags.Contains(TagManager.ETag.CastleCenter) && t.Hp != null && !t.Hp.KnockedOut)
                             .Take(n).ToList();
-                        foreach (var t in killed) t.Hp.TakeDamage(float.MaxValue);
+                        foreach (var t in killed)
+                        {
+                            // Buildings are invulnerable during the day; lift that just for the kill.
+                            bool invulnerable = t.Hp.invulnerable;
+                            t.Hp.invulnerable = false;
+                            t.Hp.TakeDamage(float.MaxValue);
+                            t.Hp.invulnerable = invulnerable;
+                        }
+                        if (killed.Count == 0 || killed.Any(t => !t.Hp.KnockedOut)) throw new InvalidOperationException("no destroyable buildings found");
                         return "destroyed " + string.Join(", ", killed.Select(t => t.name));
                     }
                     case "shrines":
