@@ -379,6 +379,8 @@ namespace PalaceMod
                 foreach (var c in go.GetComponents<MonoBehaviour>())
                 {
                     if (c == null) continue;
+                    // Every tower slot carries one; it only acts (building free towers) with the Outpost perk.
+                    if (c is OutpostPerk && !(PerkManager.instance != null && PerkManager.instance.OutpostEquipped)) continue;
                     if (Unsafe(c.GetType()) is { } reason) MarkUnrevertible(action, $"its {reason} effect can't be taken back");
                     else if (c is TowerUpgrade tu && towerUpgradeTower.GetValue(tu) is Component tower && action.NewObjects.Contains(tower.gameObject))
                         MarkUnrevertible(action, "it upgrades a tower built in the same step");
@@ -546,8 +548,8 @@ namespace PalaceMod
                 player.onBalanceGain.Invoke(action.Cost);
             }
             Plugin.Logger.LogInfo($"Undo upgrade: restored {action.Label}: level {action.LevelAfter} -> {action.LevelBefore}, " +
-                $"{action.Changes.Count} fields, {action.NewObjects.Count} objects off, {action.Recreate.Count} recreated, +{action.Cost} gold" +
-                string.Concat(action.Changes.Values.Take(12).Select(c => "\n  " + c.Describe())));
+                $"{action.Changes.Count} fields, {action.NewObjects.Count} objects off, recreated [{string.Join(", ", action.Recreate.Select(r => r.type.Name))}], +{action.Cost} gold" +
+                string.Concat(action.Changes.Values.Take(40).Select(c => "\n  " + c.Describe())));
         }
 
         // ---- Helpers ----------------------------------------------------------------------------------------------
@@ -687,6 +689,18 @@ namespace PalaceMod
         private void RegisterDevCommands()
         {
             DevCommands.Register("undo", "undo                   undo the last build/upgrade today (ignores distance)", _ => TryUndo(requireNear: false));
+            DevCommands.Register("undo-key", "undo-key               undo as the keybind does (needs the king near the building)", _ => TryUndo(requireNear: true));
+            DevCommands.Register("goto", "goto <name> [dx dz]    teleport the king next to the nearest building matching name (plus an offset)", args =>
+            {
+                if (args.Length == 0) throw new ArgumentException("usage: goto <name> [dx dz]");
+                var parts = args.ToList();
+                float dx = 0f, dz = -6f;
+                if (parts.Count >= 3 && float.TryParse(parts[^2], out var x) && float.TryParse(parts[^1], out var z)) { dx = x; dz = z; parts.RemoveRange(parts.Count - 2, 2); }
+                var slot = FindSlot(string.Join(" ", parts), buyable: false);
+                var mover = PlayerMovement.instance ?? throw new InvalidOperationException("no player");
+                mover.TeleportTo(slot.transform.position + new Vector3(dx, 0f, dz));
+                return $"king at {mover.transform.position:F0} near {slot.buildingName} @{slot.transform.position:F0}";
+            });
             DevCommands.Register("undo-status", "undo-status            list today's undoable actions, newest last", _ =>
                 stack.Count == 0 ? "nothing to undo" : string.Join("\n", stack.Select(a =>
                     $"{a.Label}: +{a.Cost} gold, {a.Changes.Count} fields, {a.NewObjects.Count} new objects, {a.Recreate.Count} to recreate" +
@@ -720,7 +734,13 @@ namespace PalaceMod
             return $"{s.buildingName} @{s.transform.position:F0}: level {s.Level}, branches [{string.Join(",", s.AppliedUpgrades)}], income {s.GoldIncome}, " +
                 $"hp {(hp != null ? $"{hpValue(hp):0}/{hp.maxHp:0}" : "-")}, units {units}, mesh {mesh}, " +
                 $"next cost {(s.CanBeUpgraded ? s.NextUpgradeOrBuildCost.ToString() : "-")}, harvested {(s.Interactor != null && harvestedToday(s.Interactor))}, " +
-                $"gold {PlayerInteraction.instance?.Balance}";
+                $"gold {PlayerInteraction.instance?.Balance}" +
+                string.Concat(s.GetComponentsInChildren<AutoAttack>(false).Select(a =>
+                    $"\n  {a.GetType().Name} on {a.name}: cooldown {a.cooldownDuration:0.###}, dmg x{a.DamageMultiplyer:0.###}, weapon {(a.weapon != null ? a.weapon.name : "-")}, " +
+                    $"range [{string.Join(",", a.targetPriorities.Select(t => t.range.ToString("0.#")))}]" +
+                    (a is AutoAttackTower t ? $", projectiles {t.simultaneousProjectiles}" : ""))) +
+                string.Concat(s.GetComponentsInChildren<UnitRespawnerForBuildings>(true).SelectMany(r => r.units).Where(u => u != null && u.gameObject.activeInHierarchy)
+                    .Select(u => $"\n  unit {u.name} @{u.transform.position:F0} hp {hpValue(u):0}/{u.maxHp:0}"));
         }
 
         private static string Buy(string[] args)
@@ -748,6 +768,7 @@ namespace PalaceMod
                 slot.TryToBuildOrUpgradeAndPay(player, _presentChoice: true);
                 // Pick the branch the way the choice screen does; the choice coroutine completes on its next frame.
                 ChoiceManager.instance.choiceToReturn = upgrade.upgradeBranches[branch].choiceDetails;
+                UIFrameManager.instance.CloseActiveFrame();
                 return $"paid {cost}; choosing branch {branch} ({upgrade.upgradeBranches[branch].choiceDetails.name}) on {slot.buildingName}";
             }
             slot.TryToBuildOrUpgradeAndPay(player, _presentChoice: false);
