@@ -1,5 +1,6 @@
 using System.Linq;
 using System.Text;
+using UnityEngine;
 
 /*
     Pause-screen overview: an "Upgrades" button in the pause menu opens a frame listing every built building with
@@ -50,10 +51,25 @@ namespace PalaceMod
                     string label = count > 1 ? $"{group.Key} {index}" : group.Key;
                     label += $"  <size=75%>Lv {slot.Level}/{maxLevel}</size>";
                     string value = taken.Count > 0 ? string.Join(", ", taken.Select(t => UpgradeInfo.ChoiceName(slot, t.choice))) : "—";
-                    var icon = taken.Count > 0 ? UpgradeInfo.Icon(taken[taken.Count - 1].choice) : null;
+                    // Rows without a choice get a blank icon so every label starts at the same place.
+                    var icon = taken.Count > 0 ? UpgradeInfo.Icon(taken[taken.Count - 1].choice) : BlankSprite;
                     var captured = slot;
                     page.Row(label, value, () => Describe(captured), icon: icon);
                 }
+            }
+        }
+
+        private static Sprite blankSprite;
+
+        private static Sprite BlankSprite
+        {
+            get
+            {
+                if (blankSprite != null) return blankSprite;
+                var tex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+                tex.SetPixel(0, 0, Color.clear);
+                tex.Apply();
+                return blankSprite = Sprite.Create(tex, new Rect(0, 0, 1, 1), new Vector2(0.5f, 0.5f));
             }
         }
 

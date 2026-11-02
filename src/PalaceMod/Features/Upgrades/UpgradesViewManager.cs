@@ -121,6 +121,19 @@ namespace PalaceMod
                 }
                 return sb.ToString();
             });
+            DevCommands.Register("upgv.units", "upgv.units             print the pause menu's unit list (name, count, stars, hover text)", _ =>
+            {
+                var info = PlayerUnitsInfo.instance?.GetUnitsInfo() ?? throw new InvalidOperationException("not in a level");
+                return string.Join("\n", info.Units.Select(u =>
+                    $"{u.unitName} x{u.unitCount} stars={(infoBadges.TryGetValue(u, out var b) ? b.Stars : 0)} hp={u.maxHP}: {u.unitDescription.Replace("\n", " / ")}"));
+            });
+            DevCommands.Register("upgv.showtypes", "upgv.showtypes [off]   show the command-mode unit icons as if commanding (test helper)", args =>
+            {
+                var command = CommandUnits.instance ?? throw new InvalidOperationException("not in a level");
+                bool on = !(args.Length > 0 && args[0] == "off");
+                command.commandingIndicator.SetActive(on);
+                return on ? "showing" : "hidden";
+            });
             DevCommands.Register("upgv.goto", "upgv.goto <slot>       teleport the king next to a build slot", args =>
             {
                 var slot = FindSlot(args.Length > 0 ? string.Join(" ", args) : throw new ArgumentException("slot name needed"));

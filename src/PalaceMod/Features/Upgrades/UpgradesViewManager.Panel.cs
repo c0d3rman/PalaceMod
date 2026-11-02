@@ -191,7 +191,8 @@ namespace PalaceMod
                     ? $"{cost}<sprite name=\"coin\">"
                     : $"<color=#{ModStyle.Hex(ModStyle.Dim)}>{cost}<sprite name=\"coin\">  (need {cost - balance} more)</color>";
                 AddSectionLabel(content, $"{label} · {costText}");
-                AddOptions(slot, n, TileSize, dim: !affordable, withNames: true);
+                // A single-branch step is already described by the game's tooltip right beside the panel.
+                if (n.IsChoice) AddOptions(slot, n, TileSize, dim: !affordable, withNames: true);
             }
             else if (UpgradeInfo.HasRemaining(slot))
             {
@@ -232,7 +233,7 @@ namespace PalaceMod
             {
                 string text = UpgradeInfo.StepText(slot, step);
                 if (!string.IsNullOrEmpty(text))
-                    AddText(content, Shorten(text), ModStyle.BodyFont, 23f, dim ? ModStyle.Dim : ModStyle.Gold, width: 0f, wrapWidth: 360f);
+                    AddText(content, Shorten(text), ModStyle.BodyFont, 23f, dim ? ModStyle.Dim : ModStyle.Gold);
                 return;
             }
             var row = AddRow(content, 10f);
@@ -252,7 +253,7 @@ namespace PalaceMod
                 {
                     string name = locked ? "Locked" : UpgradeInfo.ChoiceName(slot, choice);
                     AddText(column.transform, name, ModStyle.BodyFont, 19f, dim || locked ? ModStyle.Dim : ModStyle.Gold,
-                        TextAlignmentOptions.Top, width: 96f, wrapWidth: 96f);
+                        TextAlignmentOptions.Top, width: 120f, wrapWidth: 120f);
                 }
             }
         }
@@ -375,8 +376,9 @@ namespace PalaceMod
             Vector2 min = canvas.InverseTransformPoint(corners[0]), max = canvas.InverseTransformPoint(corners[2]);
             bool tooltipShown = tooltipRect.localScale.x > 0.5f && !string.IsNullOrEmpty(hud.currentText);
             Vector2 pos;
-            if (tooltipShown) pos = new Vector2(max.x + PanelGap, min.y);   // right of the game's tooltip, bottoms aligned
-            else pos = new Vector2(min.x, min.y);                             // where the game's tooltip would be
+            // Right of the game's tooltip with tops aligned; where the tooltip would be when it's hidden (a building
+            // with nothing left to buy has none).
+            pos = tooltipShown ? new Vector2(max.x + PanelGap, max.y - size.y) : new Vector2(min.x, max.y - size.y);
             pos.x = Mathf.Clamp(pos.x, bounds.xMin + 16f, bounds.xMax - 16f - size.x);
             pos.y = Mathf.Clamp(pos.y, bounds.yMin + 16f, bounds.yMax - 16f - size.y);
             panel.localPosition = new Vector3(pos.x, pos.y, 0f);
