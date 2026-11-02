@@ -88,7 +88,7 @@ namespace PalaceMod
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogError($"Builder: scene load handling failed: {e}");
+                Log.For<BuilderManager>().Error($"Scene load handling failed", e);
             }
         }
 

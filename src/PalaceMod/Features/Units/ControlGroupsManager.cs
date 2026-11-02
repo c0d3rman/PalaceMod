@@ -54,7 +54,7 @@ namespace PalaceMod
             pending.Clear();
             if (restored == 0) return;
             ControlGroupUIHelper.instance?.RefreshGroupFlags();
-            Plugin.Logger.LogInfo($"Control Groups: restored {restored} unit(s) to their groups");
+            Log.Debug($"Restored {restored} unit(s) to their groups");
             if (SettingsManager.Instance != null && SettingsManager.Instance.EnableControlGroups)
                 Notify.Show("Control groups restored", NotifyKind.Info, 0, "control-groups");
         }

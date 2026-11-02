@@ -79,8 +79,14 @@ namespace PalaceMod
             }
         }
 
-        /// <summary>The logger of a manager (named after its FeatureSection) or of any other type (its name).</summary>
-        public static Log For<T>() => For(typeof(T));
+        /// <summary>The logger of a manager (named after its FeatureSection) or of any other type (its name).
+        /// Cheap enough to call inline: <c>Log.For&lt;SaveStatesManager&gt;().Debug($"...")</c>.</summary>
+        public static Log For<T>() => Cache<T>.Value;
+
+        private static class Cache<T>
+        {
+            public static readonly Log Value = For(typeof(T));
+        }
 
         public static Log For(Type type)
         {

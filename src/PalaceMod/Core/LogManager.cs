@@ -120,14 +120,26 @@ namespace PalaceMod
             private const int Capacity = 2000;
             private readonly string[] lines = new string[Capacity];
             private int next, count;
+            private object lastData;
+            private int lastRepeats;
 
             public void LogEvent(object sender, LogEventArgs args)
             {
                 bool mine = args.Source?.SourceName == MyPluginInfo.PLUGIN_NAME;
                 if (!mine && (args.Level & (BepInEx.Logging.LogLevel.Fatal | BepInEx.Logging.LogLevel.Error | BepInEx.Logging.LogLevel.Warning)) == 0) return;
-                string line = $"{DateTime.Now:HH:mm:ss.fff} [{args.Level,-7}:{args.Source?.SourceName}] {args.Data}";
+                string data = args.Data?.ToString() ?? "";
+                string line = $"{DateTime.Now:HH:mm:ss.fff} [{args.Level,-7}:{args.Source?.SourceName}] {data}";
                 lock (lines)
                 {
+                    // A message repeated back to back (a per-frame Unity exception) takes one line with a count.
+                    if (count > 0 && data == (string)lastData)
+                    {
+                        lastRepeats++;
+                        lines[(next - 1 + Capacity) % Capacity] = $"{line} [x{lastRepeats + 1}]";
+                        return;
+                    }
+                    lastData = data;
+                    lastRepeats = 0;
                     lines[next] = line;
                     next = (next + 1) % Capacity;
                     if (count < Capacity) count++;

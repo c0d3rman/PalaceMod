@@ -245,7 +245,7 @@ namespace PalaceMod
             }
             GameplayImpact.Mark("Unit patrols");
             Notify.Show($"{units.Count} {(units.Count == 1 ? "unit" : "units")} patrolling {route.Points.Count} points", NotifyKind.Success, key: "patrol");
-            Plugin.Logger.LogInfo($"Patrols: {units.Count} units on a {route.Points.Count}-point {(route.Loop ? "loop" : "back-and-forth")} route");
+            Log.Info($"{units.Count} units on a {route.Points.Count}-point {(route.Loop ? "loop" : "back-and-forth")} route");
         }
 
         /// <summary>Starts a patrol for the given units along the given points (for other features, e.g. squads).</summary>

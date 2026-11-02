@@ -504,6 +504,7 @@ def print_errors(text):
 
 LOG_HEADER = re.compile(r"^\[(\w+)\s*:\s*([^\]]*?)\s*\] ?(.*)$")
 FEATURE_PREFIX = re.compile(r"^\[([^\]]+)\] (\(debug\) )?")
+LEGACY_PREFIX = re.compile(r"^([A-Z][\w -]{1,30}): ")
 LEVEL_RANKS = {"error": 0, "warn": 1, "info": 2, "debug": 3}
 
 
@@ -523,6 +524,10 @@ def log_entries(text):
                     feature = f.group(1)
                     if f.group(2):
                         level = "debug"
+                else:
+                    # Code not yet on Core/Log.cs writes "Feature: message".
+                    legacy = LEGACY_PREFIX.match(message)
+                    feature = legacy.group(1) if legacy else None
             entries.append([level, source, feature, [line]])
         elif entries:
             entries[-1][3].append(line)

@@ -167,7 +167,7 @@ namespace PalaceMod
             catch (Exception e)
             {
                 panelFailed = true;
-                Plugin.Logger.LogError($"Upgrade info: couldn't build the building panel: {e}");
+                Log.For<UpgradesViewManager>().Error($"Couldn't build the building panel", e);
                 return false;
             }
         }

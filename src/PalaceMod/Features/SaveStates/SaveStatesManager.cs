@@ -79,7 +79,7 @@ namespace PalaceMod
 
             GameplayImpact.Reset += () =>
             {
-                if (practiceRun) Plugin.Logger.LogInfo("Savestates: new run; the game saves normally again");
+                if (practiceRun) Log.Info("New run; the game saves normally again");
                 practiceRun = savesSkippedLogged = false;
             };
 
@@ -122,7 +122,7 @@ namespace PalaceMod
             catch (InvalidOperationException e) { Notify.Show($"Can't save: {e.Message}", NotifyKind.Warning, key: "savestates"); }
             catch (Exception e)
             {
-                Plugin.Logger.LogError($"Savestates: quick save failed: {e}");
+                Log.Error($"Quick save failed", e);
                 Notify.Show("Quick save failed", NotifyKind.Error, key: "savestates");
             }
         }
@@ -150,11 +150,11 @@ namespace PalaceMod
             if (!wanted) return;
             if (!SaveStates.CanCapture(out string reason))
             {
-                Plugin.Logger.LogInfo($"Savestates: no {kind} state ({reason})");
+                Log.For<SaveStatesManager>().Debug($"No {kind} state ({reason})");
                 return;
             }
             try { SaveStates.Capture(null, kind); }
-            catch (Exception e) { Plugin.Logger.LogError($"Savestates: automatic {kind} state failed: {e}"); }
+            catch (Exception e) { Log.For<SaveStatesManager>().Error($"Automatic {kind} state failed", e); }
         }
 
         private static IEnumerator DawnAfterDelay()
@@ -196,7 +196,7 @@ namespace PalaceMod
                 if (!manager.savesSkippedLogged)
                 {
                     manager.savesSkippedLogged = true;
-                    Plugin.Logger.LogInfo("Savestates: a state was loaded this run, so the game's match save isn't written (Protect real save)");
+                    Log.For<SaveStatesManager>().Info("A state was loaded this run, so the game's match save isn't written (Protect real save)");
                 }
                 return false;
             }

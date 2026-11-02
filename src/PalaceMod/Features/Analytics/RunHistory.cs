@@ -88,7 +88,7 @@ namespace PalaceMod
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogWarning($"Analytics: couldn't read the run history from the save: {e.Message}");
+                Log.For<AnalyticsManager>().Warn($"Couldn't read the run history from the save: {e.Message}");
                 return null;
             }
         }

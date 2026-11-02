@@ -52,7 +52,7 @@ namespace PalaceMod
             Keybinds.Registered += keybind =>
             {
                 if (injected)
-                    Plugin.Logger.LogWarning($"Keybind {keybind.Section}: {keybind.Id} was registered after input started, so it " +
+                    Log.For<KeybindsManager>().Warn($"Keybind {keybind.Section}: {keybind.Id} was registered after input started, so it " +
                         "has no row in Controls and reads Unity Input. Register keybinds in Awake.");
             };
             RegisterCommands();
@@ -111,7 +111,7 @@ namespace PalaceMod
                     manager.EnabledEntry.SettingChanged += (_, _) => OnFeatureToggled(section);
                 }
             }
-            Plugin.Logger.LogInfo($"Keybinds: added {byAction.Count} Rewired actions in category {CategoryName} ({categoryId})");
+            Log.For<KeybindsManager>().Debug($"Added {byAction.Count} Rewired actions in category {CategoryName} ({categoryId})");
         }
 
         private static void OnFeatureToggled(string section)
@@ -371,7 +371,7 @@ namespace PalaceMod
                 }
                 catch (Exception e)
                 {
-                    Plugin.Logger.LogError($"Keybinds: couldn't add Rewired actions, falling back to Unity Input: {e}");
+                    Log.For<KeybindsManager>().Error($"Couldn't add Rewired actions, falling back to Unity Input", e);
                     foreach (var keybind in byAction.Values) keybind.ActionId = -1;
                     byAction.Clear();
                     categoryId = -1;
@@ -418,7 +418,7 @@ namespace PalaceMod
                 }
                 catch (Exception e)
                 {
-                    Plugin.Logger.LogError($"Keybinds: couldn't strip mod bindings from the controls file: {e}");
+                    Log.For<KeybindsManager>().Error($"Couldn't strip mod bindings from the controls file", e);
                 }
             }
         }
