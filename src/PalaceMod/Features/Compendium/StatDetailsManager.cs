@@ -358,13 +358,11 @@ namespace PalaceMod
                 var s = CompendiumStats.Enemy(prefab, hp.Elite, wave);
                 var aa = enemy.GetComponent<AutoAttack>() ?? enemy.GetComponentInChildren<AutoAttack>();
                 var move = enemy.GetComponent<PathfindMovementEnemy>() ?? enemy.GetComponentInChildren<PathfindMovementEnemy>();
-                var prefabAa = prefab.GetComponent<AutoAttack>() ?? prefab.GetComponentInChildren<AutoAttack>(true);
-                float expectedMulti = 1f;
-                if (prefabAa != null && s.Base.Damage > 0f) expectedMulti = prefabAa.DamageMultiplyer * (s.Actual.Damage / s.Base.Damage) / CompendiumStats.BlacksmithMulti(prefabAa.weapon, out _);
+                float expectedMulti = s.ActualDamageMultiplier;
                 var diffs = new List<string>();
                 void Check(string what, float expected, float live) { if (Mathf.Abs(expected - live) > 0.01f * Mathf.Max(1f, Mathf.Abs(live))) diffs.Add($"{what} computed {expected:0.###} live {live:0.###}"); }
                 Check("maxHp", s.Actual.Hp, hp.maxHp);
-                if (aa != null && s.Base.Damage > 0f) Check("damageMulti", expectedMulti, aa.DamageMultiplyer);
+                if (aa != null) Check("damageMulti", expectedMulti, aa.DamageMultiplyer);
                 if (aa != null) Check("cooldown", s.Actual.Cooldown, aa.cooldownDuration);
                 if (move != null) Check("speed", s.Actual.Speed, move.movementSpeed);
                 string name = (hp.Elite ? "elite " : "") + marker.UnitName;

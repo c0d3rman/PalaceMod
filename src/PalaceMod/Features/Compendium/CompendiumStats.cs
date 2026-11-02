@@ -61,6 +61,8 @@ namespace PalaceMod
         public readonly List<StatModifier> Modifiers = [];
         public readonly List<DamageVs> DamageByTarget = [];
         public float SplashBase, SplashActual;
+        /// <summary>Enemies: the AutoAttack damage multiplier the game sets at spawn (prefab value × night, elite, perks).</summary>
+        public float ActualDamageMultiplier = 1f;
         public List<TagManager.ETag> Tags = [];
     }
 
@@ -111,6 +113,13 @@ namespace PalaceMod
                 damage *= modifier.damageMultiplyer;
             }
             return damage * finalMultiplier;
+        }
+
+        /// <summary>The modifiers that decide a weapon's damage per hit: direct damage, or splash for splash-only weapons.</summary>
+        public static List<DamageModifyer> HitDamage(Weapon weapon)
+        {
+            bool hasDirect = weapon.directDamage != null && weapon.directDamage.Any(m => m.damageAdded != 0f);
+            return hasDirect || weapon.splashDamage == null ? weapon.directDamage : weapon.splashDamage;
         }
 
         /// <summary>Weapon.BlacksmithMulti without throwing outside a level.</summary>
@@ -276,15 +285,18 @@ namespace PalaceMod
             a.Range = b.Range * rangeM;
             a.ProjectileSpeed = b.ProjectileSpeed;
 
+            stats.ActualDamageMultiplier = prefabDamageMulti * dmgM;
             if (weapon != null)
             {
                 var targets = PlayerSideTargets();
+                // Splash-only weapons (e.g. Flails) compare their splash damage per target instead.
+                var perTarget = HitDamage(weapon);
                 foreach (var (label, tags) in targets)
                     stats.DamageByTarget.Add(new DamageVs
                     {
                         Target = label,
-                        Base = DamageAgainst(weapon.directDamage, tags, prefabDamageMulti),
-                        Actual = DamageAgainst(weapon.directDamage, tags, prefabDamageMulti * dmgM * armor),
+                        Base = DamageAgainst(perTarget, tags, prefabDamageMulti),
+                        Actual = DamageAgainst(perTarget, tags, prefabDamageMulti * dmgM * armor),
                     });
                 var king = targets[0].Tags;
                 // The row shows damage against you; siege weapons that only hit buildings show their building damage.
@@ -296,12 +308,6 @@ namespace PalaceMod
                 a.Damage = main.Actual;
                 stats.SplashBase = DamageAgainst(weapon.splashDamage, king, prefabDamageMulti);
                 stats.SplashActual = DamageAgainst(weapon.splashDamage, king, prefabDamageMulti * dmgM * armor);
-                // Splash-only attackers (e.g. Flails) would otherwise show no damage at all.
-                if (a.Damage == 0f && stats.SplashActual > 0f)
-                {
-                    b.Damage = stats.SplashBase;
-                    a.Damage = stats.SplashActual;
-                }
             }
             return stats;
         }
@@ -373,16 +379,17 @@ namespace PalaceMod
                 float smith = BlacksmithMulti(weapon, out var smithLabel);
                 if (multi != 1f) stats.Modifiers.Add(new StatModifier { Label = "Perks and upgrades", Damage = multi });
                 if (smith != 1f) stats.Modifiers.Add(new StatModifier { Label = smithLabel, Damage = smith });
-                stats.Base.Damage = DamageAgainst(weapon.directDamage, PlainEnemyTags);
-                a.Damage = DamageAgainst(weapon.directDamage, PlainEnemyTags, multi * smith);
+                var perTarget = HitDamage(weapon);
+                stats.Base.Damage = DamageAgainst(perTarget, PlainEnemyTags);
+                a.Damage = DamageAgainst(perTarget, PlainEnemyTags, multi * smith);
                 stats.SplashBase = DamageAgainst(weapon.splashDamage, PlainEnemyTags);
                 stats.SplashActual = DamageAgainst(weapon.splashDamage, PlainEnemyTags, multi * smith);
                 foreach (var (label, tags) in EnemyTargets(previewWaveIndex))
                     stats.DamageByTarget.Add(new DamageVs
                     {
                         Target = label,
-                        Base = DamageAgainst(weapon.directDamage, tags),
-                        Actual = DamageAgainst(weapon.directDamage, tags, multi * smith),
+                        Base = DamageAgainst(perTarget, tags),
+                        Actual = DamageAgainst(perTarget, tags, multi * smith),
                     });
             }
             return stats;
