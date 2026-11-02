@@ -81,9 +81,8 @@ namespace PalaceMod
                 _ => SettingsManager.Instance != null && !SettingsManager.Instance.VSync ? 0 : 1,
             };
             if (QualitySettings.vSyncCount != vSyncCount) QualitySettings.vSyncCount = vSyncCount;
-            // 0 means no limit of our own; the game never sets the limiter, so "no limit" is Unity's default of -1.
-            int limit = targetFrameRate.Value > 0 ? Math.Max(MinGameplayFps, targetFrameRate.Value) : -1;
-            if (Application.targetFrameRate != limit) Application.targetFrameRate = limit;
+            // No cap of any kind (the limiter setting is applied as a cap above); the game never sets Unity's limiter.
+            if (Application.targetFrameRate != -1) Application.targetFrameRate = -1;
         }
 
         // The lowest cap that applies right now, or 0 for none.
@@ -113,6 +112,9 @@ namespace PalaceMod
                 if (PowerState.ThermalState == PowerState.Thermal.Critical) Apply(30, "thermal pressure (critical)");
                 else if (PowerState.ThermalState == PowerState.Thermal.Serious) Apply(60, "thermal pressure");
             }
+            // Without precise pacing, the "Unity frame limiter" setting is a cap like the others, so a lower limit
+            // still wins when a menu or battery cap applies.
+            if (!PrecisePacing && targetFrameRate.Value > 0) Apply(Math.Max(MinGameplayFps, targetFrameRate.Value), "frame limiter");
             if (cap > 0 && cap < MinGameplayFps && !menu) cap = MinGameplayFps;
             reason = why;
             return cap;
