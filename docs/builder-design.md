@@ -70,7 +70,7 @@ Evidence comes from the decompiled `Assembly-CSharp`, `AstarPathfindingProject.d
 | WP4a Editor UI | Open. |
 | WP4b / WP4c Level overlay, placement editor | Stage 2. Data shape fixed (`LevelDef`), stub `ILevelOverlay`. |
 | WP5 Asset import | Open. Stub `IAssetProvider` returns null. |
-| WP6 Sharing | Open. Stub `IShareCodec` refuses. |
+| WP6 Sharing | **Landed.** `Sharing/`: `ShareCodec`, `PackArchive` (`.tfpack` and Thunderstore zips), import folder watcher, `SharingUI`, `builder-share` dev command, `tests/PalaceMod.Tests`. |
 
 ## Architecture (as built, WP1 and WP2)
 
@@ -102,6 +102,10 @@ BepInEx/PalaceBuilder/                       IPackRepository.Root
   packs/<packId>/assets/...                  files the pack's "assets" entries point at (WP5 loads them)
   trash/<packId>-<yyyyMMdd-HHmmss>/          Delete() moves packs here; nothing is ever deleted outright
   cache/<sha256>                             downloaded assets (WP5)
+  import/                                    drop .tfpack/.zip/.txt (share code) files here; moved to import/imported or
+                                             import/failed (with <file>.why.txt) once handled (WP6)
+  exports/                                   .tfpack and Thunderstore zips written by Export (WP6)
+  staging/<guid>/                            temporary extraction folder during an import (WP6, removed after)
   scores.json                                per-design results (WP3)
   catalog.json                               written by `builder dump`
 BepInEx/plugins/<mod>/PalaceBuilder/packs/<packId>/   read-only "Plugin" packs shipped as Thunderstore mods
@@ -231,7 +235,8 @@ All are in `Features/Builder/Contracts/Contracts.cs` and reached through `Builde
 | `BuilderServices.Sessions` | `ISessionLauncher`: `Current`, `Launch(SessionRequest, out error)`, `End`, `Started`, `Ended` | WP3 | `SessionLauncher` (interim) |
 | `BuilderServices.Overlay` | `ILevelOverlay`: `Apply(pack, level, issues)` | WP4b | `NullLevelOverlay` (warns) |
 | `BuilderServices.Assets` | `IAssetProvider`: `GetSprite`, `GetAudio`, `GetMesh(PackEntry, assetRef)` | WP5 | `NullAssetProvider` (null) |
-| `BuilderServices.Share` | `IShareCodec`: `Encode(pack)`, `Decode(code, issues)` | WP6 | `NullShareCodec` (refuses) |
+| `BuilderServices.Share` | `IShareCodec`: `Encode(pack)`, `Decode(code, issues)` | WP6 | `ShareCodec` |
+| `BuilderServices.Archives` | `IPackArchive`: `ExportFolder`, `Export(entry, path)`, `Import(path, issues)`, `ExportThunderstore(entry, path)` (**added by WP6**, additive; stub `NullPackArchive`) | WP6 | `PackArchive` |
 
 Interfaces are frozen. If a package needs a change, add a member (don't change existing signatures), keep the stub compiling, and note it in the PR and in this table.
 
@@ -282,7 +287,7 @@ Shared data types (also in `Contracts.cs`): `PackEntry {Pack, Folder, Source, Re
 - `Validator` issues carry a JSON path (`units[0].stats.maxHp`): map them to the field to highlight it.
 - `Ids.FromName(name)` for ids, and `Validator.IsTag` for tag pickers (names are `TagManager.ETag`).
 - Test button: `BuilderServices.Packs.Save(pack)` then `BuilderServices.Sessions.Launch(new SessionRequest { Pack = pack, WaveSetId = id }, out err)`.
-- Export and import buttons: `BuilderServices.Share.Encode/Decode` (WP6), then `Packs.InstallNew(decoded)`.
+- Export and import buttons: call `PalaceMod.Builder.Sharing.SharingUI` (WP6): `Open()` (the "Share designs" frame: paste a code, import folder, export a pack), `OpenPack(entry)` (one pack's export actions), `CopyCode(pack)` and `ImportFromClipboard()`. They notify the player themselves. For custom flows use `BuilderServices.Share` and `BuilderServices.Archives` directly.
 - Live preview model: instantiate `IUnitFactory.Resolve(pack, unitId)` with `Object.Instantiate` under a preview camera, and destroy it after. Never activate or modify the returned template itself.
 
 **Not stubbed:** everything it needs exists except share codes (stub refuses) and icons (stub returns null).
@@ -303,22 +308,29 @@ Shared data types (also in `Contracts.cs`): `PackEntry {Pack, Folder, Source, Re
 
 **Spike results that matter here:** see "Tint and skin" below (how unit meshes are coloured).
 
-### WP6: sharing
+### WP6: sharing (as built)
 
-**Goal:** trade designs as copy/paste codes and files.
+**Goal:** trade designs as copy/paste codes and files, with no server.
 
-**Owns:** `Features/Builder/Sharing/` (new). Install with `BuilderServices.Share = new ShareCodec();`.
+**Owns:** `Features/Builder/Sharing/`: `ShareCodec.cs`, `PackArchive.cs` (no Unity references, unit-tested), `BuilderSharingManager.cs` (installs `BuilderServices.Share` and `BuilderServices.Archives`, the import folder watcher, the `builder-share` dev command), `SharingUI.cs` (the frames). Tests: `tests/PalaceMod.Tests` (`dotnet run --project tests/PalaceMod.Tests`; needs `dev.py setup` for `lib/`). It follows `Builder.Enabled` (`Feature<BuilderManager>.On`); its one setting is `Builder.Import folder`.
 
-**Contract:** `Encode(DesignPack)` returns `"TFB1:" + base64url(raw deflate(PackSerializer.WriteCompact(pack)))`; asset entries keep only `url` and `sha256` (drop `path`-only assets, or keep them so the receiver sees "missing"). `Decode(code, issues)` tolerates whitespace and line breaks, rejects unknown prefixes, inflates, then calls `PackSerializer.Read(json, issues)` (which migrates and validates the format). Return null on failure.
+**Share code:** `TFB1:` + base64url(raw deflate(`PackSerializer.WriteCompact(pack)`) ++ CRC-32 of the JSON, 4 bytes big-endian). The digit is the code format version (a newer one is refused with "update PalaceMod"); the pack schema version is inside the JSON and migrated by `PackSerializer`. Assets keep `path`, `url` and `sha256`, never bytes, so a receiver without the file falls back to base visuals. The sample pack (2,500 bytes of JSON) is a 1,051-character code; `SharingUI.CopyCode` suggests a `.tfpack` above 2,000.
 
-**Also:**
+Decoding treats input as hostile and never throws: it finds the `TFB<n>:` prefix anywhere in the text (so a whole chat message can be pasted), skips whitespace and line breaks, stops at the first non-base64 character (closing quotes or backticks), and accepts the standard base64 alphabet too. It caps the code at 512K characters and the inflated JSON at 2 MB (counted while inflating), checks the CRC, requires strict UTF-8, parses with a JSON depth cap of 32, then migrates and reads. Null lists become empty. Any failure is one player-facing error issue. Decode doesn't validate against the catalog; installing does (`InstallNew` → `Refresh`), and a pack with errors still installs so the editor can fix it.
 
-- Clipboard via `GUIUtility.systemCopyBuffer`.
-- `.tfpack` zip (`System.IO.Compression`, already in `Managed/`; add a csproj `Reference` with `Private=false` like `Newtonsoft.Json`; `dev.py build` copies new references into `lib/`) holding `pack.json` and `assets/`. Import through `BuilderServices.Packs.InstallNew(pack, extractedFolder)`, which never overwrites and renames clashing ids to `<id>-2`. Zip-slip check every entry path.
-- A Thunderstore template: `manifest.json` plus `PalaceBuilder/packs/<id>/pack.json` inside the mod folder, which `PackRepository` already scans read-only.
-- Keep codes under about 2,000 characters for typical packs. Measure with the sample pack.
+**.tfpack:** a zip of `tfpack.json` (`{"format":"tfpack","version":1,"pack":"<id>"}`, the archive layout version), `pack.json` and `assets/...`. Export writes to `PalaceBuilder/exports/<id>.tfpack` (never overwriting: `-2`, `-3`, ...) and only includes assets with media extensions (`PackArchive.AssetExtensions`: png, jpg, wav, ogg, mp3, obj, mtl, gltf, glb, bin, json, txt; WP5: add any new type there). Import:
 
-**Not stubbed:** nothing else is needed. `PackSerializer.WriteCompact`, `Read` and `InstallNew` exist.
+- Caps: 64 MB archive, 1,000 entries, 32 MB per entry, 128 MB total, 2 MB `pack.json`. Sizes are counted while inflating, never taken from the headers, and a partial file is deleted.
+- Zip-slip: every entry name is checked first, and one bad name rejects the whole archive: no rooted paths, drive letters or `:`, `\`, `..`, `.` or empty segments, trailing dots or spaces, or control characters. Each target path is also checked to resolve inside the staging folder.
+- Layout: exactly one `pack.json` anywhere in the archive; its folder is the pack root. So a zip of a pack folder and a Thunderstore package (`PalaceBuilder/packs/<id>/pack.json`) import too. Only `assets/` files with known extensions are unpacked; anything else is skipped with a warning.
+- Migration hooks: `PackArchive.Steps[n]` upgrades an extracted staging folder from layout n to n+1, and a newer layout is refused. A missing `tfpack.json` counts as layout 1.
+- It extracts to `PalaceBuilder/staging/<guid>`, then `InstallNew(pack, staging)` (never overwrites; a clashing id becomes `<id>-2`, reported as a warning), then deletes staging.
+
+**Thunderstore:** `ExportThunderstore` writes `exports/<Name>-thunderstore.zip` with `manifest.json` (name made Thunderstore-safe, `version_number` 1.0.0, empty `dependencies`), a README with a publishing checklist, a generated 256x256 `icon.png` and `PalaceBuilder/packs/<id>/`. Mod managers install loose files to `BepInEx/plugins/<package>/`, where `PackRepository` finds the pack read-only. Creators must add PalaceMod's Thunderstore id to `dependencies` (it isn't published yet; see `PackArchive.ThunderstoreManifest`).
+
+**Import UX:** `SharingUI.Open()` is a "Share designs" frame with two tabs. **Import** has "Paste code from clipboard", the import folder (an "Open import folder" button and a row per waiting file) and the last result. **Export** lists packs, and each opens `OpenPack(entry)`: copy share code, save `.tfpack`, save for Thunderstore, open exports folder. With `Builder.Import folder` on (the default), files dropped into `PalaceBuilder/import` (`.tfpack`, `.zip`, or `.txt` holding a code) are imported within about 2 s outside sessions. The watcher waits until a file has been unchanged for 1.5 s and isn't locked, then moves it to `import/imported/` or `import/failed/` (with `<file>.why.txt`). Every result is a `Notify`. There is no pause-menu entry of its own: WP4a's Builder menu opens it.
+
+**Dev command** `builder-share`: `code <pack>` (copies too), `decode [code]` (clipboard by default; doesn't install), `paste` (installs the clipboard), `export <pack>`, `thunderstore <pack>`, `import <path>`, `ui [pack]`, `selftest` (codec round trip, rejections and the clipboard under the game's Mono).
 
 ### WP4b / WP4c (stage 2)
 
