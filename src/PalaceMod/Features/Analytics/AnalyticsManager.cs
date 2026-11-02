@@ -48,7 +48,7 @@ namespace PalaceMod
         {
             base.Awake(plugin);
             PauseMenu.AddButton("analytics", "Run Analytics", Open, order: 20, visible: () => IsEnabled && Rules.Available);
-            DevCommands.Register("analytics", "analytics [open|kill|build <n>|reload|dump|scenario <income> <fromNight> <faster> <spend%|avg>]   run analytics: summary, open the frame, end the night, scenario", Command);
+            DevCommands.Register("analytics", "analytics [open|kill|build <n>|reload [disk|fresh]|dump|scenario <income> <fromNight> <faster> <spend%|avg>]   run analytics: summary, open the frame, end the night, scenario", Command);
         }
 
         protected override void OnFeatureDisabled()
@@ -302,10 +302,15 @@ namespace PalaceMod
                     return $"built {built}, balance {player.Balance}";
                 }
                 case "reload":
-                    // Like quitting and continuing from level select: read the match save from disk and reload the level.
-                    MatchSaveLoadHandler.TryLoadRun(ScoreManager.Instance.gameObject.scene.name);
+                {
+                    // reload: like "retry day" (the in-memory match save). reload disk: like quitting and continuing
+                    // from level select (re-read the save file). reload fresh: a fresh start.
+                    string mode = args.Length > 1 ? args[1].ToLowerInvariant() : "";
+                    if (mode == "disk") MatchSaveLoadHandler.TryLoadRun(ScoreManager.Instance.gameObject.scene.name);
+                    MatchSaveLoadHandler.OverwriteCurrentSave = mode == "fresh";
                     SceneTransitionManager.instance.RestartCurrentLevel();
-                    return "reloading from the save";
+                    return $"reloading ({(mode == "" ? "retry day" : mode)})";
+                }
                 case "dump":
                     return "\n" + history.ToJson();
                 case "scenario":

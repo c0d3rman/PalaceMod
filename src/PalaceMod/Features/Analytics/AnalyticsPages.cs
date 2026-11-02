@@ -60,8 +60,8 @@ namespace PalaceMod
             var v = p.Victory;
             page.Row("Projected final score", N(v.Total), () =>
                 $"Nights score {N(v.Score)}, then the end screen adds the gold bonus, mutators and the no-retry bonus. " +
-                $"Assumes you finish each night {p.AssumedAfterSpawning:0}s after the last spawn, keep {p.AssumedProtection:P0} of buildings standing " +
-                $"and spend {p.AssumedSpendShare:P0} of your income (change these under Projection).");
+                $"Assumes you finish each night {p.AssumedAfterSpawning:0}s after the last spawn, keep {Pct(p.AssumedProtection)} of buildings standing " +
+                $"and spend {Pct(p.AssumedSpendShare)} of your income (change these under Projection).");
             page.Row("Gold bonus", "+" + N(v.Gold), () => $"Every gold you hold at victory is worth {(p.FinalBank > 0 ? v.Gold / (float)p.FinalBank : 10f):0.#} points. Projected gold at the end: {N(p.FinalBank)}, including the final dawn's income.");
             if (v.Mutators != 0) page.Row("Mutators", "+" + N(v.Mutators), "Your mutators multiply the score plus gold bonus.");
             page.Row("No-retry bonus", v.NoRetry > 0 ? "+" + N(v.NoRetry) : "lost", v.NoRetry > 0
@@ -106,7 +106,7 @@ namespace PalaceMod
                 new[] { 1.25f, 1f, 1f, 1f, 0.8f, 0.8f, 0.7f, 0.9f, 0.9f }, rows.Count);
 
             int earned = done.Sum(r => r.Earned), spent = done.Sum(r => r.Spent);
-            page.Row("Spent of all income", earned > 0 ? $"{(float)spent / earned:P0}" : "-",
+            page.Row("Spent of all income", earned > 0 ? $"{Pct((float)spent / earned)}" : "-",
                 $"{N(spent)} of {N(earned)} gold earned so far (night 1 includes the starting gold). Income per night counts the dawn income that day, interest and enemy drops.");
             page.Row("Units lost", done.Sum(r => r.unitsLost).ToString(), "Units knocked out or killed by the end of each night.");
         }
@@ -144,7 +144,7 @@ namespace PalaceMod
                     refresh();
                 });
             float average = baseline.AssumedSpendShare;
-            page.Row("Spend per day", scenario.SpendShare is float s ? $"{s:P0}" : $"as so far ({average:P0})",
+            page.Row("Spend per day", scenario.SpendShare is float s ? $"{Pct(s)}" : $"as so far ({Pct(average)})",
                 "How much of each day's income you spend. Gold you keep is worth points at the end.", () =>
                 {
                     int i = Array.IndexOf(SpendSteps, scenario.SpendShare);
@@ -168,21 +168,23 @@ namespace PalaceMod
                       (scenario.IsBaseline ? "" : $" Without the scenario: {N(baseline.Victory.Total)}."));
             page.Row("Gold at the end", N(p.FinalBank), $"Gold held at victory, including the final dawn's income. Without the scenario: {N(baseline.FinalBank)}.");
 
-            // Running score: what's banked, then baseline vs scenario.
+            // Running score: what's banked, then baseline vs scenario, ending in the victory total (with the gold bonus).
             var done = history.nights.Where(r => r.complete).ToList();
             int count = Mathf.Max(last, done.Count + p.Nights.Count);
-            var labels = Enumerable.Range(1, count).Select(i => i.ToString()).ToArray();
-            var banked = Enumerable.Repeat(float.NaN, count).ToArray();
-            var basePath = Enumerable.Repeat(float.NaN, count).ToArray();
-            var scenPath = Enumerable.Repeat(float.NaN, count).ToArray();
+            var labels = Enumerable.Range(1, count).Select(i => i.ToString()).Append("Win").ToArray();
+            var banked = Enumerable.Repeat(float.NaN, count + 1).ToArray();
+            var basePath = Enumerable.Repeat(float.NaN, count + 1).ToArray();
+            var scenPath = Enumerable.Repeat(float.NaN, count + 1).ToArray();
             foreach (var r in done) if (r.night >= 1 && r.night <= count) banked[r.night - 1] = r.scoreAfter;
             foreach (var n in baseline.Nights) if (n.Night >= 1 && n.Night <= count) basePath[n.Night - 1] = n.ScoreAfter;
             foreach (var n in p.Nights) if (n.Night >= 1 && n.Night <= count) scenPath[n.Night - 1] = n.ScoreAfter;
+            basePath[count] = baseline.Victory.Total;
+            scenPath[count] = p.Victory.Total;
             if (done.Count > 0 && done[done.Count - 1].night is int lastDone && lastDone >= 1 && lastDone <= count)
                 basePath[lastDone - 1] = scenPath[lastDone - 1] = done[done.Count - 1].scoreAfter; // join the projection to the banked line
             var series = new List<GraphSeries> { new("Score", AnalyticsGraph.Gold, banked), new("Projected", AnalyticsGraph.Bronze, basePath) };
             if (!scenario.IsBaseline) series.Add(new GraphSeries("Scenario", AnalyticsGraph.Bright, scenPath));
-            AnalyticsGraph.Lines(page.Custom("Projection graph", GraphHeight), labels, series, ProjectedFrom(p, count));
+            AnalyticsGraph.Lines(page.Custom("Projection graph", GraphHeight), labels, series, ProjectedFrom(p, count + 1));
             page.Space(10f);
 
             page.Header("Nights ahead");
@@ -215,6 +217,8 @@ namespace PalaceMod
         }
 
         private static string N(int v) => v.ToString("N0");
+
+        private static string Pct(float share) => $"{share * 100f:0}%";
 
         private static string Clock(float seconds)
         {

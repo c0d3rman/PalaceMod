@@ -174,7 +174,7 @@ namespace PalaceMod
             // Projection band.
             if (projectedFrom < columns)
             {
-                var band = Rect(plot, "Projected", new Color(Gold.r, Gold.g, Gold.b, 0.07f));
+                var band = Rect(plot, "Projected", new Color(Gold.r, Gold.g, Gold.b, 0.035f));
                 band.anchoredPosition = new Vector2(Mathf.Max(0, projectedFrom) * slot, 0f);
                 band.sizeDelta = new Vector2((columns - Mathf.Max(0, projectedFrom)) * slot, height);
                 var tag = Label(panel, "projected", 20f, Dim, TextAlignmentOptions.MidlineRight, ModStyle.ButtonFont);
