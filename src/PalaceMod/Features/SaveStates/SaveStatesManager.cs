@@ -174,6 +174,13 @@ namespace PalaceMod
 
         private static IEnumerator FirstDawnAfterDelay(DayNightCycle cycle)
         {
+            // Wait for the level to finish loading (the scene transition, then the game's match loader).
+            float deadline = Time.realtimeSinceStartup + 60f;
+            while (DayNightCycle.Instance == cycle && Time.realtimeSinceStartup < deadline &&
+                   (SceneTransitionManager.instance == null || SceneTransitionManager.instance.SceneTransitionIsRunning ||
+                    LocalMatchSaveLoad.CurrentlyLoadingMatch || LocalGamestate.Instance == null ||
+                    LocalGamestate.Instance.CurrentState != LocalGamestate.State.InMatch))
+                yield return null;
             yield return new WaitForSeconds(1f);
             if (DayNightCycle.Instance != cycle || StateRestorer.Busy || EnemySpawner.instance == null || EnemySpawner.instance.Wavenumber != -1 ||
                 cycle.CurrentTimestate != DayNightCycle.Timestate.Day) yield break;
