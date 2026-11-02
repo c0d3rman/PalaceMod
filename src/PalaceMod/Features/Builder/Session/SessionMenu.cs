@@ -77,9 +77,9 @@ namespace PalaceMod.Builder
             foreach (var p in BuilderServices.Packs.Packs)
             {
                 if (p.Pack == null) continue;
-                foreach (var ws in p.Pack.WaveSets ?? [])
+                foreach (var ws in (p.Pack.WaveSets ?? []).Where(w => w != null))
                     list.Add(new Design { Entry = p, Name = ws.Name ?? ws.Id, Host = ws.Host, WaveSetId = ws.Id, WaveSet = ws, Key = ScoreStore.Key(p.Id, ws.Id, null) });
-                foreach (var lv in p.Pack.Levels ?? [])
+                foreach (var lv in (p.Pack.Levels ?? []).Where(l => l != null))
                     list.Add(new Design
                     {
                         Entry = p, Name = lv.Name ?? lv.Id, Host = lv.Host, LevelId = lv.Id, Level = lv,
@@ -254,7 +254,6 @@ namespace PalaceMod.Builder
                 helper.target.firstSelected = helper.noSavePlayButton;
                 helper.highscoreButton.topNav = helper.noSavePlayButton;
                 helper.highscoreButton.botNav = helper.noSavePlayButton;
-                MatchSaveLoadHandler.OverwriteCurrentSave = true;
             }
 
             bool show = Available && IsHostMap(LevelInteractor.lastActiveLevelInfo);

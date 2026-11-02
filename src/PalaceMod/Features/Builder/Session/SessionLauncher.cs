@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using HarmonyLib;
 using PalaceMod.Builder.Model;
 using UnityEngine.SceneManagement;
 
@@ -38,8 +39,8 @@ namespace PalaceMod.Builder
             public SessionRequest Request;
             public string Host;
             public string Name;
-            /// <summary>Shown by the pre-level menu (custom best) and handed to the session at launch.</summary>
-            public LevelData Scores;
+            /// <summary>The design's custom best, shown in the pre-level menu's highscore box.</summary>
+            public int? Best;
         }
 
         private int savedPerkLevel, savedPerkXp;
@@ -57,14 +58,28 @@ namespace PalaceMod.Builder
         {
             var transitions = SceneTransitionManager.instance;
             if (transitions == null || transitions.SceneTransitionIsRunning) { error = "can't start a level right now"; return false; }
-            if (!Start(request, null, out error)) return false;
+            if (!Start(request, out error)) return false;
             transitions.TransitionFromNullToLevel(Current.HostScene);
             return true;
         }
 
+        /// <summary>Ends the session. If its map is still loaded, the player is taken to level select first and the
+        /// session's isolation stays on until the map has unloaded.</summary>
         public void End()
         {
             Armed = null;
+            if (Current == null) return;
+            var transitions = SceneTransitionManager.instance;
+            if (transitions != null && SceneManager.GetSceneByName(Current.HostScene).isLoaded)
+            {
+                if (!transitions.SceneTransitionIsRunning) transitions.TransitionToLevelSelect();
+                return; // OnSceneLoaded finishes it once another scene is in
+            }
+            Finish();
+        }
+
+        private void Finish()
+        {
             var ended = Current;
             if (ended == null) return;
             Current = null;
@@ -90,7 +105,7 @@ namespace PalaceMod.Builder
                 Request = request,
                 Host = level?.Host ?? waveSet.Host,
                 Name = level?.Name ?? waveSet?.Name ?? request.Pack.Name,
-                Scores = SeededScores(record),
+                Best = record?.Best?.Score,
             };
             Plugin.Logger.LogInfo($"Builder: armed {request.Pack.Id}/{request.LevelId ?? request.WaveSetId} on {Armed.Host}");
             return true;
@@ -113,7 +128,9 @@ namespace PalaceMod.Builder
             var request = armed.Request;
             var fresh = BuilderServices.Packs.Find(request.Pack.Id)?.Pack;
             if (fresh != null) request = new SessionRequest { Pack = fresh, WaveSetId = request.WaveSetId, LevelId = request.LevelId };
-            return Start(request, armed.Scores, out error);
+            if (!Resolve(request, out var ws, out var lv, out error)) return false;
+            if ((lv?.Host ?? ws.Host) != armed.Host) { error = "the design was changed to another map; pick it again"; return false; }
+            return Start(request, out error);
         }
 
         // ------------------------------------------------------------------ results
@@ -174,7 +191,7 @@ namespace PalaceMod.Builder
             return true;
         }
 
-        private bool Start(SessionRequest request, LevelData scores, out string error)
+        private bool Start(SessionRequest request, out string error)
         {
             if (!Resolve(request, out var waveSet, out var level, out error)) return false;
             var pack = request.Pack;
@@ -185,31 +202,45 @@ namespace PalaceMod.Builder
                 if (BuilderServices.Units.Resolve(pack, sp.Unit, out string e) == null) problems.Add(e);
             if (problems.Count > 0) { error = string.Join("; ", problems.Distinct().Take(3)); return false; }
 
-            if (Current != null) End();
+            string host = level?.Host ?? waveSet.Host;
+            // Replacing a running session (e.g. the editor's Test from the pause menu): the new one takes over the
+            // isolation at once, and the transition that follows unloads the old map.
+            if (Current != null) Finish();
             Armed = null;
+            // Read the vanilla record before the session's stand-in replaces it.
+            bool vanillaBeaten = LevelProgressManager.instance?.GetLevelDataForScene(host)?.beatenBest ?? false;
             Current = new BuilderSessionInfo
             {
-                Pack = pack, WaveSet = waveSet, Level = level, HostScene = level?.Host ?? waveSet.Host, StartedUtc = DateTime.UtcNow,
-                Scores = scores ?? SeededScores(ScoreStore.Get(ScoreStore.Key(pack.Id, level == null ? waveSet?.Id : null, level?.Id))),
+                Pack = pack, WaveSet = waveSet, Level = level, HostScene = host, StartedUtc = DateTime.UtcNow,
+                Scores = SeededScores(ScoreStore.Get(ScoreStore.Key(pack.Id, level == null ? waveSet?.Id : null, level?.Id)), vanillaBeaten),
             };
+            VanillaBeaten = vanillaBeaten;
             resultRecorded = false;
             savedPerkLevel = PerkManager.instance?.level ?? 0;
             savedPerkXp = PerkManager.instance?.xp ?? 0;
             BuilderServices.Waves.SetPending(pack, waveSet);
             LocalGamestate.SelectedGameMode = LocalGamestate.GameMode.Classic;
-            // Never continue the host's vanilla mid-match save; the session's own one stays in memory only.
+            // Never continue the host's vanilla mid-match save; the session's own one stays in memory only. Point the
+            // match-save context at the host (the pre-level menu does this for vanilla runs; launches from elsewhere
+            // would leave it on the tutorial, where retrying a day is disabled).
+            Traverse.Create(typeof(MatchSaveLoadHandler)).Field("currentMap").SetValue(host);
+            Traverse.Create(typeof(MatchSaveLoadHandler)).Field("currentSave").SetValue(null);
             MatchSaveLoadHandler.OverwriteCurrentSave = true;
             Plugin.Logger.LogInfo($"Builder: session started: {pack.Id} " + (level != null ? $"level {level.Id}" : $"wave set {waveSet.Id}") + $" on {Current.HostScene}");
             Started?.Invoke(Current);
             return true;
         }
 
+        /// <summary>The host's vanilla "beaten" state, which campaign unlocks (Equippable.IsUnlocked) read through
+        /// the stand-in LevelData; kept so a custom run neither hides nor grants them.</summary>
+        internal bool VanillaBeaten { get; private set; }
+
         /// <summary>A LevelData standing in for the host's, seeded with the design's custom best so the game's "new
-        /// personal best" and highscore displays compare against custom runs only.</summary>
-        private static LevelData SeededScores(DesignRecord record) => new()
+        /// personal best" compares against custom runs only. beatenBest stays the vanilla value (see VanillaBeaten).</summary>
+        private static LevelData SeededScores(DesignRecord record, bool vanillaBeaten) => new()
         {
             highscoreBest = record?.Best?.Score ?? 0,
-            beatenBest = record?.EverBeaten ?? false,
+            beatenBest = vanillaBeaten,
         };
 
         /// <summary>BuilderManager forwards SceneManager.sceneLoaded (single loads only).</summary>
@@ -222,7 +253,7 @@ namespace PalaceMod.Builder
             }
             if (scene.name != Current.HostScene)
             {
-                End();
+                Finish();
                 return;
             }
             GameplayImpact.Mark(ImpactReason);

@@ -20,27 +20,28 @@ namespace PalaceMod
 
         // ------------------------------------------------------------------ isolation
 
-        // Scores, networth, "beaten" and quest state for the host go to the session's own LevelData. While a design
-        // is armed in the pre-level menu, the menu shows the design's custom best the same way.
+        // Scores, networth, "beaten" and quest state for the host go to the session's own LevelData.
         [HarmonyPatch(typeof(LevelProgressManager), nameof(LevelProgressManager.GetLevelDataForScene))]
         private static class LevelData_Patch
         {
             private static bool Prefix(string _sceneName, ref LevelData __result)
             {
+                var s = Launcher?.Current;
+                if (s == null || _sceneName != s.HostScene) return true;
+                __result = s.Scores;
+                return false;
+            }
+        }
+
+        // The stand-in's beatenBest stays the host's vanilla value: campaign unlocks read it (Equippable.IsUnlocked),
+        // so a custom win must not grant them, nor an unbeaten design hide them. Custom wins are in ScoreStore.
+        [HarmonyPatch(typeof(LevelData), nameof(LevelData.SaveScoreAndStatsToBestIfBest))]
+        private static class KeepVanillaBeaten_Patch
+        {
+            private static void Postfix(LevelData __instance)
+            {
                 var l = Launcher;
-                if (l == null) return true;
-                if (l.Current is { } s)
-                {
-                    if (_sceneName != s.HostScene) return true;
-                    __result = s.Scores;
-                    return false;
-                }
-                if (l.Armed is { } a && _sceneName == a.Host)
-                {
-                    __result = a.Scores;
-                    return false;
-                }
-                return true;
+                if (l?.Current != null && __instance == l.Current.Scores) __instance.beatenBest = l.VanillaBeaten;
             }
         }
 
@@ -174,7 +175,15 @@ namespace PalaceMod
             {
                 var l = Launcher;
                 if (l?.Armed == null) return true;
-                if (!Feature<BuilderManager>.On || l.Armed.Host != _levelname)
+                if (!Feature<BuilderManager>.On)
+                {
+                    // Switched off while a design was loaded: don't quietly start a vanilla run in its place.
+                    l.Disarm();
+                    Notify.Show("The Builder was turned off, so the custom design was unloaded.", NotifyKind.Warning, 6f, "builder-menu");
+                    UIFrameManager.instance?.CloseAllFrames();
+                    return false;
+                }
+                if (l.Armed.Host != _levelname)
                 {
                     l.Disarm();
                     return true;
@@ -226,14 +235,18 @@ namespace PalaceMod
             }
         }
 
-        // The highscore box shows the custom best (through LevelData_Patch); friends' ranks are for the vanilla map.
+        // The highscore box shows the design's custom best; friends' ranks are for the vanilla map.
         [HarmonyPatch(typeof(HighscorePreviewUI), "OnEnable")]
         private static class HighscorePreview_Patch
         {
             private static void Postfix(HighscorePreviewUI __instance)
             {
-                if (Launcher?.Armed == null && !InSession) return;
-                if (__instance.friendsRank != null) __instance.friendsRank.text = "<style=Body Light>Custom run";
+                var l = Launcher;
+                if (l?.Armed == null && !InSession) return;
+                int? best = l.Armed != null ? l.Armed.Best : l.Current.Scores.highscoreBest;
+                if (__instance.highscore != null)
+                    __instance.highscore.text = "Custom best: <style=Body Light>" + (best is > 0 ? best.ToString() : "-");
+                if (__instance.friendsRank != null) __instance.friendsRank.text = "<style=Body Light>Kept apart from your highscores";
             }
         }
 
