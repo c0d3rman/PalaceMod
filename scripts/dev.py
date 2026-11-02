@@ -373,7 +373,9 @@ def install(game, configuration, pids=game_pids, backup=True):
         for old in sorted(BACKUPS.glob("installed-*"))[:-10]:
             shutil.rmtree(old)
     destination.mkdir(parents=True, exist_ok=True)
-    for name in ["PalaceMod.dll", "PalaceMod.pdb"]:
+    # PalaceMod.glTFast.dll is the Builder's glTF importer (Apache-2.0; its license and notice ship with it).
+    for name in ["PalaceMod.dll", "PalaceMod.pdb", "PalaceMod.glTFast.dll", "PalaceMod.glTFast.LICENSE.md",
+                 "PalaceMod.glTFast.NOTICE.txt"]:
         if (source / name).exists():
             shutil.copy2(source / name, destination / name)
     print(f"Installed to {destination}")

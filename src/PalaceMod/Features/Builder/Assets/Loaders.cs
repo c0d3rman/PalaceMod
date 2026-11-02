@@ -15,7 +15,7 @@ namespace PalaceMod.Builder.Assets
 {
     internal sealed class AssetException(string message) : Exception(message);
 
-    internal enum AssetKind { Unknown, Png, Wav, Ogg, Obj, Glb }
+    internal enum AssetKind { Unknown, Png, Wav, Ogg, Obj, Glb, Gltf }
 
     internal static class AssetLimits
     {
@@ -28,13 +28,16 @@ namespace PalaceMod.Builder.Assets
         public const int MaxMeshVertices = 100_000;
         public const int MaxMeshTriangles = 150_000;
         public const long MaxDownloadBytes = 24 << 20;
+        /// <summary>A glTF model: the .glb, or the .gltf plus every file it references.</summary>
+        public const long MaxModelBytes = 24 << 20;
 
         public static long MaxBytes(AssetKind kind) => kind switch
         {
             AssetKind.Png => MaxImageBytes,
             AssetKind.Wav => MaxWavBytes,
             AssetKind.Ogg => MaxOggBytes,
-            AssetKind.Obj or AssetKind.Glb => MaxMeshBytes,
+            AssetKind.Obj => MaxMeshBytes,
+            AssetKind.Glb or AssetKind.Gltf => MaxModelBytes,
             _ => MaxDownloadBytes,
         };
 
@@ -51,6 +54,7 @@ namespace PalaceMod.Builder.Assets
             if (length >= 12 && Ascii(head, 0, "RIFF") && Ascii(head, 8, "WAVE")) return AssetKind.Wav;
             if (length >= 4 && Ascii(head, 0, "OggS")) return AssetKind.Ogg;
             if (length >= 4 && Ascii(head, 0, "glTF")) return AssetKind.Glb;
+            if (LooksLikeGltfJson(head, length)) return AssetKind.Gltf;
             if (LooksLikeObj(head, length)) return AssetKind.Obj;
             return AssetKind.Unknown;
         }
@@ -72,7 +76,8 @@ namespace PalaceMod.Builder.Assets
             AssetKind.Wav => "WAV sound",
             AssetKind.Ogg => "OGG sound",
             AssetKind.Obj => "OBJ mesh",
-            AssetKind.Glb => "GLB mesh",
+            AssetKind.Glb => "GLB model",
+            AssetKind.Gltf => "glTF model",
             _ => "unrecognised file",
         };
 
@@ -80,6 +85,17 @@ namespace PalaceMod.Builder.Assets
         {
             for (int i = 0; i < s.Length; i++) if (b[at + i] != s[i]) return false;
             return true;
+        }
+
+        // A .gltf is a JSON object with glTF's top-level members ("asset" is required and usually first; a file that
+        // opens with a long embedded buffer or image shows the "buffers" or "images" key before it). GltfCheck decides.
+        private static bool LooksLikeGltfJson(byte[] head, int length)
+        {
+            int i = length >= 3 && head[0] == 0xEF && head[1] == 0xBB && head[2] == 0xBF ? 3 : 0;
+            while (i < length && (head[i] == ' ' || head[i] == '\t' || head[i] == '\r' || head[i] == '\n')) i++;
+            if (i >= length || head[i] != '{') return false;
+            string text = Encoding.UTF8.GetString(head, i, length - i);
+            return text.Contains("\"asset\"") || text.Contains("\"accessors\"") || text.Contains("\"buffers\"") || text.Contains("\"images\"") || text.Contains("\"meshes\"");
         }
 
         // OBJ is plain text: printable ASCII/UTF-8 whose lines start with known keywords or comments.

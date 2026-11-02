@@ -66,5 +66,23 @@
       <HintPath>lib/Newtonsoft.Json.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- glTFast's dependencies (src/PalaceMod.glTFast builds against these lib/ copies; listed here so setup copies them). -->
+    <Reference Include="Unity.Burst">
+      <HintPath>lib/Unity.Burst.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.Collections">
+      <HintPath>lib/Unity.Collections.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.Mathematics">
+      <HintPath>lib/Unity.Mathematics.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- The Builder's glTF importer: Unity glTFast, renamed to PalaceMod.glTFast.dll and installed next to PalaceMod.dll. -->
+  <ItemGroup>
+    <ProjectReference Include="src/PalaceMod.glTFast/PalaceMod.glTFast.csproj" />
   </ItemGroup>
 </Project>

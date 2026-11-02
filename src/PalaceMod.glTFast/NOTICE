@@ -1,0 +1,14 @@
+PalaceMod.glTFast.dll
+
+This file contains Unity glTFast 6.8.0 (com.unity.cloud.gltfast),
+Copyright 2023 Unity Technologies and the Unity glTFast authors,
+licensed under the Apache License, Version 2.0 (see PalaceMod.glTFast.LICENSE.md,
+or http://www.apache.org/licenses/LICENSE-2.0).
+
+Source: https://github.com/Unity-Technologies/com.unity.cloud.gltfast
+Package: https://download.packages.unity.com/com.unity.cloud.gltfast/-/com.unity.cloud.gltfast-6.8.0.tgz
+
+Changes made by PalaceMod: none to the source code. It is compiled outside Unity
+into an assembly renamed from "glTFast" to "PalaceMod.glTFast", without its Export,
+DOTS and Editor code, with the build defines listed in PalaceMod.glTFast.csproj
+(https://github.com/c0d3rman/PalaceMod).
