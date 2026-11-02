@@ -90,7 +90,8 @@ namespace PalaceMod
             DevCommands.Register("fixes", "fixes god [on|off] | build | kill <n> | shrines | save | retry | hp | units   drive the Fixes repros", args =>
             {
                 if (args.Length == 0) throw new ArgumentException("usage: fixes <god|build|kill|shrines|save|retry|hp|units>");
-                var tags = TagManager.instance ?? throw new InvalidOperationException("not in a level");
+                var tags = TagManager.instance;
+                if (tags == null || LocalGamestate.Instance == null) throw new InvalidOperationException("not in a level");
                 string sub = args[0].ToLowerInvariant();
                 if (sub is "god" && args.Length > 1 || sub is "build" or "kill" or "shrines")
                     GameplayImpact.Mark("Fixes test command");
