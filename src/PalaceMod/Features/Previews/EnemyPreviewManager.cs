@@ -1,363 +1,444 @@
 using HarmonyLib;
+using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Text;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
-using I2.Loc;
+using Object = UnityEngine.Object;
 
+/*
+    Adds a "Spawns:" panel to the pause menu, beside the game's own night preview. Since 2.13 the game shows the wave's
+    enemies (with stats on hover) in one grid; this splits them up by where they spawn, and at night shows how many of
+    each have spawned so far. The native grid, its navigation and its hover panel are left alone.
+
+    Layout: the panel lives in its own container ("PalaceMod Spawns") parented to the pause frame's "Title " column, so it
+    scales with the menu. Its left edge sits just right of the Night selector (or the native grid, if that's wider), its
+    bottom just above the "Units:" row, and it grows upward beside the menu buttons. It never reaches the right third of
+    the screen, which the score panel uses.
+*/
 namespace PalaceMod
 {
     public class EnemyPreviewManager : BaseManager
     {
         public override string FeatureSection => "Enemy previews";
-        public override string FeatureDescription => "Replaces the pause menu's enemy preview with a list of the coming night's enemies and their counts, grouped by spawn location.";
+        public override string FeatureDescription => "Adds a panel to the pause menu that groups the night's enemies by where they spawn. At night it shows how many of each have spawned so far.";
 
-        private List<GameObject> createdObjects = new List<GameObject>();
+        private const string ContainerName = "PalaceMod Spawns";
+        private const float IconSize = 50f, IconSpacing = 14f, CaptionHeight = 22f, RowSpacing = 24f;
+        private const float LabelMaxWidth = 140f, LabelGap = 16f, GapFromNative = 40f, GapAboveUnits = 18f;
+        private const float MinLeft = 300f, NightArrowsWidth = 35f, MaxRightFraction = 0.55f;
+        private const int IconsPerLine = 4;
 
-        // The pause menu's vanilla layout, captured before the first change so disabling the feature can put it back.
-        private class Original
+        private static readonly AccessTools.FieldRef<PauseUILoadoutHelper, int> PreviewWave =
+            AccessTools.FieldRefAccess<PauseUILoadoutHelper, int>("currentPreviewWavenumber");
+        private static readonly AccessTools.FieldRef<PauseUILoadoutHelper, int> TrueWave =
+            AccessTools.FieldRefAccess<PauseUILoadoutHelper, int>("currentTrueWaveNumver");
+        private static readonly AccessTools.FieldRef<PauseUILoadoutHelper, List<ThronefallUIElement>> NativeEnemyGrid =
+            AccessTools.FieldRefAccess<PauseUILoadoutHelper, List<ThronefallUIElement>>("enemyGrid");
+
+        private PauseUILoadoutHelper helper;
+        private GameObject container;
+        private readonly HashSet<ThronefallUIElement> ownElements = [];
+
+        public override void Awake(Plugin plugin)
         {
-            public PauseUILoadoutHelper Helper;
-            public GridLayoutGroup.Constraint Constraint;
-            public int ConstraintCount;
-            public Vector2 Spacing, AnchorMin, AnchorMax, Pivot, Position;
-            public readonly List<(RectTransform Rect, Vector2 Position, Vector2 Size)> TitleChildren = [];
-            public readonly List<Component> Added = [];
+            base.Awake(plugin);
+            DevCommands.Register("spawns", "spawns [wave] | spawns preview <wave>   list the spawn groups the pause menu shows (default: current wave), or page the open pause menu to a wave", args =>
+            {
+                if (EnemySpawner.instance == null) throw new InvalidOperationException("not in a level");
+                if (args.Length == 2 && args[0] == "preview")
+                {
+                    if (helper == null || !helper.isActiveAndEnabled) throw new InvalidOperationException("pause menu not open");
+                    helper.CycleNightPreview(int.Parse(args[1]) - 1 - PreviewWave(helper));
+                    return $"previewing wave {PreviewWave(helper) + 1}";
+                }
+                int wave = args.Length > 0 ? int.Parse(args[0]) - 1 : CurrentWaveIndex();
+                var sb = new StringBuilder($"wave {wave + 1}/{EnemySpawner.instance.WaveCount}{(IsLive(wave) ? " (live)" : "")}");
+                foreach (var group in Gather(wave, IsLive(wave)))
+                    sb.Append($"\n{group.Label}: ").Append(string.Join(", ", group.Enemies.Select(e =>
+                        $"{(e.Info.eliteEnemy ? "elite " : "")}{e.Info.enemyName} {(IsLive(wave) ? $"{e.Spawned}/" : "")}{e.Info.enemyCount}")));
+                return sb.ToString();
+            });
         }
 
-        private Original original;
-
-        private void Capture(PauseUILoadoutHelper helper)
+        protected override void OnFeatureEnabled()
         {
-            if (original != null && original.Helper == helper) return;
-            var grid = helper.enemyPreview.GetComponent<GridLayoutGroup>();
-            var rect = helper.enemyPreview.GetComponent<RectTransform>();
-            original = new Original
-            {
-                Helper = helper,
-                Constraint = grid.constraint,
-                ConstraintCount = grid.constraintCount,
-                Spacing = grid.spacing,
-                AnchorMin = rect.anchorMin,
-                AnchorMax = rect.anchorMax,
-                Pivot = rect.pivot,
-                Position = rect.anchoredPosition,
-            };
+            if (helper != null && helper.isActiveAndEnabled) Rebuild(helper);
         }
 
-        protected override void OnFeatureDisabled()
+        protected override void OnFeatureDisabled() => DestroyPanel();
+
+        // ---- Data ----
+
+        private sealed class EnemyEntry
         {
-            foreach (var obj in createdObjects) if (obj != null) Object.Destroy(obj);
-            createdObjects.Clear();
-            var saved = original;
-            original = null;
-            if (saved?.Helper == null) return;
-            var grid = saved.Helper.enemyPreview.GetComponent<GridLayoutGroup>();
-            grid.constraint = saved.Constraint;
-            grid.constraintCount = saved.ConstraintCount;
-            grid.spacing = saved.Spacing;
-            var rect = saved.Helper.enemyPreview.GetComponent<RectTransform>();
-            rect.anchorMin = saved.AnchorMin;
-            rect.anchorMax = saved.AnchorMax;
-            rect.pivot = saved.Pivot;
-            rect.anchoredPosition = saved.Position;
-            foreach (var component in saved.Added) if (component != null) Object.DestroyImmediate(component);
-            foreach (var (child, position, size) in saved.TitleChildren)
-            {
-                if (child == null) continue;
-                child.anchoredPosition = position;
-                child.sizeDelta = size;
-            }
-            // The patches are already removed, so this redraws the vanilla preview.
-            if (saved.Helper.isActiveAndEnabled) AccessTools.Method(typeof(PauseUILoadoutHelper), "RefreshOnlyEnemyPreview").Invoke(saved.Helper, null);
+            public WaveEnemyInfo Info;
+            public int Spawned;
         }
 
-        [HarmonyPatch(typeof(NightPreviewElement))]
-        [HarmonyPatch("SetData")]
-        private class NightPreviewElement_SetData_Patch
+        private sealed class SpawnGroup
         {
-            private static bool Prefix()
+            public Transform Line;
+            public Vector3 Position;
+            public string Label;
+            public readonly List<EnemyEntry> Enemies = [];
+        }
+
+        private static int CurrentWaveIndex()
+        {
+            var spawner = EnemySpawner.instance;
+            bool night = DayNightCycle.Instance != null && DayNightCycle.Instance.CurrentTimestate == DayNightCycle.Timestate.Night;
+            return Mathf.Clamp(night ? spawner.Wavenumber : spawner.Wavenumber + 1, 0, spawner.WaveCount - 1);
+        }
+
+        // Spawned counts are only meaningful for the wave that's running right now.
+        private static bool IsLive(int wave) =>
+            DayNightCycle.Instance != null && DayNightCycle.Instance.CurrentTimestate == DayNightCycle.Timestate.Night &&
+            EnemySpawner.instance != null && wave == EnemySpawner.instance.Wavenumber;
+
+        private static List<SpawnGroup> Gather(int wave, bool live)
+        {
+            var spawner = EnemySpawner.instance;
+            if (spawner == null || wave < 0 || wave >= spawner.waves.Count) return [];
+
+            // The game's own per-type info (stats for the hover panel, arachnophobia icon), to copy into each group.
+            var native = EnemySpawner.GetWaveInfoByNumber(wave).enemies;
+            var groups = new List<SpawnGroup>();
+            foreach (var spawn in spawner.waves[wave].spawns)
             {
-                return false; // Skip original method
+                if (spawn.enemyPrefab == null || spawn.spawnLine == null) continue;
+                var marker = spawn.enemyPrefab.GetComponent<ScreenMarkerIcon>();
+                if (marker == null) continue; // the game hides these too (scripted events, not enemies)
+
+                var group = groups.FirstOrDefault(g => g.Line == spawn.spawnLine);
+                if (group == null)
+                {
+                    group = new SpawnGroup { Line = spawn.spawnLine, Position = MarkerPosition(spawn.spawnLine) };
+                    groups.Add(group);
+                }
+
+                var sprite = spawn.enemyPrefab.GetComponent<ScreenMarkerIconArachnophobia>()?.defaultSprite ?? marker.sprite;
+                var entry = group.Enemies.FirstOrDefault(e => e.Info.enemyName == marker.UnitName && e.Info.enemyIcon == sprite && e.Info.eliteEnemy == spawn.eliteEnemies);
+                if (entry == null)
+                {
+                    var source = native.FirstOrDefault(e => e.enemyName == marker.UnitName && e.enemyIcon == sprite && e.eliteEnemy == spawn.eliteEnemies);
+                    entry = new EnemyEntry { Info = Copy(source) ?? new WaveEnemyInfo { enemyName = marker.UnitName, enemyDescription = marker.UnitDescription, enemyIcon = sprite, eliteEnemy = spawn.eliteEnemies } };
+                    entry.Info.enemyCount = 0;
+                    group.Enemies.Add(entry);
+                }
+                entry.Info.enemyCount += spawn.count;
+                if (live) entry.Spawned += spawn.SpawnedUnits;
+            }
+            SpawnNames.Assign(groups);
+            return Merge(groups);
+        }
+
+        // Lines that share a name (four statues of the same kind, two unnamed lines to the west) read as one place.
+        private static List<SpawnGroup> Merge(List<SpawnGroup> groups)
+        {
+            var merged = new List<SpawnGroup>();
+            foreach (var group in groups)
+            {
+                var into = merged.FirstOrDefault(m => m.Label == group.Label);
+                if (into == null) { merged.Add(group); continue; }
+                foreach (var e in group.Enemies)
+                {
+                    var same = into.Enemies.FirstOrDefault(o => o.Info.enemyName == e.Info.enemyName && o.Info.enemyIcon == e.Info.enemyIcon && o.Info.eliteEnemy == e.Info.eliteEnemy);
+                    if (same == null) into.Enemies.Add(e);
+                    else { same.Info.enemyCount += e.Info.enemyCount; same.Spawned += e.Spawned; }
+                }
+            }
+            return merged;
+        }
+
+        private static WaveEnemyInfo Copy(WaveEnemyInfo e) => e == null ? null : new WaveEnemyInfo
+        {
+            enemyIcon = e.enemyIcon, AltEnemyIcon = e.AltEnemyIcon, enemyName = e.enemyName, enemyDescription = e.enemyDescription,
+            enemyCount = e.enemyCount, eliteEnemy = e.eliteEnemy, maxHP = e.maxHP, speed = e.speed, range = e.range,
+            attackDamage = e.attackDamage, attackCooldown = e.attackCooldown, projectileSpeed = e.projectileSpeed,
+        };
+
+        // Same point the game puts the daytime spawn marker at.
+        private static Vector3 MarkerPosition(Transform line) => line.childCount > 0
+            ? (line.GetChild(0).position + line.GetChild(line.childCount - 1).position) / 2f
+            : line.position;
+
+        // ---- Names ----
+
+        // Level designers named most spawn lines after landmarks ("Main Bridge", "Graveyard"); some are generic
+        // ("Spawn 3", "Marker Pos" under a summoning statue, "SpawnLine" under a boss). Those get the landmark they're
+        // attached to, or else a compass direction from the castle (north = up the screen). Same-named lines are merged.
+        private static class SpawnNames
+        {
+            private static readonly HashSet<string> Generic = new(StringComparer.OrdinalIgnoreCase)
+                { "", "spawn", "spawnline", "spawn line", "spawnpoint", "spawn point", "marker", "marker pos", "markerpos", "line", "pos", "position" };
+
+            public static void Assign(List<SpawnGroup> groups)
+            {
+                var basis = CameraBasis();
+                var named = groups.Select(g =>
+                {
+                    var (name, air) = Clean(g.Line.name);
+                    string landmark = IsGeneric(name) ? Landmark(g.Line.parent) : name;
+                    return (Group: g, Name: landmark, Air: air, Compass: Compass(g.Position, basis));
+                }).ToList();
+
+                foreach (var n in named) n.Group.Label = n.Air ? $"{n.Name ?? n.Compass} (air)" : n.Name ?? n.Compass;
+            }
+
+            private static (string Name, bool Air) Clean(string raw)
+            {
+                string name = raw.Trim();
+                bool air = false;
+                if (name.StartsWith("Fly - ", StringComparison.OrdinalIgnoreCase)) { name = name.Substring(6); air = true; }
+                if (name.EndsWith(" air", StringComparison.OrdinalIgnoreCase)) { name = name.Substring(0, name.Length - 4); air = true; }
+                if (name.Equals("air", StringComparison.OrdinalIgnoreCase)) { name = ""; air = true; }
+                name = StripCopySuffix(name);
+                if (name.StartsWith("Bot ", StringComparison.Ordinal)) name = "Bottom " + name.Substring(4);
+                if (name.Any(char.IsLetter) && !name.Any(char.IsLower)) name = TitleCase(name);
+                return (name.Trim(), air);
+            }
+
+            // "Eldermolde Statue (2)" -> "Eldermolde Statue"
+            private static string StripCopySuffix(string name)
+            {
+                name = name.Trim();
+                int open = name.LastIndexOf(" (", StringComparison.Ordinal);
+                if (open > 0 && name.EndsWith(")") && name.Substring(open + 2, name.Length - open - 3).All(char.IsDigit)) name = name.Substring(0, open);
+                return name;
+            }
+
+            private static bool IsGeneric(string name) => Generic.Contains(name.TrimEnd(' ', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'));
+
+            private static string Landmark(Transform parent)
+            {
+                if (parent == null) return null;
+                string name = StripCopySuffix(parent.name);
+                if (name.StartsWith("ES ", StringComparison.Ordinal)) return null; // the level's spawn container, not a place
+                if (name.StartsWith("E ", StringComparison.Ordinal)) name = name.Substring(2); // enemy prefab prefix
+                name = Clean(name).Name;
+                return IsGeneric(name) ? null : name;
+            }
+
+            private static string TitleCase(string s) =>
+                string.Join(" ", s.ToLowerInvariant().Split(' ').Select(w => w.Length == 0 ? w : char.ToUpperInvariant(w[0]) + w.Substring(1)));
+
+            private static (Vector3 Up, Vector3 Right) CameraBasis()
+            {
+                var cam = Camera.main;
+                if (cam == null) return (Vector3.forward, Vector3.right);
+                var up = Vector3.ProjectOnPlane(cam.transform.forward, Vector3.up);
+                if (up.sqrMagnitude < 1e-4f) up = Vector3.ProjectOnPlane(cam.transform.up, Vector3.up);
+                up.Normalize();
+                return (up, Vector3.Cross(Vector3.up, up));
+            }
+
+            private static readonly string[] Directions = ["North", "Northeast", "East", "Southeast", "South", "Southwest", "West", "Northwest"];
+
+            private static string Compass(Vector3 position, (Vector3 Up, Vector3 Right) basis)
+            {
+                var d = position - CastleCenter.CastleCenterPosition;
+                float angle = Mathf.Atan2(Vector3.Dot(d, basis.Right), Vector3.Dot(d, basis.Up)) * Mathf.Rad2Deg;
+                int sector = Mathf.RoundToInt((angle + 360f) % 360f / 45f) % 8;
+                return Directions[sector];
             }
         }
 
-        [HarmonyPatch(typeof(PauseUILoadoutHelper))]
-        [HarmonyPatch("RefreshOnlyEnemyPreview")]
-        private class RefreshOnlyEnemyPreview_Patch
+        // ---- UI ----
+
+        private void DestroyPanel()
         {
-            static EnemyPreviewManager Instance => Plugin.Instance.GetManager<EnemyPreviewManager>();
-            static readonly TMP_FontAsset font = Resources.Load<TMP_FontAsset>("fonts & materials/cormorantgaramond-light sdf");
-
-            private struct EnemyData
+            if (container == null) return;
+            var frame = helper != null ? helper.frame : null;
+            bool ownSelected = frame != null && frame.CurrentSelection != null && ownElements.Contains(frame.CurrentSelection);
+            // Detach first so the frame's refetch below no longer sees the old elements.
+            container.transform.SetParent(null, false);
+            Object.Destroy(container);
+            container = null;
+            ownElements.Clear();
+            if (frame != null)
             {
-                public WaveEnemyInfo Info;
-                public int SpawnedCount;
+                frame.RefetchManagedElements();
+                if (ownSelected && helper.continueElement != null) frame.Select(helper.continueElement);
             }
+        }
 
-            private static void Postfix(PauseUILoadoutHelper __instance)
+        private void Rebuild(PauseUILoadoutHelper pause)
+        {
+            helper = pause;
+            DestroyPanel();
+            if (EnemySpawner.instance == null || pause.enemyPreview == null) return;
+
+            int wave = PreviewWave(pause);
+            bool live = IsLive(wave) && wave == TrueWave(pause);
+            var groups = Gather(wave, live);
+            if (groups.Count == 0) return;
+
+            var column = pause.enemyPreview.transform.parent as RectTransform;
+            var unitsLabel = column.Find("Units") as RectTransform;
+            var headerSource = unitsLabel != null ? unitsLabel.GetComponent<TextMeshProUGUI>() : null;
+            if (headerSource == null) { Plugin.Logger.LogWarning("Enemy previews: pause menu layout changed, \"Units\" label not found"); return; }
+
+            container = new GameObject(ContainerName, typeof(RectTransform));
+            container.SetActive(false); // so the cloned header's Localize doesn't run before it's removed
+            var rect = (RectTransform)container.transform;
+            rect.SetParent(column, false);
+            rect.anchorMin = rect.anchorMax = unitsLabel.anchorMin;
+            rect.pivot = new Vector2(0f, 0f);
+            var vlg = container.AddComponent<VerticalLayoutGroup>();
+            vlg.spacing = RowSpacing;
+            vlg.childAlignment = TextAnchor.LowerLeft;
+            vlg.childControlWidth = vlg.childControlHeight = true;
+            vlg.childForceExpandWidth = vlg.childForceExpandHeight = false;
+            var fitter = container.AddComponent<ContentSizeFitter>();
+            fitter.horizontalFit = fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            var header = Object.Instantiate(headerSource.gameObject, rect, false);
+            header.name = "Header";
+            foreach (var loc in header.GetComponents<I2.Loc.Localize>()) Object.DestroyImmediate(loc);
+            var headerText = header.GetComponent<TextMeshProUGUI>();
+            headerText.text = "Spawns:";
+            headerText.alignment = TextAlignmentOptions.BottomLeft;
+            header.AddComponent<LayoutElement>().preferredHeight = ((RectTransform)headerSource.transform).rect.height;
+
+            var labels = new List<TextMeshProUGUI>();
+            foreach (var group in groups) labels.Add(AddRow(rect, group, headerSource, live));
+
+            // Left edge: a fixed column, unless the Night selector ("Night: 12(3)/13" plus arrows) or the native grid,
+            // both centred on the menu, are wider than usual.
+            var night = pause.nightPreviewText;
+            float nightHalfWidth = night.GetPreferredValues(night.text).x / 2f + NightArrowsWidth;
+            float nativeHalfWidth = Mathf.Max(nightHalfWidth, NativeGridWidth(pause) / 2f);
+            float unitsTop = unitsLabel.anchoredPosition.y + unitsLabel.rect.height * (1f - unitsLabel.pivot.y);
+            rect.anchoredPosition = new Vector2(Mathf.Max(MinLeft, nativeHalfWidth + GapFromNative), unitsTop + GapAboveUnits);
+
+            container.SetActive(true);
+            float labelWidth = Mathf.Min(LabelMaxWidth, labels.Max(l => l.GetPreferredValues(l.text).x));
+            foreach (var l in labels) l.GetComponent<LayoutElement>().preferredWidth = l.GetComponent<LayoutElement>().minWidth = labelWidth;
+            LayoutRebuilder.ForceRebuildLayoutImmediate(rect);
+
+            // Shrink if a level has lots of spawn points: stay below the top of the menu buttons, and in the left part
+            // of the screen (the score panel is on the right).
+            var menu = column.Find("Menu Items") as RectTransform;
+            float top = menu != null ? menu.anchoredPosition.y + menu.rect.height / 2f + column.rect.height * (menu.anchorMin.y - 1f) : 0f;
+            float room = top - rect.anchoredPosition.y;
+            float scale = rect.rect.height > room && room > 0 ? room / rect.rect.height : 1f;
+            var frameRect = (RectTransform)pause.transform;
+            float rightLimit = frameRect.rect.xMin + frameRect.rect.width * MaxRightFraction;
+            float left = frameRect.InverseTransformPoint(rect.TransformPoint(rect.rect.min)).x;
+            if (left + rect.rect.width * scale > rightLimit && rightLimit > left) scale = (rightLimit - left) / rect.rect.width;
+            rect.localScale = new Vector3(scale, scale, 1f);
+
+            foreach (var e in container.GetComponentsInChildren<ThronefallUIElement>(true)) ownElements.Add(e);
+            pause.frame.RefetchManagedElements(); // so mouse hover over our icons shows the game's stats panel
+        }
+
+        private static float NativeGridWidth(PauseUILoadoutHelper pause)
+        {
+            var grid = pause.enemyPreview;
+            int count = NativeEnemyGrid(pause)?.Count ?? 0;
+            int rows = grid.constraint == GridLayoutGroup.Constraint.FixedRowCount ? Mathf.Max(1, grid.constraintCount) : 2;
+            int columns = Mathf.CeilToInt(count / (float)rows);
+            return columns * grid.cellSize.x + Mathf.Max(0, columns - 1) * grid.spacing.x;
+        }
+
+        private TextMeshProUGUI AddRow(RectTransform parent, SpawnGroup group, TextMeshProUGUI style, bool live)
+        {
+            var row = new GameObject("Row " + group.Label, typeof(RectTransform));
+            row.transform.SetParent(parent, false);
+            var hlg = row.AddComponent<HorizontalLayoutGroup>();
+            hlg.spacing = LabelGap;
+            hlg.childAlignment = TextAnchor.UpperLeft;
+            hlg.childControlWidth = hlg.childControlHeight = true;
+            hlg.childForceExpandWidth = hlg.childForceExpandHeight = false;
+
+            float cellHeight = IconSize + (live ? CaptionHeight : 0f);
+
+            var labelObj = new GameObject("Label", typeof(RectTransform));
+            labelObj.transform.SetParent(row.transform, false);
+            var label = labelObj.AddComponent<TextMeshProUGUI>();
+            label.text = group.Label;
+            label.font = style.font;
+            label.fontSharedMaterial = style.fontSharedMaterial;
+            label.color = style.color;
+            label.fontSize = 24;
+            label.fontStyle = FontStyles.Normal;
+            label.characterSpacing = 0;
+            label.alignment = TextAlignmentOptions.Left;
+            label.enableWordWrapping = true;
+            label.overflowMode = TextOverflowModes.Overflow;
+            label.lineSpacing = -20f;
+            label.raycastTarget = false;
+            var labelLayout = labelObj.AddComponent<LayoutElement>();
+            labelLayout.minHeight = IconSize; // long names wrap onto a second line
+
+            var icons = new GameObject("Icons", typeof(RectTransform));
+            icons.transform.SetParent(row.transform, false);
+            var grid = icons.AddComponent<GridLayoutGroup>();
+            grid.cellSize = new Vector2(IconSize, cellHeight);
+            grid.spacing = new Vector2(IconSpacing, IconSpacing);
+            grid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+            grid.constraintCount = Mathf.Min(IconsPerLine, group.Enemies.Count);
+            int lines = Mathf.CeilToInt(group.Enemies.Count / (float)IconsPerLine);
+            var iconsLayout = icons.AddComponent<LayoutElement>();
+            iconsLayout.preferredWidth = grid.constraintCount * IconSize + (grid.constraintCount - 1) * IconSpacing;
+            iconsLayout.preferredHeight = lines * cellHeight + (lines - 1) * IconSpacing;
+
+            foreach (var enemy in group.Enemies) AddIcon(icons.transform, enemy, style, live);
+            return label;
+        }
+
+        private void AddIcon(Transform parent, EnemyEntry enemy, TextMeshProUGUI style, bool live)
+        {
+            var cell = new GameObject(enemy.Info.enemyName, typeof(RectTransform));
+            cell.transform.SetParent(parent, false);
+
+            var button = Object.Instantiate(helper.enemyButtonPrefab, cell.transform, false);
+            var buttonRect = (RectTransform)button.transform;
+            buttonRect.anchorMin = buttonRect.anchorMax = buttonRect.pivot = new Vector2(0.5f, 1f);
+            buttonRect.anchoredPosition = Vector2.zero;
+            buttonRect.sizeDelta = new Vector2(IconSize, IconSize);
+            button.SetDataSimple(enemy.Info);
+            if (!live) return;
+
+            bool done = enemy.Spawned >= enemy.Info.enemyCount;
+            if (done) cell.AddComponent<CanvasGroup>().alpha = 0.45f;
+
+            var captionObj = new GameObject("Spawned", typeof(RectTransform));
+            captionObj.transform.SetParent(cell.transform, false);
+            var captionRect = (RectTransform)captionObj.transform;
+            captionRect.anchorMin = new Vector2(0f, 0f);
+            captionRect.anchorMax = new Vector2(1f, 0f);
+            captionRect.pivot = new Vector2(0.5f, 0f);
+            captionRect.offsetMin = new Vector2(-6f, 0f);
+            captionRect.offsetMax = new Vector2(6f, CaptionHeight);
+            var caption = captionObj.AddComponent<TextMeshProUGUI>();
+            caption.text = $"{enemy.Spawned}/{enemy.Info.enemyCount}";
+            caption.font = button.numberText.font;
+            caption.fontSharedMaterial = button.numberText.fontSharedMaterial;
+            caption.color = style.color;
+            caption.fontSize = 19;
+            caption.alignment = TextAlignmentOptions.Bottom;
+            caption.enableWordWrapping = false;
+            caption.raycastTarget = false;
+        }
+
+        [HarmonyPatch(typeof(PauseUILoadoutHelper), "RefreshOnlyEnemyPreview")]
+        private static class RefreshOnlyEnemyPreview_Patch
+        {
+            private static void Postfix(PauseUILoadoutHelper __instance) => Feature<EnemyPreviewManager>.Instance.Rebuild(__instance);
+        }
+
+        // Selecting one of our icons while previewing another night shouldn't snap the preview back to tonight.
+        [HarmonyPatch(typeof(PauseUILoadoutHelper), nameof(PauseUILoadoutHelper.OnFrameSelectionChange))]
+        private static class OnFrameSelectionChange_Patch
+        {
+            private static bool Prefix(PauseUILoadoutHelper __instance)
             {
-                Instance.Capture(__instance);
-                CreateTitleContainerIfNeeded(__instance);
-
-                var currentPreviewWavenumber = (int)AccessTools.Field(__instance.GetType(), "currentPreviewWavenumber").GetValue(__instance);
-
-                var enemyDataByLocation = GatherEnemyWaveData(currentPreviewWavenumber);
-
-                ModifyEnemyPreviewUI(__instance, enemyDataByLocation, currentPreviewWavenumber);
-            }
-
-            private static void CreateTitleContainerIfNeeded(PauseUILoadoutHelper __instance)
-            {
-                var titleContainer = __instance.transform.Find("Title ");
-                var layoutGroup = titleContainer?.GetComponent<VerticalLayoutGroup>();
-
-                if (layoutGroup == null)
-                {
-                    if (titleContainer == null)
-                    {
-                        Plugin.Logger.LogError("Title container not found");
-                        return;
-                    }
-
-                    foreach (RectTransform child in titleContainer)
-                    {
-                        Instance.original.TitleChildren.Add((child, child.anchoredPosition, child.sizeDelta));
-                    }
-
-                    // Convert the title container into a vertical layout group so we can resize items and they will be properly positioned
-                    layoutGroup = titleContainer.gameObject.AddComponent<VerticalLayoutGroup>();
-                    Instance.original.Added.Add(layoutGroup);
-                    layoutGroup.name = "Title ";
-                    layoutGroup.spacing = 48;
-
-                    // Get our first menu item's position for reference
-                    var menuItems = titleContainer.Find("Menu Items");
-                    var rect = menuItems.GetComponent<RectTransform>();
-                    float topPadding = -rect?.localPosition.y * (1 - rect?.pivot.y) ?? 0;
-                    layoutGroup.padding = new RectOffset(0, 0, Mathf.RoundToInt(topPadding), 0);
-
-                    // Exclude tooltip from layout
-                    var tooltip = titleContainer.Find("Tooltip Background");
-                    if (tooltip != null)
-                    {
-                        var tooltipLayout = tooltip.GetComponent<LayoutElement>();
-                        if (tooltipLayout == null)
-                        {
-                            tooltipLayout = tooltip.gameObject.AddComponent<LayoutElement>();
-                            Instance.original.Added.Add(tooltipLayout);
-                            tooltipLayout.name = "ModTooltipLayout";
-                        }
-                        tooltipLayout.ignoreLayout = true;
-                    }
-                }
-            }
-
-            private static Dictionary<string, List<EnemyData>> GatherEnemyWaveData(int waveNumber)
-            {
-                if (EnemySpawner.instance == null || waveNumber < 0 || waveNumber >= EnemySpawner.instance.waves.Count)
-                {
-                    return [];
-                }
-
-                var wave = EnemySpawner.instance.waves[waveNumber];
-
-                // Dictionary to track the first spawn we find for each enemy type
-                // This will be used to get sprite and description data
-                var enemyDataByLocationRaw = new Dictionary<string, Dictionary<(string name, bool elite), (Spawn firstSpawn, int planned, int spawned)>>();
-
-                foreach (var spawn in wave.spawns)
-                {
-                    var spawnPos = spawn.spawnLine.name;
-                    var component = spawn.enemyPrefab.GetComponent<ScreenMarkerIcon>();
-                    if (component == null) continue;
-
-                    if (!enemyDataByLocationRaw.ContainsKey(spawnPos))
-                    {
-                        enemyDataByLocationRaw[spawnPos] = [];
-                    }
-
-                    var enemyKey = (component.UnitName, spawn.eliteEnemies);
-
-                    if (!enemyDataByLocationRaw[spawnPos].ContainsKey(enemyKey))
-                    {
-                        // Store the first spawn we find for this enemy type for description and sprite
-                        enemyDataByLocationRaw[spawnPos][enemyKey] = (spawn, 0, 0);
-                    }
-                    var current = enemyDataByLocationRaw[spawnPos][enemyKey];
-                    enemyDataByLocationRaw[spawnPos][enemyKey] = (
-                        current.firstSpawn,
-                        current.planned + spawn.count,
-                        current.spawned + spawn.SpawnedUnits
-                    );
-                }
-
-                // Now create the WaveEnemyInfo objects from the aggregated data
-                var enemyDataByLocation = new Dictionary<string, List<EnemyData>>();
-                foreach (var locationEntry in enemyDataByLocationRaw)
-                {
-                    string location = locationEntry.Key;
-                    enemyDataByLocation[location] = [];
-
-                    foreach (var enemyEntry in locationEntry.Value)
-                    {
-                        var data = enemyEntry.Value;
-                        var spawn = data.firstSpawn;
-                        var component = spawn.enemyPrefab.GetComponent<ScreenMarkerIcon>();
-
-                        var waveEnemyInfo = new WaveEnemyInfo
-                        {
-                            enemyIcon = component.sprite,
-                            enemyCount = data.planned,
-                            enemyName = component.UnitName,
-                            enemyDescription = component.UnitDescription,
-                            eliteEnemy = spawn.eliteEnemies
-                        };
-
-                        // During the night, add info about units spawned so far to the tooltip
-                        if (data.planned > 0 &&
-                            DayNightCycle.Instance != null &&
-                            DayNightCycle.Instance.CurrentTimestate == DayNightCycle.Timestate.Night)
-                        {
-                            waveEnemyInfo.enemyDescription += "\n\n";
-                            waveEnemyInfo.enemyDescription += $"<b>{data.spawned}</b> spawned of <b>{data.planned}</b> total";
-                        }
-
-                        enemyDataByLocation[location].Add(new EnemyData
-                        {
-                            Info = waveEnemyInfo,
-                            SpawnedCount = data.spawned
-                        });
-                    }
-                }
-
-                return enemyDataByLocation;
-            }
-
-            private static void ModifyEnemyPreviewUI(PauseUILoadoutHelper __instance, Dictionary<string, List<EnemyData>> enemyDataByLocation, int currentPreviewWavenumber)
-            {
-                var enemyGrid = AccessTools.Field(__instance.GetType(), "enemyGrid").GetValue(__instance) as List<ThronefallUIElement>;
-                var addTFUIEnemeyMethod = AccessTools.Method(__instance.GetType(), "AddTFUIEnemey");
-                var addIncomePreviewMethod = AccessTools.Method(__instance.GetType(), "AddIncomePreview");
-
-                if (EnemySpawner.instance == null) return;
-
-                // Clear existing
-                enemyGrid.Clear();
-                foreach (Transform child in __instance.enemyPreview.transform)
-                {
-                    Object.Destroy(child.gameObject);
-                }
-
-                // Add a row for each spawn location
-                foreach (var location in enemyDataByLocation)
-                {
-                    var groupContainer = new GameObject("SpawnGroup", typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
-                    groupContainer.transform.SetParent(__instance.enemyPreview.transform, false);
-                    Instance.createdObjects.Add(groupContainer);
-
-                    var hlg = groupContainer.GetComponent<HorizontalLayoutGroup>();
-                    hlg.spacing = 10;
-
-                    // Add a label for the location
-                    var textObj = new GameObject("SpawnLocation", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
-                    textObj.transform.SetParent(groupContainer.transform, false);
-                    Instance.createdObjects.Add(textObj);
-
-                    var text = textObj.GetComponent<TextMeshProUGUI>();
-                    text.text = $"{location.Key}:";
-                    text.fontSize = 20;
-                    text.font = font;
-                    text.color = new Color32(200, 166, 116, 255);
-                    text.alignment = TextAlignmentOptions.Left;
-                    text.enableWordWrapping = false;
-
-                    // Make sure the text object actually has a width so it doesn't overlap
-                    var textLayoutElement = textObj.GetComponent<LayoutElement>();
-                    textLayoutElement.minWidth = text.preferredWidth;
-
-                    // Add a grid for the enemies at that location
-                    var enemyGridObj = new GameObject("EnemyGrid", typeof(RectTransform), typeof(GridLayoutGroup), typeof(LayoutElement));
-                    enemyGridObj.transform.SetParent(groupContainer.transform, false);
-                    Instance.createdObjects.Add(enemyGridObj);
-
-                    var grid = enemyGridObj.GetComponent<GridLayoutGroup>();
-                    grid.spacing = new Vector2(5, 5);
-                    grid.cellSize = new Vector2(50, 50);
-                    grid.constraint = GridLayoutGroup.Constraint.FixedRowCount;
-                    grid.constraintCount = 1;
-
-                    // Add enemies to the grid
-                    foreach (var enemyData in location.Value)
-                    {
-                        // Add the enemy UI element
-                        addTFUIEnemeyMethod.Invoke(__instance, [grid, enemyData.Info]);
-
-                        // Update the count text if we're in night mode
-                        if (grid != null && grid.transform.childCount > 0 &&
-                            DayNightCycle.Instance != null &&
-                            DayNightCycle.Instance.CurrentTimestate == DayNightCycle.Timestate.Night)
-                        {
-                            var lastChild = grid.transform.GetChild(grid.transform.childCount - 1);
-                            if (lastChild != null)
-                            {
-                                // Update enemy count text
-                                var textComponent = lastChild.GetComponentInChildren<TextMeshProUGUI>(true);
-                                if (textComponent != null && enemyData.Info.enemyCount > 0)
-                                {
-                                    textComponent.text = $"{enemyData.SpawnedCount}|{enemyData.Info.enemyCount}";
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Add a final row for the income and difficulty icons
-                var bottomGrid = new GameObject("BottomGrid", typeof(RectTransform), typeof(GridLayoutGroup), typeof(LayoutElement));
-                bottomGrid.transform.SetParent(__instance.enemyPreview.transform, false);
-                Instance.createdObjects.Add(bottomGrid);
-
-                var bottomGridLayout = bottomGrid.GetComponent<GridLayoutGroup>();
-                bottomGridLayout.spacing = new Vector2(5, 5);
-                bottomGridLayout.cellSize = new Vector2(50, 50);
-                bottomGridLayout.constraint = GridLayoutGroup.Constraint.FixedRowCount;
-                bottomGridLayout.constraintCount = 1;
-
-                // Add the income and difficulty icons to the bottom grid
-                addIncomePreviewMethod.Invoke(__instance, new object[] { bottomGridLayout });
-
-                var waveInfo = EnemySpawner.GetWaveInfoByNumber(currentPreviewWavenumber);
-                if (waveInfo.difficultyMulti != 1f)
-                {
-                    WaveEnemyInfo waveEnemyInfo = new WaveEnemyInfo();
-                    waveEnemyInfo.enemyIcon = EnemySpawner.instance.difficultySprite;
-                    waveEnemyInfo.enemyCount = Mathf.RoundToInt((waveInfo.difficultyMulti - 1f) / 0.1f);
-                    waveEnemyInfo.enemyName = LocalizationManager.GetTranslation("Menu/DifficultyBoost", true, 0, true, false, null, null, true);
-                    waveEnemyInfo.enemyDescription = "+ " + Mathf.Round((waveInfo.difficultyMulti - 1f) * 100f).ToString() + "% " + LocalizationManager.GetTranslation("Menu/AdditionalHealth", true, 0, true, false, null, null, true);
-                    WaveEnemyInfo waveEnemyInfo2 = waveEnemyInfo;
-                    waveEnemyInfo2.enemyDescription = string.Concat(new string[]
-                    {
-                        waveEnemyInfo2.enemyDescription,
-                        "\n+ ",
-                        Mathf.Round((waveInfo.difficultyMulti - 1f) * 50f).ToString(),
-                        "% ",
-                        LocalizationManager.GetTranslation("Menu/AdditionalDamage", true, 0, true, false, null, null, true)
-                    });
-                    addTFUIEnemeyMethod.Invoke(__instance, new object[] { bottomGridLayout, waveEnemyInfo });
-                }
-
-                // Set a max of 3 rows before wrapping
-                var enemyPreviewLayout = __instance.enemyPreview.GetComponent<GridLayoutGroup>();
-                enemyPreviewLayout.constraint = GridLayoutGroup.Constraint.FixedRowCount;
-                enemyPreviewLayout.constraintCount = 3;
-                enemyPreviewLayout.spacing = new Vector2(200, 10);
-
-                // Set the enemy preview to anchor to the left
-                var rectTransform = __instance.enemyPreview.GetComponent<RectTransform>();
-                rectTransform.anchorMin = new Vector2(0, 0.5f);
-                rectTransform.anchorMax = new Vector2(0, 0.5f);
-                rectTransform.pivot = new Vector2(0, 0.5f);
-                rectTransform.anchoredPosition = new Vector2(10, 0); // Add some padding from the left edge
+                var selected = __instance.frame.CurrentSelection;
+                return selected == null || !Feature<EnemyPreviewManager>.Instance.ownElements.Contains(selected);
             }
         }
     }
