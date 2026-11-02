@@ -476,7 +476,7 @@ def error_blocks(text):
 def report(game, pids=game_pids):
     log = log_path(game)
     text = log.read_text(errors="replace")
-    loaded = "PalaceMod loaded!" in text
+    loaded = "Notify (Info): PalaceMod loaded" in text  # Plugin.Awake's startup message
     print(f"PalaceMod loaded: {'yes' if loaded else 'NO'}  (game running: {'yes' if pids() else 'no'})")
     print_errors(text)
     if not loaded:

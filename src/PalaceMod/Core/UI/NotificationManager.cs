@@ -24,7 +24,7 @@ namespace PalaceMod
         private const int MaxVisible = 5;
         private const float FadeIn = 0.18f, FadeOut = 0.45f;
         private const float TopMargin = 28f, Gap = 8f, MaxTextWidth = 560f;
-        private const float PadLeft = 34f, PadRight = 20f, PadY = 10f;
+        private const float PadLeft = 34f, PadRight = 20f, PadY = 8f;
         private const float FontSize = 24f;
 
         private class Message
@@ -207,7 +207,7 @@ namespace PalaceMod
                 var image = obj.GetComponent<MPUIKIT.MPImage>();
                 if (image != null)
                 {
-                    image.color = new Color(ModStyle.Panel.r, ModStyle.Panel.g, ModStyle.Panel.b, 0.94f);
+                    image.color = new Color(ModStyle.Panel.r, ModStyle.Panel.g, ModStyle.Panel.b, 0.97f);
                     image.raycastTarget = false;
                     ModStyle.MarkPanel(image);
                 }
