@@ -140,7 +140,14 @@ namespace PalaceMod.Builder.Sharing
                 string f = file;
                 page.Row(Path.GetFileName(f), "Import", "Import this file as a new pack.", () =>
                 {
-                    ImportFile(f);
+                    try
+                    {
+                        if (File.Exists(f)) BuilderSharingManager.ImportAndFile(f);
+                    }
+                    catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+                    {
+                        Notify.Show($"Couldn't import {Path.GetFileName(f)}: {e.Message}", NotifyKind.Error, 6f, "builder-share");
+                    }
                     main?.Refresh();
                 });
             }

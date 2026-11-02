@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
+using System.Text;
 using BepInEx.Configuration;
 using PalaceMod.Builder;
 using PalaceMod.Builder.Model;
@@ -93,14 +95,32 @@ namespace PalaceMod
                 return;
             }
 
+            ImportAndFile(path);
+        }
+
+        /// <summary>Imports a file from the import folder, then moves it to import/imported or import/failed (with a
+        /// .why.txt) so it's never imported twice. Used by the watcher and the menu's file rows.</summary>
+        internal static PackEntry ImportAndFile(string path)
+        {
             var issues = new List<ValidationIssue>();
-            PackEntry entry = SharingUI.ImportFile(path, issues);
+            PackEntry entry;
+            try
+            {
+                entry = SharingUI.ImportFile(path, issues);
+            }
+            catch (Exception e) when (!(e is OutOfMemoryException || e is StackOverflowException))
+            {
+                Plugin.Logger.LogError($"Builder sharing: importing {path} failed: {e}");
+                issues.Add(new ValidationIssue(Severity.Error, "", e.Message));
+                entry = null;
+            }
             string dest = Path.Combine(ImportFolder, entry != null ? "imported" : "failed");
             Directory.CreateDirectory(dest);
             string moved = PackArchive.UniquePath(dest, Path.GetFileNameWithoutExtension(path), Path.GetExtension(path));
             File.Move(path, moved);
             if (entry == null)
                 File.WriteAllText(moved + ".why.txt", string.Join(Environment.NewLine, issues.Select(i => i.ToString())));
+            return entry;
         }
 
         // ------------------------------------------------------------------ dev commands
@@ -168,26 +188,102 @@ namespace PalaceMod
             return entry;
         }
 
-        /// <summary>In-game checks of the codec under the game's Mono runtime (compression, clipboard).</summary>
+        /// <summary>In-game checks of the codec and archives under the game's Mono runtime, whose compression and zip
+        /// code differ from .NET's (e.g. corrupt deflate data throws IOException there).</summary>
         private static string SelfTest()
         {
             var lines = new List<string>();
-            void Check(bool ok, string what) { lines.Add((ok ? "ok   " : "FAIL ") + what); }
+            void Check(string what, Func<bool> test)
+            {
+                string result;
+                try { result = test() ? "ok   " : "FAIL "; }
+                catch (Exception e) { result = $"FAIL ({e.GetType().Name}: {e.Message}) "; }
+                lines.Add(result + what);
+            }
 
             var sample = BuilderServices.Packs.Packs.FirstOrDefault(p => p.Pack != null)?.Pack ?? throw new InvalidOperationException("no packs loaded");
             var codec = BuilderServices.Share;
             string code = codec.Encode(sample);
-            var back = codec.Decode(code, null);
-            Check(back != null && PackSerializer.WriteCompact(back) == PackSerializer.WriteCompact(ShareCodec.ForSharing(sample)), $"round trip of {sample.Id} ({code.Length} chars)");
-            Check(codec.Decode(code.Substring(0, code.Length - 10), null) == null, "truncated code rejected");
-            Check(codec.Decode("TFB1:" + new string('A', 100), null) == null, "garbage code rejected");
-            Check(codec.Decode("TFB9:abcdefgh", null) == null, "newer version rejected");
+            Check($"round trip of {sample.Id} ({code.Length} chars)", () =>
+            {
+                var back = codec.Decode(code, null);
+                return back != null && PackSerializer.WriteCompact(back) == PackSerializer.WriteCompact(ShareCodec.ForSharing(sample));
+            });
+            Check("truncated code rejected", () => codec.Decode(code.Substring(0, code.Length - 10), null) == null);
+            Check("garbage code rejected", () => codec.Decode("TFB1:" + new string('A', 100), null) == null);
+            Check("newer version rejected", () => codec.Decode("TFB9:abcdefgh", null) == null);
+            Check("200 corrupted codes rejected without exceptions", () =>
+            {
+                var rng = new System.Random(7);
+                const string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+                for (int i = 0; i < 200; i++)
+                {
+                    var chars = code.ToCharArray();
+                    for (int k = 0; k < 1 + i % 4; k++) chars[5 + rng.Next(chars.Length - 5)] = alphabet[rng.Next(alphabet.Length)];
+                    string bad = new string(chars);
+                    if (bad != code && codec.Decode(bad, new List<ValidationIssue>()) != null) return false;
+                }
+                return true;
+            });
             string wrapped = "here you go: `" + string.Join("\n", Enumerable.Range(0, (code.Length + 79) / 80).Select(i => code.Substring(i * 80, Math.Min(80, code.Length - i * 80)))) + "` enjoy";
-            Check(codec.Decode(wrapped, null) != null, "code wrapped in chat text accepted");
-            string old = GUIUtility.systemCopyBuffer;
-            GUIUtility.systemCopyBuffer = code;
-            Check(GUIUtility.systemCopyBuffer == code, "clipboard round trip");
-            GUIUtility.systemCopyBuffer = old;
+            Check("code wrapped in chat text accepted", () => codec.Decode(wrapped, null) != null);
+            Check("clipboard round trip", () =>
+            {
+                string old = GUIUtility.systemCopyBuffer;
+                GUIUtility.systemCopyBuffer = code;
+                bool ok = GUIUtility.systemCopyBuffer == code;
+                GUIUtility.systemCopyBuffer = old;
+                return ok;
+            });
+
+            // Archives, in memory plus a scratch folder that's removed afterwards.
+            string scratch = Path.Combine(BuilderServices.Packs.Root, "staging", "selftest-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                byte[] Zip(params (string name, byte[] data)[] entries)
+                {
+                    using var ms = new MemoryStream();
+                    using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, true))
+                        foreach (var (name, data) in entries)
+                            using (var s = zip.CreateEntry(name).Open()) s.Write(data, 0, data.Length);
+                    return ms.ToArray();
+                }
+                DesignPack Extract(byte[] zip)
+                {
+                    string dir = Path.Combine(scratch, Guid.NewGuid().ToString("N"));
+                    Directory.CreateDirectory(dir);
+                    using var ms = new MemoryStream(zip);
+                    return PackArchive.Extract(ms, dir, []);
+                }
+                byte[] json = Encoding.UTF8.GetBytes(PackSerializer.Write(sample));
+                byte[] png = [0x89, 0x50, 0x4e, 0x47, 1, 2, 3];
+                Check(".tfpack round trip with an asset", () =>
+                {
+                    using var ms = new MemoryStream();
+                    using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, true))
+                        PackArchive.Write(zip, sample, null, "");
+                    var written = Extract(ms.ToArray());
+                    var withAsset = Extract(Zip(("pack.json", json), ("assets/a.png", png)));
+                    return written != null && withAsset != null
+                        && PackSerializer.WriteCompact(written) == PackSerializer.WriteCompact(ShareCodec.ForSharing(sample))
+                        && Directory.GetFiles(scratch, "a.png", SearchOption.AllDirectories).Length == 1;
+                });
+                Check("zip-slip entry rejected", () => Extract(Zip(("pack.json", json), ("assets/../../evil.png", png))) == null
+                    && Directory.GetFiles(Path.GetDirectoryName(scratch), "evil.png", SearchOption.AllDirectories).Length == 0);
+                Check("damaged zip rejected", () =>
+                {
+                    var zip = Zip(("pack.json", json));
+                    for (int i = 40; i < zip.Length - 30; i++) zip[i] ^= 0x5a;
+                    return Extract(zip) == null;
+                });
+                Check("non-zip rejected", () => Extract(Encoding.UTF8.GetBytes("not a zip at all")) == null);
+                Check("zip bomb entry rejected", () => Extract(Zip(("pack.json", json), ("assets/bomb.png", new byte[PackArchive.MaxEntryBytes + 1]))) == null);
+            }
+            finally
+            {
+                try { if (Directory.Exists(scratch)) Directory.Delete(scratch, true); }
+                catch (IOException) { }
+            }
             return "\n" + string.Join("\n", lines);
         }
     }

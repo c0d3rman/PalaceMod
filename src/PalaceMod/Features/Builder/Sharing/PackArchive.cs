@@ -102,19 +102,22 @@ namespace PalaceMod.Builder.Sharing
             copy.Version = DesignPack.CurrentVersion;
             if (manifest)
                 AddText(zip, prefix + ManifestFile, new JObject { ["format"] = ManifestFormat, ["version"] = CurrentArchiveVersion, ["pack"] = copy.Id }.ToString(Formatting.Indented));
-            AddText(zip, prefix + PackFile, PackSerializer.Write(copy));
+            string json = PackSerializer.Write(copy);
+            if (Encoding.UTF8.GetByteCount(json) > MaxPackJsonBytes) throw new InvalidOperationException("the pack is too large to export");
+            AddText(zip, prefix + PackFile, json);
 
             string assets = packFolder == null ? null : Path.Combine(packFolder, "assets");
             if (assets == null || !Directory.Exists(assets)) return;
-            long total = 0;
-            int count = 0;
+            long total = json.Length;
+            int count = manifest ? 2 : 1; // WriteToFile re-checks the finished archive against every import limit
             foreach (var file in Directory.GetFiles(assets, "*", SearchOption.AllDirectories).OrderBy(f => f, StringComparer.Ordinal))
             {
                 var info = new FileInfo(file);
                 if (!AssetExtensions.Contains(info.Extension)) continue;
                 if (info.Length > MaxEntryBytes) throw new InvalidOperationException($"{info.Name} is larger than {MaxEntryBytes / (1024 * 1024)} MB");
                 total += info.Length;
-                if (++count > MaxEntries || total > MaxTotalBytes) throw new InvalidOperationException("the pack's assets are too large to export");
+                if (++count > MaxEntries) throw new InvalidOperationException($"the pack would hold more than {MaxEntries} files");
+                if (total > MaxTotalBytes) throw new InvalidOperationException("the pack's assets are too large to export");
                 string rel = file.Substring(assets.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Replace('\\', '/');
                 var entry = zip.CreateEntry(prefix + "assets/" + rel, CompressionLevel.Optimal);
                 using var src = File.OpenRead(file);
@@ -149,8 +152,9 @@ namespace PalaceMod.Builder.Sharing
                     issues.Add(new ValidationIssue(Severity.Warning, "id", $"you already have a pack \"{before}\", so this one was installed as \"{entry.Id}\""));
                 return entry;
             }
-            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException || e is InvalidOperationException || e is ArgumentException || e is NotSupportedException)
+            catch (Exception e) when (!(e is OutOfMemoryException || e is StackOverflowException))
             {
+                // Hostile files must come back as an issue, never an exception (the import folder would retry forever).
                 return Fail(issues, $"{Path.GetFileName(path)} couldn't be imported: {e.Message}");
             }
             finally
@@ -175,7 +179,7 @@ namespace PalaceMod.Builder.Sharing
             {
                 zip = new ZipArchive(archive, ZipArchiveMode.Read, leaveOpen: true);
             }
-            catch (InvalidDataException)
+            catch (Exception ex) when (ex is InvalidDataException || ex is IOException) // Mono's DeflateStream throws IOException on corrupt data
             {
                 return Reject(issues, "that file isn't a pack (it isn't a valid zip)");
             }
@@ -186,7 +190,7 @@ namespace PalaceMod.Builder.Sharing
                 {
                     entries = zip.Entries;
                 }
-                catch (InvalidDataException)
+                catch (Exception ex) when (ex is InvalidDataException || ex is IOException) // Mono's DeflateStream throws IOException on corrupt data
                 {
                     return Reject(issues, "that pack file is damaged");
                 }
@@ -220,7 +224,11 @@ namespace PalaceMod.Builder.Sharing
                         if ((string)m["format"] != ManifestFormat) return Reject(issues, "that file's tfpack.json isn't a pack manifest");
                         layout = m["version"]?.Type == JTokenType.Integer ? (int)m["version"] : 0;
                     }
-                    catch (JsonException)
+                    catch (OverflowException)
+                    {
+                        layout = int.MaxValue; // an absurd version: refused as "newer" below
+                    }
+                    catch (Exception e) when (e is JsonException || e is ArgumentException || e is InvalidCastException)
                     {
                         return Reject(issues, "that file's tfpack.json is damaged");
                     }
@@ -324,7 +332,7 @@ namespace PalaceMod.Builder.Sharing
                 if (bytes == null) error = $"{entry.Name} in that pack is too large";
                 return bytes;
             }
-            catch (InvalidDataException)
+            catch (Exception ex) when (ex is InvalidDataException || ex is IOException) // Mono's DeflateStream throws IOException on corrupt data
             {
                 error = $"{entry.Name} in that pack is damaged";
                 return null;
@@ -352,7 +360,7 @@ namespace PalaceMod.Builder.Sharing
                 ok = true;
                 return n;
             }
-            catch (InvalidDataException)
+            catch (Exception ex) when (ex is InvalidDataException || ex is IOException) // Mono's DeflateStream throws IOException on corrupt data
             {
                 error = $"{entry.Name} in that pack is damaged";
                 return -1;
@@ -371,6 +379,10 @@ namespace PalaceMod.Builder.Sharing
                 using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write))
                 using (var zip = new ZipArchive(fs, ZipArchiveMode.Create))
                     fill(zip);
+                // What we share must import again: check the finished file against the importer's limits.
+                if (new FileInfo(tmp).Length > MaxArchiveBytes) throw new InvalidOperationException($"the pack file would be larger than {MaxArchiveBytes / (1024 * 1024)} MB");
+                using (var check = new ZipArchive(File.OpenRead(tmp), ZipArchiveMode.Read))
+                    if (check.Entries.Count > MaxEntries) throw new InvalidOperationException($"the pack would hold more than {MaxEntries} files");
                 if (File.Exists(path)) File.Delete(path);
                 File.Move(tmp, path);
             }

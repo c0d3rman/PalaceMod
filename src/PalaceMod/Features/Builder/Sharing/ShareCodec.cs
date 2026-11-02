@@ -52,7 +52,18 @@ namespace PalaceMod.Builder.Sharing
 
         public DesignPack Decode(string code, List<ValidationIssue> issues)
         {
-            if (!TryDecodeJson(code, out string json, out string error))
+            string json, error;
+            try
+            {
+                TryDecodeJson(code, out json, out error);
+            }
+            catch (Exception e) when (!(e is OutOfMemoryException || e is StackOverflowException))
+            {
+                // Belt and braces: the runtime's inflater differs between .NET and Unity's Mono.
+                json = null;
+                error = "that share code is damaged (" + e.GetType().Name + ")";
+            }
+            if (json == null)
             {
                 issues?.Add(new ValidationIssue(Severity.Error, "", error));
                 return null;
@@ -103,7 +114,7 @@ namespace PalaceMod.Builder.Sharing
             {
                 raw = Inflate(data, bodyLength, MaxJsonBytes);
             }
-            catch (InvalidDataException)
+            catch (Exception ex) when (ex is InvalidDataException || ex is IOException) // Mono's DeflateStream throws IOException on corrupt data
             {
                 error = "that share code is damaged (it doesn't unpack)";
                 return false;

@@ -241,6 +241,54 @@ namespace PalaceMod.Tests
             Assert.True(Rejected(dir, Zip(("tfpack.json", Encoding.UTF8.GetBytes("{\"format\":\"zip\",\"version\":1}")), ("pack.json", PackJson()))).Contains("manifest"), "wrong format");
         }
 
+        public static void HostileManifestValuesDontThrow()
+        {
+            using var dir = new TempDir();
+            byte[] M(string json) => Encoding.UTF8.GetBytes(json);
+            Assert.True(Rejected(dir, Zip(("tfpack.json", M("{\"format\":\"tfpack\",\"version\":2147483648}")), ("pack.json", PackJson()))).Contains("newer"), "int overflow");
+            Assert.True(Rejected(dir, Zip(("tfpack.json", M("{\"format\":\"tfpack\",\"version\":99999999999999999999999}")), ("pack.json", PackJson()))).Contains("newer"), "bigint");
+            Rejected(dir, Zip(("tfpack.json", M("{\"format\":{\"x\":1},\"version\":1}")), ("pack.json", PackJson())));
+            Rejected(dir, Zip(("tfpack.json", M("[1]")), ("pack.json", PackJson())));
+            Rejected(dir, Zip(("pack.json", M("{\"format\":\"palace-builder\",\"version\":2147483648}"))));
+            Rejected(dir, Zip(("pack.json", M("{\"format\":{},\"version\":1}"))));
+        }
+
+        public static void ImportNeverThrowsOnHostileFiles()
+        {
+            using var dir = new TempDir();
+            var archive = new PackArchive(() => new FakeRepository(dir.Path));
+            string file = Path.Combine(dir.Path, "bad.tfpack");
+            File.WriteAllBytes(file, Zip(("tfpack.json", Encoding.UTF8.GetBytes("{\"format\":\"tfpack\",\"version\":2147483648}")), ("pack.json", PackJson())));
+            var issues = new List<ValidationIssue>();
+            Assert.Null(archive.Import(file, issues), "import");
+            Assert.True(issues.Any(i => i.Severity == Severity.Error), "error issue");
+        }
+
+        public static void ExportRefusesWhatImportWouldReject()
+        {
+            using var dir = new TempDir();
+            var repo = new FakeRepository(Path.Combine(dir.Path, "root"));
+            var archive = new PackArchive(() => repo);
+            var entry = SampleFolder(dir.Path);
+            // 999 assets + tfpack.json + pack.json = 1,001 entries, one more than import accepts.
+            string assets = Path.Combine(entry.Folder, "assets");
+            foreach (var f in Directory.GetFiles(assets, "*", SearchOption.AllDirectories)) File.Delete(f);
+            for (int i = 0; i < PackArchive.MaxEntries - 1; i++) File.WriteAllBytes(Path.Combine(assets, $"{i}.png"), [1]);
+            try
+            {
+                archive.Export(entry);
+                throw new AssertException("export should have refused");
+            }
+            catch (InvalidOperationException e)
+            {
+                Assert.True(e.Message.Contains("more than"), e.Message);
+            }
+            Assert.Equal(0, FilesUnder(Path.Combine(repo.Root, "exports")).Count(), "no file left behind");
+            // One fewer fits, and round-trips.
+            File.Delete(Path.Combine(assets, "0.png"));
+            Assert.NotNull(archive.Import(archive.Export(entry), new List<ValidationIssue>()), "998 assets round-trip");
+        }
+
         public static void RejectsDecompressionBombEntries()
         {
             using var dir = new TempDir();
