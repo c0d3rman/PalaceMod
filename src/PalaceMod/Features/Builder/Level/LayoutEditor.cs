@@ -591,7 +591,7 @@ namespace PalaceMod.Builder.Level
             }
             else if (propBases.FirstOrDefault(p => p.Id == id) is PropBase b)
             {
-                ghost = LayoutScene.MakeProp(scene, b, "ghost", Vector3.zero, 0f, 1f, false);
+                ghost = LayoutScene.MakeProp(scene, b, "ghost", Vector3.zero, 0f, StartScale(b), false);
                 ghost.transform.SetParent(root, true);
                 ghostYaw = 0f;
             }
@@ -807,9 +807,17 @@ namespace PalaceMod.Builder.Level
             {
                 lv.Props ??= [];
                 id = UniqueId("prop", lv);
-                lv.Props.Add(new PropDef { Id = id, Base = baseId, Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(yaw, 360f)) });
+                lv.Props.Add(new PropDef { Id = id, Base = baseId, Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(yaw, 360f)), Scale = StartScale(b) });
             });
             return id == null ? null : "prop:" + id;
+        }
+
+        /// <summary>Some scenery is huge (cliff rocks): new props start at most about 6 m across.</summary>
+        private static float StartScale(PropBase b)
+        {
+            var size = Vector3.Scale(b.Mesh.bounds.size, b.Scale);
+            float fit = Mathf.Min(1f, 6f / Mathf.Max(0.01f, Mathf.Max(size.x, size.y, size.z)));
+            return Mathf.Clamp(Mathf.Round(fit * 10f) / 10f, 0.3f, 1f);
         }
 
         private static string UniqueId(string prefix, LevelDef lv)
@@ -946,7 +954,7 @@ namespace PalaceMod.Builder.Level
                     $"Drag to move  ·  {Keys.Label(Keys.Rotate)} turn  ·  {Keys.Label(Keys.Delete)} {(s.Kind == ItemKind.Slot ? (s.Removed ? "restore" : "remove") : s.Kind == ItemKind.Line ? "reset" : "delete")}  ·  {Keys.Label(Keys.Properties)} details";
             }
             else line2 = "Click a marker to select it, drag to move it.";
-            string keys = $"{Dim($"{Keys.Label(Keys.Menu)} add & menu  ·  WASD/middle-drag pan  ·  {Keys.Label(Keys.TurnLeft)}/{Keys.Label(Keys.TurnRight)} turn view  ·  wheel zoom  ·  {Keys.Label(Keys.Snap)} snap {(Snap ? "on" : "off")}  ·  Cmd/Ctrl+Z undo")}";
+            string keys = $"{Dim($"{Keys.Label(Keys.Menu)} add & menu  ·  WASD or middle-drag pan  ·  {Keys.Label(Keys.TurnLeft)} {Keys.Label(Keys.TurnRight)} turn  ·  wheel zoom  ·  {Keys.Label(Keys.Snap)} snap {(Snap ? "on" : "off")}  ·  Cmd+Z undo")}";
             return $"{title}{dirty}\n{line2}\n{keys}";
         }
 

@@ -68,8 +68,8 @@ Evidence comes from the decompiled `Assembly-CSharp`, `AstarPathfindingProject.d
 | WP2 Catalog and runtime | **Landed** (feat/builder-core). `Runtime/`, `BuilderManager`, `builder` dev command, sample pack, interim `SessionLauncher`, leaderboard guard. |
 | Player troops | **Landed** (feat/builder-player-units). `Troops/`: troops in the catalog, `waveSets[].troops` replacements, `IUnitFactory.ApplyTo`. See "Player troops". |
 | WP3 Session and level select | **Landed.** `Session/`: Custom runs entry in every map's pre-level menu, session lifecycle, isolation, `scores.json`, `builder-session` dev command. |
-| WP4a Editor UI | **Landed** (stage 1): `Editor/`, see "Editor (WP4a, as built)". Stage 2 is planned below. |
-| WP4b / WP4c Level overlay, placement editor | Stage 2. Data shape fixed (`LevelDef`), stub `ILevelOverlay`. |
+| WP4a Editor UI | **Landed** (stage 1): `Editor/`, see "Editor (WP4a, as built)". Troops section added by stage 2 (see there). |
+| WP4b / WP4c Level overlay, placement editor | **Landed** (feat/builder-level-editor): `Level/`, see "Levels and the layout editor (stage 2, as built)". |
 | WP5 Asset import | **Landed.** `Assets/`: PNG icons and skins, WAV/OGG sounds, OBJ meshes, url assets with sha256 cache. glTF deferred (see "glTF spike"). |
 | WP6 Sharing | **Landed.** `Sharing/`: `ShareCodec`, `PackArchive` (`.tfpack` and Thunderstore zips), import folder watcher, `SharingUI`, `builder-share` dev command, `tests/PalaceMod.Tests`. |
 
@@ -175,7 +175,7 @@ Semantics worth knowing:
 - **`weapon.damage` replaces the whole direct-damage list.** Each entry applies if the target has all its `tags`: damage = (damage + add) × mult, in order. The base's list is in `catalog.json`, to copy and edit.
 - **Movement tags are refused.** Adding or removing `Flying` or `LargeUnit` would need a pathfinding graph change. Pick a base that already has them.
 - **`warning` is shown by the Builder, not the game.** The game never displays `Wave.warningText`; during a session WP3 shows a night's `warning` with `Notify` when that night starts.
-- **`levels`** are validated for shape only. Applying them is WP4b; until then they produce a warning, and a level's `waveSet` still works.
+- **`levels`** are validated for shape (ids, positions, `scene:`/`mesh:` bases, cost ranges). Names on the host (slots, spawn lines, meshes) are checked when the level loads; an unknown one is skipped with a logged warning. See "Levels and the layout editor".
 - **`troops`** (on a wave set) replace vanilla player troops for that run. Each entry names a custom player unit; its `base` is the troop it replaces (`vanilla:P Knight`), and an optional `building` (the game's building name, e.g. "Barracks") limits it to that building. Vanilla refs, enemy units, bases no building trains, buildings that don't train the base, and the same troop and building twice are errors.
 - **Behaviour modules** form a whitelist (`BehaviourTypes`). v1 has only `SpawnOnDeath {unit}`. To add one, add a constant, a validator case and a `UnitFactory.ApplyBehaviour` case.
 
@@ -261,7 +261,7 @@ Run on 2026-11-02 with `builder spike ...` and `builder play palacemod.sample` i
 | **Session isolation** | On the host: `GameplayImpact` "Builder: custom content". `SaveGame` was skipped ("skipped writing the save file during a custom run"). Leaving to level select ended the session; perk level and XP were unchanged. | WP3 builds on this. Codex found that `builder end` mid-run and launches from the main menu needed work; WP3 has fixed both on its branch. |
 | **Catalog** | 39 enemies, 37 weapons and 36 hosts (10 main maps plus mini modes), built in 89 ms at the main menu. **0 player units**: player unit prefabs aren't loaded at the menu (they live inside building prefabs). | Fixed by the troops package: 14 troops from the troop buildings' Resources prefabs (see "Player troops"). |
 
-Not yet run (not needed for the interfaces): cloning a `BuildSlot` before Start (stage 2, WP4b). glTFast (WP5) is under "WP5: asset import", "glTF spike".
+Cloning a `BuildSlot` before Start: **works** (stage 2): an inactive clone gets its GUID, costs and activator, then is reparented active so the game's own Awake/Start register it. Rescan after a layout: 120-220 ms on Nordfels (warm). glTFast (WP5) is under "WP5: asset import", "glTF spike".
 
 ## Interfaces
 
@@ -274,7 +274,7 @@ All are in `Features/Builder/Contracts/Contracts.cs` and reached through `Builde
 | `BuilderServices.Units` | `IUnitFactory`: `Resolve(pack, unitRef, out error)`, `IsTemplate`, `Clear`, `ApplyTo(instance, pack, unitRef, out error)` (added by troops) | WP2 | `UnitFactory` |
 | `BuilderServices.Waves` | `IWaveInjector`: `SetPending(pack, waveSet)`, `Pending`, `BuildWaves(...)` | WP2 | `WaveInjector` |
 | `BuilderServices.Sessions` | `ISessionLauncher`: `Current`, `Launch(SessionRequest, out error)`, `End`, `Started`, `Ended` | WP3 | `SessionLauncher` |
-| `BuilderServices.Overlay` | `ILevelOverlay`: `Apply(pack, level, issues)` | WP4b | `NullLevelOverlay` (warns) |
+| `BuilderServices.Overlay` | `ILevelOverlay`: `Apply(pack, level, issues)` | WP4b | `LevelOverlay` |
 | `BuilderServices.Assets` | `IAssetProvider`: `GetSprite`, `GetAudio`, `GetMesh(PackEntry, assetRef)`; added by WP5: `GetTexture`, `GetState(pack, ref, use, out message)` (`AssetState` Missing/Loading/Ready/Failed, `AssetUse` constants), `Prefetch(pack)` | WP5 | `AssetProvider` |
 | `BuilderServices.Share` | `IShareCodec`: `Encode(pack)`, `Decode(code, issues)` | WP6 | `ShareCodec` |
 | `BuilderServices.Archives` | `IPackArchive`: `ExportFolder`, `Export(entry, path)`, `Import(path, issues)`, `ExportThunderstore(entry, path)` (**added by WP6**, additive; stub `NullPackArchive`) | WP6 | `PackArchive` |
@@ -305,7 +305,7 @@ The level-1 choices in this game version are Longbow, Crossbow, Hunters, Fire Ar
 
 **Tint fix (affects enemies too).** `ColorAndLightManager` writes the level's colour scheme into the shared unit materials (`Enemy`, `Ally`, `Ally Ranged`, ...) in its `Start` and re-tints their outlines with the daylight. A tint clone is a snapshot, so a troop cloned on scene load came out black (`Ally Ranged` is all zeros until the scheme is applied), and enemy templates built at the menu kept the asset's default colours and outlines. `UnitFactory` now records each tint clone with its source, and a postfix on `ApplyColorScheme` and `AdjustAllOutlineColorsBasedOnLight` recopies the source and re-applies the tint. `TroopManager` also applies the level's scheme just before it clones, so WP5 skin clones start from the level's colours. WP5 skin clones aren't resynced afterwards, so their outlines don't follow the daylight. Fixing that would mean registering them the same way.
 
-**For WP4a (editor):** the editor has no troops section yet. It needs a "Troops" list on the wave set page: pick a custom player unit and optionally a building from `CatalogUnit.Buildings` of the unit's base.
+**Editor:** the Units tab has "New player unit" (pick a troop as the base); a wave set page has a **Troops** section (pick one of the pack's player units and, optionally, the building from `CatalogUnit.Buildings` of its base); a player unit's Test plays the first map's own nights with the buildings training it.
 
 **Dev command** `builder-troops`:
 
@@ -335,7 +335,7 @@ The level-1 choices in this game version are Longbow, Crossbow, Hunters, Fire Ar
 
 **Hooks for other packages:** the editor sets `SessionMenu.EditorAvailable`, `SessionMenu.OpenEditor` and `SessionMenu.OpenPackInEditor` to get "Create your own" and per-pack "Edit" rows; `SessionMenu.Open()` opens the list from anywhere (a pick then launches directly). `ScoreStore.Get(ScoreStore.Key(pack, waveSet, level))` gives a design's record.
 
-**Open:** level-overlay sessions (`LevelId`) are wired but untested until WP4b. Retry day was not exercised in game (it uses the in-memory match save, unchanged from the interim). A changed design keeps its old best (records aren't versioned by content).
+**Open:** level-overlay sessions (`LevelId`) are verified with stage 2 (Custom Runs lists levels and applies their layout). Retry day was not exercised in game (it uses the in-memory match save, unchanged from the interim). A changed design keeps its old best (records aren't versioned by content).
 
 **Interfaces consumed:** `IPackRepository`, `IWaveInjector.SetPending`, `IUnitFactory.Resolve`, `ILevelOverlay.Apply`.
 
@@ -455,17 +455,31 @@ Behaviour worth knowing:
 - **Share codes.** "Copy share code" and "Import share code" call `BuilderServices.Share` (WP6) and `Packs.InstallNew`; with WP6's stub they explain that codes aren't available yet.
 - **Not built:** the live 3D preview model (planned: a preview camera rendering a stripped `Instantiate` of the template into a `RawImage`; components other than renderers removed before activation so no game script runs); editing `warning` text is stored but not yet shown in play.
 
-### Stage 2 plan: level overlay editor (WP4b/WP4c)
+### Levels and the layout editor (stage 2, as built)
 
-Not started. The plan, in order:
+A level is a host map with layout edits and optionally one of the pack's wave sets (null = the map's own nights). Files in `Features/Builder/Level/` (namespace `PalaceMod.Builder.Level`, plus `LevelPage` in `PalaceMod.Builder.Editor`):
 
-1. **Data first, no 3D.** A Levels tab on the pack screen: host, wave set, and the `buildSlots.edit` list (per vanilla slot: upgrade costs, income, HP) as property panels, using `catalog.json`-style host data (slot names and their upgrade trees) that WP2's catalog would need to add (`CatalogHost.BuildSlots`). This needs `ILevelOverlay` to apply edits, but no placement UI.
-2. **Placement mode** inside the host scene (launched like a test play, with a flag that makes the session an edit session): a free camera, a palette (build slot bases, spawn lines, props from the catalog), a ghost that snaps to the navmesh (`AstarPath.active.GetNearest`), move/rotate gizmos, and the same property panel docked on the right for the selected object. Editing writes `LevelDef` through `PackDraft.Edit`, so undo and validation work unchanged.
-3. **Play from edit mode**: save, reload the host with the overlay (WP4b applies it before `Start`, then rescans).
+| File | Does |
+|---|---|
+| `BuilderLevelManager.cs` | installs `BuilderServices.Overlay`, runs the one rescan after a custom level starts, drives the layout editor, registers its keys (Builder section) and the `builder-level` dev command |
+| `LevelOverlay.cs` | `ILevelOverlay`: applies a level on host load (after Awake, before Start) |
+| `LayoutEditor.cs` | the in-level editing mode (state, camera, pointer, keys, edits through `PackDraft.Edit`, path check, play/leave) |
+| `LayoutMenus.cs`, `LayoutHud.cs`, `LayoutMarkers.cs` | its menus (UI kit frames), status panel (cloned game tooltip panel) and ground markers |
+| `LayoutScene.cs` | host scene queries (slots, spawn lines, scenery meshes), inert copies, GUIDs |
+| `PathCheck.cs` | rescan and spawn-line-to-castle reachability (`PathUtilities.IsPathPossible` on `Enemy Units L`/`S`) |
+| `LevelPage.cs` | the pack screen's Levels tab and the level screen |
 
-### WP4b / WP4c (stage 2)
+**Data** (additive to v1, no version bump): `buildSlots.edit[]` gained `pos`/`rotY` (move a host slot); `buildSlots.add[]` gained `upgrades` (cost changes); `props` is now `PropDef {id, base: "mesh:<scenery mesh>", pos, rotY, scale, solid}`; `spawnLines.edit[] {ref, pos, rotY}` moves a host spawn line (pos = its new middle, rotY turns it about the middle). `spawnLines.add` is still not applied (validator warning).
 
-`LevelDef` and its overlay types define the data. `BuilderServices.Overlay.Apply(pack, level, issues)` is called by the session on host load (after Awake, before Start), so clone `BuildSlot`s there as Falkenpass does. See the spike results for rescan cost.
+**Applying (play).** In order: host slot moves and costs; clones (`base: "scene:<slot>"`, inactive under a holder, deterministic save GUID from `<pack>/<level>/<id>`, costs, optional `activator`/`activatorLevel`, then reparented active so Awake/Start run and register it; with no activator it unlocks like its base); removals (deactivated before Start, so slots they unlock never appear; the castle can't be removed or moved); spawn line moves; props (plain mesh objects, layer Obstacle when solid, which the host's recast graphs rasterize: layers Ground and Obstacle, meshes on, colliders off). Two frames later, one `AstarPath.Scan()` and a reachability check from each ground spawn line to the castle; blocked lines get a warning notice and a log line. Restart and retry reapply it. Custom Runs lists levels next to wave sets; picking one arms the pre-level menu as for wave sets.
+
+**Layout editor.** "Edit the layout on the map" (level screen) launches a session with a trimmed copy of the pack (only the level, no wave set), so problems elsewhere in the pack don't block editing. `LevelOverlay.Apply` sees it's the edit session and applies nothing; instead every host slot but the castle is hidden and shown as an inert copy in its blueprint state (scripts, colliders and the built building stripped before activation), and the scene is redrawn from the `LevelDef` after every change (`Reconcile`), so undo/redo (Cmd/Ctrl+Z, the editor's own history) just work. The player is frozen; the camera follows a pivot through `CameraRig.overrideCameraTarget` (pan with the game's move keys or middle-drag, `,`/`.` turn, wheel zoom). Click a ring to select, drag to move (1 m grid snap and 15° turns, G toggles), T turns (Shift+T back), Delete removes/restores, I opens costs and options, B opens the menu: Add (build slot kinds, each new slot copying the nearest slot of that kind so it unlocks with its neighbours; the map's scenery meshes), Level (save, undo, redo, check enemy paths, snap, play, pack editor, leave) and Help. "Check enemy paths" rescans with the edits (props as obstacles) and draws each ground line's route (green, red if blocked): the only rescan in the editor. Play saves (writable pack, no errors) and launches the level for real. Markers: gold host slots (big ring = castle, locked), green added slots, pale green scenery, red spawn lines, a cross for removed.
+
+**Sharing in the editor** (WP6 hook): the Pack tab has "Export or share" (`SharingUI.OpenPack`, for the saved pack) and the pack list has "Share designs" (`SharingUI.Open`).
+
+**Limits.** Moving the castle, adding spawn lines, removing or moving the map's own scenery (MeshFusion-combined), changing a slot's upgrade branches, income or HP, and picking another activator in the UI (the data supports `activator`) aren't built. Slots are found by name; when a host has two of a name, only the first is editable.
+
+`python3 scripts/dev.py cmd "builder-level <sub>"`: `new <pack> <map>` (test pack), `edit <pack> <level>`, `state`, `add slot <kind|slot> <x> <z> [yaw]`, `add prop <name|index> <x> <z> [yaw]`, `select|remove <key>`, `move <key> <x> <z>`, `rotate <key> <deg>`, `cost <key> <level> <gold|base>`, `cursor <x> <z>|off` + `tool <id>|none` + `click` (stand-ins for the mouse), `cam <x> <z> [zoom] [yaw]`, `menu`, `details`, `check`, `paths`, `play`, `leave`, `json`, `spike graphs|slots|lines|props`. Keys look like `slot:<name>`, `add:<id>`, `prop:<id>`, `line:<name>`.
 
 ## Design notes from research
 

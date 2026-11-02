@@ -10,7 +10,7 @@ namespace PalaceMod.Builder.Level
 {
     internal sealed class LayoutHud
     {
-        private const float Width = 920f, Pad = 18f, FontSize = 21f;
+        private const float Width = 1040f, Pad = 18f, FontSize = 21f;
         private GameObject canvasObj, panel;
         private CanvasScaler scaler;
         private TextMeshProUGUI label;
