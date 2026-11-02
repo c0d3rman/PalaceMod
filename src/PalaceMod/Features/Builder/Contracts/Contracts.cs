@@ -192,13 +192,42 @@ namespace PalaceMod.Builder
 
     // ---------------------------------------------------------------- WP5: assets
 
+    public enum AssetState
+    {
+        /// <summary>The ref isn't "asset:&lt;key&gt;", the key isn't in the pack, or the file doesn't exist.</summary>
+        Missing,
+        /// <summary>Downloading or decoding in the background; ask again later.</summary>
+        Loading,
+        Ready,
+        /// <summary>The file is malformed, too large or of the wrong type (see the message).</summary>
+        Failed,
+    }
+
     public interface IAssetProvider
     {
         /// <summary>Sprite for "asset:&lt;key&gt;" in pack, or null (callers then keep the base visuals).</summary>
         Sprite GetSprite(PackEntry pack, string assetRef);
+        /// <summary>WAV loads synchronously; OGG decodes in the background, so this is null until it's ready.</summary>
         AudioClip GetAudio(PackEntry pack, string assetRef);
-        /// <summary>Mesh plus material(s) to render it with, or null.</summary>
+        /// <summary>Mesh plus material(s) to render it with, or null. OBJ meshes come with no materials (an empty
+        /// array): the caller renders them with the unit's own material.</summary>
         (Mesh mesh, Material[] materials)? GetMesh(PackEntry pack, string assetRef);
+
+        // Added by WP5 (additive):
+        /// <summary>A PNG as a mipmapped, repeating texture (for skins), or null.</summary>
+        Texture2D GetTexture(PackEntry pack, string assetRef);
+        /// <summary>Whether an asset can be used, with a player-facing reason when it can't (for the editor).
+        /// <paramref name="use"/> is one of the AssetUse constants, or null for "any".</summary>
+        AssetState GetState(PackEntry pack, string assetRef, string use, out string message);
+        /// <summary>Starts downloads and background decodes for a pack's assets (also done automatically when
+        /// packs change and when a session starts).</summary>
+        void Prefetch(PackEntry pack);
+    }
+
+    /// <summary>What an asset is used as (IAssetProvider.GetState).</summary>
+    public static class AssetUse
+    {
+        public const string Sprite = "sprite", Texture = "texture", Audio = "audio", Mesh = "mesh";
     }
 
     // ---------------------------------------------------------------- WP6: sharing
