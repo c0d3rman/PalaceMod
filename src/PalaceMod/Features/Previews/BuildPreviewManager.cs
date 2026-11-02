@@ -11,7 +11,7 @@ namespace PalaceMod
 
         public override void Update()
         {
-            if (Plugin.Input.GetButtonDown("Preview Build Options"))
+            if (Plugin.Input?.GetButtonDown("Preview Build Options") == true)
             {
                 previewsEnabled = !previewsEnabled;
             }

@@ -14,7 +14,9 @@ public class Plugin : BaseUnityPlugin
     internal static new ManualLogSource Logger;
     private Harmony harmony;
     internal static Plugin Instance { get; private set; }
-    internal static Player Input { get; private set; }
+    private static Player input;
+    // Rewired initializes after plugins load, so resolve the player on first use.
+    internal static Player Input => input ??= ReInput.isReady ? ReInput.players.GetPlayer(0) : null;
     private readonly List<IManager> managers = [];
 
     private void Awake()
@@ -31,6 +33,7 @@ public class Plugin : BaseUnityPlugin
         }
 
         // Add managers
+        managers.Add(new DevToolsManager());
         managers.Add(new UIManager());
         managers.Add(new GoldManager());
         managers.Add(new BuildPreviewManager());
@@ -83,14 +86,28 @@ public class Plugin : BaseUnityPlugin
 
     private void Start()
     {
-        Input = ReInput.players.GetPlayer(0);
-
         foreach (var manager in managers) manager.Start();
     }
 
+    private readonly HashSet<string> reportedErrors = [];
+
     private void Update()
     {
-        foreach (var manager in managers) manager.Update();
+        // Isolate managers so one failing feature does not stop the others from updating.
+        foreach (var manager in managers)
+        {
+            try
+            {
+                manager.Update();
+            }
+            catch (Exception e)
+            {
+                if (reportedErrors.Add($"{manager.GetType().Name}: {e}"))
+                {
+                    Logger.LogError($"{manager.GetType().Name}.Update failed (further identical errors suppressed): {e}");
+                }
+            }
+        }
     }
 
     internal void ShowMessage(string message)

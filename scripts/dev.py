@@ -7,14 +7,38 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
+import tarfile
 import time
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / ".local/config.json"
+# Shared across worktrees and outside the repo so backups survive worktree cleanup.
+DEV_HOME = Path(os.environ.get("PALACEMOD_DEV_HOME",
+                               Path.home() / "Documents/Misc/Thronefall Backup/PalaceMod dev"))
+BACKUPS = DEV_HOME / "backups"
 DEFAULT_GAME = Path.home() / "Library/Application Support/Steam/steamapps/common/Thronefall"
+SAVE_DIR = Path.home() / "Library/Application Support/Grizzly Games/Thronefall"
+PREFS = Path.home() / "Library/Preferences/com.grizzlygames.thronefall.plist"
+PROCESS = "Thronefall"
+SAVE_BACKUPS_KEPT = 30
+PREFS_DOMAIN = "com.grizzlygames.thronefall"
+# The game applies its Video_* settings at startup; Unity persists Screenmanager * on quit.
+WINDOWED_PREFS = {"Video_Fullscreen": 0, "Screenmanager Fullscreen mode": 3}
+DISPLAY_KEYS = [*WINDOWED_PREFS, "Video_ResWidth", "Video_ResHeight", "Screenmanager Resolution Width",
+                "Screenmanager Resolution Height", "Screenmanager Resolution Use Native",
+                "Screenmanager Window Position X", "Screenmanager Window Position Y"]
+DISPLAY_SAVED = DEV_HOME / "display-prefs.json"
+ROSETTA_MARKER = "# PalaceMod: run under Rosetta"
+ROSETTA_BLOCK = f"""{ROSETTA_MARKER} because libdoorstop.dylib is x86_64-only.
+if [ "$(uname -m)" = "arm64" ] && [ -z "$PALACEMOD_ROSETTA" ]; then
+    export PALACEMOD_ROSETTA=1
+    exec /usr/bin/arch -x86_64 /bin/sh "$0" "$@"
+fi
+"""
 
 
 def run(*args):
@@ -42,6 +66,127 @@ def managed_dir(game):
     raise RuntimeError(f"Cannot find Thronefall managed assemblies in {game}")
 
 
+def log_path(game):
+    return game / "BepInEx/LogOutput.log"
+
+
+def stamp():
+    return datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+
+
+# --- Game process -----------------------------------------------------------
+
+def game_pids():
+    result = subprocess.run(["pgrep", "-x", PROCESS], capture_output=True, text=True)
+    return [int(pid) for pid in result.stdout.split()]
+
+
+def require_stopped():
+    if game_pids():
+        raise RuntimeError("Thronefall is running; run `dev.py stop` first (or use `dev.py run`).")
+
+
+def stop():
+    pids = game_pids()
+    if not pids:
+        print("Thronefall is not running.")
+        return
+    for pid in pids:
+        os.kill(pid, signal.SIGTERM)
+    for _ in range(30):
+        if not game_pids():
+            print("Thronefall stopped.")
+            break
+        time.sleep(0.5)
+    else:
+        for pid in game_pids():
+            os.kill(pid, signal.SIGKILL)
+        time.sleep(1)
+        print("Thronefall force-stopped.")
+    restore_display()
+
+
+def save_display():
+    """Remember the player's display settings before a windowed dev launch overwrites them."""
+    if DISPLAY_SAVED.exists():
+        return
+    values = {}
+    for key in DISPLAY_KEYS:
+        result = subprocess.run(["defaults", "read", PREFS_DOMAIN, key], capture_output=True, text=True)
+        if result.returncode == 0:
+            values[key] = int(result.stdout.strip())
+    DISPLAY_SAVED.parent.mkdir(parents=True, exist_ok=True)
+    DISPLAY_SAVED.write_text(json.dumps(values, indent=2) + "\n")
+
+
+def apply_windowed():
+    save_display()
+    for key, value in WINDOWED_PREFS.items():
+        subprocess.run(["defaults", "write", PREFS_DOMAIN, key, "-int", str(value)], check=True)
+
+
+def restore_display():
+    """Put back the display settings saved by save_display (Unity persists the windowed mode on quit)."""
+    if not DISPLAY_SAVED.exists() or game_pids():
+        return
+    for key, value in json.loads(DISPLAY_SAVED.read_text()).items():
+        subprocess.run(["defaults", "write", PREFS_DOMAIN, key, "-int", str(value)], check=True)
+    DISPLAY_SAVED.unlink()
+    print("Restored the game's display settings.")
+
+
+def ensure_steam():
+    if subprocess.run(["pgrep", "-x", "steam_osx"], capture_output=True).returncode == 0:
+        return
+    print("Starting Steam (required for the game to boot)...", flush=True)
+    subprocess.run(["open", "-a", "Steam"], check=True)
+    for _ in range(60):
+        if subprocess.run(["pgrep", "-x", "steam_osx"], capture_output=True).returncode == 0:
+            time.sleep(15)  # let the client finish signing in
+            return
+        time.sleep(1)
+    raise RuntimeError("Steam did not start.")
+
+
+# --- Safety -----------------------------------------------------------------
+
+def backup_saves():
+    """Snapshot save files and preferences before anything runs the game."""
+    if not SAVE_DIR.exists():
+        return None
+    folder = BACKUPS / "saves"
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / f"saves-{stamp()}.tar.gz"
+    with tarfile.open(target, "w:gz") as archive:
+        archive.add(SAVE_DIR, arcname="Thronefall")
+        if PREFS.exists():
+            archive.add(PREFS, arcname=PREFS.name)
+    for old in sorted(folder.glob("saves-*.tar.gz"))[:-SAVE_BACKUPS_KEPT]:
+        old.unlink()
+    return target
+
+
+# --- Setup ------------------------------------------------------------------
+
+def patch_loader(game):
+    """Make run_bepinex.sh re-exec under Rosetta so Steam launches load the mod too."""
+    script = game / "run_bepinex.sh"
+    if not script.is_file():
+        raise RuntimeError(f"Missing {script}; install BepInEx 5 for macOS into the game first.")
+    text = script.read_text()
+    if ROSETTA_MARKER in text:
+        return False
+    archs = subprocess.run(["lipo", "-archs", str(game / "libdoorstop.dylib")],
+                           capture_output=True, text=True).stdout.split()
+    if "arm64" in archs:
+        return False
+    BACKUPS.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(script, BACKUPS / f"run_bepinex.sh.orig-{stamp()}")
+    first, _, rest = text.partition("\n")
+    script.write_text(f"{first}\n{ROSETTA_BLOCK}{rest}")
+    return True
+
+
 def setup(game):
     managed = managed_dir(game)
     project = ET.parse(ROOT / "PalaceMod.csproj")
@@ -56,14 +201,21 @@ def setup(game):
     CONFIG.parent.mkdir(exist_ok=True)
     CONFIG.write_text(json.dumps({"game": str(game)}, indent=2) + "\n")
     print(f"Copied {len(names)} game libraries to {lib}")
+    if patch_loader(game):
+        print(f"Patched run_bepinex.sh to run under Rosetta (original backed up in {BACKUPS}).")
     print("Game libraries and local settings are ignored by Git.")
 
 
+# --- Build / install --------------------------------------------------------
+
 def build(configuration):
-    run("dotnet", "build", "PalaceMod.csproj", "-c", configuration)
+    if not (ROOT / "lib/Assembly-CSharp.dll").is_file():
+        raise RuntimeError("Game libraries missing from lib/; run `dev.py setup` first.")
+    run("dotnet", "build", "PalaceMod.csproj", "-c", configuration, "-nologo", "-clp:NoSummary")
 
 
 def install(game, configuration):
+    require_stopped()
     source = ROOT / f"bin/{configuration}/netstandard2.1"
     if not (source / "PalaceMod.dll").is_file():
         raise RuntimeError("Build PalaceMod before installing it.")
@@ -76,17 +228,128 @@ def install(game, configuration):
     if duplicates:
         raise RuntimeError(f"Move duplicate PalaceMod DLLs out of plugins first: {duplicates}")
     if destination.exists():
-        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-        backup = ROOT / f".backups/installed-{stamp}"
-        backup.parent.mkdir(exist_ok=True)
+        backup = BACKUPS / f"installed-{stamp()}"
+        BACKUPS.mkdir(parents=True, exist_ok=True)
         shutil.copytree(destination, backup)
-        print(f"Previous installed mod backed up to {backup}")
+        for old in sorted(BACKUPS.glob("installed-*"))[:-10]:
+            shutil.rmtree(old)
     destination.mkdir(parents=True, exist_ok=True)
     for name in ["PalaceMod.dll", "PalaceMod.pdb"]:
         if (source / name).exists():
             shutil.copy2(source / name, destination / name)
-    print(f"Installed to {destination}; restart the game to load changes.")
+    print(f"Installed to {destination}")
 
+
+# --- Launch / verify --------------------------------------------------------
+
+def launch(game, timeout, fullscreen):
+    require_stopped()
+    if fullscreen:
+        restore_display()
+    else:
+        apply_windowed()
+    ensure_steam()
+    saved = backup_saves()
+    if saved:
+        print(f"Saves backed up to {saved}")
+    log = log_path(game)
+    started = time.time()
+    out = ROOT / ".local/launch.log"
+    out.parent.mkdir(exist_ok=True)
+    with out.open("w") as handle:
+        # Doorstop's dylib is x86_64-only, so the game must run under Rosetta.
+        command = ["/usr/bin/arch", "-x86_64", "/bin/sh", str(game / "run_bepinex.sh")]
+        env = {**os.environ, "PALACEMOD_DEV": "1"}
+        subprocess.Popen(command, cwd=game, stdout=handle, stderr=subprocess.STDOUT,
+                         stdin=subprocess.DEVNULL, start_new_session=True, env=env)
+    print(f"Launching Thronefall under Rosetta ({'fullscreen' if fullscreen else 'windowed'})...", flush=True)
+    deadline = started + timeout
+    while time.time() < deadline:
+        time.sleep(1)
+        if log.exists() and log.stat().st_mtime >= started:
+            text = log.read_text(errors="replace")
+            if "Chainloader startup complete" in text:
+                time.sleep(5)  # let managers run Start/Update before reporting
+                report(game)
+                return
+        if time.time() - started > 20 and not game_pids():
+            raise RuntimeError(f"Thronefall exited during startup; see {out}")
+    raise RuntimeError(f"BepInEx did not finish loading within {timeout}s; see {out} and {log}")
+
+
+def error_blocks(text):
+    """Group each [Error]/[Fatal] log line with its stack trace."""
+    blocks, current = [], None
+    for line in text.splitlines():
+        if line.startswith(("[Error", "[Fatal")):
+            current = [line]
+            blocks.append(current)
+        elif current is not None and line.strip() and not line.startswith("["):
+            current.append(line)
+        else:
+            current = None
+    return ["\n".join(block) for block in blocks]
+
+
+def report(game):
+    log = log_path(game)
+    text = log.read_text(errors="replace")
+    loaded = "PalaceMod loaded!" in text
+    print(f"PalaceMod loaded: {'yes' if loaded else 'NO'}  (game running: {'yes' if game_pids() else 'no'})")
+    print_errors(text)
+    if not loaded:
+        raise RuntimeError(f"PalaceMod did not load; see {log}")
+
+
+def print_errors(text):
+    counts = {}
+    for block in error_blocks(text):
+        counts[block] = counts.get(block, 0) + 1
+    if not counts:
+        print("Errors: none")
+        return
+    print(f"Errors: {len(counts)} unique, {sum(counts.values())} total")
+    for block, count in counts.items():
+        lines = block.splitlines()
+        print(f"--- x{count}")
+        print("\n".join(lines[:8] + (["  ..."] if len(lines) > 8 else [])))
+
+
+def logs(game, errors, follow, lines):
+    log = log_path(game)
+    if not log.exists():
+        raise RuntimeError(f"No BepInEx log yet: {log}")
+    if follow:
+        subprocess.run(["tail", "-n", str(lines), "-F", str(log)])
+    elif errors:
+        print_errors(log.read_text(errors="replace"))
+    else:
+        print("\n".join(log.read_text(errors="replace").splitlines()[-lines:]))
+
+
+def screenshot(game, output, timeout=15):
+    """Ask the running mod (dev launches only) to capture the game frame; works without focus."""
+    if not game_pids():
+        raise RuntimeError("Thronefall is not running.")
+    target = (Path(output) if output else ROOT / f".local/screenshots/{stamp()}.png").resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.unlink(missing_ok=True)
+    request = game / "BepInEx/PalaceMod-dev/screenshot.request"
+    request.parent.mkdir(parents=True, exist_ok=True)
+    request.write_text(str(target))
+    deadline = time.time() + timeout
+    size = -1
+    while time.time() < deadline:
+        time.sleep(0.5)
+        if target.exists() and target.stat().st_size == size and size > 0:
+            print(target)
+            return
+        size = target.stat().st_size if target.exists() else -1
+    request.unlink(missing_ok=True)
+    raise RuntimeError("No screenshot produced; dev tools only run when the game is started by `dev.py launch`/`run`.")
+
+
+# --- Misc -------------------------------------------------------------------
 
 def snapshot():
     files = list((ROOT / "src").rglob("*")) + [ROOT / "PalaceMod.csproj"]
@@ -123,27 +386,55 @@ def decompile(game, type_name):
     print(f"Decompiled output: {output} (ignored by Git)")
 
 
-def doctor(game):
-    print(f"Game: {game}")
-    print(f"Managed assemblies: {managed_dir(game)}")
+def file_hash(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+
+
+def doctor(game, configuration):
+    def check(label, ok, detail=""):
+        print(f"[{'ok' if ok else '!!'}] {label}{': ' + detail if detail else ''}")
+
+    check("Game", game.exists(), str(game))
+    check("Managed assemblies", True, str(managed_dir(game)))
     for name in ["dotnet", "git", "python3"]:
-        print(f"{name}: {shutil.which(name) or 'MISSING'}")
-    executable = game / "Thronefall.app/Contents/MacOS/Thronefall"
-    for path in [executable, game / "libdoorstop.dylib"]:
-        if path.exists() and shutil.which("file"):
-            run("file", path)
-    log = game / "BepInEx/LogOutput.log"
-    print(f"BepInEx log: {log} ({'exists' if log.exists() else 'not generated'})")
-    print("Architecture output is diagnostic only; loader and Harmony startup need an in-game test.")
+        check(name, bool(shutil.which(name)), shutil.which(name) or "MISSING")
+    libs = (ROOT / "lib/Assembly-CSharp.dll").is_file()
+    check("Game libraries in lib/", libs, "" if libs else "run `setup`")
+    check("BepInEx 5 installed", (game / "BepInEx/core/BepInEx.dll").is_file())
+    rosetta = subprocess.run(["/usr/bin/arch", "-x86_64", "/usr/bin/true"], capture_output=True).returncode == 0
+    check("Rosetta available", rosetta, "softwareupdate --install-rosetta" if not rosetta else "")
+    script = game / "run_bepinex.sh"
+    patched = script.is_file() and ROSETTA_MARKER in script.read_text()
+    check("run_bepinex.sh runs under Rosetta", patched, "" if patched else "run `setup` to patch")
+    localconfigs = list((Path.home() / "Library/Application Support/Steam/userdata").glob("*/config/localconfig.vdf"))
+    steam_ok = any("run_bepinex.sh" in f.read_text(errors="replace") for f in localconfigs)
+    check("Steam launch options use run_bepinex.sh", steam_ok,
+          "" if steam_ok else f"set to: \"{script}\" %command%")
+    built = ROOT / f"bin/{configuration}/netstandard2.1/PalaceMod.dll"
+    installed = game / "BepInEx/plugins/PalaceMod/PalaceMod.dll"
+    check("Installed plugin matches this build", file_hash(built) is not None and file_hash(built) == file_hash(installed))
+    check("Game running", True, "yes" if game_pids() else "no")
+    restored = not DISPLAY_SAVED.exists() or bool(game_pids())
+    check("Display settings restored", restored, "" if restored else "run `dev.py stop` to restore them")
+    log = log_path(game)
+    check("BepInEx log", log.exists(), str(log))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["setup", "build", "install", "watch", "decompile", "doctor", "logs"])
+    parser.add_argument("command", choices=["setup", "build", "install", "run", "launch", "stop", "logs",
+                                            "screenshot", "backup-saves", "watch", "decompile", "doctor"])
     parser.add_argument("--game", help="Game directory or Thronefall.app; otherwise saved config or THRONEFALL_DIR")
     parser.add_argument("--configuration", default="Debug", choices=["Debug", "Release"])
     parser.add_argument("--type", dest="type_name", help="Decompile a single type instead of the whole assembly")
     parser.add_argument("--install", action="store_true", help="Watch: install after each successful build")
+    parser.add_argument("--errors", action="store_true", help="Logs: show unique errors with stack traces")
+    parser.add_argument("--follow", action="store_true", help="Logs: stream the log")
+    parser.add_argument("--lines", type=int, default=150, help="Logs: number of trailing lines")
+    parser.add_argument("--timeout", type=int, default=120, help="Launch: seconds to wait for BepInEx")
+    parser.add_argument("--output", help="Screenshot: output PNG path")
+    parser.add_argument("--fullscreen", action="store_true",
+                        help="Launch/run: use the player's display settings instead of windowed mode")
     args = parser.parse_args()
     game = game_root(args.game)
     if args.command == "setup":
@@ -152,17 +443,27 @@ def main():
         build(args.configuration)
     elif args.command == "install":
         install(game, args.configuration)
+    elif args.command == "run":
+        build(args.configuration)
+        stop()
+        install(game, args.configuration)
+        launch(game, args.timeout, args.fullscreen)
+    elif args.command == "launch":
+        launch(game, args.timeout, args.fullscreen)
+    elif args.command == "stop":
+        stop()
+    elif args.command == "logs":
+        logs(game, args.errors, args.follow, args.lines)
+    elif args.command == "screenshot":
+        screenshot(game, args.output)
+    elif args.command == "backup-saves":
+        print(backup_saves() or f"No save directory at {SAVE_DIR}")
     elif args.command == "watch":
         watch(game, args.configuration, args.install)
     elif args.command == "decompile":
         decompile(game, args.type_name)
     elif args.command == "doctor":
-        doctor(game)
-    elif args.command == "logs":
-        log = game / "BepInEx/LogOutput.log"
-        if not log.exists():
-            raise RuntimeError(f"No BepInEx log yet: {log}")
-        print("\n".join(log.read_text(errors="replace").splitlines()[-150:]))
+        doctor(game, args.configuration)
 
 
 if __name__ == "__main__":

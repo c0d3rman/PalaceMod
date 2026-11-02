@@ -11,3 +11,4 @@ lib/
 *.user
 *.suo
 install.cfg
+.claude/worktrees/
