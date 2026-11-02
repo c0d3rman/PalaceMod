@@ -73,10 +73,35 @@ Then check the result with `dev.py logs` (log what features do with `Plugin.Logg
 - Override `FeatureSection` (its settings section, e.g. `"Formations"`) and `FeatureDescription`. That adds a `<Section>.Enabled` switch as the first row of its page in Settings > Mods. While the feature is disabled, `Update` isn't called and its patches are removed. `Awake` and `Start` always run. Undo anything visible in `OnFeatureDisabled()`; the hooks fire live when the setting changes. To keep patches applied, override `UnpatchWhenDisabled => false` and early-out with `if (!Feature<MyManager>.On) return;`. Use `Feature<T>.Instance` to reach a manager from static code. Infrastructure managers leave `FeatureSection` null.
 - Settings: bind `ConfigEntry`s in the feature's own section in `Awake`. Give every entry a real description, shown beside the selected row. Use bool, enum or `AcceptableValueList`, or `AcceptableValueRange` for sliders. Add a `SettingTags` for units, a label for 0, a slider step, or `Hidden`. A page shows 7 rows including `Enabled`; a longer section is split into pages, so keep it to 6 settings if you can.
 - Keys: `Keybinds.Register(FeatureSection, "id", "Display name", new KeyboardShortcut(KeyCode.X), "What it does")` returns a `Keybind`; poll `.Down`, `.Held` or `.Up`. These are inert while the feature is disabled, a menu is open (unless `KeybindFlags.AllowInMenus`), or a text field has focus. Never read raw `Input.GetKey` for a feature key.
-- Messages to the player: `Notify.Show(text, kind, seconds, key)`. A message with the same `key` replaces the previous one.
+- Messages to the player: `Notify.Show(text, kind, seconds, key)`. A message with the same `key` replaces the previous one. It shows as a small panel in the game's style at the top centre; `kind` only tints its emblem.
+- Menus, pause-menu buttons and tooltips: use the UI kit (below), never `new GameObject` + `AddComponent` UI or GameObject-path lookups.
 - If the feature changes gameplay (cheats, undo, save states, beyond-vanilla options), call `GameplayImpact.Mark("Reason")` when the player uses it. It resets on a fresh run.
 - Test hooks: `DevCommands.Register("name", "name <args>   what it does", args => "result")` in `Awake`. Throw to report a failure. `dev.py cmd features` shows each manager's enabled state and patch count, and `dev.py cmd impact` shows the run's gameplay impact.
 - Logging: `Plugin.Logger.LogInfo`, which `dev.py logs` shows. `LogError` is for real bugs; `run` reports them.
+
+## UI kit (src/PalaceMod/Core/UI)
+
+Everything is cloned from the game's own widgets (found through its UI scripts' fields, not GameObject paths) and carries PalaceMod's mark: a small verdigris diamond, and a thin verdigris edge on panels (`ModStyle.Accent`, `ModStyle.AddEmblem`, `ModStyle.MarkPanel`). Take the game's palette and fonts from `ModStyle` for anything custom.
+
+```csharp
+// In Awake. The frame is built on first open; a tab's page is rebuilt each time it's shown.
+var frame = new ModFrame("Compendium")
+    .AddTab("Enemies", page =>
+    {
+        page.Header("Night 3");
+        page.Row("Hit points", "120", tooltip: "Base 100, +20% night difficulty");
+        page.Text("Wrapped body text.");
+        page.Button("Reset", () => ...);
+    });
+PauseMenu.AddButton("compendium", "Compendium", frame.Open, order: 10, visible: () => IsEnabled);
+ModTooltip.Attach(someGameButton, "Title", () => "Body");   // shown while selected or hovered
+```
+
+- `PauseMenu.AddButton` is idempotent per id and safe to call before the UI exists. Buttons go under Settings, sorted by `order`; past 3 they move into a "More" frame. `visible` is re-checked on every open, so gate it on your feature's `IsEnabled`.
+- `ModFrame` runs on the game's `UIFrameManager`: Escape or back returns to the menu it was opened from, the game stays paused, and keyboard, controller and mouse navigation work. `Refresh()` rebuilds the current tab; `ModRow.SetValue` updates one row in place.
+- `ModTooltip.Show/Hide/Attach/AttachHover` share one tooltip in the game's tooltip look.
+- `GameWidgets.Clone/Button/Text` are the low-level cloners, for widgets the kit doesn't wrap.
+- Dev: `dev.py cmd "uidump <pause|active|hud|tooltip|name> [depth]"` prints a live UI hierarchy with fonts, colours and sprites; `dev.py cmd "uikit frame|notify|buttons <n>|tooltip"` exercises the kit.
 
 ## Code conventions
 
@@ -88,9 +113,9 @@ Then check the result with `dev.py logs` (log what features do with `Plugin.Logg
 - Never commit `lib/`, `.decompiled/` or anything else copied from the game; they're in `.gitignore`.
 - Builds target `netstandard2.1`. The 18 existing Harmony003 analyzer warnings predate this guide and aren't regressions.
 
-## Keybind notes (for the keybind UI)
+## Keybinds and the Controls screen
 
-The game reads input from Rewired: `ReInput.players.GetPlayer(0).GetButtonDown("<action>")`. `KeyRebinder` builds Controls > Keyboard by looping `ReInput.mapping.ActionsInCategory(category)` over the scene's `actionCategoriesToShow` and making a `ControlMapButton` for each `userAssignable` action. Labels come from the I2 term `Controls/<action name>`, so add the term or patch `ControlMapButton.SetData`. Remaps go through `InputMapper`s on each controller's category-0 map and are saved by `ControlConfigSaveLoad` to `ControlsConfig_v2.json` via `SaveServicesLocator`, with `AddDefaultMappingsForNewActions` on load. Rewired has no public API for adding actions at runtime: `InputAction` setters are internal, and `ReInput.mapping` is read-only. The likely route is a Harmony prefix on the `InputManager_Base` initialisation that calls `userData.AddAction(categoryId)`, sets the name, type and `userAssignable` by reflection, and adds default keyboard bindings. That's unverified, and mod action IDs would then end up in the player's controls file. Callers only use `Keybind.Down/Held/Up`, so a Rewired backend can replace `Keybinds.Backend` (`IKeybindBackend`) and use `Keybind.Entry` for migration without touching features. Menu focus is `UIFrameManager.instance.ActiveFrame != null`; the HUD isn't a frame, and the game has no text fields of its own. The game's cheat menu (`CheatMenuIMGUI` and `CheatSystem`) is still compiled in, but nothing opens it.
+`Core/KeybindsManager` turns every keybind registered in a feature's `Awake` into a Rewired action (category `PalaceMod`), so it gets a native row under a "Mods" heading in Settings > Controls and is remapped by the game's own listener (keyboard with modifiers, mouse, controller); conflicts with game or mod keys show in red on both rows, and "Restore Default Configuration" resets mod keys too. Bindings persist in the BepInEx config (`Keybinds` section, hidden), never in the game's `ControlsConfig_v2.json`, which stays vanilla. A keybind registered after Rewired starts (i.e. outside `Awake`) has no row and reads Unity Input. `dev.py cmd keybinds` lists bindings and conflicts; `keybinds open|select|bind|reset` drive the screen. Menu focus is `UIFrameManager.instance.ActiveFrame != null`; the game has no text fields of its own. The game's cheat menu (`CheatMenuIMGUI` and `CheatSystem`) is still compiled in, but nothing opens it.
 
 ## Don't
 
