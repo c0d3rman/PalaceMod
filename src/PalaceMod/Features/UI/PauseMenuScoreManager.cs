@@ -25,7 +25,7 @@ namespace PalaceMod
     public class PauseMenuScoreManager : BaseManager
     {
         public override string FeatureSection => "Pause menu score";
-        public override string FeatureDescription => "Pause menu shows the score so far, last night's breakdown, and at night what the night would score if it ended now. After a victory, the end screen shows the final night's breakdown.";
+        public override string FeatureDescription => "The pause menu shows the score so far, last night's breakdown, and at night what the night would score if it ended now. After a victory, the end screen shows the final night's breakdown.";
 
         private BepInEx.Configuration.ConfigEntry<bool> showOnEndScreen;
 
