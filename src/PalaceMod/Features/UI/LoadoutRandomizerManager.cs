@@ -261,7 +261,7 @@ namespace PalaceMod
                 if (manager == null || __instance.frame == null) return;
                 if (__instance.frame.LastApplied is not TFUIEquippable tile || tile.Locked || tile.Data == null) return;
                 if (PerkManager.IsEquipped(tile.Data)) manager.handPicked.Add(tile.Data);
-                else manager.handPicked.Remove(tile.Data);
+                manager.ForgetUnequippedHandPicks(); // also drops perks vanilla displaced at the slot limit
             }
         }
 
@@ -348,6 +348,7 @@ namespace PalaceMod
             if (only == null || only == Category.Perks) changed.AddRange(RollPerks(helper));
             if ((only == null || only == Category.Mutators) && HasMutators(helper)) changed.AddRange(RollMutators(helper));
             RefreshTexts(helper);
+            ForgetUnequippedHandPicks(); // a hand pick a roll replaced is no longer protected
             var ui = helper.GetComponent<LoadoutRandomizerUI>();
             if (ui != null)
             {
@@ -390,6 +391,8 @@ namespace PalaceMod
             min = Math.Min(min, max);
             return RollMany(helper, Category.Mutators, SampleCount(min, max));
         }
+
+        private void ForgetUnequippedHandPicks() => handPicked.RemoveWhere(e => e == null || !PerkManager.IsEquipped(e));
 
         private List<TFUIEquippable> Kept(LoadoutUIHelper helper, Category c) =>
             keepHandPicks.Value ? Equipped(helper, c).Where(t => handPicked.Contains(t.Data)).ToList() : new List<TFUIEquippable>();
