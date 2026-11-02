@@ -430,6 +430,27 @@ namespace PalaceMod
             this.viewport = viewport;
             this.content = content;
             frame.onNewSelection.AddListener(KeepSelectionVisible);
+            // A thin scroll bar right of the page, in the game's slider colours; shown only when the page overflows.
+            track = Bar("Scroll Bar", viewport.parent, new Color(ModStyle.Dim.r, ModStyle.Dim.g, ModStyle.Dim.b, 0.6f), 2f);
+            track.anchorMin = track.anchorMax = new Vector2(0f, 1f);
+            track.pivot = new Vector2(0.5f, 1f);
+            thumb = Bar("Thumb", track, ModStyle.Gold, 4f);
+            thumb.anchorMin = thumb.anchorMax = new Vector2(0.5f, 1f);
+            thumb.pivot = new Vector2(0.5f, 1f);
+        }
+
+        private RectTransform track, thumb;
+
+        private static RectTransform Bar(string name, Transform parent, Color color, float width)
+        {
+            var obj = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            obj.transform.SetParent(parent, false);
+            var image = obj.GetComponent<Image>();
+            image.color = color;
+            image.raycastTarget = false;
+            var rect = (RectTransform)obj.transform;
+            rect.sizeDelta = new Vector2(width, 0f);
+            return rect;
         }
 
         public void ResetTo(float y)
@@ -465,6 +486,16 @@ namespace PalaceMod
             }
             float y = Mathf.SmoothDamp(content.anchoredPosition.y, target, ref velocity, 0.12f, float.PositiveInfinity, Time.unscaledDeltaTime);
             content.anchoredPosition = new Vector2(content.anchoredPosition.x, y);
+
+            float max = MaxScroll, height = viewport.rect.height;
+            track.gameObject.SetActive(max > 1f);
+            if (max <= 1f) return;
+            // Track sits just right of the viewport, over its full height.
+            track.anchoredPosition = new Vector2(viewport.offsetMax.x + 16f, viewport.offsetMax.y);
+            track.sizeDelta = new Vector2(2f, height);
+            float thumbHeight = Mathf.Max(30f, height * height / content.rect.height);
+            thumb.sizeDelta = new Vector2(4f, thumbHeight);
+            thumb.anchoredPosition = new Vector2(0f, -(height - thumbHeight) * Mathf.Clamp01(y / max));
         }
     }
 }
