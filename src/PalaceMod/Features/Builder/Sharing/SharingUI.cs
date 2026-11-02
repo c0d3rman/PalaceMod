@@ -165,8 +165,8 @@ namespace PalaceMod.Builder.Sharing
             foreach (var p in packs)
             {
                 var entry = p;
-                string source = entry.Source switch { PackSource.BuiltIn => "built-in", PackSource.Plugin => "mod", _ => "yours" };
-                page.Row(entry.Pack.Name ?? entry.Id, source, () => Summary(entry), () => OpenPack(entry));
+                // The id tells same-named copies apart (imports of a pack you already have get "-2", "-3", ...).
+                page.Row(entry.Pack.Name ?? entry.Id, entry.Id, () => Summary(entry), () => OpenPack(entry));
             }
         }
 
@@ -203,7 +203,8 @@ namespace PalaceMod.Builder.Sharing
             var p = entry.Pack;
             string by = string.IsNullOrWhiteSpace(p.Author) ? "" : $" by {p.Author}";
             int assets = p.Assets?.Count ?? 0;
-            return $"{p.Units?.Count ?? 0} unit(s), {p.WaveSets?.Count ?? 0} wave set(s){(assets > 0 ? $", {assets} asset(s)" : "")}{by}. Id: {p.Id}";
+            string source = entry.Source switch { PackSource.BuiltIn => "Built into PalaceMod", PackSource.Plugin => "Installed by a mod", _ => "Yours" };
+            return $"{p.Units?.Count ?? 0} unit(s), {p.WaveSets?.Count ?? 0} wave set(s){(assets > 0 ? $", {assets} asset(s)" : "")}{by}. {source}; id {p.Id}.";
         }
 
         private static void Export(PackEntry entry, bool thunderstore)

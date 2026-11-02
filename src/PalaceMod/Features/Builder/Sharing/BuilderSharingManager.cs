@@ -166,6 +166,7 @@ namespace PalaceMod
                         return $"installed {entry.Id} at {entry.Folder}" + Describe(issues);
                     }
                     case "ui":
+                        if (!On) return "refused: the Builder is switched off";
                         if (args.Length > 1) SharingUI.OpenPack(FindPack(args));
                         else SharingUI.Open();
                         return "opened";
