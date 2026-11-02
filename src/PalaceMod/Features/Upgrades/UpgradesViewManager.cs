@@ -74,39 +74,6 @@ namespace PalaceMod
 
         private void RegisterDevCommands()
         {
-            DevCommands.Register("upgv.gold", "upgv.gold <n>          add n coins to the king's purse (test helper)", args =>
-            {
-                var player = PlayerInteraction.instance ?? throw new InvalidOperationException("not in a level");
-                int n = args.Length > 0 ? int.Parse(args[0]) : 100;
-                GameplayImpact.Mark("Dev: gold");
-                if (n >= 0) player.AddCoin(n); else player.SpendCoins(Math.Min(-n, player.Balance));
-                return $"balance {player.Balance}";
-            });
-            DevCommands.Register("upgv.upgrade", "upgv.upgrade <slot|nearest> [branch]  free build/upgrade of one level (test helper)", args =>
-            {
-                // Slot names have spaces ("Outpost Variant (1)"), so a trailing number is the branch.
-                int branch = 0;
-                var words = args.ToList();
-                if (words.Count > 1 && int.TryParse(words[words.Count - 1], out int b)) { branch = b; words.RemoveAt(words.Count - 1); }
-                var slot = FindSlot(words.Count > 0 ? string.Join(" ", words) : "nearest");
-                slot = UpgradeInfo.Owner(slot);
-                if (!slot.CanBeUpgraded) throw new InvalidOperationException($"{slot.name} can't be upgraded now (level {slot.Level})");
-                var next = slot.OwnUpgrades[slot.Level];
-                var choice = next.upgradeBranches[Mathf.Clamp(branch, 0, next.upgradeBranches.Count - 1)].choiceDetails;
-                GameplayImpact.Mark("Dev: free upgrade");
-                // Same as picking `choice` in the game's popup: OnUpgradeChoiceComplete for the selected upgrade step.
-                if (next.upgradeBranches.Count == 1)
-                {
-                    slot.TryToBuildOrUpgradeAndPay(null, _presentChoice: false);
-                }
-                else
-                {
-                    HarmonyLib.Traverse.Create(slot).Field("upgradeSelected").SetValue(next);
-                    slot.OnUpgradeChoiceComplete(choice);
-                    if (slot.buildingInteractor != null) slot.buildingInteractor.UpdateInteractionState();
-                }
-                return $"{slot.name} ({UpgradeInfo.BuildingName(slot)}) now level {slot.Level}, applied [{string.Join(",", slot.AppliedUpgrades)}]";
-            });
             DevCommands.Register("upgv.slots", "upgv.slots             list build slots with level, distance and upgrade info", _ =>
             {
                 var king = PlayerInteraction.instance ?? throw new InvalidOperationException("not in a level");
