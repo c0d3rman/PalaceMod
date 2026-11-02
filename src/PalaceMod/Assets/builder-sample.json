@@ -1,0 +1,68 @@
+{
+  "format": "palace-builder",
+  "version": 1,
+  "id": "palacemod.sample",
+  "name": "Sample: Goblin Night",
+  "author": "PalaceMod",
+  "description": "A small example pack: two custom enemies and a three-night wave set on Nordfels.",
+  "units": [
+    {
+      "id": "goblin-runner",
+      "side": "enemy",
+      "base": "vanilla:E Racer",
+      "name": "Goblin Runner",
+      "description": "Fast and fragile. Comes in packs.",
+      "visuals": { "tint": "#8fd14f", "scale": 0.8 },
+      "stats": { "maxHp": 7, "moveSpeed": 12 }
+    },
+    {
+      "id": "iron-brute",
+      "side": "enemy",
+      "base": "vanilla:E Melee",
+      "name": "Iron Brute",
+      "description": "A slow, heavily armoured soldier that hits buildings hard. Splits into two goblins when it falls.",
+      "visuals": { "tint": "#c9a227", "scale": 1.5 },
+      "stats": { "maxHp": 120, "moveSpeed": 2.5, "attackCooldown": 1.6 },
+      "weapon": {
+        "damage": [
+          { "tags": [], "add": 6 },
+          { "tags": ["Building"], "mult": 3 }
+        ]
+      },
+      "tags": { "add": ["ArmoredAgainstRanged"] },
+      "behaviours": [ { "type": "SpawnOnDeath", "unit": "goblin-runner" } ]
+    }
+  ],
+  "waveSets": [
+    {
+      "id": "goblin-night",
+      "name": "Goblin Night",
+      "host": "Nordfels",
+      "startingGold": 20,
+      "nights": [
+        {
+          "spawns": [
+            { "unit": "goblin-runner", "count": 8, "interval": 0.5, "line": "Forest", "gold": 6 },
+            { "unit": "iron-brute", "count": 1, "delay": 4, "line": "Main Bridge", "gold": 4 }
+          ]
+        },
+        {
+          "spawns": [
+            { "unit": "goblin-runner", "count": 14, "interval": 0.4, "line": "Forest", "gold": 8 },
+            { "unit": "vanilla:E Melee", "count": 6, "interval": 1, "line": "Right Bridge", "gold": 5 },
+            { "unit": "iron-brute", "count": 2, "interval": 6, "delay": 8, "line": "Main Bridge", "gold": 6 }
+          ]
+        },
+        {
+          "difficulty": 1.2,
+          "spawns": [
+            { "unit": "goblin-runner", "count": 20, "interval": 0.3, "line": "Forest", "gold": 10 },
+            { "unit": "goblin-runner", "count": 10, "interval": 0.3, "delay": 10, "line": "Right Bridge", "gold": 5 },
+            { "unit": "vanilla:E Flyer", "count": 4, "interval": 2, "line": "Fly - Pond", "gold": 4 },
+            { "unit": "iron-brute", "count": 3, "interval": 5, "delay": 5, "line": "Main Bridge", "gold": 10, "elite": true }
+          ]
+        }
+      ]
+    }
+  ]
+}
