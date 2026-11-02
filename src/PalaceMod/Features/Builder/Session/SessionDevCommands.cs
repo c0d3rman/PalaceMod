@@ -55,6 +55,8 @@ namespace PalaceMod.Builder
                     {
                         var gs = LocalGamestate.Instance ?? throw new InvalidOperationException("not in a level");
                         bool win = args.Length < 2 || args[1].ToLowerInvariant() != "lose";
+                        // A forced result isn't a real run: mark it so its score record lists the assist.
+                        GameplayImpact.Mark("Dev: forced match end");
                         gs.SetState(win ? LocalGamestate.State.AfterMatchVictory : LocalGamestate.State.AfterMatchDefeat);
                         return win ? "victory" : "defeat";
                     }
