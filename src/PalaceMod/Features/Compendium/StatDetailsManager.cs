@@ -65,6 +65,15 @@ namespace PalaceMod
                 }
                 return "equipped: " + string.Join(", ", perks.CurrentlyEquipped.Select(e => $"{CompendiumStats.EquippableName(e)} ({e.name})"));
             });
+            DevCommands.Register("wave", "wave <n>               make night n the next night (by day; dev only)", args =>
+            {
+                var spawner = EnemySpawner.instance ?? throw new System.InvalidOperationException("not in a level");
+                int n = int.Parse(args[1]);
+                if (n < 1 || n > spawner.WaveCount) throw new System.ArgumentException($"night must be 1..{spawner.WaveCount}");
+                AccessTools.Field(typeof(EnemySpawner), "wavenumber").SetValue(spawner, n - 2);
+                GameplayImpact.Mark("Dev: skipped to a night");
+                return $"next night: {n}";
+            });
             DevCommands.Register("tooltip", "tooltip                print the pause menu's open tooltip (title, description, stat rows)", _ => DescribeTooltip());
         }
 

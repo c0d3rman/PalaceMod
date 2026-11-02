@@ -113,7 +113,7 @@ namespace PalaceMod
                         var body = StatBlock(CompendiumStats.Enemy(g.Prefab, g.Elite, waveIndex), true);
                         if (lines.Count > 0) body += "\n\nFrom: " + string.Join(", ", lines);
                         return body;
-                    });
+                    }, icon: stats.Icon);
                 }
                 if (gold > 0) page.Row("Gold carried", Coin(gold), "Gold dropped by this night's enemies.");
             }
@@ -155,7 +155,7 @@ namespace PalaceMod
                     if (!string.IsNullOrEmpty(description)) body.Insert(0, description + "\n\n");
                     body.Append("\n\nNights: ").Append(string.Join(", ", nights[p]));
                     return body.ToString();
-                });
+                }, icon: stats.Icon);
             }
         }
 
@@ -177,7 +177,7 @@ namespace PalaceMod
                     var description = marker != null ? marker.UnitDescription : "";
                     var block = StatBlock(CompendiumStats.Unit(unit, wave), false);
                     return string.IsNullOrEmpty(description) ? block : description + "\n\n" + block;
-                });
+                }, icon: stats.Icon);
             }
         }
 
@@ -258,7 +258,7 @@ namespace PalaceMod
                         var body = CompendiumStats.Translate(item.LOCIDENTIFIER_DESCRIPTION);
                         if (item is EquippableMutation mutation) body += $"\n\nScore on a win: {CompendiumStats.Percent(mutation.scoreMultiplyerOnWin)}";
                         return body;
-                    });
+                    }, icon: unlocked ? item.icon : null);
                 }
             }
             var all = perks.allEquippables.Where(e => e != null).ToList();
