@@ -94,11 +94,11 @@ namespace PalaceMod
         /// <summary>Raised when a keybind is registered (for a UI that is already built).</summary>
         public static event Action<Keybind> Registered;
 
-        /// <summary>How keys are read; Unity's Input by default.</summary>
-        public static IKeybindBackend Backend { get; set; } = UnityInput;
-
         /// <summary>Reads the configured KeyboardShortcut with Unity's Input; the fallback for other backends.</summary>
         internal static readonly IKeybindBackend UnityInput = new UnityInputBackend();
+
+        /// <summary>How keys are read; Unity's Input until KeybindsManager installs the Rewired backend.</summary>
+        public static IKeybindBackend Backend { get; set; } = UnityInput;
 
         /// <summary>Registers a keybind; registering the same section and id again returns the existing handle.</summary>
         /// <param name="section">The owning feature's FeatureSection, so the keybind follows its Enabled switch.</param>

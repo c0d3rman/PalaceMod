@@ -47,7 +47,16 @@ namespace PalaceMod
         {
             foreach (var rebinder in UnityEngine.Object.FindObjectsOfType<KeyRebinder>())
             {
-                if (rebinder.isActiveAndEnabled) rebinder.RegenerateButtons();
+                if (!rebinder.isActiveAndEnabled) continue;
+                // The rebuild destroys the selected row; select its replacement, or the tab if it's gone.
+                var frame = rebinder.GetComponentInParent<UIFrame>();
+                var selected = frame?.CurrentSelection?.GetComponentInParent<ControlMapButton>();
+                var key = selected != null && rowAction(selected) != null ? (rowAction(selected).id, rowAxisMode(selected)) : ((int, ControlMapButton.AxisMode)?)null;
+                bool wasInList = frame?.CurrentSelection != null && frame.CurrentSelection.transform.IsChildOf(rebinder.buttonParent);
+                rebinder.RegenerateButtons();
+                if (frame == null || !wasInList) continue;
+                var replacement = key == null ? null : rebinder.buttons.FirstOrDefault(b => rowAction(b)?.id == key.Value.Item1 && rowAxisMode(b) == key.Value.Item2);
+                frame.Select(replacement != null ? replacement.target : rebinder.tabButton);
             }
         }
 
@@ -251,6 +260,8 @@ namespace PalaceMod
                         if (other.actionId == actionId || !other.enabled || (!mine && !byAction.ContainsKey(other.actionId))) continue;
                         if (other.elementType != element.elementType || other.elementIdentifierId != element.elementIdentifierId) continue;
                         if (map.controllerType == ControllerType.Keyboard && other.modifierKeyFlags != element.modifierKeyFlags) continue;
+                        // Opposite halves of one axis (wheel up / wheel down, stick left / right) are separate inputs.
+                        if (element.axisRange != AxisRange.Full && other.axisRange != AxisRange.Full && element.axisRange != other.axisRange) continue;
                         string name = ActionLabel(other);
                         if (name != null && !names.Contains(name)) names.Add(name);
                     }
