@@ -102,6 +102,26 @@ ModTooltip.Attach(someGameButton, "Title", () => "Body");   // shown while selec
 - `GameWidgets.Clone/Button/Text` are the low-level cloners, for widgets the kit doesn't wrap.
 - Dev: `dev.py cmd "uidump <pause|active|hud|tooltip|name> [depth]"` prints a live UI hierarchy with fonts, colours and sprites; `dev.py cmd "uikit frame|notify|buttons <n>|tooltip"` exercises the kit.
 
+## Savestates API (Features/SaveStates)
+
+`SaveStates` (static) captures and restores whole mid-level moments; build "retry this night"-style features on it instead of touching the game's match save.
+
+```csharp
+SaveStates.List(level)                  // SaveStateInfo list, newest first (level defaults to SaveStates.CurrentLevel)
+SaveStates.Latest(level, SaveStateKind.AutoDusk)   // e.g. right before the last night started
+SaveStates.CanCapture(out reason); SaveStates.Capture(name, kind)   // throws InvalidOperationException(reason)
+SaveStates.CanRestore(state, out reason); SaveStates.Restore(state) // async: ~1 s scene reload, then Restored fires
+SaveStates.Captured / AutoCaptured / Restoring / Restored / Changed  // events
+SaveStates.Last, SaveStates.IsRestoring, Delete, Rename, Overwrite
+```
+
+- Kinds: `Manual`, `Quick` (one slot, overwritten), `AutoDawn` (1 s after sunrise), `AutoDusk` (in `SwitchToNight`, still daytime), `BeforeLoad` (undo state taken before every load). `Wave` is `EnemySpawner.Wavenumber` at capture (-1 on day 1, n during night n+1 and the day after it); `NightNumber`/`Moment` are the player-facing versions.
+- Files: `BepInEx/PalaceMod/SaveStates/<level>/<id>.json` + `.png`, never the game's save folder. Restore only works into the same level, Classic mode, not the tutorial, while `InMatch`.
+- How it works: capture runs every `SaveLoadEntity.OnSave` into a scratch `MatchSave` (the run's real one is swapped back untouched) and adds what that format misses (night progress and spawn timers, enemies, units, king, ground coins, per-day stats, `Random.state`). Restore injects that `MatchSave` in memory, restarts the level like the game's retry-day, then applies the rest; afterwards the run's in-memory `MatchSave` is the captured run's last dawn, so native retry-day still means "this run's last dawn".
+- Every load calls `GameplayImpact.Mark("Savestate loaded")`; with "Protect real save" on, the game's `MatchSaveLoadHandler.SaveRun` is skipped for the rest of that run (until `GameplayImpact.Reset`).
+- Not restored: projectiles and effects in flight, enemy/unit AI targets and attack timers, units following the king (they stay where they were), buffs/slows, player units the level spawns at runtime (clones), level-scripted events beyond what the game's own save keeps.
+- Dev: `dev.py cmd "savestate save [name] | quick | load <id|name|quick|last> | list | dump | delete <id|name> | menu"`; `dump` prints a one-line summary of the live state (also logged on every capture and load) for comparing.
+
 ## Code conventions
 
 - `Plugin.Update` isolates managers from each other's exceptions, and each distinct error is logged once. A manager whose `Awake` or `Start` throws is dropped, along with its patches.
