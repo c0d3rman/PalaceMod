@@ -10,7 +10,7 @@ python3 scripts/dev.py setup         # once per checkout/worktree: restores tool
 python3 scripts/dev.py run           # build -> stop game -> install -> launch -> wait for BepInEx -> print errors
 python3 scripts/dev.py logs --errors # unique errors with stack traces from the current game session
 python3 scripts/dev.py screenshot    # in-game frame capture (works while unfocused); prints the PNG path
-python3 scripts/dev.py stop          # quit the game, restore the player's display settings and config, release the lease
+python3 scripts/dev.py stop          # quit your game and release your pool instance (or the --real lease)
 python3 scripts/dev.py cmd "<command>"  # drive a dev launch: load levels, start nights, fake input, open/navigate menus
 python3 scripts/dev.py config get|set <Section>.<Key> [value]  # read/edit PalaceMod.cfg; the game reloads it live
 python3 scripts/dev.py land --body-file pr.md  # merge origin/main, push, open and merge the PR (see Landing)
@@ -20,17 +20,18 @@ Dev launches are windowed, muted (`--sound` to keep audio) and hand focus back t
 
 A feature is not done until `run` reports `PalaceMod loaded: yes` and no PalaceMod errors. The one expected error is `HookGenPatcher ... Could not load file or assembly 'MonoMod'`, which comes from a BepInEx patcher and is harmless.
 
-Always finish with `dev.py stop`, so the game isn't left running and the player's settings are restored.
+Always finish with `dev.py stop`, so the game isn't left running and others can use the instance.
 
-## The game lease
+## The game pool
 
-Many agents share one game install (the game, the installed DLL, `BepInEx/config`), so it's leased to one checkout at a time.
+Agents test on a pool of cloned game installs ("instances", 6 by default), so several can run the game at once.
 
-- `run` (also `launch`, `install`, `lease acquire`) takes the lease and you keep it through build, install, launch and testing until `stop` (or `lease release`). `cmd`, `screenshot` and `config` need the lease.
-- If another checkout holds it, `run` waits in a FIFO queue and prints your position. Run it in a background shell so you're woken when it finishes. `--wait SECONDS` caps the wait (default 1 h, `0` = don't wait). If the lease doesn't come free in time, `run` exits with code 75. `lease status` shows the holder, the queue and idle times.
-- Hold the game briefly. Batch your tests, then `stop` immediately; don't hold it while you write code. Every dev.py call you make refreshes the lease. After 10 min idle it expires: the next dev.py call from any checkout stops your game and frees it.
-- `BepInEx/config/PalaceMod.cfg` is also the player's real config. Taking the lease snapshots `BepInEx/config`, and `stop` or expiry puts it back exactly. Each `run` starts the game from default settings; use `--set "Section.Key=value"` (repeatable) to start with other values, or `--keep-config`. Never edit the cfg without the lease; use `dev.py config set`.
-- Use `--force` (on `stop` or `lease release`) only if the holder is definitely gone.
+- `run` (also `launch`, `install`, `lease acquire`) takes a free instance and you keep it until `stop` (or `lease release`). `cmd`, `screenshot`, `config` and `logs` then go to your instance. Nothing else changes in how you call dev.py.
+- If every instance is busy, `run` waits in a FIFO queue and prints your position. Run it in a background shell so you're woken when it finishes. `--wait SECONDS` caps the wait (default 1 h, `0` = don't wait); if none frees up in time, `run` exits with code 75. `lease status` shows every instance's holder, the queue and idle times.
+- Hold an instance briefly: batch your tests, then `stop`; don't hold it while you write code. Every dev.py call refreshes your lease. After 10 min idle it expires and the next dev.py call from any checkout stops your game and frees it.
+- An instance is fully isolated: its own executable (`ThronefallDev<N>`), BepInEx folder (DLL, `PalaceMod.cfg`, log, command channel), preferences domain and save folder, seeded from a copy of the player's saves and preferences when you take it. Each `run` starts the mod from default settings; use `--set "Section.Key=value"` (repeatable) for other values, or `--keep-config`. Edit settings with `dev.py config set`.
+- Instances are rebuilt automatically when the game or its loader changes. `dev.py instances create [COUNT] | list | reset [N|all] | remove [N|all]` manages them by hand.
+- `--real` uses the real install instead, behind its own single lease (which also snapshots and restores the player's `BepInEx/config`). Use `--solo` (implies `--real`) for frame-time or other performance measurements: it waits until every pool instance is released and holds off new pool leases until you `stop`.
 
 ## Landing
 
@@ -49,7 +50,7 @@ python3 scripts/dev.py land --body-file /path/to/pr-body.md [--title "Short titl
 - `setup` also adds GC tuning to `run_bepinex.sh` (`GC_FREE_SPACE_DIVISOR`, `GC_INITIAL_HEAP_SIZE`) and per-collection timings in `BepInEx/gc-stats.log`. `PerformanceManager` logs frame spikes and a frame-time summary to the BepInEx log.
 - Steam must be running. `launch` starts it if it isn't.
 - Dev launches set `PALACEMOD_DEV=1`, which turns on `Core/DevToolsManager.cs`: the game keeps running in the background and screenshots are taken on request. Dev launches are windowed unless you pass `--fullscreen`.
-- Every launch first backs up save files and preferences to `~/Documents/Misc/Thronefall Backup/PalaceMod dev/backups/saves/`, keeping the last 30.
+- Every `--real` launch first backs up save files and preferences to `~/Documents/Misc/Thronefall Backup/PalaceMod dev/backups/saves/`, keeping the last 30.
 
 ## Verifying in-game behavior
 
