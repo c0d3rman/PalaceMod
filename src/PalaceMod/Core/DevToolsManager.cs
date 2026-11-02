@@ -34,6 +34,7 @@ namespace PalaceMod
             "ui [up|down|left|right|apply|close]   navigate the open menu like a controller; prints the selection",
             "mute [off]             mute or unmute the game (dev launches start muted unless PALACEMOD_SOUND=1)",
             "night                  start the next night (wave) now",
+            "pause                  open the in-match pause menu",
             "timescale <x>          set Time.timeScale",
             "resolutions            list the current and available display modes",
             "setres <w> <h> <hz>    switch display mode (keeps the fullscreen mode)",
@@ -212,6 +213,10 @@ namespace PalaceMod
                     if (DayNightCycle.Instance == null) throw new InvalidOperationException("not in a level");
                     DayNightCycle.Instance.SwitchToNight();
                     return "";
+                case "pause":
+                    if (DayNightCycle.Instance == null || UIFrameManager.instance == null) throw new InvalidOperationException("not in a level");
+                    UIFrameManager.instance.InMatchPause();
+                    return DescribeSelection();
                 case "timescale":
                     if (args.Length < 2) throw new ArgumentException("usage: timescale <x>");
                     Time.timeScale = float.Parse(args[1]);
