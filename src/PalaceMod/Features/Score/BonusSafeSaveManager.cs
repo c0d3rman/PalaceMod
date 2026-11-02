@@ -76,6 +76,7 @@ namespace PalaceMod
 
         private static GameObject hintObject;
         private static TextMeshProUGUI hintText;
+        private static RectTransform hintEmblem;
 
         private static BonusSafeSaveManager Instance => Feature<BonusSafeSaveManager>.Instance;
 
@@ -406,10 +407,12 @@ namespace PalaceMod
         private void ShowHint(PauseUILoadoutHelper pause)
         {
             string text = HintText();
-            if (!pauseHint.Value || text == null || pause == null || pause.backToMenuElement == null) { HideHint(); return; }
+            if (!pauseHint.Value || text == null || pause == null) { HideHint(); return; }
             if (hintText == null || hintObject == null || hintObject.transform.parent != pause.transform) BuildHint(pause);
+            if (hintText == null) return;
             hintText.text = text;
             hintObject.SetActive(true);
+            if (hintEmblem != null) hintEmblem.anchoredPosition = new Vector2(-hintText.preferredWidth / 2f - 16f, 15f);
         }
 
         private static string HintText()
@@ -418,34 +421,34 @@ namespace PalaceMod
             if (saveLoad == null || !Applicable || save == null || save.hadRestarts) return null;
             // No save for this run yet (day 1): quitting just starts the level over, which costs nothing.
             if (!sessionHasSave || memoryMap != sessionMap || memoryHash == null) return null;
-            if (sessionClean) return "<color=#9fd08a>Bonus-safe:</color> nothing has changed since this day began, so you can quit and continue later without losing the no-restart bonus.";
-            return $"<color=#e0a060>Quitting now forfeits the no-restart bonus</color> ({dirtyReason ?? "this day is under way"}).";
+            if (sessionClean) return $"<color=#{ColorUtility.ToHtmlStringRGB(ModStyle.Accent)}>Bonus-safe:</color> you can quit now and continue later without losing the no-restart bonus.";
+            return $"<color=#{ColorUtility.ToHtmlStringRGB(ModStyle.KindColor(NotifyKind.Warning))}>Quitting now forfeits the no-restart bonus</color> ({dirtyReason ?? "this day is under way"}).";
         }
 
         private static void BuildHint(PauseUILoadoutHelper pause)
         {
-            HideHint();
             if (hintObject != null) UnityEngine.Object.Destroy(hintObject);
-            var source = pause.nightPreviewText;
-            hintObject = new GameObject("PalaceMod BonusSafeHint", typeof(RectTransform));
-            hintObject.transform.SetParent(pause.transform, false);
-            var rect = (RectTransform)hintObject.transform;
-            rect.anchorMin = new Vector2(0.5f, 0f);
-            rect.anchorMax = new Vector2(0.5f, 0f);
+            hintObject = null;
+            hintText = null;
+            hintEmblem = null;
+            try
+            {
+                hintText = GameWidgets.Text(pause.transform, "PalaceMod BonusSafeHint", "", ModStyle.BodyFont, 26f, ModStyle.Gold, TextAlignmentOptions.Center);
+            }
+            catch (InvalidOperationException e)
+            {
+                Plugin.Logger.LogWarning($"Bonus-safe saves: can't show the pause hint: {e.Message}");
+                return;
+            }
+            hintObject = hintText.gameObject;
+            var rect = hintText.rectTransform;
+            rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0f);
             rect.pivot = new Vector2(0.5f, 0f);
             rect.anchoredPosition = new Vector2(0f, 40f);
-            rect.sizeDelta = new Vector2(1100f, 60f);
-            hintText = hintObject.AddComponent<TextMeshProUGUI>();
-            if (source != null)
-            {
-                hintText.font = source.font;
-                hintText.fontSharedMaterial = source.fontSharedMaterial;
-                hintText.color = source.color;
-            }
-            hintText.fontSize = 24;
-            hintText.alignment = TextAlignmentOptions.Center;
-            hintText.enableWordWrapping = true;
-            hintText.raycastTarget = false;
+            rect.sizeDelta = new Vector2(1400f, 30f);
+            hintText.enableWordWrapping = false;
+            hintEmblem = ModStyle.AddEmblem(rect);
+            hintEmblem.anchorMin = hintEmblem.anchorMax = new Vector2(0.5f, 0f);
         }
 
         private static void HideHint()
