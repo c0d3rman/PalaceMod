@@ -104,19 +104,16 @@ namespace PalaceMod.Profiles
             ReloadGameState();
         }
 
-        // A failed change was undone by the store, so the game's state still matches the files. If undoing it failed
-        // too, the files are in an unknown state: stop offering changes and re-read them so the game shows what's there.
+        // A failed change was rolled back or, past its commit point, finished by the store; either way re-read the files
+        // so the game's progression matches the active profile. If that recovery failed too, stop offering changes.
         private void Guarded(Action change)
         {
             try { change(); }
             catch (ProfileStore.OperationFailedException e)
             {
                 Plugin.Logger.LogError($"Profiles: {e.Message}\n{e.InnerException}");
-                if (Store.Pending)
-                {
-                    Broken = e.Message;
-                    ReloadGameState();
-                }
+                if (Store.Pending) Broken = e.Message;
+                ReloadGameState();
                 throw new InvalidOperationException(e.Message);
             }
         }

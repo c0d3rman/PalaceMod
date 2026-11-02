@@ -202,12 +202,14 @@ namespace PalaceMod.Profiles
             catch (Exception e)
             {
                 log($"Profiles: operation failed, undoing it: {e.Message}");
-                try { RecoverIfNeeded(); }
+                string outcome;
+                try { outcome = RecoverIfNeeded() ?? "Nothing was changed"; }
                 catch (Exception recovery)
                 {
                     throw new OperationFailedException($"{e.Message}; undoing it also failed ({recovery.Message}). Restart the game to retry the recovery.", e);
                 }
-                throw new OperationFailedException($"{e.Message}. Nothing was changed.", e);
+                // Recovery may have rolled back or (past the "applied" stage) finished the change; say which.
+                throw new OperationFailedException($"{e.Message}. {outcome}.", e);
             }
         }
 
@@ -233,12 +235,27 @@ namespace PalaceMod.Profiles
             return backup;
         }
 
+        // Writes a new profile's snapshot, then lists it; if writing fails the profile is taken back out.
+        private void Publish(Profile profile, Action writeSnapshot)
+        {
+            try
+            {
+                writeSnapshot();
+                SaveIndex();
+            }
+            catch
+            {
+                LoadIndex().profiles.Remove(profile);
+                DeleteDirectory(ProfileDir(profile.id));
+                throw;
+            }
+        }
+
         /// <summary>Adds a profile with no progression. Doesn't switch to it.</summary>
         public Profile CreateFresh(string name)
         {
             var profile = AddProfile(name);
-            ReplaceSnapshot(ProfileDir(profile.id), dir => WriteSnapshot(dir, profile.id, [], EmptyPrefs()));
-            SaveIndex();
+            Publish(profile, () => ReplaceSnapshot(ProfileDir(profile.id), dir => WriteSnapshot(dir, profile.id, [], EmptyPrefs())));
             log($"Profiles: created \"{profile.name}\"");
             return profile;
         }
@@ -249,14 +266,16 @@ namespace PalaceMod.Profiles
             var idx = LoadIndex();
             var source = idx.profiles.FirstOrDefault(p => p.id == sourceId) ?? throw new ArgumentException($"no profile {sourceId}");
             var profile = AddProfile(name);
-            if (source.id == idx.active)
-                ReplaceSnapshot(ProfileDir(profile.id), dir => WriteSnapshot(dir, profile.id, LiveFiles(), prefs.Read()));
-            else
+            Publish(profile, () =>
             {
-                VerifySnapshot(ProfileDir(source.id));
-                ReplaceSnapshot(ProfileDir(profile.id), dir => CopySnapshot(ProfileDir(source.id), dir));
-            }
-            SaveIndex();
+                if (source.id == idx.active)
+                    ReplaceSnapshot(ProfileDir(profile.id), dir => WriteSnapshot(dir, profile.id, LiveFiles(), prefs.Read()));
+                else
+                {
+                    VerifySnapshot(ProfileDir(source.id));
+                    ReplaceSnapshot(ProfileDir(profile.id), dir => CopySnapshot(ProfileDir(source.id), dir));
+                }
+            });
             log($"Profiles: duplicated \"{source.name}\" as \"{profile.name}\"");
             return profile;
         }

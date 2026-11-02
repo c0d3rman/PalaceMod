@@ -364,7 +364,12 @@ namespace PalaceMod.Profiles
                 else if (c == '\n' || c == '\r') { EndRename(true); return; }
                 else if (!char.IsControl(c) && typed.Length < ProfileStore.MaxNameLength) typed += c;
             }
-            if (Input.GetKeyDown(KeyCode.Escape)) { EndRename(false); return; }
+            // Esc, or the game's Cancel action from a controller (which can't type) so it isn't stuck here. Only from a
+            // controller: the keyboard's Cancel binding could be a key that's being typed.
+            var player = Plugin.Input;
+            bool padCancel = player != null && player.GetButtonDown("Cancel")
+                && player.controllers.GetLastActiveController()?.type == Rewired.ControllerType.Joystick;
+            if (Input.GetKeyDown(KeyCode.Escape) || padCancel) { EndRename(false); return; }
             if (Input.GetKeyDown(KeyCode.KeypadEnter)) { EndRename(true); return; }
             ShowTyped();
         }
