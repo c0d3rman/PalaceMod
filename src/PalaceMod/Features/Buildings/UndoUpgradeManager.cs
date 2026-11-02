@@ -59,6 +59,7 @@ namespace PalaceMod
         private static readonly AccessTools.FieldRef<PlayerInteraction, int> balance = AccessTools.FieldRefAccess<PlayerInteraction, int>("balance");
         private static readonly AccessTools.FieldRef<DayNightCycle, List<DayNightCycle.IDaytimeSensitive>> daytimeObjects =
             AccessTools.FieldRefAccess<DayNightCycle, List<DayNightCycle.IDaytimeSensitive>>("daytimeSensitiveObjects");
+        private static readonly AccessTools.FieldRef<CommandUnits, List<AutoAttack>> attacksToEnable = AccessTools.FieldRefAccess<CommandUnits, List<AutoAttack>>("autoAttacksToEnable");
         private static readonly FieldInfo towerUpgradeTower = AccessTools.Field(typeof(TowerUpgrade), "autoAttackTower");
         private static readonly FieldInfo upgradeUnitsUnits = AccessTools.Field(typeof(UpgradeUnitsOnEnable), "units");
 
@@ -200,6 +201,7 @@ namespace PalaceMod
             public readonly List<(GameObject go, Type type, ObjectState state)> Recreate = [];
             public readonly Dictionary<TaggedObject, List<TagManager.ETag>> UnitTags = [];
             public readonly List<LastStandPerk> Registered = [];
+            public readonly List<(Component owner, UnityEngine.Events.UnityEventBase evt, object[] calls)> Events = [];
 
             public bool Contains(BuildSlot s) => Slots.Any(x => x.Slot == s);
         }
@@ -285,7 +287,13 @@ namespace PalaceMod
             {
                 action.Transforms[go.transform] = new TransformState(go.transform);
                 foreach (var c in go.GetComponents<MonoBehaviour>())
-                    if (c != null && Capturable(c)) action.States[c] = (go, go.activeInHierarchy, ObjectState.Capture(c));
+                {
+                    if (c == null) continue;
+                    if (Capturable(c)) action.States[c] = (go, go.activeInHierarchy, ObjectState.Capture(c));
+                    if (go.activeInHierarchy && IsGameType(c.GetType()))
+                        foreach (var f in EventHooks.EventsOf(c.GetType()))
+                            if (f.GetValue(c) is UnityEngine.Events.UnityEventBase e) action.Events.Add((c, e, EventHooks.Calls(e)));
+                }
             }
             pending = action;
             OpenWindow(action, initial: true);
@@ -420,6 +428,19 @@ namespace PalaceMod
                 if (wasActive) MarkUnrevertible(action, "it removed something that already existed");
                 else if (go != null && HasOnEnable(state.Target.GetType())) action.Recreate.Add((go, state.Target.GetType(), state));
             }
+            // A new component that subscribed (in Start) to an event of something that stays around after undo would keep
+            // acting while switched off: the Armored Tower's shield listens to the tower's damage. The building's own
+            // upgrade events are fine: they only fire when it's upgraded again, which switches the listener back on.
+            foreach (var (owner, evt, before) in action.Events)
+            {
+                if (owner == null || owner is BuildSlot) continue;
+                foreach (var call in EventHooks.Calls(evt))
+                {
+                    if (Array.IndexOf(before, call) >= 0) continue;
+                    if (EventHooks.Target(call) is Component listener && listener != null && action.NewObjects.Contains(listener.gameObject))
+                        MarkUnrevertible(action, $"its {listener.GetType().Name} stays hooked to the {owner.name}");
+                }
+            }
             foreach (var go in action.NewObjects)
             {
                 if (go == null) continue;
@@ -455,6 +476,9 @@ namespace PalaceMod
             if (root == null) { stack.Clear(); return Say("Nothing to undo today.", NotifyKind.Info); }
             var player = PlayerInteraction.instance;
             if (player == null) return "no player";
+            // Refreshing the cost displays would drop coins already put into another payment.
+            if (TagManager.instance != null && TagManager.instance.playerBuildingInteractors.Any(i => i != null && i.costDisplay != null && filledCoins(i.costDisplay) > 0))
+                return Say("Finish or cancel the payment first.", NotifyKind.Info);
             if (requireNear && Vector3.Distance(Flat(player.transform.position), Flat(ClosestPoint(root, player.transform.position))) > NearDistance)
                 return Say($"Walk back to the {action.Name} to undo {Lower(action.Label)}.", NotifyKind.Info);
             if (action.Slots.Any(s => s.Slot == null) || root.Level != action.LevelAfter)
@@ -487,6 +511,14 @@ namespace PalaceMod
                     var p = go != null ? go.GetComponent<PathfindMovementPlayerunit>() : null;
                     if (p != null && command.PlayerUnitsCommanding.Remove(p))
                     {
+                        // Selected recruits have their attacks switched off until they're placed; placing switches
+                        // them back on, removal doesn't.
+                        var pendingAttacks = attacksToEnable(command);
+                        foreach (var attack in p.GetComponents<AutoAttack>())
+                        {
+                            pendingAttacks.Remove(attack);
+                            attack.enabled = true;
+                        }
                         command.OnUnitRemove(p);
                         if (command.PlayerUnitsCommanding.Count == 0) command.commanding = false;
                     }

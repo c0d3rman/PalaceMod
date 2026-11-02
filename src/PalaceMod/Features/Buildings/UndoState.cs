@@ -213,6 +213,49 @@ namespace PalaceMod
         };
     }
 
+    /// <summary>Listeners added to a UnityEvent at runtime (AddListener), read through Unity's internals.</summary>
+    internal static class EventHooks
+    {
+        private const BindingFlags Any = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        private static readonly FieldInfo calls = typeof(UnityEventBase).GetField("m_Calls", Any);
+        private static readonly FieldInfo runtimeCalls = calls?.FieldType.GetField("m_RuntimeCalls", Any);
+        private static readonly Dictionary<Type, FieldInfo> delegateFields = new();
+        private static readonly Dictionary<Type, FieldInfo[]> eventFields = new();
+
+        public static bool Available => runtimeCalls != null;
+
+        /// <summary>The UnityEvent fields of a component type.</summary>
+        public static FieldInfo[] EventsOf(Type type)
+        {
+            if (eventFields.TryGetValue(type, out var cached)) return cached;
+            var list = new List<FieldInfo>();
+            for (var t = type; t != null && t != typeof(MonoBehaviour); t = t.BaseType)
+                foreach (var f in t.GetFields(Any | BindingFlags.DeclaredOnly))
+                    if (typeof(UnityEventBase).IsAssignableFrom(f.FieldType)) list.Add(f);
+            return eventFields[type] = list.ToArray();
+        }
+
+        public static object[] Calls(UnityEventBase e)
+        {
+            if (e == null || !Available || calls.GetValue(e) is not { } list || runtimeCalls.GetValue(list) is not IList items) return [];
+            var copy = new object[items.Count];
+            items.CopyTo(copy, 0);
+            return copy;
+        }
+
+        /// <summary>The object a listener call runs on (the component for a method group), or null.</summary>
+        public static object Target(object call)
+        {
+            var type = call.GetType();
+            if (!delegateFields.TryGetValue(type, out var field))
+            {
+                for (var t = type; t != null && field == null; t = t.BaseType) field = t.GetField("Delegate", Any | BindingFlags.DeclaredOnly);
+                delegateFields[type] = field;
+            }
+            return field?.GetValue(call) is Delegate d ? d.Target : null;
+        }
+    }
+
     /// <summary>A transform's placement and active flag.</summary>
     internal readonly struct TransformState
     {
