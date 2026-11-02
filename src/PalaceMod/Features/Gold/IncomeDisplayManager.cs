@@ -45,6 +45,25 @@ namespace PalaceMod
             DevCommands.Register("income", "income [build [passes]|pause|preview <+n|-n>]   show the income breakdown; build every slot; open the pause menu on the income tooltip; cycle the previewed night", RunCommand);
         }
 
+        protected override void OnFeatureEnabled() => RefreshOpenDisplays();
+        protected override void OnFeatureDisabled() => RefreshOpenDisplays();
+
+        private static readonly AccessTools.FieldRef<PauseUILoadoutHelper, int> previewWave = AccessTools.FieldRefAccess<PauseUILoadoutHelper, int>("currentPreviewWavenumber");
+
+        /// <summary>Re-fills any income display on screen (with or without the patches, whichever is current) and
+        /// redraws open tooltips, so toggling the feature with the pause menu open takes effect at once.</summary>
+        private static void RefreshOpenDisplays()
+        {
+            var helper = UnityEngine.Object.FindObjectOfType<PauseUILoadoutHelper>();
+            if (helper == null) return;
+            foreach (var display in UnityEngine.Object.FindObjectsOfType<TFUIIncomeDisplay>())
+            {
+                breakdowns.Remove(display);
+                display.UpdateData(previewWave(helper));
+            }
+            foreach (var tooltip in UnityEngine.Object.FindObjectsOfType<PerkSelectionTooltipHelper>()) tooltip.UpdateTooltip();
+        }
+
         /// <summary>Dawns between the coming one and the one after the previewed night (the pause menu can look ahead).</summary>
         private static int DawnsAhead(int previewWave)
         {
