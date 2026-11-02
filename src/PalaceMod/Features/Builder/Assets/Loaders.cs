@@ -380,8 +380,8 @@ namespace PalaceMod.Builder.Assets
 
     internal static class MeshBuilder
     {
-        /// <param name="colors">Vertex colours; required, because the game's unit shader (FlatKit Stylized Surface)
-        /// multiplies by them and a mesh without them renders black. White = the material's own colour.</param>
+        /// <param name="colors">Vertex colours (white when the file has none). The game's `Enemy` material doesn't use
+        /// them today; they're kept so a vertex-colour material could.</param>
         public static Mesh Build(string name, List<Vector3> positions, List<Vector2> uvs, List<Vector3> normals, List<Color> colors, List<int> triangles)
         {
             var mesh = new Mesh { name = name };
