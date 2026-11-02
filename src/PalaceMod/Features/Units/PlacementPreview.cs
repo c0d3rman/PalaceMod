@@ -9,10 +9,10 @@ namespace PalaceMod
 {
     internal sealed class PlacementPreview
     {
-        private static readonly Color NormalColor = new(1f, 1f, 1f, 0.75f);
+        private static readonly Color NormalColor = new(1f, 1f, 1f, 0.9f);
         private static readonly Color HoldColor = new(1f, 0.82f, 0.3f, 0.9f);
-        private const float RingSize = 1.1f;
-        private const float ArrowSize = 1.4f;
+        private const float RingSize = 1.7f;
+        private const float ArrowSize = 2.2f;
         private const float Lift = 0.08f;
 
         private readonly List<GameObject> rings = [];
@@ -108,8 +108,8 @@ namespace PalaceMod
         private static Texture2D RingTexture() => Paint((x, y) =>
         {
             float d = new Vector2(x - 0.5f, y - 0.5f).magnitude * 2f; // 0 at the center, 1 at the edge
-            float ring = 1f - Mathf.Clamp01(Mathf.Abs(d - 0.78f) / 0.14f);
-            float fill = d < 0.78f ? 0.18f : 0f;
+            float ring = 1f - Mathf.Clamp01((Mathf.Abs(d - 0.8f) - 0.06f) / 0.08f);
+            float fill = d < 0.8f ? 0.3f : 0f;
             return Mathf.Max(ring, fill);
         });
 

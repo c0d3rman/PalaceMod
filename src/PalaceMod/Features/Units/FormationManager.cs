@@ -96,6 +96,7 @@ namespace PalaceMod
         {
             CancelDrag();
             placeOneActive = false;
+            devPress = devHeld = devRelease = false;
         }
 
         public override void OnDestroy() => previewMarkers.Destroy();
@@ -622,7 +623,7 @@ namespace PalaceMod
             var lines = TagManager.instance.PlayerUnits
                 .Select(t => t.GetComponent<PathfindMovementPlayerunit>())
                 .Where(u => u != null && u.hp != null && u.hp.Alive)
-                .Select(u => $"  {u.name}: home {Flat(u.HomePosition - king)} from king{(u.FollowingPlayer ? ", following" : "")}{(u.HoldPosition ? ", holding" : "")}");
+                .Select(u => $"  {u.name}: home {Flat(u.HomePosition - king)} from king{(u.FollowingPlayer ? ", following" : "")}{(u.GetComponents<AutoAttack>().Any(a => !a.enabled) ? ", attacks off" : "")}{(u.HoldPosition ? ", holding" : "")}");
             return $"formation {formation.Value}, {cu.PlayerUnitsCommanding.Count} following, commanding={cu.commanding}\n" + string.Join("\n", lines);
         }
     }
