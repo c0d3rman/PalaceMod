@@ -107,7 +107,7 @@ namespace PalaceMod
                     Vector3 king = command.transform.position;
                     foreach (var tagged in TagManager.instance.PlayerUnits)
                     {
-                        if (tagged != null && TagManager.instance.MeasureDistanceToTaggedObject(tagged, king) <= command.attractRange) Want(tagged);
+                        if (tagged != null && InCommandRadius(tagged, king, command.attractRange)) Want(tagged);
                     }
                 }
             }
@@ -129,6 +129,15 @@ namespace PalaceMod
                     handler.ShowIndicator(position, ring.range, ring.key, ring.type);
                 }
             }
+        }
+
+        // Same test CommandUnits uses to pick units up: 3D distance, or horizontal distance for flying units.
+        private static bool InCommandRadius(TaggedObject tagged, Vector3 king, float radius)
+        {
+            if (TagManager.instance.MeasureDistanceToTaggedObject(tagged, king) <= radius) return true;
+            if (!tagged.Tags.Contains(TagManager.ETag.Flying)) return false;
+            Vector3 d = tagged.transform.position - king;
+            return new Vector2(d.x, d.z).magnitude <= radius;
         }
 
         private void Want(TaggedObject tagged)
@@ -260,6 +269,7 @@ namespace PalaceMod
                         if (slot.Level > 0 || slot.upgrades.Count == 0 || slot.name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) continue;
                         if (slot.GetComponentInChildren<UnitRespawnerForBuildings>(true) == null) continue;
                         slot.ForceManualUpgradeWithoutFeedbackEffects(slot.upgrades[0].upgradeBranches[0]);
+                        GameplayImpact.Mark("Built a troop building for free (dev command)");
                         sb.AppendLine($"built {slot.name}");
                     }
                     return sb.Length > 0 ? sb.ToString() : "nothing matched";
