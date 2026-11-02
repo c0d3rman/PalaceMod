@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /*
-    On-disk shape of a savestate (JsonUtility, so plain [Serializable] classes with public fields; JsonUtility can't
-    write null objects, hence the Has* flags).
+    On-disk shape of a savestate: plain classes with public fields, written with Newtonsoft.Json (Unity's JsonUtility
+    skips nested types from plugin assemblies). Unity's Vector3/Quaternion are stored as V3/Q4.
 
     A state is the game's own mid-level save data captured at that moment (every SaveLoadEntity's OnSave: buildings,
     upgrades, building HP and tags, gold, wave, score, research timers, shrine XP, ...) plus what the native format
@@ -61,9 +61,25 @@ namespace PalaceMod
         public List<UnitData> units = [];
         public List<FlagData> knockedOutTonight = [];
         public List<EnemyData> enemies = [];
-        public List<Vector3> freeCoins = [];
+        public List<V3> freeCoins = [];
         public bool hasSpawner;
         public SpawnerData spawner = new();
+    }
+
+    [Serializable]
+    internal struct V3
+    {
+        public float x, y, z;
+        public static implicit operator V3(Vector3 v) => new() { x = v.x, y = v.y, z = v.z };
+        public static implicit operator Vector3(V3 v) => new(v.x, v.y, v.z);
+    }
+
+    [Serializable]
+    internal struct Q4
+    {
+        public float x, y, z, w;
+        public static implicit operator Q4(Quaternion q) => new() { x = q.x, y = q.y, z = q.z, w = q.w };
+        public static implicit operator Quaternion(Q4 q) => q.x == 0f && q.y == 0f && q.z == 0f && q.w == 0f ? Quaternion.identity : new(q.x, q.y, q.z, q.w);
     }
 
     [Serializable]
@@ -109,8 +125,8 @@ namespace PalaceMod
     internal class KingData
     {
         public bool valid;
-        public Vector3 position;
-        public Quaternion meshRotation;
+        public V3 position;
+        public Q4 meshRotation;
         public float hp;
         public float maxHp;
         public float knockedOutFor;
@@ -131,11 +147,11 @@ namespace PalaceMod
     internal class UnitData
     {
         public string path;
-        public Vector3 position;
-        public Quaternion rotation;
+        public V3 position;
+        public Q4 rotation;
         public float hp;
         public float maxHp;
-        public Vector3 home;
+        public V3 home;
         public bool hold;
         public bool follow;
         public int[] groups = [];
@@ -155,8 +171,8 @@ namespace PalaceMod
         public string prefab;
         /// <summary>Hierarchy path for enemies placed in the scene; empty for spawned ones.</summary>
         public string scenePath;
-        public Vector3 position;
-        public Quaternion rotation;
+        public V3 position;
+        public Q4 rotation;
         public List<EnemyHp> hps = [];
         public float[] damage = [];
         public float[] cooldowns = [];

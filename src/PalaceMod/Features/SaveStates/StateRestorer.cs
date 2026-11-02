@@ -435,7 +435,7 @@ namespace PalaceMod
             var king = PlayerMovement.instance;
             king.TeleportTo(saved.position);
             if (king.meshParent != null) king.meshParent.rotation = saved.meshRotation;
-            Priv.Set(king, "desiredMeshRotation", saved.meshRotation);
+            Priv.Set(king, "desiredMeshRotation", (Quaternion)saved.meshRotation);
             var hp = king.GetComponent<Hp>();
             if (hp != null) SetHp(hp, saved.hp, saved.maxHp);
             var revive = king.GetComponent<AutoRevive>();

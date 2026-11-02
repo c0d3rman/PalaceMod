@@ -242,7 +242,7 @@ namespace PalaceMod
 
         private void RegisterDevCommands()
         {
-            DevCommands.Register("savestate", "savestate save [name] | quick | load <id|name|quick|last> | list | dump | delete <id|name> | menu | detail <id|name>   savestates", args =>
+            DevCommands.Register("savestate", "savestate save [name] | quick | load <id|name|quick|last> | list | dump | delete <id|name> | menu | gold <n> | build [n] | defeat   savestates (gold/build/defeat: test setup)", args =>
             {
                 string sub = args.Length > 0 ? args[0].ToLowerInvariant() : "list";
                 string rest = string.Join(" ", args.Skip(1));
@@ -271,6 +271,39 @@ namespace PalaceMod
                     case "menu":
                         browser.Open();
                         return "";
+                    case "defeat":
+                    {
+                        // Test setup: destroy the castle (to try "Load on defeat").
+                        var castle = TagManager.instance.FindAllTaggedObjectsWithTagDirect_UseWithCare(TagManager.ETag.CastleCenter).FirstOrDefault();
+                        var hp = castle != null ? castle.GetComponent<Hp>() : null;
+                        if (hp == null) throw new InvalidOperationException("no castle");
+                        hp.invulnerable = false;
+                        hp.TakeDamage(hp.HpValue + 1f);
+                        return $"castle hp {hp.HpValue}, state {LocalGamestate.Instance.CurrentState}";
+                    }
+                    case "gold":
+                        // Test setup: add gold.
+                        PlayerInteraction.instance.AddCoin(int.Parse(rest));
+                        return $"gold {PlayerInteraction.instance.Balance}";
+                    case "build":
+                    {
+                        // Test setup: build or upgrade up to n affordable buildings, paying their cost.
+                        int n = rest.Length > 0 ? int.Parse(rest) : 5, built = 0;
+                        var player = PlayerInteraction.instance;
+                        foreach (var slot in UnityEngine.Object.FindObjectsOfType<BuildSlot>())
+                        {
+                            if (built >= n) break;
+                            if (!slot.CanBeUpgraded || slot.ActivatorUpgradesThis) continue;
+                            int cost = slot.upgrades[slot.Level].cost;
+                            if (player.Balance < cost) continue;
+                            int before = slot.Level;
+                            player.SpendCoins(cost);
+                            slot.TryToBuildOrUpgradeAndPay(player, _presentChoice: false);
+                            if (slot.Level != before) built++;
+                            else player.AddCoin(cost);
+                        }
+                        return $"built {built}, gold {player.Balance}";
+                    }
                     default:
                         throw new ArgumentException("unknown subcommand");
                 }

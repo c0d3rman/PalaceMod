@@ -309,38 +309,54 @@ namespace PalaceMod
 
         // ---- Thumbnail ------------------------------------------------------------------------------------------
 
-        /// <summary>A small PNG of the world as the camera sees it, without the HUD or any open menu.</summary>
-        public static byte[] Thumbnail()
+        /// <summary>A small PNG of this frame as the player sees it. When a menu is open (saving from the
+        /// savestates menu) the UI is hidden for that one frame so the picture shows the level, not the menu.</summary>
+        public static IEnumerator WriteThumbnail(string path, Action<byte[]> done)
         {
-            var camera = Camera.main;
-            if (camera == null) return null;
-            const int width = 480, height = 270;
-            var rt = RenderTexture.GetTemporary(width, height, 24, RenderTextureFormat.ARGB32);
-            var previousTarget = camera.targetTexture;
+            var hidden = new List<Canvas>();
+            if (UIFrameManager.instance != null && UIFrameManager.instance.ActiveFrame != null)
+            {
+                foreach (var canvas in Object.FindObjectsOfType<Canvas>())
+                {
+                    if (canvas.isRootCanvas && canvas.enabled && canvas.renderMode == RenderMode.ScreenSpaceOverlay)
+                    {
+                        canvas.enabled = false;
+                        hidden.Add(canvas);
+                    }
+                }
+            }
+            yield return new WaitForEndOfFrame();
+            byte[] png = null;
+            Texture2D shot = null, small = null;
+            RenderTexture rt = null;
             var previousActive = RenderTexture.active;
-            Texture2D tex = null;
             try
             {
-                camera.targetTexture = rt;
-                camera.Render();
+                shot = ScreenCapture.CaptureScreenshotAsTexture();
+                const int height = 270;
+                int width = Mathf.Max(1, Mathf.RoundToInt(height * (float)shot.width / shot.height));
+                rt = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32);
+                Graphics.Blit(shot, rt);
                 RenderTexture.active = rt;
-                tex = new Texture2D(width, height, TextureFormat.RGB24, false);
-                tex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
-                tex.Apply();
-                return tex.EncodeToPNG();
+                small = new Texture2D(width, height, TextureFormat.RGB24, false);
+                small.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+                small.Apply();
+                png = small.EncodeToPNG();
             }
             catch (Exception e)
             {
                 Plugin.Logger.LogWarning($"Savestates: thumbnail failed: {e.Message}");
-                return null;
             }
             finally
             {
-                camera.targetTexture = previousTarget;
+                foreach (var canvas in hidden) if (canvas != null) canvas.enabled = true;
                 RenderTexture.active = previousActive;
-                RenderTexture.ReleaseTemporary(rt);
-                if (tex != null) Object.Destroy(tex);
+                if (rt != null) RenderTexture.ReleaseTemporary(rt);
+                if (shot != null) Object.Destroy(shot);
+                if (small != null) Object.Destroy(small);
             }
+            try { done(png); }
+            catch (Exception e) { Plugin.Logger.LogWarning($"Savestates: writing thumbnail {path} failed: {e.Message}"); }
         }
     }
 }

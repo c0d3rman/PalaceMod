@@ -215,7 +215,7 @@ namespace PalaceMod
         {
             var texture = Thumbnails.Texture(state);
             if (texture == null) return;
-            const float height = 270f;
+            const float height = 216f;
             var holder = new GameObject("Thumbnail", typeof(RectTransform), typeof(LayoutElement));
             holder.transform.SetParent(content, false);
             holder.GetComponent<LayoutElement>().preferredHeight = height + 12f;

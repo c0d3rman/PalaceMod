@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using BepInEx;
+using Newtonsoft.Json;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -88,6 +89,13 @@ namespace PalaceMod
 
         private static readonly Dictionary<string, (DateTime Stamp, SaveStateInfo Info)> cache = [];
 
+        private static readonly JsonSerializerSettings JsonSettings = new()
+        {
+            ObjectCreationHandling = ObjectCreationHandling.Replace,
+            MissingMemberHandling = MissingMemberHandling.Ignore,
+            Formatting = Formatting.None,
+        };
+
         /// <summary>All states for a level (default: the current one), newest first. Unreadable files are skipped.</summary>
         public static IReadOnlyList<SaveStateInfo> List(string level = null)
         {
@@ -129,8 +137,7 @@ namespace PalaceMod
             var data = StateCapture.Capture();
             data.kind = kind.ToString();
             data.name = name ?? DefaultName(level, kind, data);
-            var thumbnail = StateCapture.Thumbnail();
-            var info = Write(level, kind, data, thumbnail);
+            var info = Write(level, kind, data);
             Last = info;
             Prune(level);
             Plugin.Logger.LogInfo($"Savestates: captured {info} -> {info.JsonPath}; {StateRestorer.Summary()}");
@@ -195,7 +202,7 @@ namespace PalaceMod
             {
                 var stamp = File.GetLastWriteTimeUtc(file);
                 if (cache.TryGetValue(file, out var hit) && hit.Stamp == stamp) return hit.Info;
-                var data = JsonUtility.FromJson<SaveStateData>(File.ReadAllText(file));
+                var data = JsonConvert.DeserializeObject<SaveStateData>(File.ReadAllText(file), JsonSettings);
                 if (data == null || data.format > SaveStateData.CurrentFormat || string.IsNullOrEmpty(data.level)) return null;
                 var info = new SaveStateInfo(file, data);
                 cache[file] = (stamp, info);
@@ -208,7 +215,7 @@ namespace PalaceMod
             }
         }
 
-        private static SaveStateInfo Write(string level, SaveStateKind kind, SaveStateData data, byte[] thumbnail)
+        private static SaveStateInfo Write(string level, SaveStateKind kind, SaveStateData data)
         {
             string dir = LevelFolder(level);
             Directory.CreateDirectory(dir);
@@ -217,15 +224,22 @@ namespace PalaceMod
             string json = Path.Combine(dir, id + ".json");
             WriteJson(json, data);
             string png = Path.ChangeExtension(json, ".png");
-            if (thumbnail != null) WriteAtomic(png, thumbnail);
-            else TryDelete(png);
+            TryDelete(png);
+            Thumbnails.ForgetPath(png);
             cache.Remove(json);
-            if (kind == SaveStateKind.Quick) Thumbnails.ForgetPath(png);
+            // The thumbnail is the frame being drawn now, so it's written at the end of this frame.
+            Plugin.Instance.StartCoroutine(StateCapture.WriteThumbnail(png, bytes =>
+            {
+                if (bytes == null || !File.Exists(json)) return;
+                WriteAtomic(png, bytes);
+                Thumbnails.ForgetPath(png);
+                Changed?.Invoke();
+            }));
             return Read(json) ?? throw new IOException($"couldn't read back {json}");
         }
 
         private static void WriteJson(string path, SaveStateData data) =>
-            WriteAtomic(path, System.Text.Encoding.UTF8.GetBytes(JsonUtility.ToJson(data)));
+            WriteAtomic(path, System.Text.Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(data, JsonSettings)));
 
         private static void WriteAtomic(string path, byte[] bytes)
         {
