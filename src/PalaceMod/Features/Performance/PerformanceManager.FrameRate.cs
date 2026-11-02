@@ -197,14 +197,30 @@ namespace PalaceMod
             TryLog("refresh rate", () => DisplayMode.RaiseRefreshRate(raiseRefreshRate.Value));
         }
 
+        // The render scale the game itself wants, remembered while we override it so it can be put back.
+        private float? gameRenderScale;
+
         // The game's URP asset isn't referenced at compile time, so set its properties by name.
         private void ApplyRenderOverrides()
         {
-            if (renderScale.Value <= 0f && msaa.Value <= 0) return;
+            bool battery = (PowerState.OnBattery || PowerState.LowPowerMode) && batteryRenderScale.Value > 0f;
+            float scale = battery ? batteryRenderScale.Value : renderScale.Value;
+            if (scale <= 0f && msaa.Value <= 0 && gameRenderScale == null) return;
             var pipeline = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
             if (pipeline == null) return;
             var type = pipeline.GetType();
-            if (renderScale.Value > 0f) SetIfDifferent(type.GetProperty("renderScale"), pipeline, renderScale.Value);
+            var scaleProperty = type.GetProperty("renderScale");
+            if (scale > 0f)
+            {
+                gameRenderScale ??= scaleProperty?.GetValue(pipeline) as float?;
+                SetIfDifferent(scaleProperty, pipeline, scale);
+            }
+            else if (gameRenderScale != null)
+            {
+                // No override any more (e.g. plugged back in): restore the game's own value.
+                SetIfDifferent(scaleProperty, pipeline, gameRenderScale.Value);
+                gameRenderScale = null;
+            }
             if (msaa.Value > 0) SetIfDifferent(type.GetProperty("msaaSampleCount"), pipeline, msaa.Value);
         }
 

@@ -41,6 +41,7 @@ namespace PalaceMod
         private ConfigEntry<int> batteryFrameRate;
         private ConfigEntry<bool> saveCpuOnBattery;
         private ConfigEntry<bool> coolDownWhenHot;
+        private ConfigEntry<float> batteryRenderScale;
         private ConfigEntry<int> idleFrameRate;
         private ConfigEntry<int> idleAfterSeconds;
         // Memory
@@ -117,6 +118,10 @@ namespace PalaceMod
             coolDownWhenHot = config.Bind(BatterySection, "Cool down when hot", true,
                 "Cap the frame rate at 60 when macOS reports the Mac is under thermal pressure, and at 30 when critical.");
 
+            batteryRenderScale = config.Bind(BatterySection, "Battery render scale", 0f, new ConfigDescription(
+                "Render the 3D scene at this fraction of full resolution on battery or in Low Power Mode (UI stays sharp). " +
+                "Saves a lot of GPU power at some sharpness. Off keeps the game's setting.", new AcceptableValueRange<float>(0f, 1f),
+                new SettingTags { ZeroLabel = "Off", Unit = "x", Step = 0.05f }));
             idleFrameRate = config.Bind(BatterySection, "Idle frame rate", 30, new ConfigDescription(
                 "Frame rate cap when there's been no input for a while, outside of night battles. 0 for no extra cap.",
                 new AcceptableValueRange<int>(0, 240), new SettingTags { ZeroLabel = "Off", Unit = " fps", Step = 5 }));
