@@ -7,7 +7,6 @@ using HarmonyLib;
 using TMPro;
 using Thronefall.GameServices;
 using UnityEngine;
-using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 /*
@@ -92,10 +91,10 @@ namespace PalaceMod
                     case "hover":
                         var badge = Feature<HighscoreGuardManager>.Instance?.badges.FirstOrDefault(b => b != null && b.isActiveAndEnabled)
                             ?? throw new System.InvalidOperationException("no badge showing");
-                        badge.OnPointerEnter(null);
+                        badge.ShowTooltip();
                         return "tooltip shown";
                     case "unhover":
-                        foreach (var b in Feature<HighscoreGuardManager>.Instance?.badges ?? []) if (b != null) b.OnPointerExit(null);
+                        foreach (var b in Feature<HighscoreGuardManager>.Instance?.badges ?? []) if (b != null) b.HideTooltip();
                         return "";
                     case "win":
                     case "lose":
@@ -267,32 +266,37 @@ namespace PalaceMod
 
         // ---------------- Badge ----------------
 
-        private static readonly Color32 Gold = new(200, 166, 116, 255);
-        private static readonly Color32 Amber = new(232, 150, 70, 255);
-        private static TMP_FontAsset titleFont;
         private readonly List<Badge> badges = [];
 
         [HarmonyPatch(typeof(PauseUILoadoutHelper), "OnEnable")]
         private class Pause_Patch
         {
             private static void Postfix(PauseUILoadoutHelper __instance) =>
-                Feature<HighscoreGuardManager>.Instance?.AttachBadge(__instance.transform, new Vector2(50, -50));
+                Feature<HighscoreGuardManager>.Instance?.AttachBadge(__instance.transform);
         }
 
         [HarmonyPatch(typeof(EndOfMatchScoreUIHelper), nameof(EndOfMatchScoreUIHelper.OnActivate))]
         private class EndOfMatch_Patch
         {
             private static void Postfix(EndOfMatchScoreUIHelper __instance) =>
-                Feature<HighscoreGuardManager>.Instance?.AttachBadge(__instance.transform, new Vector2(50, -50));
+                Feature<HighscoreGuardManager>.Instance?.AttachBadge(__instance.transform);
         }
 
-        private void AttachBadge(Transform parent, Vector2 offset)
+        private void AttachBadge(Transform parent)
         {
             badges.RemoveAll(b => b == null);
             var badge = badges.FirstOrDefault(b => b.transform.parent == parent);
             if (badge == null)
             {
-                badge = Badge.Create(parent, offset);
+                try
+                {
+                    badge = Badge.Create(parent);
+                }
+                catch (System.Exception e)
+                {
+                    Plugin.Logger.LogWarning($"Unranked Runs: couldn't build the badge: {e.Message}");
+                    return;
+                }
                 badges.Add(badge);
             }
             badge.Refresh();
@@ -304,101 +308,55 @@ namespace PalaceMod
             foreach (var badge in badges) badge.Refresh();
         }
 
-        private class Badge : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
+        private static string TooltipBody() =>
+            "Scores, quests and achievements from this run won't be recorded.\nMod features used:\n" +
+            string.Join("\n", GameplayImpact.Reasons.Select(r => "• " + r));
+
+        // A small panel in the corner ("◆ UNRANKED") cut from the game's tooltip panel, with the mod's edge and emblem;
+        // hovering it shows the reasons in the shared mod tooltip.
+        private class Badge : MonoBehaviour
         {
-            private GameObject tooltip;
-            private TextMeshProUGUI tooltipText;
-
-            public static Badge Create(Transform parent, Vector2 offset)
+            public static Badge Create(Transform parent)
             {
-                titleFont ??= Resources.Load<TMP_FontAsset>("fonts & materials/CormorantGaramond-SemiBold SDF");
+                var source = GameWidgets.PauseTooltip?.selectionTitle?.GetComponentInParent<MPUIKIT.MPImage>(true)
+                    ?? throw new System.InvalidOperationException("no tooltip panel to clone");
+                var obj = GameWidgets.Clone(source, parent, "PalaceMod Unranked Badge", keepChildren: false);
+                foreach (var c in obj.GetComponents<Component>())
+                {
+                    if (c is not (RectTransform or CanvasRenderer or MPUIKIT.MPImage)) DestroyImmediate(c);
+                }
+                ModStyle.MarkPanel(obj.GetComponent<MPUIKIT.MPImage>());
+                obj.GetComponent<MPUIKIT.MPImage>().raycastTarget = false;
 
-                var go = new GameObject("PalaceMod Unranked Badge", typeof(RectTransform), typeof(Image), typeof(HorizontalLayoutGroup), typeof(ContentSizeFitter));
-                go.transform.SetParent(parent, false);
-                var rect = (RectTransform)go.transform;
-                rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0, 1);
-                rect.anchoredPosition = offset;
+                var rect = (RectTransform)obj.transform;
+                rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0f, 1f);
+                rect.anchoredPosition = new Vector2(48f, -40f);
 
-                var image = go.GetComponent<Image>();
-                image.sprite = Resources.Load<Sprite>("ui/frame_round");
-                image.type = Image.Type.Sliced;
-                image.color = new Color(0, 0, 0, 0.75f);
-
-                var layout = go.GetComponent<HorizontalLayoutGroup>();
-                layout.padding = new RectOffset(18, 18, 6, 6);
+                var layout = obj.AddComponent<HorizontalLayoutGroup>();
+                layout.padding = new RectOffset(38, 20, 8, 8);
                 layout.childControlWidth = layout.childControlHeight = true;
-                var fitter = go.GetComponent<ContentSizeFitter>();
+                layout.childForceExpandWidth = layout.childForceExpandHeight = false;
+                var fitter = obj.AddComponent<ContentSizeFitter>();
                 fitter.horizontalFit = fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
-                var label = MakeText(go.transform, "UNRANKED", 24, Amber);
-                label.characterSpacing = 30;
-                label.raycastTarget = false;
+                var label = GameWidgets.Text(obj.transform, "Label", "UNRANKED", ModStyle.BoldFont, 22f, ModStyle.Gold,
+                    TextAlignmentOptions.MidlineLeft);
+                label.characterSpacing = 30f;
+                label.enableWordWrapping = false;
 
-                var badge = go.AddComponent<Badge>();
-                badge.BuildTooltip();
-                return badge;
+                var emblem = ModStyle.AddEmblem(obj.transform, 12f, ModStyle.KindColor(NotifyKind.Warning));
+                emblem.anchorMin = emblem.anchorMax = new Vector2(0f, 0.5f);
+                emblem.anchoredPosition = new Vector2(20f, 0f);
+
+                ModTooltip.AttachHover(obj, "Unranked run", TooltipBody);
+                return obj.AddComponent<Badge>();
             }
 
-            private static TextMeshProUGUI MakeText(Transform parent, string text, float size, Color color)
-            {
-                var go = new GameObject("Text", typeof(RectTransform), typeof(TextMeshProUGUI));
-                go.transform.SetParent(parent, false);
-                var tmp = go.GetComponent<TextMeshProUGUI>();
-                if (titleFont != null) tmp.font = titleFont;
-                tmp.text = text;
-                tmp.fontSize = size;
-                tmp.color = color;
-                tmp.enableWordWrapping = false;
-                return tmp;
-            }
+            public void Refresh() => gameObject.SetActive(Blocking && showBadge.Value);
 
-            private void BuildTooltip()
-            {
-                tooltip = new GameObject("Tooltip", typeof(RectTransform), typeof(Image), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter), typeof(LayoutElement));
-                tooltip.transform.SetParent(transform, false);
-                tooltip.GetComponent<LayoutElement>().ignoreLayout = true;
-                var rect = (RectTransform)tooltip.transform;
-                rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0, 1);
-                rect.anchoredPosition = new Vector2(0, -52);
+            public void ShowTooltip() => ModTooltip.Show("Unranked run", TooltipBody(), (RectTransform)transform, this);
 
-                var image = tooltip.GetComponent<Image>();
-                image.sprite = Resources.Load<Sprite>("ui/frame_round");
-                image.type = Image.Type.Sliced;
-                image.color = new Color(0, 0, 0, 0.9f);
-                image.raycastTarget = false;
-
-                var layout = tooltip.GetComponent<VerticalLayoutGroup>();
-                layout.padding = new RectOffset(18, 18, 12, 12);
-                layout.childControlWidth = layout.childControlHeight = true;
-                var fitter = tooltip.GetComponent<ContentSizeFitter>();
-                fitter.horizontalFit = fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-                tooltipText = MakeText(tooltip.transform, "", 22, Gold);
-                tooltipText.raycastTarget = false;
-                tooltip.SetActive(false);
-            }
-
-            public void Refresh()
-            {
-                bool show = Blocking && showBadge.Value;
-                gameObject.SetActive(show);
-                if (!show) return;
-                string reasons = string.Join("\n", GameplayImpact.Reasons.Select(r => "• " + r));
-                tooltipText.text = "Scores, quests and achievements from this run\nwon't be recorded. Mod features used:\n" + reasons;
-            }
-
-            public void OnPointerEnter(PointerEventData eventData)
-            {
-                Refresh();
-                tooltip.SetActive(true);
-            }
-
-            public void OnPointerExit(PointerEventData eventData) => tooltip.SetActive(false);
-
-            private void OnDisable()
-            {
-                if (tooltip != null) tooltip.SetActive(false);
-            }
+            public void HideTooltip() => ModTooltip.Hide(this);
         }
     }
 }
