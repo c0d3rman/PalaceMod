@@ -270,8 +270,9 @@ namespace PalaceMod.Profiles
         public string RecoverIfNeeded()
         {
             if (!Directory.Exists(Root)) return null;
+            // Only profile folders are ever replaced (their ids can't end in ".old"); elsewhere just drop unfinished writes.
             foreach (string parent in new[] { Root, ProfilesDir, BackupsDir }.Where(Directory.Exists))
-                foreach (string dir in Directory.GetDirectories(parent)) RepairSnapshotSwap(dir);
+                foreach (string dir in Directory.GetDirectories(parent)) RepairSnapshotSwap(dir, allowOld: parent == ProfilesDir);
             if (!File.Exists(JournalPath)) return null;
 
             var journal = JsonUtility.FromJson<Journal>(File.ReadAllText(JournalPath));
@@ -344,9 +345,9 @@ namespace PalaceMod.Profiles
         }
 
         // Undo a ReplaceSnapshot that was cut off between its renames.
-        private static void RepairSnapshotSwap(string path)
+        private static void RepairSnapshotSwap(string path, bool allowOld)
         {
-            if (path.EndsWith(".old", StringComparison.Ordinal))
+            if (allowOld && path.EndsWith(".old", StringComparison.Ordinal))
             {
                 string dir = path.Substring(0, path.Length - 4);
                 if (!Directory.Exists(dir)) Directory.Move(path, dir);
