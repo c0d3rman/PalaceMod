@@ -308,6 +308,19 @@ def set_native(game, enabled):
         print("Loader set to Rosetta.")
 
 
+def copy_missing_libs():
+    """Copies game libraries that PalaceMod.csproj references but lib/ lacks (e.g. one added after setup ran)."""
+    project = ET.parse(ROOT / "PalaceMod.csproj")
+    names = [item.text.rsplit("/", 1)[-1] for item in project.findall(".//Reference/HintPath")]
+    missing = [name for name in names if not (ROOT / "lib" / name).is_file()]
+    if not missing:
+        return
+    managed = managed_dir(game_root())
+    for name in missing:
+        shutil.copy2(managed / name, ROOT / "lib" / name)
+    print(f"Copied newly referenced game libraries into lib/: {', '.join(missing)}")
+
+
 def setup(game):
     run("dotnet", "tool", "restore")
     managed = managed_dir(game)
@@ -334,6 +347,7 @@ def setup(game):
 def build(configuration):
     if not (ROOT / "lib/Assembly-CSharp.dll").is_file():
         raise RuntimeError("Game libraries missing from lib/; run `dev.py setup` first.")
+    copy_missing_libs()
     run("dotnet", "build", "PalaceMod.csproj", "-c", configuration, "-nologo", "-clp:NoSummary")
 
 
@@ -565,9 +579,6 @@ LEASE_LOCK = LEASE_DIR / ".lock"
 LEASE_FILE = LEASE_DIR / "lease.json"
 QUEUE_DIR = LEASE_DIR / "queue"
 USER_CONFIG = LEASE_DIR / "user-config"
-# A snapshot whose restore waits for a running game the lease didn't launch (the player's) to quit. Kept apart from
-# USER_CONFIG so dev.py copies that predate it don't restore it under the live game.
-DEFERRED_CONFIG = LEASE_DIR / "user-config-deferred"
 LEASE_IDLE_LIMIT = 10 * 60
 LEASE_BUSY_EXIT = 75  # EX_TEMPFAIL: the lease didn't become free within --wait
 HEARTBEAT_SECONDS = 20
@@ -691,45 +702,24 @@ def snapshot_user_config(game):
     os.rename(temp, USER_CONFIG)  # atomic: the snapshot is either complete or absent
 
 
-def restore_user_config(snapshot=USER_CONFIG):
+def restore_user_config():
     """Put the player's BepInEx/config back exactly as snapshotted. Idempotent, so a crash part-way is redone."""
-    manifest_path = snapshot / "manifest.json"
+    manifest_path = USER_CONFIG / "manifest.json"
     if not manifest_path.exists():
-        shutil.rmtree(snapshot, ignore_errors=True)
+        shutil.rmtree(USER_CONFIG, ignore_errors=True)
         return
     manifest = json.loads(manifest_path.read_text())
     target = config_dir(Path(manifest["game"]))
     target.mkdir(parents=True, exist_ok=True)
     for name in manifest["files"]:
         temp = target / f".{name}.restore.tmp"
-        shutil.copy2(snapshot / "files" / name, temp)
+        shutil.copy2(USER_CONFIG / "files" / name, temp)
         os.replace(temp, target / name)
     for extra in target.iterdir():
         if extra.is_file() and extra.name not in manifest["files"]:
             extra.unlink()
-    shutil.rmtree(snapshot)
+    shutil.rmtree(USER_CONFIG)
     print("Restored the player's BepInEx config.")
-
-
-def restore_or_defer_user_config():
-    """Restore the snapshot now, or, if a game is still running (one the lease didn't launch, so it was left
-    alone), keep it until that game quits: restoring under a live game would roll back its settings mid-session."""
-    if not USER_CONFIG.exists():
-        return
-    if not game_pids():
-        restore_user_config()
-        return
-    if DEFERRED_CONFIG.exists():
-        shutil.rmtree(USER_CONFIG)  # the older deferred snapshot predates this one, so it's the player's
-    else:
-        os.rename(USER_CONFIG, DEFERRED_CONFIG)
-    print("Thronefall is still running, so the player's BepInEx config will be restored once it quits.")
-
-
-def restore_deferred_config():
-    """Restore a deferred snapshot once no game is running and no lease is held. Call under lease_lock."""
-    if DEFERRED_CONFIG.exists() and not game_pids() and read_lease() is None:
-        restore_user_config(DEFERRED_CONFIG)
 
 
 def free_lease(lease, reason):
@@ -737,7 +727,7 @@ def free_lease(lease, reason):
     if lease:
         print(f"Releasing the game lease of {describe_holder(lease)}: {reason}", flush=True)
     stop_holders_game(lease)
-    restore_or_defer_user_config()
+    restore_user_config()
     LEASE_FILE.unlink(missing_ok=True)
 
 
@@ -745,10 +735,7 @@ def stop_holders_game(lease, force=False):
     """Stop the game if the lease holder launched it. Anything else (the player's own game, or a checkout whose
     dev.py predates the lease) is left running unless forced."""
     if not game_pids():
-        # A dev launch that crashed or was closed still left its windowed-mode prefs and its ownership marker; a
-        # stale marker would make a later Steam launch look like a dev launch.
-        OWNER.unlink(missing_ok=True)
-        restore_display()
+        restore_display()  # a dev launch that crashed or was closed still left windowed-mode prefs behind
         return
     owner = game_owner()
     if force or (lease is not None and owner == lease["root"]):
@@ -770,11 +757,9 @@ def recover():
             free_lease(None, "")
         elif lease is not None and lease_stale(lease):
             free_lease(lease, f"idle for {duration(lease_idle(lease))}")
-        restore_deferred_config()
 
 
 def take_lease(game, command):
-    restore_deferred_config()  # so the new snapshot is of the player's settings, not a test's
     snapshot_user_config(game)
     now = time.time()
     lease = {"root": str(ROOT), "branch": current_branch(), "pid": os.getpid(), "command": command,
@@ -882,10 +867,8 @@ def release_lease(force):
                 stop_game(force)
             else:
                 print("Thronefall is not running.")
-                OWNER.unlink(missing_ok=True)
                 restore_display()
-            restore_or_defer_user_config()
-            restore_deferred_config()
+            restore_user_config()
             return
         if lease["root"] != str(ROOT) and not force:
             raise RuntimeError(f"The game lease is held by {describe_holder(lease)}, idle "
@@ -894,11 +877,9 @@ def release_lease(force):
             stop_holders_game(lease, force)
         else:
             print("Thronefall is not running.")
-            OWNER.unlink(missing_ok=True)
             restore_display()
-        restore_or_defer_user_config()
+        restore_user_config()
         LEASE_FILE.unlink(missing_ok=True)
-        restore_deferred_config()
         print("Released the game lease.")
 
 
@@ -917,8 +898,7 @@ def lease_status():
     for i, (_, data) in enumerate(waiters, 1):
         branch = f" ({data['branch']})" if data.get("branch") else ""
         print(f"  {i}. {data['root']}{branch}, waiting {duration(time.time() - data['since'])}")
-    deferred = " (plus one waiting for the running game to quit)" if DEFERRED_CONFIG.exists() else ""
-    print(f"Player config snapshot: {'held' if USER_CONFIG.exists() else 'none'}{deferred}")
+    print(f"Player config snapshot: {'held' if USER_CONFIG.exists() else 'none'}")
     print(f"Game: {'running, launched from ' + (game_owner() or 'outside dev.py') if game_pids() else 'not running'}")
 
 
