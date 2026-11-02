@@ -18,6 +18,8 @@ using UnityEngine.SceneManagement;
         circle <seconds>       run in a circle, for testing camera motion
         sprint <on|off>        hold sprint while running
         stop                   release all fake input
+        resolutions            list the current and available display modes
+        setres <w> <h> <hz>    switch display mode (keeps the fullscreen mode)
     Each command logs "Dev command done: <command>" or "Dev command failed: <command>: <reason>".
 */
 namespace PalaceMod
@@ -118,6 +120,15 @@ namespace PalaceMod
                     return "";
                 case "stop":
                     inputActive = circling = sprint = false;
+                    return "";
+                case "resolutions":
+                    return $"current {Screen.currentResolution.width}x{Screen.currentResolution.height}@{Screen.currentResolution.refreshRateRatio.value:0.##} " +
+                        $"({Screen.fullScreenMode}); available " +
+                        string.Join(", ", Screen.resolutions.Select(r => $"{r.width}x{r.height}@{r.refreshRateRatio.value:0.##}"));
+                case "setres":
+                    if (args.Length < 4) throw new ArgumentException("usage: setres <width> <height> <hz>");
+                    Screen.SetResolution(int.Parse(args[1]), int.Parse(args[2]), Screen.fullScreenMode,
+                        new RefreshRate { numerator = uint.Parse(args[3]), denominator = 1 });
                     return "";
                 default:
                     throw new ArgumentException("unknown command");

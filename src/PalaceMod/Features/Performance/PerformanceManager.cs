@@ -31,6 +31,7 @@ namespace PalaceMod
         private ConfigEntry<float> gcTimeSliceMs;
         private ConfigEntry<bool> spikeLogging;
         private ConfigEntry<float> spikeThresholdMs;
+        private ConfigEntry<float> spikeRatio;
         private ConfigEntry<float> summaryIntervalSeconds;
         private ConfigEntry<PathfindingThreads> pathfindingThreads;
         private ConfigEntry<VSyncMode> vSync;
@@ -41,6 +42,8 @@ namespace PalaceMod
         private ConfigEntry<Toggle> precisePacing;
         private ConfigEntry<int> pacedFrameRate;
         private ConfigEntry<bool> lockToDisplay;
+        private ConfigEntry<int> raiseRefreshRate;
+        private bool refreshRateApplied;
         private readonly FramePacer pacer = new();
         private ConfigEntry<float> renderScale;
         private ConfigEntry<int> msaa;
@@ -69,7 +72,9 @@ namespace PalaceMod
             spikeLogging = config.Bind(Section, "Log frame spikes", true,
                 "Write frame-time spikes and a periodic frame-time summary to the BepInEx log.");
             spikeThresholdMs = config.Bind(Section, "Spike threshold (ms)", 25f,
-                "A frame counts as a spike when it takes longer than this and more than twice the recent average.");
+                "A frame counts as a spike when it takes longer than this...");
+            spikeRatio = config.Bind(Section, "Spike ratio", 2f,
+                "...and longer than this multiple of the recent average frame time.");
             summaryIntervalSeconds = config.Bind(Section, "Summary interval (s)", 60f,
                 "How often to log the frame-time summary.");
 
@@ -88,6 +93,9 @@ namespace PalaceMod
                 "Frame rate for precise frame pacing. 0 matches the display's refresh rate.");
             lockToDisplay = config.Bind(Section, "Lock pacing to display refresh", true,
                 "Start each paced frame just after a display refresh, so frames don't drift across refreshes (judder).");
+            raiseRefreshRate = config.Bind(Section, "Raise refresh rate (Hz)", 0,
+                "macOS: while the game runs, switch the display to the highest refresh rate up to this (e.g. 120 on a " +
+                "ProMotion screen set to 60 Hz). macOS restores your setting when the game quits. 0 leaves it alone.");
             renderScale = config.Bind(Section, "Render scale override", 0f,
                 "Resolution multiplier for 3D rendering (UI stays sharp). 0 keeps the game's setting.");
             msaa = config.Bind(Section, "MSAA override", 0,
@@ -163,6 +171,7 @@ namespace PalaceMod
         public override void Update()
         {
             ReloadConfigIfChanged();
+            ApplyRefreshRate();
             ApplyFramePacing();
             if (!spikeLogging.Value) return;
 
@@ -171,7 +180,7 @@ namespace PalaceMod
             bool gcRan = gcCount != lastGcCount;
             lastGcCount = gcCount;
 
-            bool spike = frameMs > spikeThresholdMs.Value && frameMs > smoothedFrameMs * 2f;
+            bool spike = frameMs > spikeThresholdMs.Value && frameMs > smoothedFrameMs * spikeRatio.Value;
             stats.Add(frameMs, spike, gcRan);
             // Don't let spikes drag the baseline up.
             if (!spike) smoothedFrameMs = Mathf.Lerp(smoothedFrameMs, frameMs, 0.05f);
@@ -189,7 +198,7 @@ namespace PalaceMod
                 if (stats.Frames > 0)
                 {
                     Plugin.Logger.LogInfo($"Performance: {stats.Summarize()}, vSync {QualitySettings.vSyncCount}, target fps {Application.targetFrameRate}, " +
-                        $"paced {(pacer.Enabled ? $"{pacer.TargetFps:0.#} fps{(pacer.LockedToDisplay ? " locked to display" : "")}, worst sleep {pacer.WorstSleepMs:0.0} ms, " +
+                        $"paced {(pacer.Enabled ? $"{pacer.TargetFps:0.#} fps{(pacer.LockedToDisplay ? " locked to display" : "")}, worst wake overshoot {pacer.WorstSleepMs:0.0} ms, " +
                             $"mistimed {pacer.MistimedFrames}/{pacer.Frames} frames" : "off")}, " +
                         $"refresh period {DisplayLink.PeriodTicks * 1000.0 / System.Diagnostics.Stopwatch.Frequency:0.00} ms, " +
                         $"display {Screen.currentResolution.refreshRateRatio.value:0.#} Hz, focused {Application.isFocused}, {DescribeRendering()}, mono used {Profiler.GetMonoUsedSizeLong() / 1048576}/{Profiler.GetMonoHeapSizeLong() / 1048576} MB");
@@ -216,6 +225,21 @@ namespace PalaceMod
         }
 
         // The game applies its own VSync setting when settings load, so re-assert ours whenever it differs.
+        // Done on the first frame rather than in Awake so it lands after the game applies its own display settings.
+        private void ApplyRefreshRate()
+        {
+            if (refreshRateApplied || raiseRefreshRate.Value <= 0 || Application.platform != RuntimePlatform.OSXPlayer) return;
+            refreshRateApplied = true;
+            try
+            {
+                Plugin.Logger.LogInfo($"Performance: refresh rate {DisplayMode.RaiseRefreshRate(raiseRefreshRate.Value)}");
+            }
+            catch (Exception e)
+            {
+                Plugin.Logger.LogWarning($"Performance: couldn't change the refresh rate: {e.Message}");
+            }
+        }
+
         // The game's URP asset isn't referenced at compile time, so set its properties by name.
         private void ApplyRenderOverrides()
         {

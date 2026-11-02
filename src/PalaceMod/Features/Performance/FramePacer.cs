@@ -16,7 +16,8 @@ namespace PalaceMod
 {
     internal class FramePacer
     {
-        private const double SleepMarginMs = 2.0;
+        // Thread.Sleep(1) usually wakes within a few ms on macOS, so spin for the last stretch.
+        private const double SleepMarginMs = 4.0;
         // How long after a refresh to start the next frame.
         private const double PhaseOffsetMs = 0.5;
         private static readonly double TicksPerMs = Stopwatch.Frequency / 1000.0;
@@ -29,7 +30,7 @@ namespace PalaceMod
         public bool LockToDisplay { get; set; } = true;
         public bool LockedToDisplay { get; private set; }
 
-        // Diagnostics, reset by the summary.
+        // Diagnostics, reset by the summary. WorstSleepMs is how far a sleep overshot its wake-up time.
         public double WorstSleepMs { get; private set; }
         public int Frames { get; private set; }
         public int MistimedFrames { get; private set; } // shown for more or fewer refreshes than intended
@@ -94,13 +95,12 @@ namespace PalaceMod
         {
             long sleepUntil = deadline - (long)(SleepMarginMs * TicksPerMs);
             long now = Stopwatch.GetTimestamp();
-            while (now < sleepUntil)
+            if (now < sleepUntil)
             {
-                long before = now;
-                Thread.Sleep(1);
-                now = Stopwatch.GetTimestamp();
-                double slept = (now - before) / TicksPerMs;
-                if (slept > WorstSleepMs) WorstSleepMs = slept;
+                // Short sleeps overshoot least here; mach_wait_until to the full deadline overshot by up to 70 ms.
+                while (Stopwatch.GetTimestamp() < sleepUntil) Thread.Sleep(1);
+                double overshoot = (Stopwatch.GetTimestamp() - sleepUntil) / TicksPerMs;
+                if (overshoot > WorstSleepMs) WorstSleepMs = overshoot;
             }
             while (Stopwatch.GetTimestamp() < deadline) Thread.SpinWait(64);
         }
