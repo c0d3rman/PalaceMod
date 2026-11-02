@@ -34,6 +34,7 @@ public class Plugin : BaseUnityPlugin
 
         // Add managers
         managers.Add(new DevToolsManager());
+        managers.Add(new PerformanceManager());
         managers.Add(new UIManager());
         managers.Add(new GoldManager());
         managers.Add(new BuildPreviewManager());
@@ -116,9 +117,17 @@ public class Plugin : BaseUnityPlugin
         GetManager<UIManager>()?.ShowMessage(message);
     }
 
+    private readonly Dictionary<Type, IManager> managerCache = [];
+
+    // Called from per-frame Harmony patches, so cache instead of scanning with LINQ each time.
     internal T GetManager<T>() where T : class, IManager
     {
-        return managers.OfType<T>().FirstOrDefault();
+        if (!managerCache.TryGetValue(typeof(T), out var manager))
+        {
+            manager = managers.OfType<T>().FirstOrDefault();
+            managerCache[typeof(T)] = manager;
+        }
+        return (T)manager;
     }
 
     private void OnDestroy()
