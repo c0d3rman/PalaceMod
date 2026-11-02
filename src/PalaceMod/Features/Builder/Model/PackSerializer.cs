@@ -48,7 +48,7 @@ namespace PalaceMod.Builder.Model
                 }
                 return root.ToObject<DesignPack>(Serializer);
             }
-            catch (Exception e) when (e is JsonException || e is ArgumentException || e is FormatException || e is InvalidCastException)
+            catch (Exception e) when (e is JsonException || e is ArgumentException || e is FormatException || e is InvalidCastException || e is OverflowException)
             {
                 issues?.Add(new ValidationIssue(Severity.Error, "", "doesn't match the pack format: " + e.Message));
                 return null;
