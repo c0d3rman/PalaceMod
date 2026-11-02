@@ -40,7 +40,8 @@ namespace PalaceMod
             else if (LocalGamestate.SelectedGameMode != LocalGamestate.GameMode.Classic) reason = "Savestates only work in normal levels";
             else if (StateUtil.CustomSession) reason = "Savestates don't work in custom (Builder) levels";
             else if (SceneTransitionManager.instance.SceneTransitionIsRunning || LocalMatchSaveLoad.CurrentlyLoadingMatch) reason = "The level is still loading";
-            else if (LocalGamestate.Instance.CurrentState != LocalGamestate.State.InMatch) reason = "The match is over";
+            // After a defeat the level is still loaded, so a state can be loaded from the defeat screen like retry-day.
+            else if (LocalGamestate.Instance.CurrentState is not (LocalGamestate.State.InMatch or LocalGamestate.State.AfterMatchDefeat)) reason = "The match is over";
             else if (state.WaveCount != EnemySpawner.instance.WaveCount) reason = "That state doesn't match this level's waves";
             return reason == null;
         }

@@ -20,6 +20,10 @@ namespace PalaceMod
 {
     public partial class PerformanceManager : BaseManager
     {
+        public override string FeatureSection => "Performance";
+        public override string FeatureDescription =>
+            "Smoother frame pacing, battery saving and the optimizations in the sections below. Off hands frame limiting back to the game.";
+
         public enum Toggle { Auto, On, Off }
         public enum VSyncMode { GameDefault, On, Off }
         public enum PathfindingThreads { GameDefault, None, One, Two, Four, AutomaticLowLoad, AutomaticHighLoad }
@@ -62,9 +66,6 @@ namespace PalaceMod
         private ConfigEntry<int> msaa;
         private ConfigEntry<PathfindingThreads> pathfindingThreads;
 
-        private DateTime configWriteTime;
-        private float nextConfigCheck;
-
         private static bool IsMac => Application.platform == RuntimePlatform.OSXPlayer;
 
         public override void Awake(Plugin plugin)
@@ -72,7 +73,7 @@ namespace PalaceMod
             base.Awake(plugin);
             BindSettings(plugin.Config);
             RemoveOldSettings(plugin.Config);
-            configWriteTime = System.IO.File.GetLastWriteTimeUtc(plugin.Config.ConfigFilePath);
+            plugin.Config.ConfigReloaded += (_, _) => stats.Reset();
 
             if (IsMac)
             {
@@ -81,12 +82,13 @@ namespace PalaceMod
                 Plugin.Logger.LogInfo($"Performance: on battery {PowerState.OnBattery}, low power mode {PowerState.LowPowerMode}, thermal {PowerState.ThermalState}");
             }
             AstarPath.OnAwakeSettings += ConfigurePathfinding;
-            ReserveHeap(heapReserveMb.Value);
-            ApplyGcTimeSlice();
+            if (IsEnabled) ReserveHeap(heapReserveMb.Value);
+            gameGcTimeSlice = GarbageCollector.incrementalTimeSliceNanoseconds;
+            if (IsEnabled) ApplyGcTimeSlice();
             gcTimeSliceMs.SettingChanged += (_, _) => ApplyGcTimeSlice();
 
             pacer.Install();
-            if (spikeLogging.Value) loopTimer.Install(); // after the pacer, so its wait shows up as its own entry
+            if (IsEnabled && spikeLogging.Value) loopTimer.Install(); // after the pacer, so its wait shows up as its own entry
             lastGcCount = GC.CollectionCount(0);
             Plugin.Logger.LogInfo($"Performance: GC incremental {GarbageCollector.isIncremental}, heap {Profiler.GetMonoHeapSizeLong() / 1048576} MB, " +
                 $"run in background {Application.runInBackground}, arch {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}");
@@ -202,29 +204,30 @@ namespace PalaceMod
 
         public override void Update()
         {
-            ReloadConfigIfChanged();
             UpdateFrameRate();
             UpdateDiagnostics();
         }
 
-        // Lets settings be tuned while the game runs by editing the config file.
-        private void ReloadConfigIfChanged()
+        // Hand frame limiting, VSync and render scale back to the game. A raised refresh rate stays until quit.
+        protected override void OnFeatureDisabled()
         {
-            if (Time.unscaledTime < nextConfigCheck) return;
-            nextConfigCheck = Time.unscaledTime + 2f;
-            var written = System.IO.File.GetLastWriteTimeUtc(Plugin.Config.ConfigFilePath);
-            if (written == configWriteTime) return;
-            configWriteTime = written;
-            Plugin.Config.Reload();
-            Plugin.Logger.LogInfo("Performance: reloaded config");
+            pacer.TargetFps = 0;
+            Application.targetFrameRate = -1;
+            QualitySettings.vSyncCount = SettingsManager.Instance != null && !SettingsManager.Instance.VSync ? 0 : 1;
+            RestoreRenderScale();
+            RestoreMsaa();
+            if (GarbageCollector.isIncremental) GarbageCollector.incrementalTimeSliceNanoseconds = gameGcTimeSlice;
+            if (MacActivity.Active) MacActivity.End();
             stats.Reset();
         }
+
+        protected override void OnFeatureEnabled() => ApplyGcTimeSlice();
 
         // Runs inside AstarPath.OnEnable, just before its path threads start.
         private void ConfigurePathfinding()
         {
             var astar = AstarPath.active;
-            if (astar == null) return;
+            if (astar == null || !IsEnabled) return;
             var original = astar.threadCount;
             if (pathfindingThreads.Value != PathfindingThreads.GameDefault)
             {
@@ -246,10 +249,12 @@ namespace PalaceMod
             Plugin.Logger.LogInfo($"Performance: grew managed heap {before / 1048576} MB -> {Profiler.GetMonoHeapSizeLong() / 1048576} MB");
         }
 
+        private ulong gameGcTimeSlice;
+
         private void ApplyGcTimeSlice()
         {
-            if (gcTimeSliceMs.Value <= 0f || !GarbageCollector.isIncremental) return;
-            GarbageCollector.incrementalTimeSliceNanoseconds = (ulong)(gcTimeSliceMs.Value * 1e6f);
+            if (!IsEnabled || !GarbageCollector.isIncremental) return;
+            GarbageCollector.incrementalTimeSliceNanoseconds = gcTimeSliceMs.Value > 0f ? (ulong)(gcTimeSliceMs.Value * 1e6f) : gameGcTimeSlice;
         }
     }
 }
