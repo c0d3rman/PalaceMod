@@ -73,7 +73,7 @@ namespace PalaceMod.Builder.Editor
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogError($"Builder editor: \"{label}\" failed: {e}");
+                Log.For<BuilderManager>().Error($"Editor change \"{label}\" failed; undone", e);
                 History.Undo();
                 lastKey = null;
                 structural = true;
@@ -118,7 +118,7 @@ namespace PalaceMod.Builder.Editor
             json = null;
             issues = null;
             try { Changed?.Invoke(structural); }
-            catch (Exception e) { Plugin.Logger.LogError($"Builder editor: refresh failed: {e}"); }
+            catch (Exception e) { Log.For<BuilderManager>().Caught("Editor refresh failed", e); }
         }
 
         /// <summary>Revalidates (e.g. after other packs changed on disk).</summary>
@@ -134,7 +134,7 @@ namespace PalaceMod.Builder.Editor
             try { list = BuilderServices.Packs.Validate(Pack); }
             catch (Exception e)
             {
-                Plugin.Logger.LogError($"Builder editor: validation failed: {e}");
+                Log.For<BuilderManager>().Error("Editor validation failed; using the basic checks", e);
                 list = Validator.Validate(Pack);
             }
             list.AddRange(EditorChecks.Check(Pack));
@@ -187,7 +187,7 @@ namespace PalaceMod.Builder.Editor
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogError($"Builder editor: saving {pack.Id} failed: {e}");
+                Log.For<BuilderManager>().Error($"Saving pack {pack.Id} failed", e);
                 message = "Couldn't save: " + e.Message;
                 return false;
             }

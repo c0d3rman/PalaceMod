@@ -78,7 +78,7 @@ namespace PalaceMod.Builder.Editor
                     var sprite = BuilderServices.Assets.GetSprite(draft.Entry, custom.Visuals.Icon);
                     if (sprite != null) return sprite;
                 }
-                catch (Exception e) { Plugin.Logger.LogWarning($"Builder editor: icon {custom.Visuals.Icon}: {e.Message}"); }
+                catch (Exception e) { Log.For<BuilderManager>().Warn($"Couldn't load unit icon {custom.Visuals.Icon}: {e.Message}"); }
             }
             return BaseOf(draft?.Pack, unitRef)?.Icon;
         }
