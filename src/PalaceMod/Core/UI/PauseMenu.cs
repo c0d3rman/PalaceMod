@@ -226,7 +226,7 @@ namespace PalaceMod
             return button;
         }
 
-        // Keeps the column's top where the game put it and tightens the rows so the column still ends above the
+        // Keeps the column's top where the game puts it and tightens the rows so the column still ends above the
         // Night row. With no mod buttons showing, the game's own layout is restored exactly.
         private void SaveLayout(PauseUILoadoutHelper helper)
         {
@@ -254,10 +254,16 @@ namespace PalaceMod
                 group.spacing = savedSpacing;
                 return;
             }
-            float top = savedPosition.y + savedHeight * (1f - savedPivot.y);
-            int rows = menu.Cast<Transform>().Count(t => t.gameObject.activeSelf);
-            float rowHeight = ((RectTransform)helper.settingsElement.transform).rect.height + savedSpacing;
-            float available = savedHeight;
+            // Where the game's own (centred) column would start with the rows it shows right now; Restart, for
+            // example, is hidden before the first night.
+            float rowHeight = ((RectTransform)helper.settingsElement.transform).rect.height;
+            var children = menu.Cast<Transform>().Where(t => t.gameObject.activeSelf).ToList();
+            int rows = children.Count;
+            int nativeRows = children.Count(t => !t.name.StartsWith("PalaceMod "));
+            float center = savedPosition.y + savedHeight * (0.5f - savedPivot.y);
+            float nativeHeight = nativeRows * rowHeight + Mathf.Max(0, nativeRows - 1) * savedSpacing;
+            float top = center + nativeHeight / 2f;
+            float available = nativeHeight;
             if (helper.nightButton != null && rect.parent is RectTransform parent)
             {
                 var corners = new Vector3[4];
@@ -267,10 +273,10 @@ namespace PalaceMod
                 float anchorY = Mathf.Lerp(parent.rect.yMin, parent.rect.yMax, rect.anchorMin.y);
                 available = top + anchorY - nightTop - 10f;
             }
-            float pitch = Mathf.Min(rowHeight, available / rows);
+            float pitch = Mathf.Min(rowHeight + savedSpacing, available / rows);
             rect.pivot = new Vector2(savedPivot.x, 1f);
             rect.anchoredPosition = new Vector2(savedPosition.x, top);
-            group.spacing = pitch - ((RectTransform)helper.settingsElement.transform).rect.height;
+            group.spacing = pitch - rowHeight;
         }
 
         // The game points the menu's right arrow at the loadout grid each time it refreshes; ours follow Settings.

@@ -75,11 +75,6 @@ namespace PalaceMod
                 var corners = new Vector3[4];
                 near.GetWorldCorners(corners);
                 Vector2 min = canvas.InverseTransformPoint(corners[0]), max = canvas.InverseTransformPoint(corners[2]);
-                // The text's visible width matters more than its rect for left-aligned labels in wide rows.
-                if (near.GetComponent<TextMeshProUGUI>() is { } tmp && tmp.textBounds.size.x > 0 && tmp.alignment is TextAlignmentOptions.Left or TextAlignmentOptions.TopLeft or TextAlignmentOptions.MidlineLeft)
-                {
-                    max.x = Mathf.Min(max.x, canvas.InverseTransformPoint(near.TransformPoint(tmp.textBounds.max)).x);
-                }
                 pos = new Vector2(max.x + Offset, max.y);
                 if (pos.x + size.x > bounds.xMax - 16f) pos.x = min.x - Offset - size.x;
             }
