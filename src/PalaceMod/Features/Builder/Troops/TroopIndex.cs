@@ -51,7 +51,7 @@ namespace PalaceMod.Builder
             {
                 if (requests[i].asset is not GameObject prefab)
                 {
-                    Plugin.Logger.LogWarning($"Builder: troop building \"{TroopBuildingPaths[i]}\" isn't in Resources any more; its troops are missing from the catalog");
+                    Log.For<BuilderManager>().Warn($"Troop building \"{TroopBuildingPaths[i]}\" isn't in Resources any more; its troops are missing from the catalog");
                     continue;
                 }
                 foreach (var unit in TroopsUnder(prefab))

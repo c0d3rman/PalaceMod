@@ -58,7 +58,7 @@ namespace PalaceMod
                 records[currentKey] = reasons;
                 SaveRecords();
             }
-            Plugin.Logger.LogInfo($"Gameplay impact: {reason}");
+            Log.For<GameplayImpactManager>().Info($"Marked: {reason}");
             Marked?.Invoke(reason);
         }
 
@@ -151,7 +151,7 @@ namespace PalaceMod
             currentKey = key;
             reasons = next;
             if (!changed) return;
-            if (reasons.Count > 0) Plugin.Logger.LogInfo($"Gameplay impact: resumed {key} ({string.Join(", ", reasons)})");
+            if (reasons.Count > 0) Log.For<GameplayImpactManager>().Debug($"Resumed {key} ({string.Join(", ", reasons)})");
             Reset?.Invoke();
         }
 
@@ -190,7 +190,7 @@ namespace PalaceMod
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogWarning($"Gameplay impact: couldn't read {RecordsPath}: {e.Message}");
+                Log.For<GameplayImpactManager>().Warn($"Couldn't read {RecordsPath}: {e.Message}");
             }
             return result;
         }
@@ -210,7 +210,7 @@ namespace PalaceMod
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogWarning($"Gameplay impact: couldn't save {RecordsPath}: {e.Message}");
+                Log.For<GameplayImpactManager>().Warn($"Couldn't save {RecordsPath}: {e.Message}");
             }
         }
 

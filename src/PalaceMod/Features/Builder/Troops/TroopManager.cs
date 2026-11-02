@@ -44,7 +44,7 @@ namespace PalaceMod
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogError($"Builder: applying custom troops failed: {e}");
+                Log.For<BuilderManager>().Error($"Applying custom troops failed", e);
             }
         }
 
@@ -60,7 +60,7 @@ namespace PalaceMod
                 var baseUnit = def == null ? null : BuilderServices.Catalog.FindUnit(ContentRef.Parse(def.Base).Id);
                 if (baseUnit == null || baseUnit.Side != UnitSide.Player)
                 {
-                    Plugin.Logger.LogWarning($"Builder: troop {troop.Unit} skipped: it isn't a custom player unit with a known base");
+                    Log.For<BuilderManager>().Warn($"Troop {troop.Unit} skipped: it isn't a custom player unit with a known base");
                     continue;
                 }
                 rules.Add((baseUnit.Id, troop.Building, troop.Unit));
@@ -91,8 +91,8 @@ namespace PalaceMod
                     string key = $"{id} @ {building ?? "-"} -> {rule.unitRef}";
                     applied[key] = applied.TryGetValue(key, out int n) ? n + 1 : 1;
                 }
-            foreach (var e in errors) Plugin.Logger.LogWarning($"Builder: troop override: {e}");
-            Plugin.Logger.LogInfo($"Builder: custom troops on {scene.name}: {count} troops overridden ({string.Join("; ", applied.Select(kv => $"{kv.Value}x {kv.Key}"))})");
+            foreach (var e in errors) Log.For<BuilderManager>().Warn($"Troop override: {e}");
+            Log.For<BuilderManager>().Info($"Custom troops on {scene.name}: {count} troops overridden ({string.Join("; ", applied.Select(kv => $"{kv.Value}x {kv.Key}"))})");
         }
 
         // ------------------------------------------------------------------ dev commands

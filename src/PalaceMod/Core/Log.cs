@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
@@ -265,14 +266,14 @@ namespace PalaceMod
                 var t = FrameType(raw);
                 if (t == null) continue;
                 first ??= t;
-                var manager = OwningManager(t);
+                var manager = OwningManager(t) ?? UsageOwner(t);
                 if (manager == null) continue;
                 lock (sync)
                 {
                     if (featureManagers.Contains(manager)) return For(manager);
                 }
             }
-            return first == null ? null : For(OwningManager(first) ?? NamespaceOwner(first) ?? first);
+            return first == null ? null : Owner(first);
         }
 
         private static Type FrameType(string line)
@@ -293,9 +294,15 @@ namespace PalaceMod
                 if (dot <= 0) return null;
                 s = s.Substring(0, dot);
             }
-            var types = modTypes;
-            if (types == null)
+            return ModTypes.TryGetValue(s, out var type) ? type : null;
+        }
+
+        private static Dictionary<string, Type> ModTypes
+        {
+            get
             {
+                var types = modTypes;
+                if (types != null) return types;
                 types = new Dictionary<string, Type>(StringComparer.Ordinal);
                 foreach (var t in HarmonyLib.AccessTools.GetTypesFromAssembly(typeof(Log).Assembly))
                 {
@@ -306,10 +313,16 @@ namespace PalaceMod
                     types[full.Replace('+', '/')] = t;
                     if (tick > 0 && !full.Contains('+')) types[full.Substring(0, tick)] = t;
                 }
-                modTypes = types;
+                return modTypes = types;
             }
-            return types.TryGetValue(s, out var type) ? type : null;
         }
+
+        /// <summary>The logger an exception thrown in <paramref name="type"/>'s code is attributed to.</summary>
+        internal static Log Owner(Type type) => For(OwningManager(type) ?? UsageOwner(type) ?? NamespaceOwner(type) ?? type);
+
+        /// <summary>A mod type by full or simple name, for the `log owner` dev command.</summary>
+        internal static Type FindType(string name) =>
+            ModTypes.TryGetValue(name, out var t) ? t : ModTypes.Values.FirstOrDefault(v => v.Name == name);
 
         private static Type OwningManager(Type type)
         {
@@ -320,6 +333,102 @@ namespace PalaceMod
             return null;
         }
 
+        private static readonly Dictionary<Type, Type> usageOwners = [];
+
+        /// <summary>The feature a helper class (not nested in a manager) belongs to, read from its code: the manager
+        /// whose logger it uses (<c>Log.For&lt;M&gt;()</c>) most, else the only feature manager it references at all.
+        /// Worked out on first use per type, so it only costs anything when an exception needs attributing.</summary>
+        private static Type UsageOwner(Type type)
+        {
+            while (type.DeclaringType != null) type = type.DeclaringType;
+            lock (usageOwners)
+            {
+                if (usageOwners.TryGetValue(type, out var cached)) return cached;
+            }
+            Type owner = null;
+            try
+            {
+                var loggers = new Dictionary<Type, int>();
+                var referenced = new HashSet<Type>();
+                foreach (var t in Nested(type))
+                {
+                    foreach (var method in t.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public |
+                                                        BindingFlags.NonPublic | BindingFlags.DeclaredOnly).Cast<MethodBase>()
+                                 .Concat(t.GetConstructors(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)))
+                    {
+                        byte[] il;
+                        try { il = method.GetMethodBody()?.GetILAsByteArray(); }
+                        catch { continue; }
+                        if (il == null) continue;
+                        ScanIL(method, il, loggers, referenced);
+                    }
+                }
+                owner = loggers.Count > 0 ? loggers.OrderByDescending(kv => kv.Value).First().Key
+                    : referenced.Count == 1 ? referenced.First() : null;
+            }
+            catch
+            {
+                owner = null;
+            }
+            lock (usageOwners) usageOwners[type] = owner;
+            return owner;
+        }
+
+        private static IEnumerable<Type> Nested(Type type)
+        {
+            yield return type;
+            foreach (var n in type.GetNestedTypes(BindingFlags.Public | BindingFlags.NonPublic))
+                foreach (var t in Nested(n)) yield return t;
+        }
+
+        // Looks at every call/callvirt/newobj/ldftn and field-access operand. Operand bytes can look like opcodes, so a
+        // token is only trusted if it resolves to a member; a stray match would have to resolve to a manager to matter.
+        private static void ScanIL(MethodBase method, byte[] il, Dictionary<Type, int> loggers, HashSet<Type> referenced)
+        {
+            var module = method.Module;
+            var typeArgs = method.DeclaringType?.IsGenericType == true ? method.DeclaringType.GetGenericArguments() : null;
+            var methodArgs = method.IsGenericMethod ? method.GetGenericArguments() : null;
+            for (int i = 0; i + 4 < il.Length; i++)
+            {
+                byte op = il[i];
+                bool isMethod = op is 0x28 or 0x6F or 0x73; // call, callvirt, newobj
+                bool isField = op is 0x7B or 0x7C or 0x7D or 0x7E or 0x7F or 0x80; // ldfld..stsfld
+                if (!isMethod && !isField) continue;
+                int token = BitConverter.ToInt32(il, i + 1);
+                int table = token >>> 24;
+                Type declaring;
+                try
+                {
+                    if (isMethod && table is 0x06 or 0x0A or 0x2B)
+                    {
+                        var m = module.ResolveMethod(token, typeArgs, methodArgs);
+                        declaring = m.DeclaringType;
+                        if (m.IsGenericMethod && m.Name == nameof(For) && declaring == typeof(Log))
+                        {
+                            var arg = m.GetGenericArguments()[0];
+                            if (featureManagers.Contains(arg))
+                            {
+                                loggers.TryGetValue(arg, out int n);
+                                loggers[arg] = n + 1;
+                            }
+                        }
+                    }
+                    else if (isField && table is 0x04 or 0x0A) declaring = module.ResolveField(token, typeArgs, methodArgs).DeclaringType;
+                    else continue;
+                }
+                catch
+                {
+                    continue;
+                }
+                // Feature<M>.Instance / .On and members of M itself.
+                if (declaring is { IsGenericType: true } && declaring.GetGenericTypeDefinition() == typeof(Feature<>))
+                    declaring = declaring.GetGenericArguments()[0];
+                var owner = OwningManager(declaring);
+                if (owner != null && featureManagers.Contains(owner)) referenced.Add(owner);
+                i += 4;
+            }
+        }
+
         // Features in their own namespace (PalaceMod.Builder.*, PalaceMod.Profiles) map their helpers to the manager
         // of that namespace when there's exactly one.
         private static Type NamespaceOwner(Type type)
@@ -327,7 +436,7 @@ namespace PalaceMod
             var ns = type.Namespace;
             if (ns == null || ns == "PalaceMod" || !ns.StartsWith("PalaceMod.")) return null;
             string top = "PalaceMod." + ns.Substring(10).Split('.')[0];
-            var owners = modTypes.Values.Distinct().Where(t => !t.IsAbstract && typeof(BaseManager).IsAssignableFrom(t)
+            var owners = ModTypes.Values.Distinct().Where(t => !t.IsAbstract && typeof(BaseManager).IsAssignableFrom(t)
                 && t.Namespace != null && (t.Namespace == top || t.Namespace.StartsWith(top + "."))).Take(2).ToList();
             return owners.Count == 1 ? owners[0] : null;
         }

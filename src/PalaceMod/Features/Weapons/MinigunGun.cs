@@ -372,10 +372,10 @@ namespace PalaceMod
                 tracerMaterial = new Material(shader) { name = "PalaceMod Minigun Tracer" };
                 if (tracerMaterial.HasProperty("_BaseColor")) tracerMaterial.SetColor("_BaseColor", Color.white);
                 if (tracerMaterial.HasProperty("_Color")) tracerMaterial.SetColor("_Color", Color.white);
-                Plugin.Logger.LogInfo($"Minigun: tracer shader {name}");
+                Log.For<MinigunManager>().Debug($"Tracer shader {name}");
                 return tracerMaterial;
             }
-            Plugin.Logger.LogWarning("Minigun: no unlit shader found for tracers");
+            Log.For<MinigunManager>().Warn("No unlit shader found for tracers");
             tracerMaterial = new Material(Shader.Find("Hidden/InternalErrorShader"));
             return tracerMaterial;
         }
@@ -436,7 +436,7 @@ namespace PalaceMod
             gunModel.transform.rotation = Quaternion.LookRotation(forward.sqrMagnitude > 0.01f ? forward.normalized : Vector3.forward, Vector3.up);
             float parentScale = Mathf.Max(0.0001f, bowVisuals.transform.lossyScale.x);
             gunModel.transform.localScale = Vector3.one * (MinigunManager.ModelScale / parentScale);
-            Plugin.Logger.LogInfo($"Minigun: model at {anchor.name} pos={anchor.position} parentScale={parentScale} facing={forward}");
+            Log.For<MinigunManager>().Debug($"Model at {anchor.name} pos={anchor.position} parentScale={parentScale} facing={forward}");
 
             var body = Part(PrimitiveType.Cube, gunModel.transform, new Vector3(0f, 0f, -0.05f), new Vector3(0.28f, 0.26f, 0.42f), material, new Color(0.35f, 0.33f, 0.36f));
             body.name = "Body";

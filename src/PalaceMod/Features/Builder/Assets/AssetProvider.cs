@@ -259,7 +259,7 @@ namespace PalaceMod.Builder.Assets
                         break;
                     }
                 }
-                if (loaded.Value != null) Plugin.Logger.LogInfo($"Builder assets: loaded {label} ({AssetSniffer.Name(kind)}, {Describe(loaded.Value)})");
+                if (loaded.Value != null) Log.For<BuilderManager>().Debug($"Assets: loaded {label} ({AssetSniffer.Name(kind)}, {Describe(loaded.Value)})");
             }
             catch (AssetException e)
             {
@@ -301,7 +301,7 @@ namespace PalaceMod.Builder.Assets
             request.redirectLimit = 4;
             request.SendWebRequest();
             downloads[sha] = new Download { Request = request, Sha256 = sha, Url = url, Label = label };
-            Plugin.Logger.LogInfo($"Builder assets: downloading {label} from {url}");
+            Log.For<BuilderManager>().Info($"Assets: downloading {label} from {url}");
             return true;
         }
 
@@ -372,7 +372,7 @@ namespace PalaceMod.Builder.Assets
                             clip.name = "PalaceBuilder " + d.Label;
                             clip.hideFlags = HideFlags.DontUnloadUnusedAsset;
                             loaded.Value = clip;
-                            Plugin.Logger.LogInfo($"Builder assets: loaded {d.Label} (OGG sound, {Describe(clip)})");
+                            Log.For<BuilderManager>().Debug($"Assets: loaded {d.Label} (OGG sound, {Describe(clip)})");
                         }
                     }
                 }
@@ -409,7 +409,7 @@ namespace PalaceMod.Builder.Assets
             File.WriteAllBytes(temp, data);
             if (File.Exists(target)) File.Delete(target);
             File.Move(temp, target);
-            Plugin.Logger.LogInfo($"Builder assets: cached {d.Label} ({AssetLimits.Mb(data.Length)}) as cache/{d.Sha256}");
+            Log.For<BuilderManager>().Debug($"Assets: cached {d.Label} ({AssetLimits.Mb(data.Length)}) as cache/{d.Sha256}");
         }
 
         private void Fail(Download d, string reason, bool retry = false)
@@ -469,7 +469,7 @@ namespace PalaceMod.Builder.Assets
 
         private void WarnOnce(string key, string message)
         {
-            if (warned.Add(key)) Plugin.Logger.LogWarning("Builder assets: " + message);
+            if (warned.Add(key)) Log.For<BuilderManager>().Warn("Assets: " + message);
         }
     }
 
