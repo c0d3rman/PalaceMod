@@ -708,6 +708,7 @@ def stop_holders_game(lease, force=False):
     """Stop the game if the lease holder launched it. Anything else (the player's own game, or a checkout whose
     dev.py predates the lease) is left running unless forced."""
     if not game_pids():
+        restore_display()  # a dev launch that crashed or was closed still left windowed-mode prefs behind
         return
     owner = game_owner()
     if force or (lease is not None and owner == lease["root"]):
@@ -741,7 +742,17 @@ def take_lease(game, command):
           flush=True)
 
 
-def acquire_lease(game, command, wait):
+def foreign_game():
+    """Who has a running game that isn't this checkout's dev launch, or None."""
+    if not game_pids():
+        return None
+    owner = game_owner()
+    if owner == str(ROOT):
+        return None
+    return owner or "the player (not launched by dev.py)"
+
+
+def acquire_lease(game, command, wait, force=False):
     """Return once this checkout holds the lease, queueing behind other checkouts for up to `wait` seconds."""
     ticket = None
     deadline = time.time() + wait
@@ -760,7 +771,10 @@ def acquire_lease(game, command, wait):
                     return
                 waiters = live_queue()
                 ahead = [w for w in waiters if ticket is None or w[0].name < ticket.name]
-                if lease is None and not ahead:
+                # A game this lease didn't launch (the player's, or a checkout on an older dev.py) also blocks it:
+                # its config would be snapshotted mid-session and later restored over it.
+                foreign = None if force else foreign_game()
+                if lease is None and not ahead and foreign is None:
                     take_lease(game, command)
                     return
                 if ticket is None:
@@ -768,7 +782,8 @@ def acquire_lease(game, command, wait):
                     ticket.write_text(json.dumps({"root": str(ROOT), "branch": current_branch(), "pid": os.getpid(),
                                                   "since": time.time()}) + "\n")
                 status = (f"held by {describe_holder(lease)}, idle {duration(lease_idle(lease))}" if lease
-                          else "free, but other checkouts are ahead")
+                          else "free, but other checkouts are ahead" if ahead
+                          else f"free, but Thronefall is running for {foreign} (--force takes over)")
                 position = len(ahead) + 1
             if wait <= 0 or time.time() >= deadline:
                 raise LeaseBusy(f"The game lease is {status}; gave up waiting (exit code {LEASE_BUSY_EXIT}). "
@@ -792,14 +807,14 @@ def require_lease():
 
 
 @contextlib.contextmanager
-def game_lease(game, command, wait=None):
+def game_lease(game, command, wait=None, force=False):
     """Wraps a command that touches the shared game. wait=None requires the lease already; otherwise it's acquired
     (queueing up to `wait` seconds). The heartbeat is refreshed throughout, so long launches don't go stale."""
     if wait is None:
         require_lease()
         heartbeat(command)
     else:
-        acquire_lease(game, command, wait)
+        acquire_lease(game, command, wait, force)
     done = threading.Event()
 
     def beat():
@@ -1145,13 +1160,13 @@ def main():
             install(game, args.configuration)
     elif args.command == "run":
         build(args.configuration)
-        with game_lease(game, "run", args.wait):
+        with game_lease(game, "run", args.wait, args.force):
             stop_game(args.force)
             install(game, args.configuration)
             prepare_config()
             launch(game, args.timeout, args.fullscreen, not args.focus)
     elif args.command == "launch":
-        with game_lease(game, "launch", args.wait):
+        with game_lease(game, "launch", args.wait, args.force):
             require_stopped()
             prepare_config()
             launch(game, args.timeout, args.fullscreen, not args.focus)
@@ -1187,7 +1202,7 @@ def main():
                            " ".join(rest[2:]) if len(rest) > 2 else None)
     elif args.command == "lease":
         if mode == "acquire":
-            with game_lease(game, "lease acquire", args.wait):
+            with game_lease(game, "lease acquire", args.wait, args.force):
                 pass
         elif mode == "release":
             release_lease(args.force)

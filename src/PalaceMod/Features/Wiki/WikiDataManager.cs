@@ -589,7 +589,8 @@ namespace PalaceMod
         public override void OnDestroy()
         {
             // Find and clean up all Wiki buttons
-            var allButtons = UnityEngine.Object.FindObjectsOfType<ThronefallUIElement>();
+            // Include inactive objects: the pause menu holding the button is usually closed when this runs.
+            var allButtons = Resources.FindObjectsOfTypeAll<ThronefallUIElement>().Where(b => b.gameObject.scene.IsValid());
             foreach (var button in allButtons)
             {
                 if (button == null || button.name != "Wiki") continue;
@@ -597,15 +598,15 @@ namespace PalaceMod
                 // Fix navigation - link the buttons above and below this one back up
                 var topButton = button.topNav;
                 var bottomButton = button.botNav;
-                topButton.botNav = bottomButton;
-                bottomButton.topNav = topButton;
+                if (topButton != null) topButton.botNav = bottomButton;
+                if (bottomButton != null) bottomButton.topNav = topButton;
 
                 // Destroy the Wiki button
                 UnityEngine.Object.Destroy(button.gameObject);
             }
 
             // Find and destroy any Wiki frames
-            var wikiFrame = GameObject.Find("Wiki Frame");
+            var wikiFrame = Resources.FindObjectsOfTypeAll<UIFrame>().FirstOrDefault(f => f.name == "Wiki Frame" && f.gameObject.scene.IsValid())?.gameObject;
             if (wikiFrame != null)
             {
                 // If the frame is active, close it first
