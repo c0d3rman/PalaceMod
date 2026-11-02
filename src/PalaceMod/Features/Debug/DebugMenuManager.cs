@@ -288,7 +288,13 @@ namespace PalaceMod
                 keep ? "Equips the loadout below and reloads today from dawn, so everything applies like at level start."
                      : "Equips the loadout below and restarts the level (there's no dawn save yet).",
                 () => Run(() => changes == 0 ? throw new InvalidOperationException("Nothing changed") : DebugActions.ApplyLoadout(pendingLoadout)));
-            if (changes > 0) page.Button("Undo changes", () => Run(() => { pendingLoadout = null; return ""; }), "Goes back to the loadout you're playing with.");
+            // Always shown, so toggling items never shifts the rows below it.
+            page.Button("Undo changes", () => Run(() =>
+            {
+                if (changes == 0) throw new InvalidOperationException("Nothing changed");
+                pendingLoadout = null;
+                return "";
+            }), "Goes back to the loadout you're playing with.");
 
             foreach (var category in new[] { DebugActions.Category.Weapon, DebugActions.Category.Perk, DebugActions.Category.Mutator })
             {

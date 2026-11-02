@@ -226,7 +226,8 @@ namespace PalaceMod
                 }
                 // Down to one per spawn: drop a spawn (a spawn with count 0 would still spawn one).
                 spawn = group.LastOrDefault();
-                if (spawn == null) break;
+                // Keep at least one enemy, which also keeps somewhere to put the night's gold.
+                if (spawn == null || wave.spawns.Count(Editable) <= 1) break;
                 wave.spawns.Remove(spawn);
                 group.Remove(spawn);
                 // Keep the night's gold reward: hand the removed spawn's coins to one that stays.
