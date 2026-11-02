@@ -26,6 +26,7 @@ namespace PalaceMod
                 reason = "Not in a level";
             else if (SceneManager.GetActiveScene().name == StateUtil.TutorialScene) reason = "Savestates don't work in the tutorial";
             else if (LocalGamestate.SelectedGameMode != LocalGamestate.GameMode.Classic) reason = "Savestates only work in normal levels";
+            else if (StateUtil.CustomSession) reason = "Savestates don't work in custom (Builder) levels";
             else if (SceneTransitionManager.instance != null && SceneTransitionManager.instance.SceneTransitionIsRunning) reason = "The level is still loading";
             else if (LocalMatchSaveLoad.CurrentlyLoadingMatch) reason = "The level is still loading";
             else if (LocalGamestate.Instance.CurrentState != LocalGamestate.State.InMatch) reason = "The match is over";
@@ -95,6 +96,7 @@ namespace PalaceMod
                     highscore = levelData.highscore,
                     dayToDayScore = [.. levelData.dayToDayScore],
                     dayToDayNetworth = [.. levelData.dayToDayNetworth],
+                    networth = PlayerInteraction.instance.Networth,
                 };
             }
 

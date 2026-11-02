@@ -191,6 +191,8 @@ namespace PalaceMod
             {
                 var manager = Feature<SaveStatesManager>.Instance;
                 if (manager == null || !manager.practiceRun || !manager.protectSave.Value) return true;
+                // SaveRun is also where the game stores the loadout into the in-memory save that retry-day applies.
+                MatchSaveLoadHandler.CurrentSave?.FetchLoadout();
                 if (!manager.savesSkippedLogged)
                 {
                     manager.savesSkippedLogged = true;

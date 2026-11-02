@@ -111,6 +111,8 @@ namespace PalaceMod
         public int highscore;
         public List<int> dayToDayScore = [];
         public List<int> dayToDayNetworth = [];
+        /// <summary>PlayerInteraction's running total of gold earned (feeds the next day's net-worth entry).</summary>
+        public int networth;
     }
 
     [Serializable]

@@ -85,6 +85,16 @@ namespace PalaceMod
     {
         public const string TutorialScene = "Neuland(Tutorial)";
 
+        /// <summary>A Builder custom design is running: same scene and mode as vanilla, but different waves and units.</summary>
+        public static bool CustomSession
+        {
+            get
+            {
+                try { return Builder.BuilderServices.InSession; }
+                catch (Exception) { return false; }
+            }
+        }
+
         public static string StripClone(string name)
         {
             while (name.EndsWith("(Clone)", StringComparison.Ordinal)) name = name.Substring(0, name.Length - "(Clone)".Length).TrimEnd();

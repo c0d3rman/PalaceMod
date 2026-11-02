@@ -38,6 +38,7 @@ namespace PalaceMod
             else if (state.Level != SceneManager.GetActiveScene().name) reason = $"That state is from {state.Level}";
             else if (state.Level == StateUtil.TutorialScene) reason = "Savestates don't work in the tutorial";
             else if (LocalGamestate.SelectedGameMode != LocalGamestate.GameMode.Classic) reason = "Savestates only work in normal levels";
+            else if (StateUtil.CustomSession) reason = "Savestates don't work in custom (Builder) levels";
             else if (SceneTransitionManager.instance.SceneTransitionIsRunning || LocalMatchSaveLoad.CurrentlyLoadingMatch) reason = "The level is still loading";
             else if (LocalGamestate.Instance.CurrentState != LocalGamestate.State.InMatch) reason = "The match is over";
             else if (state.WaveCount != EnemySpawner.instance.WaveCount) reason = "That state doesn't match this level's waves";
@@ -199,6 +200,7 @@ namespace PalaceMod
                 levelData.dayToDayScore = [.. data.stats.dayToDayScore];
                 levelData.dayToDayNetworth = [.. data.stats.dayToDayNetworth];
             }
+            if (data.stats.valid) Priv.Set(PlayerInteraction.instance, "networth", data.stats.networth);
 
             var cycle = DayNightCycle.Instance;
             var spawner = EnemySpawner.instance;
@@ -299,11 +301,18 @@ namespace PalaceMod
             {
                 if (!units.TryGetValue(saved.path, out var unit) || !unit.gameObject.activeInHierarchy) { missing++; continue; }
                 var hp = unit.GetComponent<Hp>();
+                // Health first: reviving a unit re-enables it, and OnEnable clears its hold order.
+                if (hp != null) SetHp(hp, saved.hp, saved.maxHp);
                 unit.HomePosition = saved.home;
                 unit.HoldPosition = saved.hold;
                 unit.transform.SetPositionAndRotation(saved.position, saved.rotation);
                 unit.ClearCurrentPath();
-                if (hp != null) SetHp(hp, saved.hp, saved.maxHp);
+                if (hp != null && saved.hp > 0f && saved.maxHp > 0f)
+                {
+                    // The hold order may have rescaled health (Commander); put the captured values back.
+                    hp.maxHp = saved.maxHp;
+                    hp.SetHpTo(Mathf.Min(saved.hp, saved.maxHp));
+                }
                 var tagged = unit.GetComponent<TaggedObject>();
                 if (tagged != null)
                 {
