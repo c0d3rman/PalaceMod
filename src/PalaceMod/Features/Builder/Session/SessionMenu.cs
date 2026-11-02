@@ -91,6 +91,11 @@ namespace PalaceMod.Builder
 
         private static void Build(ModPage page)
         {
+            if (!Available)
+            {
+                page.Text("The Builder is turned off. Turn it on in Settings > Mods to play custom runs.");
+                return;
+            }
             var designs = Designs();
             var armed = launcher.Armed;
 
@@ -180,6 +185,12 @@ namespace PalaceMod.Builder
 
         private static void Pick(Design d)
         {
+            if (!Available)
+            {
+                Notify.Show("The Builder is turned off in Settings > Mods.", NotifyKind.Warning, 5f, "builder-menu");
+                frame.Close();
+                return;
+            }
             if (d.Entry.HasErrors)
             {
                 Notify.Show($"{d.Name} can't be played: {FirstError(d.Entry.Issues)}", NotifyKind.Error, 6f, "builder-menu");

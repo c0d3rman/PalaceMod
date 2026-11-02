@@ -45,8 +45,28 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("tint")] public string Tint { get; set; }
         /// <summary>Uniform scale factor relative to the base prefab (1 = unchanged). Visual only.</summary>
         [JsonProperty("scale")] public float? Scale { get; set; }
-        /// <summary>Replacement mesh, "asset:&lt;key&gt;" (WP5; ignored until asset import lands).</summary>
+        /// <summary>Replacement body mesh, "asset:&lt;key&gt;" of an OBJ file. It's scaled to fit the base unit's size
+        /// and stands where the base stood, rendered with the unit's own material (so tint and elites still work).</summary>
         [JsonProperty("mesh")] public string Mesh { get; set; }
+        /// <summary>Scale for the imported mesh in its own units instead of fitting it to the base's height.</summary>
+        [JsonProperty("meshScale")] public float? MeshScale { get; set; }
+        /// <summary>Turns the imported mesh around the vertical axis, in degrees (to face it forward).</summary>
+        [JsonProperty("meshRotY")] public float? MeshRotY { get; set; }
+        /// <summary>Skin texture, "asset:&lt;key&gt;" of a PNG, applied to the body material (uses the mesh's UVs;
+        /// meant for imported meshes, since vanilla bodies are flat-coloured).</summary>
+        [JsonProperty("texture")] public string Texture { get; set; }
+        /// <summary>Replacement sounds; each missing one keeps the base unit's sound.</summary>
+        [JsonProperty("sounds")] public SoundsDef Sounds { get; set; }
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>Unit sounds, each "asset:&lt;key&gt;" of a WAV or OGG file (WP5).</summary>
+    public sealed class SoundsDef
+    {
+        [JsonProperty("attack")] public string Attack { get; set; }
+        /// <summary>Played when the unit takes damage.</summary>
+        [JsonProperty("hurt")] public string Hurt { get; set; }
+        [JsonProperty("death")] public string Death { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
