@@ -99,7 +99,11 @@ namespace PalaceMod.Builder.Editor
             var set = new HashSet<string>(taken.Where(t => t != null));
             if (!Ids.IsValid(baseId)) baseId = "item";
             string id = baseId;
-            for (int n = 2; set.Contains(id); n++) id = $"{baseId}-{n}";
+            for (int n = 2; set.Contains(id); n++)
+            {
+                string suffix = $"-{n}";
+                id = baseId.Substring(0, Math.Min(baseId.Length, 64 - suffix.Length)).TrimEnd('-', '.', '_') + suffix;
+            }
             return id;
         }
     }

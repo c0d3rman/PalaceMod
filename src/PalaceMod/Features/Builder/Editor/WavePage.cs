@@ -51,7 +51,14 @@ namespace PalaceMod.Builder.Editor
 
             page.Header("Wave set");
             Text(page, "Name", P + ".name", () => Set?.Name, (p, v) => p.WaveSets[Index].Name = v, "Shown when choosing a custom run.");
-            Text(page, "Id", P + ".id", () => Set?.Id, (p, v) => p.WaveSets[Index].Id = v ?? p.WaveSets[Index].Id,
+            Text(page, "Id", P + ".id", () => Set?.Id, (p, v) =>
+            {
+                var w = p.WaveSets[Index];
+                if (v == null || v == w.Id) return;
+                // Levels name their wave set by id; keep them pointing at it.
+                foreach (var level in p.Levels ?? []) if (level?.WaveSet == w.Id) level.WaveSet = v;
+                w.Id = v;
+            },
                 "Unique within the pack: lowercase letters, digits, '.', '_' or '-'.", isId: true);
             Choice(page, "Map", P + ".host", EditorCatalog.Hosts.Select(h => (h.Scene, h.DisplayName)).ToList(), () => Set?.Host,
                 (p, v) => p.WaveSets[Index].Host = v,
@@ -183,6 +190,24 @@ namespace PalaceMod.Builder.Editor
         // across a rebuild; remember which chip (night, group; -1 for "+ group") was selected and select its new copy.
         private readonly Dictionary<TFUITextButton, (int Night, int Spawn)> chipKeys = [];
 
+        private string ChipLabel(int n, int s)
+        {
+            var sp = Spawn(n, s);
+            var issues = IssuesAt($"{P}.nights[{n}].spawns[{s}]").ToList();
+            string mark = issues.Any(i => i.Severity == Severity.Error) ? $" <color=#{ModStyle.Hex(ModStyle.KindColor(NotifyKind.Error))}>\u25c6</color>"
+                : issues.Count > 0 ? $" <color=#{ModStyle.Hex(ModStyle.KindColor(NotifyKind.Warning))}>\u25c6</color>" : "";
+            return $"<b>{sp?.Count ?? 0}×</b> {Escape(Short(EditorCatalog.UnitName(Pack, sp?.Unit), 13))}{mark}\n" +
+                $"<size=75%><color=#{ModStyle.Hex(ModStyle.Dim)}>{Escape(Short(sp?.Line ?? "no line", 14))} · {EditorCatalog.Num(sp?.Delay ?? 0)} s{(sp?.Elite == true ? " · elite" : "")}</color></size>";
+        }
+
+        // Value edits (count, delay, line, elite) don't rebuild the page; redraw the chips' text in place.
+        protected override void OnFieldsUpdated()
+        {
+            foreach (var kv in chipKeys)
+                if (kv.Key != null && kv.Value.Spawn >= 0 && Spawn(kv.Value.Night, kv.Value.Spawn) != null)
+                    kv.Key.SetOriginalString(ChipLabel(kv.Value.Night, kv.Value.Spawn));
+        }
+
         public override void Rebuild()
         {
             var selected = Frame.Frame?.CurrentSelection as TFUITextButton;
@@ -218,15 +243,13 @@ namespace PalaceMod.Builder.Editor
                 int k = s;
                 var sp = spawns[s];
                 string sp_ = $"{np}.spawns[{s}]";
-                var issues = IssuesAt(sp_).ToList();
-                string mark = issues.Any(i => i.Severity == Severity.Error) ? $" <color=#{ModStyle.Hex(ModStyle.KindColor(NotifyKind.Error))}>◆</color>"
-                    : issues.Count > 0 ? $" <color=#{ModStyle.Hex(ModStyle.KindColor(NotifyKind.Warning))}>◆</color>" : "";
-                string label = $"<b>{sp?.Count ?? 0}×</b> {Escape(Short(EditorCatalog.UnitName(Pack, sp?.Unit), 13))}{mark}\n" +
-                    $"<size=75%><color=#{ModStyle.Hex(ModStyle.Dim)}>{Escape(Short(sp?.Line ?? "no line", 14))} · {EditorCatalog.Num(sp?.Delay ?? 0)} s{(sp?.Elite == true ? " · elite" : "")}</color></size>";
-                var chip = Chip(area, label, EditorCatalog.UnitIcon(Draft, sp?.Unit), () => Focus(n, k), night == n && spawn == k);
-                ModTooltip.Attach(chip, EditorCatalog.UnitName(Pack, sp?.Unit), () =>
-                    $"{sp?.Count} from {sp?.Line}, one every {EditorCatalog.Num(sp?.Interval ?? 0)} s, starting {EditorCatalog.Num(sp?.Delay ?? 0)} s into the night; " +
-                    $"{sp?.Gold} gold in all." + string.Concat(IssuesAt(sp_).Select(i => "\n" + Capital(i.Message))) + "\nApply to edit.");
+                var chip = Chip(area, ChipLabel(n, s), EditorCatalog.UnitIcon(Draft, sp?.Unit), () => Focus(n, k), night == n && spawn == k);
+                ModTooltip.Attach(chip, EditorCatalog.UnitName(Pack, Spawn(n, k)?.Unit), () =>
+                {
+                    var g = Spawn(n, k);
+                    return $"{g?.Count} from {g?.Line}, one every {EditorCatalog.Num(g?.Interval ?? 0)} s, starting {EditorCatalog.Num(g?.Delay ?? 0)} s into the night; " +
+                        $"{g?.Gold} gold in all." + string.Concat(IssuesAt(sp_).Select(i => "\n" + Capital(i.Message))) + "\nApply to edit.";
+                });
                 chips.Add(chip);
                 chipKeys[chip] = (n, s);
             }

@@ -63,7 +63,11 @@ namespace PalaceMod.Builder.Editor
                 field.Refresh();
                 if (path != null) field.SetMarker(MarkerFor(path));
             }
+            OnFieldsUpdated();
         }
+
+        /// <summary>Redraw custom (non-field) widgets after a value edit.</summary>
+        protected virtual void OnFieldsUpdated() { }
 
         /// <summary>Selects the field whose path best matches an issue path; false if none is on this page.</summary>
         public bool SelectPath(string path)
@@ -268,6 +272,8 @@ namespace PalaceMod.Builder.Editor
         }
 
         public static bool IsOpen => frame?.IsOpen == true;
+
+        public static void Close() => frame?.Close();
 
         private static void Show(string title)
         {

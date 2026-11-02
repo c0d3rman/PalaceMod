@@ -79,17 +79,23 @@ namespace PalaceMod.Builder.Editor
         }
 
         private static bool Referenced(DesignPack pack, string unitId) =>
-            pack.WaveSets.Any(w => w.Nights.Any(n => n.Spawns.Any(s => IsRef(s.Unit, unitId)))) ||
-            pack.Units.Any(o => o.Behaviours?.Any(b => IsRef(b.GetString("unit"), unitId)) == true);
+            pack.WaveSets.Any(w => w.Nights.Any(n => n.Spawns.Any(s => IsRef(pack, s.Unit, unitId)))) ||
+            pack.Units.Any(o => o.Behaviours?.Any(b => IsRef(pack, b.GetString("unit"), unitId)) == true);
 
-        private static bool IsRef(string reference, string unitId) => reference == unitId || reference == "unit:" + unitId;
+        /// <summary>Whether a unit ref names this pack's unit: "id", "unit:id" or "&lt;this pack&gt;/id".</summary>
+        private static bool IsRef(DesignPack pack, string reference, string unitId)
+        {
+            if (reference == null) return false;
+            var r = ContentRef.Parse(reference);
+            return r.Id == unitId && (r.Kind == RefKind.LocalUnit || (r.Kind == RefKind.PackUnit && r.Pack == pack.Id));
+        }
 
         private static void RenameRefs(DesignPack pack, string from, string to)
         {
             foreach (var s in pack.WaveSets.SelectMany(w => w.Nights).SelectMany(n => n.Spawns))
-                if (IsRef(s.Unit, from)) s.Unit = to;
+                if (IsRef(pack, s.Unit, from)) s.Unit = to;
             foreach (var b in pack.Units.Where(o => o.Behaviours != null).SelectMany(o => o.Behaviours))
-                if (IsRef(b.GetString("unit"), from)) b.Params["unit"] = to;
+                if (IsRef(pack, b.GetString("unit"), from)) b.Params["unit"] = to;
         }
 
         internal static IEnumerable<Picker.Item> BaseItems(DesignPack pack, string side)

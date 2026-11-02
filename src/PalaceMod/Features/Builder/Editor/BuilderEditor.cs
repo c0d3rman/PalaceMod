@@ -169,6 +169,7 @@ namespace PalaceMod.Builder.Editor
         internal static void Undo()
         {
             if (Draft == null) return;
+            if (Picker.IsOpen) Picker.Close();
             string label = Draft.History.UndoLabel;
             if (Draft.Undo()) Notify.Show($"Undid: {label}", NotifyKind.Info, 2f, key: "builder-undo");
             else Notify.Show("Nothing to undo", NotifyKind.Info, 2f, key: "builder-undo");
@@ -177,6 +178,7 @@ namespace PalaceMod.Builder.Editor
         internal static void Redo()
         {
             if (Draft == null) return;
+            if (Picker.IsOpen) Picker.Close();
             string label = Draft.History.RedoLabel;
             if (Draft.Redo()) Notify.Show($"Redid: {label}", NotifyKind.Info, 2f, key: "builder-undo");
             else Notify.Show("Nothing to redo", NotifyKind.Info, 2f, key: "builder-undo");

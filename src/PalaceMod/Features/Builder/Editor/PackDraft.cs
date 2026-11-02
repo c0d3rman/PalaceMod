@@ -162,6 +162,8 @@ namespace PalaceMod.Builder.Editor
                     message = ReadOnly ? $"Saved a copy as \"{installed.Id}\"" : renamed ? $"Saved as \"{installed.Id}\" (the id was taken)" : "Saved";
                     if (renamed) pack.Id = installed.Id;
                     SourceId = installed.Id;
+                    // The copy is a new pack: its undo history starts here, so undo can't bring back the original's id.
+                    if (ReadOnly) History = new EditHistory(pack);
                     Source = PackSource.User;
                 }
                 else
