@@ -178,11 +178,12 @@ namespace PalaceMod
         private static int MoveFollowers(TeleporterPad from, TeleporterPad to)
         {
             var cu = CommandUnits.instance;
-            if (cu == null || !cu.commanding) return 0;
+            // Not cu.commanding: that is only set once the command key is released, while units join as it's held.
+            if (cu == null) return 0;
             int moved = 0;
             foreach (var unit in cu.PlayerUnitsCommanding)
             {
-                if (unit == null || unit.hp == null || !unit.hp.Alive) continue;
+                if (unit == null || !unit.FollowingPlayer || unit.hp == null || !unit.hp.Alive) continue;
                 Vector3 relative = unit.transform.position - from.Position;
                 relative.y = 0f;
                 if (relative.magnitude > 8f) relative = relative.normalized * 8f;

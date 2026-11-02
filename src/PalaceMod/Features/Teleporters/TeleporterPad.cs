@@ -22,7 +22,7 @@ namespace PalaceMod
         private static Texture2D baseTexture, ringTexture, fillTexture;
 
         public GameObject Root { get; }
-        public Vector3 Position => Root.transform.position;
+        public Vector3 Position { get; }
 
         private readonly Transform spinner, fill;
         private readonly Material baseMaterial, ringMaterial, fillMaterial;
@@ -33,7 +33,7 @@ namespace PalaceMod
         public TeleporterPad(Vector3 position, ParticleSystem nativeSparkle)
         {
             Root = new GameObject("PalaceMod Teleporter");
-            Root.transform.position = position;
+            Root.transform.position = Position = position;
 
             var shader = Shader.Find("Sprites/Default");
             baseMaterial = new Material(shader) { mainTexture = baseTexture ??= BaseTexture(), renderQueue = 3100 };
@@ -94,7 +94,11 @@ namespace PalaceMod
             if (burst != null) burst.Emit(30);
         }
 
-        public void SetVisible(bool visible) => Root.SetActive(visible);
+        // The root goes away with its level, possibly while the feature is off and the manager isn't updating.
+        public void SetVisible(bool visible)
+        {
+            if (Root != null) Root.SetActive(visible);
+        }
 
         public void Destroy()
         {
