@@ -379,6 +379,7 @@ namespace PalaceMod
             DevCommands.Register("tp", "tp place|pickup|list|goto <n>|clear|save   drive teleporters (place/pickup act at the king)", args =>
             {
                 var king = PlayerMovement.instance ?? throw new InvalidOperationException("not in a level");
+                if (!IsEnabled) throw new InvalidOperationException("Teleporters is disabled");
                 string sub = args.Length > 0 ? args[0].ToLowerInvariant() : "list";
                 switch (sub)
                 {

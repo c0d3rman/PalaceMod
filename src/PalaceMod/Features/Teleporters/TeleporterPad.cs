@@ -11,7 +11,7 @@ namespace PalaceMod
 {
     internal sealed class TeleporterPad
     {
-        public const float Radius = 1.6f;
+        public const float Radius = 1.8f;
         private const float Lift = 0.06f;
 
         // The mod's signature colour, so the pad reads as a mod object.
@@ -28,6 +28,7 @@ namespace PalaceMod
         private readonly Material baseMaterial, ringMaterial, fillMaterial;
         private readonly ParticleSystem shimmer, burst;
         private readonly Light glow;
+        private readonly System.Collections.Generic.List<Material> particleMaterials = [];
 
         public TeleporterPad(Vector3 position, ParticleSystem nativeSparkle)
         {
@@ -49,7 +50,7 @@ namespace PalaceMod
             glow = lightObj.AddComponent<Light>();
             glow.type = LightType.Point;
             glow.color = Accent;
-            glow.range = 5f;
+            glow.range = 4f;
             glow.shadows = LightShadows.None;
 
             if (nativeSparkle != null)
@@ -65,10 +66,11 @@ namespace PalaceMod
         /// <param name="night">Brighter light at night.</param>
         public void Tick(bool linked, bool ready, float channel, bool night)
         {
-            Color color = linked ? Accent : Idle;
+            // A touch lighter than the UI accent: the game's colour grading darkens everything on the ground.
+            Color color = Color.Lerp(linked ? Accent : Idle, Color.white, 0.2f);
             float alpha = ready ? 1f : 0.45f;
-            baseMaterial.color = new Color(color.r, color.g, color.b, 0.85f * alpha);
-            ringMaterial.color = new Color(color.r, color.g, color.b, 0.9f * alpha);
+            baseMaterial.color = new Color(color.r, color.g, color.b, 0.95f * alpha);
+            ringMaterial.color = new Color(color.r, color.g, color.b, alpha);
             fillMaterial.color = new Color(Accent.r, Accent.g, Accent.b, 0.55f);
 
             float speed = ready ? 25f + 300f * channel : 8f;
@@ -77,7 +79,7 @@ namespace PalaceMod
             fill.gameObject.SetActive(channel > 0f);
 
             float pulse = 0.85f + 0.15f * Mathf.Sin(Time.time * 2.5f);
-            glow.intensity = (night ? 1.6f : 0.6f) * (ready ? pulse : 0.4f) * (1f + 1.5f * channel);
+            glow.intensity = (night ? 1.6f : 0.3f) * (ready ? pulse : 0.4f) * (1f + 1.5f * channel);
 
             if (shimmer != null)
             {
@@ -100,6 +102,7 @@ namespace PalaceMod
             Object.Destroy(baseMaterial);
             Object.Destroy(ringMaterial);
             Object.Destroy(fillMaterial);
+            foreach (var material in particleMaterials) Object.Destroy(material);
         }
 
         private GameObject Marker(string name, Material material, float size, float lift)
@@ -133,7 +136,7 @@ namespace PalaceMod
             main.loop = loop;
             main.playOnAwake = false;
             main.simulationSpace = ParticleSystemSimulationSpace.World;
-            main.startColor = new ParticleSystem.MinMaxGradient(Accent, Color.white);
+            main.startColor = new ParticleSystem.MinMaxGradient(Accent, Color.Lerp(Accent, Color.white, 0.5f));
             main.startLifetime = new ParticleSystem.MinMaxCurve(0.8f, 1.6f);
             main.startSpeed = new ParticleSystem.MinMaxCurve(0.6f, loop ? 1.6f : 4f);
             main.gravityModifier = loop ? -0.15f : 0f;
@@ -151,6 +154,14 @@ namespace PalaceMod
             emission.rateOverTime = 0f;
             emission.rateOverDistance = 0f;
             emission.burstCount = 0;
+
+            // The native sparkle is white; tint its material too, in case its shader ignores vertex colour.
+            var renderer = copy.GetComponent<ParticleSystemRenderer>();
+            if (renderer != null && renderer.sharedMaterial != null && renderer.sharedMaterial.HasProperty("_Color"))
+            {
+                renderer.material.color = Accent;
+                particleMaterials.Add(renderer.sharedMaterial);
+            }
 
             if (loop) ps.Play();
             return ps;
@@ -177,15 +188,15 @@ namespace PalaceMod
         // Solid outer ring, a faint inner disc, and a four-point star in the middle (like a compass rose).
         private static Texture2D BaseTexture() => Paint((d, angle) =>
         {
-            float outer = Band(d, 0.92f, 0.035f);
-            float inner = Band(d, 0.62f, 0.012f) * 0.8f;
-            float disc = d < 0.92f ? 0.12f : 0f;
+            float outer = Band(d, 0.92f, 0.05f);
+            float inner = Band(d, 0.62f, 0.02f) * 0.85f;
+            float disc = d < 0.92f ? 0.22f : 0f;
             float star = 0f;
             for (int i = 0; i < 4; i++)
             {
                 float a = Mathf.DeltaAngle(angle, i * 90f) / 90f; // -0.5..0.5 within a quadrant
-                float reach = 0.55f * (1f - Mathf.Abs(a) * 7f);
-                if (reach > 0f && d < reach) star = Mathf.Max(star, 0.7f);
+                float reach = 0.56f * (1f - Mathf.Abs(a) * 4.5f);
+                if (reach > 0f && d < reach) star = Mathf.Max(star, 0.8f);
             }
             return Mathf.Max(outer, inner, disc, star);
         });
@@ -194,7 +205,7 @@ namespace PalaceMod
         private static Texture2D RingTexture() => Paint((d, angle) =>
         {
             float dash = Mathf.Repeat(angle, 22.5f) < 14f ? 1f : 0f;
-            float ring = Band(d, 0.86f, 0.012f) * dash;
+            float ring = Band(d, 0.86f, 0.022f) * dash;
             float a = Mathf.Repeat(angle + 11.25f, 45f) - 22.5f; // diamonds between dashes, every 45°
             float diamond = Mathf.Abs(a) / 6f + Mathf.Abs(d - 0.86f) / 0.05f < 1f ? 1f : 0f;
             return Mathf.Max(ring, diamond);
