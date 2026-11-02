@@ -52,7 +52,7 @@ namespace PalaceMod.Builder.Assets
         private readonly Dictionary<string, Loaded> cache = [];
         private readonly Dictionary<string, Download> downloads = [];          // by sha256
         private readonly Dictionary<string, string> failedDownloads = [];      // sha256 -> reason
-        private readonly Dictionary<string, (float until, string reason)> retryAfter = [];          // transient failures
+        private readonly Dictionary<string, (float until, string reason, string url, string label)> retryAfter = [];  // transient failures, retried by Update
         private readonly List<AudioDecode> decodes = [];
         private readonly HashSet<string> warned = [];
 
@@ -305,9 +305,27 @@ namespace PalaceMod.Builder.Assets
             return true;
         }
 
+        private float nextRetryCheck;
+
+        /// <summary>Restarts downloads whose transient failure (offline, server error) has cooled down. Successful
+        /// arrivals then rebuild templates (AssetsArrived), so a pack fetched after reconnecting shows up.</summary>
+        private void RetryDue()
+        {
+            if (retryAfter.Count == 0 || Time.unscaledTime < nextRetryCheck) return;
+            nextRetryCheck = Time.unscaledTime + 5f;
+            foreach (var kv in retryAfter.ToList())
+            {
+                if (Time.unscaledTime < kv.Value.until || downloads.ContainsKey(kv.Key)) continue;
+                retryAfter.Remove(kv.Key);
+                if (CacheDir != null && File.Exists(CachePath(kv.Key))) continue;
+                StartDownload(kv.Value.url, kv.Key, kv.Value.label, out _);
+            }
+        }
+
         /// <summary>Advances downloads and background decodes. Called every frame by BuilderAssetsManager.</summary>
         public void Update()
         {
+            RetryDue();
             if (downloads.Count == 0 && decodes.Count == 0) return;
             bool arrived = false;
             foreach (var d in downloads.Values.ToList())
@@ -396,7 +414,7 @@ namespace PalaceMod.Builder.Assets
 
         private void Fail(Download d, string reason, bool retry = false)
         {
-            if (retry) retryAfter[d.Sha256] = (Time.unscaledTime + 60f, reason);
+            if (retry) retryAfter[d.Sha256] = (Time.unscaledTime + 60f, reason, d.Url, d.Label);
             else failedDownloads[d.Sha256] = reason;
             WarnOnce("download " + d.Sha256 + reason, $"{d.Label}: download from {d.Url} failed: {reason}");
         }
