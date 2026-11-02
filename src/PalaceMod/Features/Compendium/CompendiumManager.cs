@@ -264,20 +264,21 @@ namespace PalaceMod
                 var list = items.ToList();
                 if (list.Count == 0) return;
                 page.Header(title);
-                foreach (var e in list)
+                // Locked items stay hidden like in the game's loadout screen: one row says how many, and how to unlock them.
+                var locked = list.Where(e => !e.IsUnlocked && !PerkManager.IsEquipped(e)).ToList();
+                foreach (var e in list.Except(locked))
                 {
                     var item = e;
-                    bool unlocked = item.IsUnlocked;
-                    string value = PerkManager.IsEquipped(item) ? "Equipped" : unlocked ? "" : CompendiumStats.Translate("Menu/Locked");
-                    string name = unlocked ? CompendiumStats.EquippableName(item) : "???";
-                    page.Row(name, value, () =>
+                    page.Row(CompendiumStats.EquippableName(item), PerkManager.IsEquipped(item) ? "Equipped" : "", () =>
                     {
-                        if (!item.IsUnlocked) return item.GetLockedTooltip();
                         var body = CompendiumStats.Translate(item.LOCIDENTIFIER_DESCRIPTION);
                         if (item is EquippableMutation mutation) body += $"\n\nScore on a win: {CompendiumStats.Percent(mutation.scoreMultiplyerOnWin)}";
                         return body;
-                    }, icon: unlocked ? item.icon : null);
+                    }, icon: item.icon);
                 }
+                if (locked.Count > 0)
+                    page.Row(CompendiumStats.Translate("Menu/Locked"), locked.Count.ToString(), () =>
+                        string.Join("\n", locked.Select(e => e.GetLockedTooltip()).Distinct()));
             }
             var all = perks.allEquippables.Where(e => e != null).ToList();
             Section("Weapons", all.OfType<EquippableWeapon>());
