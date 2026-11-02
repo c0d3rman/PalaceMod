@@ -350,7 +350,7 @@ namespace PalaceMod
             Vector3? next = null;
             var cu = CommandUnits.instance;
             if (leading && pending.Count > 0) next = cu.transform.position;
-            markers.Show(routes, pending, next, routeMode.Value == PatrolRouteMode.Loop, alpha);
+            markers.Show(routes, pending, next, alpha);
         }
 
         // ---- Patches ----------------------------------------------------------------------------------------------

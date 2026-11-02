@@ -26,7 +26,7 @@ namespace PalaceMod
         private int builtHash;
         private readonly List<Vector3> samples = [];
 
-        public void Show(List<PatrolManager.Route> routes, List<Vector3> pending, Vector3? king, bool pendingLoop, float alpha)
+        public void Show(List<PatrolManager.Route> routes, List<Vector3> pending, Vector3? king, float alpha)
         {
             if (root == null) Build();
             root.SetActive(true);
