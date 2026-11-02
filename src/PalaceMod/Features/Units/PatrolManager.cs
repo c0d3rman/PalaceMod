@@ -9,7 +9,7 @@ using UnityEngine;
     Patrols: units walk a route of points the player drops, fight whatever comes near, then go back to the route.
 
     Controls follow the game's own king-centric commanding. While units follow the king, the patrol key drops a point
-    at the king (or middle-click at the cursor). Placing the units as usual (Space, or right-click from unit placement)
+    at the king (an optional, unbound key drops one at the cursor). Placing the units as usual (Space, or right-click from unit placement)
     starts the patrol: the drop spot becomes the last point. Back and forth (StarCraft's convention) or loop.
     Picking the units up again, or making them hold position, ends their patrol.
 
@@ -47,7 +47,7 @@ namespace PalaceMod
         private ConfigEntry<PatrolMarkerMode> markerMode;
         private ConfigEntry<bool> hints;
 
-        private Keybind pointKey, cursorPointKey, clearKey;
+        private Keybind pointKey, cursorPointKey;
 
         /// <summary>A route and the units walking it.</summary>
         internal sealed class Route
@@ -91,11 +91,10 @@ namespace PalaceMod
                 "Shows a short reminder of the patrol keys the first time you lead units each session."));
 
             pointKey = Keybinds.Register(FeatureSection, "point", "Add patrol point", new KeyboardShortcut(KeyCode.P),
-                "While leading units, drops a patrol point where the king stands. Place the units to start the patrol.");
-            cursorPointKey = Keybinds.Register(FeatureSection, "cursor-point", "Add patrol point at cursor", new KeyboardShortcut(KeyCode.Mouse2),
+                "While leading units, drops a patrol point where the king stands; place the units to start the patrol. Hold to clear the points, or (not leading) to stop every patrol.");
+            // Unbound by default: the game already uses middle-click (Command Units) and right-click (unit placement).
+            cursorPointKey = Keybinds.Register(FeatureSection, "cursor-point", "Add patrol point at cursor", KeyboardShortcut.Empty,
                 "While leading units, drops a patrol point under the mouse cursor.");
-            clearKey = Keybinds.Register(FeatureSection, "clear", "Clear patrols", new KeyboardShortcut(KeyCode.P, KeyCode.LeftShift),
-                "While leading units, removes the patrol points you dropped; otherwise stops every patrol.");
 
             RegisterDevCommands();
         }
@@ -112,6 +111,8 @@ namespace PalaceMod
         // ---- Input ------------------------------------------------------------------------------------------------
 
         private bool wasLeading, hintShown;
+        private float pointHeldFor;
+        private bool pointHoldDone;
 
         public override void Update()
         {
@@ -139,7 +140,7 @@ namespace PalaceMod
                 if (pointKey.Down) AddPoint(cu.transform.position, cu);
                 if (cursorPointKey.Down && TryCursorWorld(cu, out var cursor)) AddPoint(cursor, cu);
             }
-            if (clearKey.Down)
+            if (HeldLong(cu))
             {
                 if (leading && pending.Count > 0)
                 {
@@ -158,12 +159,27 @@ namespace PalaceMod
             UpdateMarkers(leading);
         }
 
+        /// <summary>True once when the patrol key has been held as long as the game's hold-to-hold-position press.</summary>
+        private bool HeldLong(CommandUnits cu)
+        {
+            if (!pointKey.Held)
+            {
+                pointHeldFor = 0f;
+                pointHoldDone = false;
+                return false;
+            }
+            pointHeldFor += Time.deltaTime;
+            if (pointHoldDone || pointHeldFor < cu.holdToHoldPositionTime) return false;
+            pointHoldDone = true;
+            return true;
+        }
+
         private void OnStartLeading()
         {
             if (!hints.Value || hintShown || !Bound(pointKey)) return;
             hintShown = true;
             string cursor = Bound(cursorPointKey) ? $" ({KeyLabel(cursorPointKey)}: at cursor)" : "";
-            Notify.Show($"{KeyLabel(pointKey)}: patrol point{cursor}, then place units to patrol", seconds: 7f, key: "patrol-hint");
+            Notify.Show($"{KeyLabel(pointKey)}: patrol point{cursor}, then place units to patrol. Hold {KeyLabel(pointKey)} to clear", seconds: 7f, key: "patrol-hint");
         }
 
         private void AddPoint(Vector3 position, CommandUnits cu)
@@ -465,7 +481,7 @@ namespace PalaceMod
                 AddPoint(p, cu);
                 return $"{pending.Count} pending points";
             });
-            DevCommands.Register("patrol-cursor", "patrol-cursor <x> <y>  drop a patrol point at a screen spot (0-1 fractions), like middle-click", args =>
+            DevCommands.Register("patrol-cursor", "patrol-cursor <x> <y>  drop a patrol point at a screen spot (0-1 fractions), like the cursor key", args =>
             {
                 var cu = RequireLevel();
                 if (args.Length < 2) throw new ArgumentException("usage: patrol-cursor <x> <y>");
