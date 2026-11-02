@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using UnityEngine;
+using Newtonsoft.Json;
 
 /*
     What the analytics feature records about a run, one NightRecord per night, plus the in-progress day.
@@ -10,6 +10,7 @@ using UnityEngine;
         earned = change in TrueBalance + gold spent
     Night 1's day income includes the starting gold.
 
+    Serialized with the game's own Newtonsoft.Json (Unity's JsonUtility drops the list of records from a mod assembly).
     The history is stored inside the game's own match save (MatchSave, under one string key), so it is saved, loaded,
     rolled back by "retry day" and discarded by a fresh start exactly like the run itself.
 */
@@ -41,9 +42,9 @@ namespace PalaceMod
         public int buildingIncome;      // what buildings pay at the following dawn
         public bool complete;           // false while the night is in progress
 
-        public int ScoreTotal => scoreBase + scoreTime + scoreProtection;
-        public int Earned => dayEarned + nightEarned;
-        public int Spent => daySpent + nightSpent;
+        [JsonIgnore] public int ScoreTotal => scoreBase + scoreTime + scoreProtection;
+        [JsonIgnore] public int Earned => dayEarned + nightEarned;
+        [JsonIgnore] public int Spent => daySpent + nightSpent;
     }
 
     [Serializable]
@@ -60,9 +61,9 @@ namespace PalaceMod
         public int spentSinceDawn;
         public float daySeconds;
 
-        public NightRecord Current => nights.Count > 0 && !nights[nights.Count - 1].complete ? nights[nights.Count - 1] : null;
+        [JsonIgnore] public NightRecord Current => nights.Count > 0 && !nights[nights.Count - 1].complete ? nights[nights.Count - 1] : null;
 
-        public int CompletedCount
+        [JsonIgnore] public int CompletedCount
         {
             get
             {
@@ -72,14 +73,14 @@ namespace PalaceMod
             }
         }
 
-        public string ToJson() => JsonUtility.ToJson(this);
+        public string ToJson() => JsonConvert.SerializeObject(this);
 
         public static RunHistory FromJson(string json)
         {
             if (string.IsNullOrEmpty(json)) return null;
             try
             {
-                var history = JsonUtility.FromJson<RunHistory>(json);
+                var history = JsonConvert.DeserializeObject<RunHistory>(json);
                 return history != null && history.version == 1 ? history : null;
             }
             catch (Exception e)
