@@ -64,7 +64,7 @@ public class Plugin : BaseUnityPlugin
         }
         Logger.LogInfo($"Managers: {string.Join(", ", managers.Select(m => m.IsEnabled ? m.GetType().Name : $"{m.GetType().Name} (disabled)"))}");
 
-        ShowMessage("PalaceMod loaded!");
+        Notify.Show("PalaceMod loaded", seconds: 2.5f);
     }
 
     private void Start()
