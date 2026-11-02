@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using BepInEx.Configuration;
 using HarmonyLib;
+using PalaceMod.Builder;
 using Thronefall.SaveServices;
 using TMPro;
 using UnityEngine;
@@ -48,6 +49,9 @@ namespace PalaceMod
 
         private const string SidecarFileName = "PalaceMod.BonusSafeSaves.txt";
         private const float DiffInterval = 0.5f;
+        private const float SettleSeconds = 3f;
+        private static float settleUntil = -1f;
+        private static bool balanceReady;
 
         private ConfigEntry<bool> pauseHint;
 
@@ -129,7 +133,17 @@ namespace PalaceMod
             if (saveLoad == null || !sessionClean) return;
             if (pendingBaseline)
             {
-                if (LocalMatchSaveLoad.CurrentlyLoadingMatch || PlayerInteraction.instance == null) return;
+                // Some things (control groups, harbour ships) are restored a little after the game's loading flag
+                // clears, so let the level settle first. Gold is compared with the saved value, so spending in the
+                // meantime still counts.
+                if (LocalMatchSaveLoad.CurrentlyLoadingMatch || PlayerInteraction.instance == null) { settleUntil = -1f; return; }
+                if (settleUntil < 0f) settleUntil = Time.unscaledTime + SettleSeconds;
+                if (!balanceReady)
+                {
+                    baselineBalance = SavedBalance() ?? PlayerInteraction.instance.TrueBalance;
+                    balanceReady = true;
+                }
+                if (Time.unscaledTime < settleUntil) { CheckCheap(); return; }
                 TakeBaseline();
                 return;
             }
@@ -143,8 +157,9 @@ namespace PalaceMod
 
         // ---- Tracking ----
 
+        // Classic campaign levels only. Builder custom sessions run on a host map but leave its campaign save alone.
         private static bool Applicable =>
-            LocalGamestate.SelectedGameMode == LocalGamestate.GameMode.Classic && !MatchSaveLoadHandler.SaveLoadForbidden;
+            LocalGamestate.SelectedGameMode == LocalGamestate.GameMode.Classic && !MatchSaveLoadHandler.SaveLoadForbidden && !BuilderServices.InSession;
 
         private static void CheckNow()
         {
@@ -348,6 +363,8 @@ namespace PalaceMod
                 sessionClean = false;
                 pendingBaseline = false;
                 sessionHasSave = LocalMatchSaveLoad.CurrentlyLoadingMatch;
+                settleUntil = -1f;
+                balanceReady = false;
                 dirtyReason = "no save yet";
                 if (!Applicable) return;
                 if (!On)
