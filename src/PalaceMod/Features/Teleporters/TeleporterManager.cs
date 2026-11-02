@@ -89,7 +89,11 @@ namespace PalaceMod
         protected override void OnFeatureEnabled()
         {
             foreach (var pad in pads) pad.SetVisible(true);
+            armAfterAppear = true;
         }
+
+        // When pads appear under the king (level start, re-enabling), he has to step off before one fires.
+        private bool armAfterAppear;
 
         // ---- Frame ------------------------------------------------------------------------------------------------
 
@@ -108,6 +112,12 @@ namespace PalaceMod
                 padScene = king.gameObject.scene;
                 hintPending = true;
                 SpawnLoaded();
+                armAfterAppear = true;
+            }
+            if (armAfterAppear)
+            {
+                armAfterAppear = false;
+                arrivedPad = PadAt(king.transform.position, StepOffRadius);
             }
 
             bool night = day.CurrentTimestate == DayNightCycle.Timestate.Night;

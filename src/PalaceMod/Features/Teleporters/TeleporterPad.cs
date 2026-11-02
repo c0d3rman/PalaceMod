@@ -91,7 +91,7 @@ namespace PalaceMod
         /// <summary>The native sparkle burst, for leaving or arriving.</summary>
         public void Burst()
         {
-            if (burst != null) burst.Emit(60);
+            if (burst != null) burst.Emit(30);
         }
 
         public void SetVisible(bool visible) => Root.SetActive(visible);
