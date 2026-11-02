@@ -79,7 +79,7 @@ namespace PalaceMod
             {
                 TryLog("display link", () => DisplayLink.Start() ? "running" : "unavailable");
                 PowerState.Refresh();
-                Plugin.Logger.LogInfo($"Performance: on battery {PowerState.OnBattery}, low power mode {PowerState.LowPowerMode}, thermal {PowerState.ThermalState}");
+                Log.For<PerformanceManager>().Debug($"On battery {PowerState.OnBattery}, low power mode {PowerState.LowPowerMode}, thermal {PowerState.ThermalState}");
             }
             AstarPath.OnAwakeSettings += ConfigurePathfinding;
             if (IsEnabled) ReserveHeap(heapReserveMb.Value);
@@ -90,7 +90,7 @@ namespace PalaceMod
             pacer.Install();
             if (IsEnabled && spikeLogging.Value) loopTimer.Install(); // after the pacer, so its wait shows up as its own entry
             lastGcCount = GC.CollectionCount(0);
-            Plugin.Logger.LogInfo($"Performance: GC incremental {GarbageCollector.isIncremental}, heap {Profiler.GetMonoHeapSizeLong() / 1048576} MB, " +
+            Log.For<PerformanceManager>().Debug($"GC incremental {GarbageCollector.isIncremental}, heap {Profiler.GetMonoHeapSizeLong() / 1048576} MB, " +
                 $"run in background {Application.runInBackground}, arch {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}");
         }
 
@@ -101,7 +101,7 @@ namespace PalaceMod
                 "oversleep by several frames on macOS and make the game stutter. Auto: on for macOS.");
             maxFrameRate = config.Bind(FrameRateSection, "Max frame rate", 0, new ConfigDescription(
                 "Frame rate cap while playing (at least 15). 0 matches the display's refresh rate.", new AcceptableValueRange<int>(0, 240), new SettingTags { ZeroLabel = "Display", Unit = " fps", Step = 5 }));
-            raiseRefreshRate = config.Bind(FrameRateSection, "Raise refresh rate (Hz)", 120, new ConfigDescription(
+            raiseRefreshRate = config.Bind(FrameRateSection, "Raise refresh rate", 120, new ConfigDescription(
                 "macOS: while the game runs, switch the display to the highest refresh rate up to this, e.g. 120 on a " +
                 "ProMotion screen set to 60 Hz. macOS restores your setting when the game quits. 0 leaves it alone. " +
                 "Takes effect at launch.", new AcceptableValueList<int>(0, 90, 100, 120, 144), new SettingTags { ZeroLabel = "Off", Unit = " Hz" }));
@@ -127,13 +127,13 @@ namespace PalaceMod
             idleFrameRate = config.Bind(BatterySection, "Idle frame rate", 30, new ConfigDescription(
                 "Frame rate cap when there's been no input for a while, outside of night battles. 0 for no extra cap.",
                 new AcceptableValueRange<int>(0, 240), new SettingTags { ZeroLabel = "Off", Unit = " fps", Step = 5 }));
-            idleAfterSeconds = config.Bind(BatterySection, "Idle after (s)", 60, new ConfigDescription(
+            idleAfterSeconds = config.Bind(BatterySection, "Idle after", 60, new ConfigDescription(
                 "Seconds without keyboard, mouse or controller input before the idle frame rate applies.", new AcceptableValueRange<int>(5, 600), new SettingTags { Unit = " s", Step = 5 }));
 
-            heapReserveMb = config.Bind(MemorySection, "Minimum heap size (MB)", 512, new ConfigDescription(
+            heapReserveMb = config.Bind(MemorySection, "Minimum heap size", 512, new ConfigDescription(
                 "Grow the managed heap to at least this size at startup so it doesn't have to expand (and stall) during play. " +
                 "0 disables. Takes effect at launch.", new AcceptableValueRange<int>(0, 2048), new SettingTags { ZeroLabel = "Off", Unit = " MB", Step = 64 }));
-            gcTimeSliceMs = config.Bind(MemorySection, "Incremental GC time slice (ms)", 0f, new ConfigDescription(
+            gcTimeSliceMs = config.Bind(MemorySection, "Incremental GC time slice", 0f, new ConfigDescription(
                 "Per-frame budget for the incremental garbage collector. 0 keeps the game's default (3 ms).", new AcceptableValueRange<float>(0f, 10f), new SettingTags { ZeroLabel = "Default", Unit = " ms", Step = 0.5f }));
 
             collectWhenPaused = config.Bind(MemorySection, "Collect garbage when paused", true,
@@ -142,17 +142,17 @@ namespace PalaceMod
 
             spikeLogging = config.Bind(DiagnosticsSection, "Log frame spikes", true,
                 "Write frame-time spikes and a periodic frame-time summary to the BepInEx log. Takes effect at launch.");
-            spikeThresholdMs = config.Bind(DiagnosticsSection, "Spike threshold (ms)", 25f, new ConfigDescription(
+            spikeThresholdMs = config.Bind(DiagnosticsSection, "Spike threshold", 25f, new ConfigDescription(
                 "A frame counts as a spike when it takes longer than this...", new AcceptableValueRange<float>(5f, 200f), new SettingTags { Unit = " ms", Step = 5 }));
             spikeRatio = config.Bind(DiagnosticsSection, "Spike ratio", 2f, new ConfigDescription(
                 "...and longer than this multiple of the recent average frame time.", new AcceptableValueRange<float>(1f, 10f), new SettingTags { Unit = "x", Step = 0.25f }));
-            summaryIntervalSeconds = config.Bind(DiagnosticsSection, "Summary interval (s)", 60f, new ConfigDescription(
+            summaryIntervalSeconds = config.Bind(DiagnosticsSection, "Summary interval", 60f, new ConfigDescription(
                 "How often to log the frame-time summary.", new AcceptableValueRange<float>(5f, 600f), new SettingTags { Unit = " s", Step = 5 }));
 
             latencyCritical = config.Bind(AdvancedSection, "Latency-critical mode", Toggle.Auto,
                 "Ask macOS to treat the game as latency-critical while it's focused, which disables App Nap and timer " +
                 "coalescing so waits don't overshoot. Auto: on for macOS.");
-            maxSpinMs = config.Bind(AdvancedSection, "Max busy-wait (ms)", 4f, new ConfigDescription(
+            maxSpinMs = config.Bind(AdvancedSection, "Max busy-wait", 4f, new ConfigDescription(
                 "Longest the frame pacer busy-waits before each frame for exact timing. It adapts to how precisely this Mac " +
                 "wakes from sleep and only spins as long as needed.", new AcceptableValueRange<float>(0f, 8f), new SettingTags { ZeroLabel = "Off", Unit = " ms", Step = 0.5f }));
             vSync = config.Bind(AdvancedSection, "VSync override", VSyncMode.GameDefault,
@@ -181,18 +181,19 @@ namespace PalaceMod
             if (old.Count == 0) return;
             foreach (var definition in old) orphans.Remove(definition);
             config.Save();
-            Plugin.Logger.LogInfo($"Performance: removed {old.Count} settings left over from an older version");
+            Log.For<PerformanceManager>().Info($"Removed {old.Count} settings left over from an older version");
         }
 
         private static void TryLog(string what, Func<string> action)
         {
             try
             {
-                Plugin.Logger.LogInfo($"Performance: {what} {action()}");
+                string result = action(); // always run it; only the log line depends on the level
+                Log.For<PerformanceManager>().Debug($"{what} {result}");
             }
             catch (Exception e)
             {
-                Plugin.Logger.LogWarning($"Performance: {what} failed: {e.Message}");
+                Log.For<PerformanceManager>().Warn($"{what} failed: {e.Message}");
             }
         }
 
@@ -233,7 +234,7 @@ namespace PalaceMod
             {
                 astar.threadCount = (ThreadCount)Enum.Parse(typeof(ThreadCount), pathfindingThreads.Value.ToString());
             }
-            Plugin.Logger.LogInfo($"Performance: A* threads {original}{(astar.threadCount != original ? $" -> {astar.threadCount}" : "")}, " +
+            Log.For<PerformanceManager>().Debug($"A* threads {original}{(astar.threadCount != original ? $" -> {astar.threadCount}" : "")}, " +
                 $"max frame time {astar.maxFrameTime} ms, navmesh cut interval {astar.navmeshUpdates.updateInterval} s, graphs {astar.graphs?.Length ?? 0}");
         }
 
@@ -246,7 +247,7 @@ namespace PalaceMod
             var chunks = new List<byte[]>(missing);
             for (int i = 0; i < missing; i++) chunks.Add(new byte[1024 * 1024]);
             chunks.Clear();
-            Plugin.Logger.LogInfo($"Performance: grew managed heap {before / 1048576} MB -> {Profiler.GetMonoHeapSizeLong() / 1048576} MB");
+            Log.For<PerformanceManager>().Debug($"Grew managed heap {before / 1048576} MB -> {Profiler.GetMonoHeapSizeLong() / 1048576} MB");
         }
 
         private ulong gameGcTimeSlice;

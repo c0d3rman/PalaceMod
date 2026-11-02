@@ -19,9 +19,9 @@ namespace PalaceMod
 {
     public class DebugMenuManager : BaseManager
     {
-        public override string FeatureSection => "Debug Menu";
+        public override string FeatureSection => "Debug menu";
         public override string FeatureDescription =>
-            "Cheat menu for practice: gold, nights, waves, free buildings, god mode and loadout swaps. Open it from the pause menu. Runs that use it are flagged.";
+            "Cheat menu for practice: gold, nights, waves, free buildings, god mode and loadout swaps. Open it from the pause menu. Using it makes the run unranked.";
         protected override bool EnabledByDefault => false;
 
         private Keybind openKey;
@@ -99,7 +99,7 @@ namespace PalaceMod
             if (!hintShown && frame.IsOpen)
             {
                 hintShown = true;
-                Notify.Show("Debug menu: left/right change values. Runs that use it are flagged.", NotifyKind.Info, 5f, "debug-menu-hint");
+                Notify.Show("Debug menu: left/right change values. Using it makes the run unranked.", NotifyKind.Info, 5f, "debug-menu-hint");
             }
         }
 
@@ -360,7 +360,7 @@ namespace PalaceMod
             {
                 if (args.FirstOrDefault() == "close") frame?.Close();
                 else Open();
-                return frame != null && frame.IsOpen ? "open" : IsEnabled ? "closed" : "closed (Debug Menu is disabled)";
+                return frame != null && frame.IsOpen ? "open" : IsEnabled ? "closed" : "closed (Debug menu is disabled)";
             });
             // Dev launches load levels without the level select, which is what points the match save at the level;
             // without it nothing is saved and "reload today" can't be tested.
@@ -450,8 +450,8 @@ namespace PalaceMod
             DevCommands.Register("dbg.heal", "dbg.heal               revive and heal the king, units and buildings", _ => DebugActions.HealAll());
             DevCommands.Register("dbg.revive", "dbg.revive             revive the king", _ => DebugActions.ReviveKing());
             DevCommands.Register("dbg.kill", "dbg.kill               kill every enemy", _ => DebugActions.KillEnemies());
-            DevCommands.Register("dbg.god", "dbg.god [on|off]       king takes no damage (needs Debug Menu enabled)", args => DebugActions.SetGodMode(ParseOnOff(args, DebugActions.GodMode)));
-            DevCommands.Register("dbg.invuln", "dbg.invuln [on|off]    units and buildings take no damage (needs Debug Menu enabled)",
+            DevCommands.Register("dbg.god", "dbg.god [on|off]       king takes no damage (needs the debug menu enabled)", args => DebugActions.SetGodMode(ParseOnOff(args, DebugActions.GodMode)));
+            DevCommands.Register("dbg.invuln", "dbg.invuln [on|off]    units and buildings take no damage (needs the debug menu enabled)",
                 args => DebugActions.SetInvulnerableKingdom(ParseOnOff(args, DebugActions.InvulnerableKingdom)));
             DevCommands.Register("dbg.speed", "dbg.speed <x>          game speed", args => DebugActions.SetSpeed(ParseFloat(args.FirstOrDefault() ?? "1")));
             DevCommands.Register("dbg.loadout", "dbg.loadout [+name|-name ...]   list, or change and apply the loadout (a weapon replaces the current one)", args =>

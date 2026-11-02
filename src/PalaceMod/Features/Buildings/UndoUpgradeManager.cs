@@ -246,7 +246,7 @@ namespace PalaceMod
                 return;
             }
             foreach (var due in stack.Where(a => !a.Settled && Time.frameCount >= a.SettleFrame).ToList()) Settle(due);
-            if (undoKey.Down) Plugin.Logger.LogInfo("Undo upgrade: " + TryUndo(requireNear: true));
+            if (undoKey.Down) Log.For<UndoUpgradeManager>().Info(TryUndo(requireNear: true));
         }
 
         private static void Clear()
@@ -368,7 +368,7 @@ namespace PalaceMod
         private static void Barrier(BuildSlot slot, string what)
         {
             if (stack.Count == 0 || stack[^1].Unrevertible != null) return;
-            Plugin.Logger.LogInfo($"Undo upgrade: {BuildingName(slot)} {what} on its own; earlier actions can no longer be undone");
+            Log.For<UndoUpgradeManager>().Info($"{BuildingName(slot)} {what} on its own; earlier actions can no longer be undone");
             stack.Clear();
         }
 
@@ -407,7 +407,7 @@ namespace PalaceMod
 
             action.SettleFrame = Time.frameCount + SettleFrames;
             stack.Add(action);
-            Plugin.Logger.LogInfo($"Undo upgrade: recorded \"{action.Label}\" (cost {action.Cost}, {action.Changes.Count} field changes, " +
+            Log.For<UndoUpgradeManager>().Debug($"Recorded \"{action.Label}\" (cost {action.Cost}, {action.Changes.Count} field changes, " +
                 $"{action.NewObjects.Count} objects switched on){(action.Unrevertible != null ? $"; not undoable: {action.Unrevertible}" : "")}");
         }
 
@@ -604,7 +604,7 @@ namespace PalaceMod
                 balance(player) += action.Cost;
                 player.onBalanceGain.Invoke(action.Cost);
             }
-            Plugin.Logger.LogInfo($"Undo upgrade: restored {action.Label}: level {action.LevelAfter} -> {action.LevelBefore}, " +
+            Log.For<UndoUpgradeManager>().Info($"Restored {action.Label}: level {action.LevelAfter} -> {action.LevelBefore}, " +
                 $"{action.Changes.Count} fields, {action.NewObjects.Count} objects off, recreated [{string.Join(", ", action.Recreate.Select(r => r.type.Name))}], +{action.Cost} gold" +
                 string.Concat(action.Changes.Values.Take(40).Select(c => "\n  " + c.Describe())));
         }
@@ -658,7 +658,7 @@ namespace PalaceMod
                 {
                     pending = null;
                     window = null;
-                    Plugin.Logger.LogError($"Undo upgrade: capture failed: {e}");
+                    Log.For<UndoUpgradeManager>().Error($"Capture failed", e);
                 }
             }
 
@@ -701,7 +701,7 @@ namespace PalaceMod
                     {
                         pending = null;
                         window = null;
-                        Plugin.Logger.LogError($"Undo upgrade: capture failed: {e}");
+                        Log.For<UndoUpgradeManager>().Error($"Capture failed", e);
                     }
                     return;
                 }
@@ -821,7 +821,7 @@ namespace PalaceMod
                 yield return null;
             }
             interactor.InteractionEnd(player);
-            Plugin.Logger.LogInfo($"hold: {interactor.targetBuilding.buildingName} level {level} -> {interactor.targetBuilding.Level}, waiting for choice {interactor.IsWaitingForChoice}, gold {player.Balance}");
+            Log.For<UndoUpgradeManager>().Info($"hold: {interactor.targetBuilding.buildingName} level {level} -> {interactor.targetBuilding.Level}, waiting for choice {interactor.IsWaitingForChoice}, gold {player.Balance}");
         }
 
         private static string Buy(string[] args)
@@ -881,7 +881,7 @@ namespace PalaceMod
             }
             var text = string.Join("\n", types.OrderBy(kv => kv.Key.Name).Select(kv =>
                 $"{kv.Key.Name} [{Unsafe(kv.Key) ?? "ok"}] {string.Join(" ", kv.Value.Take(6))}{(kv.Value.Count > 6 ? $" +{kv.Value.Count - 6}" : "")}"));
-            Plugin.Logger.LogInfo("undo-scan\n" + text);
+            Log.For<UndoUpgradeManager>().Info("undo-scan\n" + text);
             return text;
         }
     }

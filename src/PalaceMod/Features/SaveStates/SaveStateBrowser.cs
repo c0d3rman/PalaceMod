@@ -162,7 +162,7 @@ namespace PalaceMod
                 case "load":
                     page.Header($"Load \"{state.Name}\"?");
                     page.Text("Everything since that moment is replaced. An undo state (\"Before last load\") is kept on the Automatic tab. " +
-                        "Loading a state marks this run as modded.");
+                        "Loading a state makes this run unranked.");
                     page.Button("Load", () => Load(state));
                     break;
                 case "overwrite":

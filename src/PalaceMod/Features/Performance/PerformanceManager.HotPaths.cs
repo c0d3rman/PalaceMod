@@ -98,7 +98,7 @@ namespace PalaceMod
                     }
                     yield return instruction;
                 }
-                if (!replaced) Plugin.Logger.LogWarning("Performance: GPUInstancingManager.Update no longer calls CalculateFrustumPlanes; patch skipped");
+                if (!replaced) Log.For<PerformanceManager>().Warn("GPUInstancingManager.Update no longer calls CalculateFrustumPlanes; patch skipped");
             }
         }
 

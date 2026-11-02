@@ -9,7 +9,7 @@ using UnityEngine.UI;
 using Object = UnityEngine.Object;
 
 /*
-    The Profiles screen: a "Profiles" button in the title screen's row (before Quit) opens a frame listing the profiles
+    The Profiles screen: a "Profiles" button in the title screen's row (TitleMenu, before Quit) opens a frame listing the profiles
     on the left and what can be done with the selected one on the right. Everything is cloned from the game's own
     title-screen buttons and Settings texts, so it looks and navigates like the rest of the menus (keyboard, mouse,
     controller). Destructive actions ask first in a Yes/No dialog built the same way. Renaming types into the
@@ -22,7 +22,6 @@ namespace PalaceMod.Profiles
         private readonly ProfilesManager manager;
 
         private UIFrame titleFrame, frame, confirmFrame;
-        private TFUITextButton titleButton;     // "Profiles" on the title screen
         private TFUITextButton buttonTemplate;  // a title-screen button, the model for every button here
         private TextMeshProUGUI bodyTemplate, headingTemplate;
         private RectTransform listColumn, actionColumn;
@@ -45,13 +44,15 @@ namespace PalaceMod.Profiles
         public void Update()
         {
             // The title screen may live in the menu scene, which is reloaded; build again for the new one.
-            if (built && (titleFrame == null || frame == null || titleButton == null)) Remove();
+            if (built && (titleFrame == null || frame == null)) Remove();
             if (!built && !failed) TryBuild();
             if (!built) return;
-            if (titleButton != null) titleButton.gameObject.SetActive(true);
             if (renaming != null) UpdateRename();
             else if (frame != null && UIFrameManager.instance.ActiveFrame == frame) TrackSelection();
         }
+
+        /// <summary>The title menu's "Profiles" button.</summary>
+        public void OpenFromTitle() => Run(Open);
 
         public void Open()
         {
@@ -73,10 +74,8 @@ namespace PalaceMod.Profiles
         public void Remove()
         {
             Close();
-            foreach (var obj in new Object[] { titleButton?.gameObject, frame?.gameObject, confirmFrame?.gameObject })
+            foreach (var obj in new Object[] { frame?.gameObject, confirmFrame?.gameObject })
                 if (obj != null) Object.Destroy(obj);
-            if (titleButton != null) Unsplice(titleButton);
-            titleButton = null;
             frame = confirmFrame = null;
             built = false;
             failed = false;
@@ -96,7 +95,6 @@ namespace PalaceMod.Profiles
                 FindTemplates();
                 BuildFrame(created);
                 BuildConfirm(created);
-                BuildTitleButton(created);
                 built = true;
                 Log.For<ProfilesManager>().Debug("Added the Profiles screen to the title menu");
             }
@@ -190,39 +188,6 @@ namespace PalaceMod.Profiles
             confirmNo = Button(rowRect, "No", () => UIFrameManager.instance.CloseActiveFrame());
             Link(confirmYes, confirmNo, horizontal: true);
             confirmFrame.firstSelected = confirmNo;
-        }
-
-        private void BuildTitleButton(List<GameObject> created)
-        {
-            // Before Quit, the last button of the row the Settings button is in (other menus hide in the same frame).
-            var row = buttonTemplate.transform.parent.GetComponentsInChildren<TFUITextButton>(true)
-                .Where(b => b.transform.parent == buttonTemplate.transform.parent).ToList();
-            var quit = row.FirstOrDefault(b => Listeners(b.onApply).Contains("Quit")) ?? row.Last();
-            Log.For<ProfilesManager>().Debug($"Title row {string.Join(", ", row.Select(b => b.name))}; inserting before {quit.name}");
-            var obj = Object.Instantiate(buttonTemplate.gameObject, quit.transform.parent, false);
-            created.Add(obj);
-            obj.name = "PalaceMod Profiles Button";
-            obj.transform.SetSiblingIndex(quit.transform.GetSiblingIndex());
-            StripLocalization(obj);
-            titleButton = obj.GetComponent<TFUITextButton>();
-            titleButton.onApply = new UnityEvent();
-            titleButton.onApply.AddListener(() => Run(Open));
-            titleButton.SetOriginalString("Profiles");
-            // Splice into the row's left/right navigation before Quit.
-            var before = quit.leftNav;
-            titleButton.leftNav = before;
-            titleButton.rightNav = quit;
-            titleButton.topNav = quit.topNav;
-            titleButton.botNav = quit.botNav;
-            if (before != null) before.rightNav = titleButton;
-            quit.leftNav = titleButton;
-            titleFrame.RefetchManagedElements();
-        }
-
-        private static void Unsplice(TFUITextButton button)
-        {
-            if (button.leftNav != null) button.leftNav.rightNav = button.rightNav;
-            if (button.rightNav != null) button.rightNav.leftNav = button.leftNav;
         }
 
         // ---- Content ------------------------------------------------------------------------------------------------

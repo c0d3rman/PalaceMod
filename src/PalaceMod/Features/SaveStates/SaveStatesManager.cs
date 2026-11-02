@@ -23,7 +23,7 @@ namespace PalaceMod
     {
         public override string FeatureSection => "Savestates";
         public override string FeatureDescription =>
-            "Save and load the whole game mid-level, for practice. Pause > Savestates lists them. Loading a state marks the run as modded.";
+            "Save and load the whole game mid-level, for practice. Pause > Savestates lists them. Loading a state makes the run unranked.";
 
         // The real-save guard must outlive the Enabled switch: turning savestates off after a load mustn't let the
         // practice run be saved. The other patches check IsEnabled themselves.
@@ -56,8 +56,8 @@ namespace PalaceMod
             var config = plugin.Config;
             autoMode = config.Bind(FeatureSection, "Automatic states", AutoStateMode.Both, new ConfigDescription(
                 "When to save a state automatically: shortly after sunrise, right before the night starts, or both."));
-            autoHistory = config.Bind(FeatureSection, "Automatic history", 10, new ConfigDescription(
-                "How many automatic states to keep per level; older ones are deleted.", new AcceptableValueRange<int>(1, 30)));
+            autoHistory = config.Bind(FeatureSection, "Automatic history", 40, new ConfigDescription(
+                "How many automatic states (dawn and pre-night together) to keep per level; older ones are deleted. About 0.1 MB each.", new AcceptableValueRange<int>(1, 80)));
             confirmLoad = config.Bind(FeatureSection, "Confirm loads", true, new ConfigDescription(
                 "Ask before loading a state from the menu. The quick load key never asks; every load keeps an undo state."));
             loadOnDefeat = config.Bind(FeatureSection, "Load on defeat", false, new ConfigDescription(

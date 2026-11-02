@@ -110,7 +110,7 @@ namespace PalaceMod
                 count++;
             }
             if (count == 0) return;
-            Plugin.Logger.LogInfo($"Level 4 buildings: unlocked the top tier of {count} build slots in {SceneManager.GetActiveScene().name}");
+            Log.For<Level4BuildingsManager>().Info($"Unlocked the top tier of {count} build slots in {SceneManager.GetActiveScene().name}");
             RefreshInteractors();
         }
 

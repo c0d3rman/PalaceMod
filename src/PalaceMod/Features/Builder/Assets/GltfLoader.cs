@@ -99,12 +99,12 @@ namespace PalaceMod.Builder.Assets
             catch (Exception e)
             {
                 result.Error = "glTF couldn't be read: " + e.Message;
-                Log.For<BuilderAssetsManager>().Warn($"{name}: glTF import failed", e);
+                Log.For<BuilderManager>().Warn($"Assets: {name}: glTF import failed", e);
             }
             finally
             {
                 try { import?.Dispose(); }
-                catch (Exception e) { Log.For<BuilderAssetsManager>().Warn($"{name}: glTF cleanup failed", e); }
+                catch (Exception e) { Log.For<BuilderManager>().Warn($"Assets: {name}: glTF cleanup failed", e); }
             }
             if (result.Error != null)
             {
@@ -114,7 +114,7 @@ namespace PalaceMod.Builder.Assets
                 result.Texture = null;
             }
             try { done(result); }
-            catch (Exception e) { Log.For<BuilderAssetsManager>().Caught($"{name}: glTF callback failed", e); }
+            catch (Exception e) { Log.For<BuilderManager>().Caught($"Assets: {name}: glTF callback failed", e); }
         }
 
         /// <summary>glTFast's messages go to PalaceMod's log as warnings (never Unity errors); the first error

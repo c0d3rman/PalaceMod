@@ -226,13 +226,13 @@ namespace PalaceMod
                 obj.AddComponent<CanvasGroup>().blocksRaycasts = false;
                 obj.SetActive(false);
                 template = obj;
-                Plugin.Logger.LogInfo("Notifications: using the game's tooltip panel");
+                Log.For<NotificationManager>().Debug("Using the game's tooltip panel");
                 return true;
             }
             catch (System.Exception e)
             {
                 if (obj != null) Object.Destroy(obj);
-                Plugin.Logger.LogError($"Notifications: couldn't build the panel from the game's tooltip: {e}");
+                Log.For<NotificationManager>().Error($"Couldn't build the panel from the game's tooltip", e);
                 nextTemplateCheck = float.PositiveInfinity; // don't retry every half second
                 return false;
             }

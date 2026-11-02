@@ -73,13 +73,13 @@ namespace PalaceMod.Builder.Editor
             // Player units aren't in the catalog yet (they live inside building prefabs), so only show Side for packs
             // that already have one.
             if (u.Side != UnitSide.Enemy) Choice(page, "Side", P + ".side", [(UnitSide.Enemy, "Enemy"), (UnitSide.Player, "Player")], () => Unit?.Side,
-                (p, v) => p.Units[Index].Side = v, "Enemies come in wave sets. Player units can't be placed in buildings yet.");
+                (p, v) => p.Units[Index].Side = v, "Enemies come in wave sets. Player units stand in for the troops buildings train (a wave set's Troops).");
             Text(page, "Description", P + ".description", () => Unit?.Description, (p, v) => p.Units[Index].Description = v,
                 "One or two sentences for its tooltip.", 300);
         }
 
         private static bool Referenced(DesignPack pack, string unitId) =>
-            pack.WaveSets.Any(w => w.Nights.Any(n => n.Spawns.Any(s => IsRef(pack, s.Unit, unitId)))) ||
+            pack.WaveSets.Any(w => w.Nights.Any(n => n.Spawns.Any(s => IsRef(pack, s.Unit, unitId))) || (w.Troops?.Any(t => IsRef(pack, t?.Unit, unitId)) ?? false)) ||
             pack.Units.Any(o => o.Behaviours?.Any(b => IsRef(pack, b.GetString("unit"), unitId)) == true);
 
         /// <summary>Whether a unit ref names this pack's unit: "id", "unit:id" or "&lt;this pack&gt;/id".</summary>
@@ -94,6 +94,8 @@ namespace PalaceMod.Builder.Editor
         {
             foreach (var s in pack.WaveSets.SelectMany(w => w.Nights).SelectMany(n => n.Spawns))
                 if (IsRef(pack, s.Unit, from)) s.Unit = to;
+            foreach (var t in pack.WaveSets.SelectMany(w => w.Troops ?? []).Where(t => t != null))
+                if (IsRef(pack, t.Unit, from)) t.Unit = to;
             foreach (var b in pack.Units.Where(o => o.Behaviours != null).SelectMany(o => o.Behaviours))
                 if (IsRef(pack, b.GetString("unit"), from)) b.Params["unit"] = to;
         }

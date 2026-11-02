@@ -52,6 +52,7 @@ namespace PalaceMod.Profiles
                 Log.Error($"Unavailable, the save folder was left alone", e);
             }
             menu = new ProfilesMenu(this);
+            TitleMenu.AddButton("profiles", "Profiles", menu.OpenFromTitle, visible: () => IsEnabled, order: 10);
             RegisterDevCommands();
         }
 

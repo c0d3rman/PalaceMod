@@ -59,7 +59,7 @@ namespace PalaceMod.Builder.Assets
         private readonly List<AudioDecode> decodes = [];
         private readonly HashSet<string> warned = [];
         private bool modelsArrived;
-        private static readonly Log log = Log.For<BuilderAssetsManager>();
+        private static readonly Log log = Log.For<BuilderManager>();
 
         public AssetProvider(Func<string> root) { this.root = root; }
 
@@ -289,7 +289,7 @@ namespace PalaceMod.Builder.Assets
                         break;
                     }
                 }
-                if (loaded.Value != null) log.Info($"loaded {label} ({AssetSniffer.Name(kind)}, {Describe(loaded.Value)})");
+                if (loaded.Value != null) Log.For<BuilderManager>().Debug($"Assets: loaded {label} ({AssetSniffer.Name(kind)}, {Describe(loaded.Value)})");
             }
             catch (AssetException e)
             {
@@ -304,7 +304,7 @@ namespace PalaceMod.Builder.Assets
 
         private void StartModel(GltfModel model, string name, string label, string key, Loaded loaded)
         {
-            foreach (var note in model.Notes.Distinct()) log.Debug($"{label}: {note}");
+            foreach (var note in model.Notes.Distinct()) log.Debug($"Assets: {label}: {note}");
             try
             {
                 GltfLoader.Start(model, name, result =>
@@ -320,9 +320,9 @@ namespace PalaceMod.Builder.Assets
                     loaded.Value = result.Mesh;
                     loaded.Texture = result.Texture;
                     loaded.Error = result.Error;
-                    foreach (var w in result.Warnings.Distinct()) log.Debug($"{label}: glTF: {w}");
+                    foreach (var w in result.Warnings.Distinct()) log.Debug($"Assets: {label}: glTF: {w}");
                     if (result.Error != null) WarnOnce(key + result.Error, $"{label}: {result.Error}");
-                    else log.Info($"loaded {label} (glTF model, {result.Summary})");
+                    else log.Debug($"Assets: loaded {label} (glTF model, {result.Summary})");
                     modelsArrived = true;
                 });
             }
@@ -362,7 +362,7 @@ namespace PalaceMod.Builder.Assets
             request.redirectLimit = 4;
             request.SendWebRequest();
             downloads[sha] = new Download { Request = request, Sha256 = sha, Url = url, Label = label };
-            log.Info($"downloading {label} from {url}");
+            Log.For<BuilderManager>().Info($"Assets: downloading {label} from {url}");
             return true;
         }
 
@@ -438,7 +438,7 @@ namespace PalaceMod.Builder.Assets
                             clip.name = "PalaceBuilder " + d.Label;
                             clip.hideFlags = HideFlags.DontUnloadUnusedAsset;
                             loaded.Value = clip;
-                            log.Info($"loaded {d.Label} (OGG sound, {Describe(clip)})");
+                            Log.For<BuilderManager>().Debug($"Assets: loaded {d.Label} (OGG sound, {Describe(clip)})");
                         }
                     }
                 }
@@ -475,7 +475,7 @@ namespace PalaceMod.Builder.Assets
             File.WriteAllBytes(temp, data);
             if (File.Exists(target)) File.Delete(target);
             File.Move(temp, target);
-            log.Info($"cached {d.Label} ({AssetLimits.Mb(data.Length)}) as cache/{d.Sha256}");
+            Log.For<BuilderManager>().Debug($"Assets: cached {d.Label} ({AssetLimits.Mb(data.Length)}) as cache/{d.Sha256}");
         }
 
         private void Fail(Download d, string reason, bool retry = false)
@@ -537,7 +537,7 @@ namespace PalaceMod.Builder.Assets
 
         private void WarnOnce(string key, string message)
         {
-            if (warned.Add(key)) log.Warn(message);
+            if (warned.Add(key)) Log.For<BuilderManager>().Warn("Assets: " + message);
         }
     }
 

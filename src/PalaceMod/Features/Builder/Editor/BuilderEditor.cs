@@ -23,6 +23,7 @@ namespace PalaceMod.Builder.Editor
         private static PackPage packPage;
         private static UnitPage unitPage;
         private static WavePage wavePage;
+        private static LevelPage levelPage;
 
         internal static PackDraft Draft { get; private set; }
 
@@ -60,6 +61,13 @@ namespace PalaceMod.Builder.Editor
             unitPage ??= new UnitPage();
             unitPage.Index = index;
             Show(unitPage);
+        }
+
+        internal static void OpenLevel(int index)
+        {
+            levelPage ??= new LevelPage();
+            levelPage.Index = index;
+            Show(levelPage);
         }
 
         internal static void OpenWaveSet(int index)
@@ -120,7 +128,13 @@ namespace PalaceMod.Builder.Editor
             foreach (var page in Pages) page?.MarkStale();
         }
 
-        private static IEnumerable<EditorPage> Pages => [list, packPage, unitPage, wavePage];
+        private static IEnumerable<EditorPage> Pages => [list, packPage, unitPage, wavePage, levelPage];
+
+        /// <summary>Makes a draft the open one (the layout editor edits a level of it on the map).</summary>
+        internal static void BindDraft(PackDraft draft)
+        {
+            if (draft != null) Bind(draft);
+        }
 
         private static void OnChanged(bool structural)
         {
@@ -195,7 +209,7 @@ namespace PalaceMod.Builder.Editor
         }
 
         private static bool IsChildScreen(UIFrame frame) =>
-            frame != null && (Picker.IsOpen || (unitPage != null && unitPage.Frame.Frame == frame) || (wavePage != null && wavePage.Frame.Frame == frame));
+            frame != null && (Picker.IsOpen || (unitPage != null && unitPage.Frame.Frame == frame) || (wavePage != null && wavePage.Frame.Frame == frame) || (levelPage != null && levelPage.Frame.Frame == frame));
 
         internal static void CloseAll()
         {
@@ -219,7 +233,7 @@ namespace PalaceMod.Builder.Editor
             if (Draft == null) return;
             var unit = unitIndex >= 0 && unitIndex < Draft.Pack.Units.Count ? Draft.Pack.Units[unitIndex] : null;
             if (unit == null) return;
-            if (unit.Side != UnitSide.Enemy) { Notify.Show("Only enemies can be test-played for now", NotifyKind.Warning, key: "builder-editor"); return; }
+            if (unit.Side == UnitSide.Player) { TestTroop(unit); return; }
             var copy = PackSerializer.Clone(Draft.Pack);
             var baseUnit = EditorCatalog.BaseOf(copy, unit.Id);
             string hostScene = Draft.Pack.WaveSets.Select(w => w.Host).FirstOrDefault(h => EditorCatalog.Host(h) != null)
@@ -242,6 +256,23 @@ namespace PalaceMod.Builder.Editor
                 ],
             });
             Launch(copy, id);
+        }
+
+        // A player unit plays as a troop: the map's own nights, with the buildings training it instead of its base.
+        private static void TestTroop(UnitDef unit)
+        {
+            var copy = PackSerializer.Clone(Draft.Pack);
+            string hostScene = Draft.Pack.WaveSets.Select(w => w.Host).FirstOrDefault(h => EditorCatalog.Host(h) != null)
+                ?? EditorCatalog.Hosts.FirstOrDefault(h => h.Scene == "Nordfels")?.Scene ?? EditorCatalog.Hosts.FirstOrDefault()?.Scene;
+            var host = EditorCatalog.Host(hostScene);
+            var ws = EditorCatalog.Copy(host?.VanillaWaves);
+            if (host == null || ws == null) { Notify.Show("No map to test on", NotifyKind.Error, key: "builder-editor"); return; }
+            ws.Id = EditorCatalog.UniqueId("editor-test", copy.WaveSets.Select(w => w.Id));
+            ws.Name = $"Test: {unit.Name ?? unit.Id}";
+            ws.Host = host.Scene;
+            ws.Troops = [new TroopDef { Unit = unit.Id }];
+            copy.WaveSets.Add(ws);
+            Launch(copy, ws.Id);
         }
 
         private static void Launch(DesignPack pack, string waveSetId)
@@ -302,6 +333,7 @@ namespace PalaceMod.Builder.Editor
 
         // Issue paths have a fixed shape ("units[2].stats.maxHp", "waveSets[0].nights[1].spawns[3].line").
         private static readonly Regex UnitPath = new(@"^units\[(\d+)\]");
+        private static readonly Regex LevelPath = new(@"^levels\[(\d+)\]");
         private static readonly Regex WavePath = new(@"^waveSets\[(\d+)\](?:\.nights\[(\d+)\](?:\.spawns\[(\d+)\])?)?");
 
         /// <summary>Opens the screen holding the field an issue is about and selects it.</summary>
@@ -324,6 +356,13 @@ namespace PalaceMod.Builder.Editor
                 wavePage.Expand(wave.Groups[2].Success ? int.Parse(wave.Groups[2].Value) : -1, wave.Groups[3].Success ? int.Parse(wave.Groups[3].Value) : -1);
                 Show(wavePage);
                 wavePage.SelectPath(path);
+                return;
+            }
+            var level = LevelPath.Match(path);
+            if (level.Success)
+            {
+                OpenLevel(int.Parse(level.Groups[1].Value));
+                levelPage.SelectPath(path);
                 return;
             }
             packPage?.SelectPath(path);

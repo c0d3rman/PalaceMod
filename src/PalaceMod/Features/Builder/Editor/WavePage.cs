@@ -84,6 +84,7 @@ namespace PalaceMod.Builder.Editor
                 spawn = -1;
                 Rebuild();
             }, "Adds a night after the last one, starting as a copy of it.");
+            BuildTroops(page);
             if (Host != null)
                 Danger(page, $"Replace with {Host.DisplayName}'s own waves", "Swaps every night for the map's vanilla nights (you can undo this).", () =>
                 {
@@ -98,6 +99,47 @@ namespace PalaceMod.Builder.Editor
                 Frame.Close();
             });
         }
+
+        // ---- Troops: custom player units standing in for the troops buildings train ------------------------------
+
+        private void BuildTroops(ModPage page)
+        {
+            page.Header("Troops");
+            var players = Pack.Units.Where(u => u?.Side == UnitSide.Player && u.Id != null).ToList();
+            var troops = Set.Troops ?? [];
+            if (troops.Count == 0)
+                page.Text(players.Count == 0
+                    ? "Buildings can train your own player units instead of their usual troops. Make one on the Units tab (New player unit) first."
+                    : "Pick which of your player units the buildings train on this run.");
+            var unitOptions = players.Select(u => (u.Id, string.IsNullOrWhiteSpace(u.Name) ? u.Id : u.Name)).ToList();
+            for (int t = 0; t < troops.Count; t++)
+            {
+                int ti = t;
+                string tp = $"{P}.troops[{t}]";
+                var troop = troops[t];
+                var options = unitOptions.ToList();
+                if (troop?.Unit != null && options.All(o => o.Id != troop.Unit)) options.Add((troop.Unit, troop.Unit));
+                Choice(page, $"Troop {t + 1}", tp + ".unit", options, () => Troop(ti)?.Unit, (p, v) => p.WaveSets[Index].Troops[ti].Unit = v,
+                    "The player unit that stands in for its base troop.", structural: true);
+                var baseUnit = EditorCatalog.BaseOf(Pack, troop?.Unit);
+                var buildings = new List<(string Value, string Display)> { (null, "Every building that trains it") };
+                buildings.AddRange((baseUnit?.Buildings ?? []).Select(b => (b, b)));
+                if (troop?.Building != null && buildings.All(b => b.Value != troop.Building)) buildings.Add((troop.Building, troop.Building));
+                Choice(page, "   Trained by", tp + ".building", buildings, () => Troop(ti)?.Building, (p, v) => p.WaveSets[Index].Troops[ti].Building = v,
+                    $"Only this building's {baseUnit?.DisplayName ?? "troops"} are replaced, or every building that trains them.");
+                page.Row("   Remove this troop", "", "Buildings train their usual troop again.", () =>
+                    Edit("Remove troop", w => { w.Troops.RemoveAt(ti); if (w.Troops.Count == 0) w.Troops = null; }, structural: true));
+            }
+            if (players.Count > 0)
+                page.Button("Add troop", () =>
+                {
+                    var used = new HashSet<string>((Set.Troops ?? []).Select(x => x?.Unit).Where(x => x != null));
+                    var pick = players.FirstOrDefault(u => !used.Contains(u.Id)) ?? players[0];
+                    Edit("Add troop", w => (w.Troops ??= []).Add(new TroopDef { Unit = pick.Id }), structural: true);
+                }, "Buildings train one of your player units instead of their usual troop on this run.");
+        }
+
+        private TroopDef Troop(int i) => Set?.Troops != null && i < Set.Troops.Count ? Set.Troops[i] : null;
 
         // ---- Night ----------------------------------------------------------------------------------------------------
 

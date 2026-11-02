@@ -14,7 +14,8 @@ using UnityEngine.EventSystems;
     Bindings are saved as KeyboardShortcut entries in the hidden "Keybinds" config section (key "<section>: <id>"), so
     they don't appear in Settings > Mods; they belong in the game's Controls > Keyboard screen under a "Mods" heading.
     A keybind is inert while its feature is disabled, while a menu is open (unless AllowInMenus), and while a text field
-    has keyboard focus.
+    has keyboard focus. A key that only acts on one screen or in one mode can name it as its context (e.g.
+    KeybindContext.LoadoutScreen); the Controls screen then only reports conflicts with keys that can act there too.
 
     How keys are read is behind IKeybindBackend. KeybindsManager makes each keybind a Rewired action (so it gets a
     native row in Controls > Keyboard and can be bound to keyboard, mouse or controller) and reads it from Rewired;
@@ -28,6 +29,14 @@ namespace PalaceMod
         None = 0,
         /// <summary>Also fire while a game menu (pause, settings, any UIFrame) is open.</summary>
         AllowInMenus = 1,
+    }
+
+    /// <summary>Common keybind contexts: where a key acts, so conflicts are only shown between keys active at once.
+    /// Any other string works too; keys with the same context can clash with each other.</summary>
+    public static class KeybindContext
+    {
+        /// <summary>The loadout (perks and mutators) screen before a level.</summary>
+        public const string LoadoutScreen = "Loadout screen";
     }
 
     /// <summary>Reads the physical state of a keybind. Swap with Keybinds.Backend.</summary>
@@ -48,6 +57,8 @@ namespace PalaceMod
         public string DisplayName { get; }
         public string Description { get; }
         public KeybindFlags Flags { get; }
+        /// <summary>Where the key acts (see KeybindContext), or null for wherever its flags allow.</summary>
+        public string Context { get; }
         public KeyboardShortcut DefaultShortcut => (KeyboardShortcut)Entry.DefaultValue;
         /// <summary>The saved binding. The keybind UI writes this; it's persisted to the config file.</summary>
         public ConfigEntry<KeyboardShortcut> Entry { get; }
@@ -68,8 +79,10 @@ namespace PalaceMod
         /// <summary>Released this frame.</summary>
         public bool Up => Active && Keybinds.Backend.Up(this);
 
-        internal Keybind(string section, string id, string displayName, string description, KeybindFlags flags, ConfigEntry<KeyboardShortcut> entry)
+        internal Keybind(string section, string id, string displayName, string description, KeybindFlags flags, string context,
+            ConfigEntry<KeyboardShortcut> entry)
         {
+            Context = string.IsNullOrEmpty(context) ? null : context;
             Section = section;
             Id = id;
             DisplayName = displayName;
@@ -106,8 +119,10 @@ namespace PalaceMod
         /// <param name="displayName">Label shown in the controls screen.</param>
         /// <param name="defaultKey">Default binding; KeyboardShortcut.Empty for unbound.</param>
         /// <param name="description">What the key does, shown as its tooltip.</param>
+        /// <param name="context">The one screen or mode the key acts in (see KeybindContext); null for anywhere its
+        /// flags allow. Only affects which conflicts the Controls screen reports.</param>
         public static Keybind Register(string section, string id, string displayName, KeyboardShortcut defaultKey,
-            string description, KeybindFlags flags = KeybindFlags.None)
+            string description, KeybindFlags flags = KeybindFlags.None, string context = null)
         {
             if (string.IsNullOrEmpty(section)) throw new ArgumentException("section is required", nameof(section));
             if (string.IsNullOrEmpty(id)) throw new ArgumentException("id is required", nameof(id));
@@ -115,7 +130,7 @@ namespace PalaceMod
             if (byKey.TryGetValue(key, out var existing)) return existing;
             var entry = Plugin.Instance.Config.Bind(ConfigSection, key, defaultKey, new ConfigDescription(
                 $"{displayName}: {description}", null, new SettingTags { Hidden = true }));
-            var keybind = new Keybind(section, id, displayName, description, flags, entry);
+            var keybind = new Keybind(section, id, displayName, description, flags, context, entry);
             all.Add(keybind);
             byKey[key] = keybind;
             Registered?.Invoke(keybind);

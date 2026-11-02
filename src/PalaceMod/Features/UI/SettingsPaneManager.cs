@@ -84,7 +84,7 @@ namespace PalaceMod
             try
             {
                 Inject(created);
-                Plugin.Logger.LogInfo($"Settings pane: added \"{TabLabel}\" tab with {sections.Count} sections");
+                Log.For<SettingsPaneManager>().Debug($"Added \"{TabLabel}\" tab with {sections.Count} sections");
             }
             catch (Exception e)
             {
@@ -92,7 +92,7 @@ namespace PalaceMod
                 foreach (var obj in created) if (obj != null) Object.Destroy(obj);
                 tab = null;
                 description = null;
-                Plugin.Logger.LogError($"Settings pane: couldn't add the settings tab, use the config file or F1 instead: {e}");
+                Log.For<SettingsPaneManager>().Error($"Couldn't add the settings tab, use the config file or F1 instead", e);
             }
         }
 
@@ -236,7 +236,7 @@ namespace PalaceMod
             rect.pivot = source.pivot;
             rect.sizeDelta = source.rect.size;
             hintOffset = hint != null ? sliderTemplate.transform.InverseTransformPoint(source.position) : new Vector3(source.rect.width, 0f, 0f);
-            Plugin.Logger.LogInfo($"Settings pane: description template {(hint != null ? $"slider hint \"{hint.text}\"" : "row label")}, offset {hintOffset}, size {rect.sizeDelta}");
+            Log.For<SettingsPaneManager>().Debug($"Description template {(hint != null ? $"slider hint \"{hint.text}\"" : "row label")}, offset {hintOffset}, size {rect.sizeDelta}");
         }
 
         // ---- Rows ---------------------------------------------------------------------------------------------

@@ -77,7 +77,7 @@ namespace PalaceMod
                 follower.Gap = size * 0.5f + version.fontSize * 0.3f;
             }
             obj.SetActive(true);
-            Plugin.Logger.LogInfo($"Version badge: added above \"{version.text}\"");
+            Log.For<MenuBadgeManager>().Debug($"Added above \"{version.text}\"");
             return text;
         }
 

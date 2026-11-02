@@ -31,6 +31,9 @@ public class Plugin : BaseUnityPlugin
         BepInEx.Logging.Logger.Listeners.Add(LogManager.RecentLines.Instance);
         Logger.LogMessage($"PalaceMod {DebugBundle.ModVersion} starting");
 
+        // Renamed settings keep their saved values; must run before anything binds a setting.
+        ConfigMigrations.Apply(Config);
+
         // Every concrete BaseManager outside Experimental, ordered by [ManagerOrder] then name. Each one applies its
         // own nested Harmony patches (see BaseManager), so a feature is added just by adding its file.
         var types = AccessTools.GetTypesFromAssembly(typeof(Plugin).Assembly)

@@ -166,7 +166,7 @@ namespace PalaceMod.Builder
             go.name = $"{baseUnit.Prefab.name} [{pack.Id}/{def.Id}]";
             var notes = new List<string>();
             Apply(go, pack, def, [], notes, inPlace: false);
-            Plugin.Logger.LogInfo($"Builder: built {pack.Id}/{def.Id} from {baseUnit.Id}: {Describe(go)}" + (notes.Count > 0 ? $" ({string.Join("; ", notes)})" : ""));
+            Log.For<BuilderManager>().Debug($"Built {pack.Id}/{def.Id} from {baseUnit.Id}: {Describe(go)}" + (notes.Count > 0 ? $" ({string.Join("; ", notes)})" : ""));
             return go;
         }
 
