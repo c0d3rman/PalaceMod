@@ -97,8 +97,9 @@ PauseMenu.AddButton("compendium", "Compendium", frame.Open, order: 10, visible: 
 ModTooltip.Attach(someGameButton, "Title", () => "Body");   // shown while selected or hovered
 ```
 
-- `PauseMenu.AddButton` is idempotent per id and safe to call before the UI exists. Buttons go under Settings, sorted by `order`; past 3 they move into a "More" frame. `visible` is re-checked on every open, so gate it on your feature's `IsEnabled`.
+- `PauseMenu.AddButton` is idempotent per id and safe to call before the UI exists. Buttons go under Settings, sorted by `order`; past 3 they move into a "More" entry that opens a "Mods" frame. `visible` is re-checked on every open, so gate it on your feature's `IsEnabled`.
 - `ModFrame` runs on the game's `UIFrameManager`: Escape or back returns to the menu it was opened from, the game stays paused, and keyboard, controller and mouse navigation work. `Refresh()` rebuilds the current tab; `ModRow.SetValue` updates one row in place.
+- Page pieces: `Header`, `Text`, `Row` (label, value, tooltip, action, icon), `Button`, `Stepper` (left/right or the clickable arrows), `Custom(name, height)` for your own drawing, and `AddElement` to put your own selectable in the up/down chain. `ModFrame.Activated` fires on open and on return from a menu opened on top.
 - `ModTooltip.Show/Hide/Attach/AttachHover` share one tooltip in the game's tooltip look.
 - `GameWidgets.Clone/Button/Text` are the low-level cloners, for widgets the kit doesn't wrap.
 - Dev: `dev.py cmd "uidump <pause|active|hud|tooltip|name> [depth]"` prints a live UI hierarchy with fonts, colours and sprites; `dev.py cmd "uikit frame|notify|buttons <n>|tooltip"` exercises the kit.
