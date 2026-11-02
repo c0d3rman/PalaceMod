@@ -46,6 +46,7 @@ namespace PalaceMod
 
         private SaveStateBrowser browser;
         private string lastLevel;
+        private DayNightCycle lastCycle;
         private bool practiceRun, savesSkippedLogged;
         private float lastDefeatLoad = -100f;
 
@@ -98,6 +99,13 @@ namespace PalaceMod
             {
                 lastLevel = level;
                 if (SaveStates.Last != null && SaveStates.Last.Level != level) SaveStates.Last = null;
+            }
+            // Day 1 has no sunrise, so its dawn state is taken when a level starts fresh (not when a state loads).
+            var cycle = DayNightCycle.Instance;
+            if (cycle != lastCycle)
+            {
+                lastCycle = cycle;
+                if (cycle != null && !StateRestorer.Busy) Plugin.Instance.StartCoroutine(FirstDawnAfterDelay(cycle));
             }
             if (level == null) return;
             if (QuickSaveKey.Down) QuickSave();
@@ -161,6 +169,21 @@ namespace PalaceMod
         {
             // The game's own dawn save happens a few frames after sunrise; coins flying to the king count as banked.
             yield return new WaitForSeconds(1f);
+            TryAuto(SaveStateKind.AutoDawn);
+        }
+
+        private static IEnumerator FirstDawnAfterDelay(DayNightCycle cycle)
+        {
+            // Wait for the level to finish loading (the scene transition, then the game's match loader).
+            float deadline = Time.realtimeSinceStartup + 60f;
+            while (DayNightCycle.Instance == cycle && Time.realtimeSinceStartup < deadline &&
+                   (SceneTransitionManager.instance == null || SceneTransitionManager.instance.SceneTransitionIsRunning ||
+                    LocalMatchSaveLoad.CurrentlyLoadingMatch || LocalGamestate.Instance == null ||
+                    LocalGamestate.Instance.CurrentState != LocalGamestate.State.InMatch))
+                yield return null;
+            yield return new WaitForSeconds(1f);
+            if (DayNightCycle.Instance != cycle || StateRestorer.Busy || EnemySpawner.instance == null || EnemySpawner.instance.Wavenumber != -1 ||
+                cycle.CurrentTimestate != DayNightCycle.Timestate.Day) yield break;
             TryAuto(SaveStateKind.AutoDawn);
         }
 
