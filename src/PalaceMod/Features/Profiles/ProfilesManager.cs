@@ -156,6 +156,19 @@ namespace PalaceMod.Profiles
             SceneTransitionManager.instance.TransitionToMainMenu();
         }
 
+        // While a profile name is being typed, the game's menus mustn't read the keys (WASD navigates, Esc closes).
+        [HarmonyPatch(typeof(UIFrame), "Update")]
+        private static class UIFrame_Update_Patch
+        {
+            private static bool Prefix() => !ProfilesMenu.Typing;
+        }
+
+        [HarmonyPatch(typeof(UIFrameManager), "Update")]
+        private static class UIFrameManager_Update_Patch
+        {
+            private static bool Prefix() => !ProfilesMenu.Typing;
+        }
+
         // ---- PlayerPrefs ------------------------------------------------------------------------------------------
 
         /// <summary>The PlayerPrefs that are progression: the wardrobe (the game's reset clears it too) and the Eternal
