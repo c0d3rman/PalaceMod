@@ -75,7 +75,12 @@ namespace PalaceMod
             // there's none or the player chose to start over.
             var save = MatchSaveLoadHandler.CurrentSave;
             bool continuing = !MatchSaveLoadHandler.OverwriteCurrentSave && save != null;
-            if (continuing) pending.Remove(levelName);
+            // Continuing the save read from disk drops any pending fresh run; retrying a day of a fresh run whose save
+            // only exists in memory (never written, e.g. a Builder session) keeps going with that run's record.
+            if (continuing)
+            {
+                if (save == loadedSave) pending.Remove(levelName);
+            }
             else
             {
                 pending[levelName] = [];
@@ -88,6 +93,9 @@ namespace PalaceMod
         // writes a different save object, writes still go to the old run (e.g. a defeat before the first dawn
         // re-saves the old match save).
         private static MatchSave replacedSave;
+        // The match save last read from disk (MatchSaveLoadHandler.TryLoadRun).
+        private static MatchSave loadedSave;
+        internal static void MatchSaveLoaded(MatchSave save) => loadedSave = save;
         private static EternalTrialsRun freshEternalTrialsRun;
         // The game keeps an abandoned Eternal Trials run in memory and can bring it back; its record goes with it.
         private static List<string> discardedEternalTrialsReasons;
@@ -196,8 +204,9 @@ namespace PalaceMod
                 var lines = records.Where(r => r.Value.Count > 0)
                     .Select(r => string.Join("\t", new[] { Clean(r.Key) }.Concat(r.Value.Select(Clean))));
                 File.WriteAllLines(path + ".tmp", lines);
-                if (File.Exists(path)) File.Delete(path);
-                File.Move(path + ".tmp", path);
+                // rename(2) replaces atomically; File.Replace is that on Mono.
+                if (File.Exists(path)) File.Replace(path + ".tmp", path, null);
+                else File.Move(path + ".tmp", path);
             }
             catch (Exception e)
             {
@@ -306,6 +315,12 @@ namespace PalaceMod
                 savingRun = false;
                 if (runWritten) GameplayImpact.EternalTrialsRunSaved(runToSave);
             }
+        }
+
+        [HarmonyPatch(typeof(MatchSaveLoadHandler), nameof(MatchSaveLoadHandler.TryLoadRun))]
+        private class MatchLoaded_Patch
+        {
+            private static void Postfix() => GameplayImpact.MatchSaveLoaded(MatchSaveLoadHandler.CurrentSave);
         }
 
         // The game re-reads its save (startup, or a profile switch swapping the save folder): re-read the records too.

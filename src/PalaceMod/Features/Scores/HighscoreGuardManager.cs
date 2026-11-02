@@ -85,6 +85,8 @@ namespace PalaceMod
                     case "score":
                         if (ScoreManager.Instance == null || ActiveLevelData == null || args.Length < 2)
                             throw new System.ArgumentException("usage: unranked score <n> (in a level)");
+                        // A made-up score must never reach real records or Steam.
+                        GameplayImpact.Mark("Dev command: set score");
                         AccessTools.Field(typeof(ScoreManager), "currentScore").SetValue(ScoreManager.Instance, int.Parse(args[1]));
                         ActiveLevelData.highscore = int.Parse(args[1]);
                         break;
@@ -99,6 +101,8 @@ namespace PalaceMod
                     case "win":
                     case "lose":
                         if (LocalGamestate.Instance == null) throw new System.InvalidOperationException("not in a level");
+                        // A forced win isn't earned; a forced defeat records only the score actually played.
+                        if (action == "win") GameplayImpact.Mark("Dev command: forced win");
                         LocalGamestate.Instance.SetState(action == "win" ? LocalGamestate.State.AfterMatchVictory : LocalGamestate.State.AfterMatchDefeat);
                         break;
                     default:
