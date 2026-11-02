@@ -98,11 +98,14 @@ namespace PalaceMod.Builder.Assets
                 }
 
                 var atlas = new Atlas();
-                var tileOf = keys.ToDictionary(k => k, k => atlas.AddTile(textures.Get(k.Texture), k.Factor));
+                var tileOf = new Dictionary<(int, Color), int>();
                 foreach (var g in groups)
                 {
                     if (g.Paint == Paint.Textured && g.Tiles && !g.Unweld) g.FlatSwatch = atlas.AddSwatch(AverageColour(textures.Get(g.Texture), g.Factor));
-                    else if (g.Paint == Paint.Textured) g.Tile = tileOf[(g.Texture, g.Factor)];
+                    else if (g.Paint == Paint.Textured)
+                    {
+                        if (!tileOf.TryGetValue((g.Texture, g.Factor), out g.Tile)) tileOf[(g.Texture, g.Factor)] = g.Tile = atlas.AddTile(textures.Get(g.Texture), g.Factor);
+                    }
                     else if (g.Paint == Paint.Flat) g.FlatSwatch = atlas.AddSwatch(g.Flat);
                     else if (!g.Unweld) g.FlatSwatch = atlas.AddSwatch(Multiply(AverageAll(g.Colours), g.Factor));
                     else
@@ -139,7 +142,7 @@ namespace PalaceMod.Builder.Assets
                     }
                 }
                 texture = atlas.Bake(out int w, out int h);
-                paint = $"a {w}x{h} atlas of {keys.Count} texture{(keys.Count == 1 ? "" : "s")} and {atlas.SwatchCount} colour{(atlas.SwatchCount == 1 ? "" : "s")}";
+                paint = $"a {w}x{h} atlas of {tileOf.Count} texture{(tileOf.Count == 1 ? "" : "s")} and {atlas.SwatchCount} colour{(atlas.SwatchCount == 1 ? "" : "s")}";
             }
             texture.name = name;
 
