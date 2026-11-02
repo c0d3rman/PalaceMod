@@ -20,7 +20,7 @@ namespace PalaceMod.Builder
         [JsonProperty("perks")] public List<string> Perks { get; set; } = [];
         /// <summary>Other gameplay-changing tools used during the run (GameplayImpact reasons besides the Builder's).</summary>
         [JsonProperty("assists", NullValueHandling = NullValueHandling.Ignore)] public List<string> Assists { get; set; }
-        /// <summary>Nights survived (the wave number reached).</summary>
+        /// <summary>The night the run ended on (1-based; the last night for a win).</summary>
         [JsonProperty("nights")] public int Nights { get; set; }
     }
 
@@ -35,7 +35,7 @@ namespace PalaceMod.Builder
         [JsonProperty("wins")] public int Wins { get; set; }
         [JsonProperty("best")] public RunResult Best { get; set; }
         [JsonProperty("last")] public RunResult Last { get; set; }
-        public bool EverBeaten => Wins > 0;
+        [JsonIgnore] public bool EverBeaten => Wins > 0;
     }
 
     public static class ScoreStore

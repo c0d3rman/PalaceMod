@@ -89,6 +89,11 @@ namespace PalaceMod.Builder
                 PerkManager.instance.level = savedPerkLevel;
                 PerkManager.instance.xp = savedPerkXp;
             }
+            // The in-memory match save is the custom run's: never let a vanilla run continue from it.
+            MatchSaveLoadHandler.OverwriteCurrentSave = true;
+            // GameplayImpact keeps its record when the same map is re-entered without a fresh start (continuing a
+            // save). The next run on the host is a different run, so make it count as a new level.
+            Traverse.Create(typeof(GameplayImpact)).Field("level").SetValue(null);
             Plugin.Logger.LogInfo($"Builder: session ended: {ended.Pack.Id} on {ended.HostScene}");
             Ended?.Invoke(ended);
         }
@@ -147,7 +152,7 @@ namespace PalaceMod.Builder
                 Beaten = LocalGamestate.Instance != null && LocalGamestate.Instance.CurrentState == LocalGamestate.State.AfterMatchVictory,
                 DateUtc = DateTime.UtcNow,
                 Perks = PerkManager.instance?.CurrentlyEquipped.Where(e => e != null).Select(e => e.name).ToList() ?? [],
-                Nights = EnemySpawner.instance?.Wavenumber ?? 0,
+                Nights = (EnemySpawner.instance?.Wavenumber ?? -1) + 1,
             };
             var assists = GameplayImpact.Reasons.Where(r => r != ImpactReason).ToList();
             if (assists.Count > 0) run.Assists = assists;

@@ -22,7 +22,7 @@ namespace PalaceMod.Builder
                         // The map's pre-level menu, as if the king walked onto it.
                         if (args.Length < 2) throw new ArgumentException("usage: builder-session prelevel <map scene>");
                         if (SceneTransitionManager.instance?.IsInLevelSelect() != true) throw new InvalidOperationException("not in level select (`levelselect`)");
-                        var info = LevelProgressManager.instance.GetLevelInfoFromSceneName(args[1]) ?? throw new ArgumentException($"no map \"{args[1]}\"");
+                        var info = LevelProgressManager.instance.GetLevelInfoFromSceneName(string.Join(" ", args.Skip(1))) ?? throw new ArgumentException($"no map \"{string.Join(" ", args.Skip(1))}\"");
                         launcher.Disarm();
                         LevelInteractor.lastActiveLevelInfo = info;
                         if (UIFrameManager.instance.ActiveFrame != null) UIFrameManager.instance.CloseAllFrames();

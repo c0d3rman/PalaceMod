@@ -205,6 +205,19 @@ namespace PalaceMod
             }
         }
 
+        // Coming back from the Custom Runs list, the game re-selects what was selected before it opened, which may
+        // now be hidden (arming swaps "New Game / Continue" for "Play"). Fall back to the menu's first element.
+        [HarmonyPatch(typeof(UIFrame), nameof(UIFrame.Activate))]
+        private static class PreLevelSelection_Patch
+        {
+            private static void Postfix(UIFrame __instance)
+            {
+                if (Launcher == null || __instance.GetComponent<LevelSelectUIFrameHelper>() == null) return;
+                var sel = __instance.CurrentSelection;
+                if ((sel == null || !sel.gameObject.activeInHierarchy) && __instance.firstSelected != null) __instance.Select(__instance.firstSelected);
+            }
+        }
+
         // Walking onto a map opens its pre-level menu fresh, without a design.
         [HarmonyPatch(typeof(LevelInteractor), nameof(LevelInteractor.InteractionBegin))]
         private static class Interact_Patch

@@ -282,6 +282,8 @@ namespace PalaceMod.Builder
         private static bool IsHostMap(LevelInfo info)
         {
             if (info == null || info.enemySpawner == null) return false;
+            // Challenge maps (they have a subtitle) only get the entry when a design is made for them.
+            if (info.useSubtitle && !Designs().Any(d => d.Host == info.sceneName)) return false;
             try { return BuilderServices.Catalog.FindHost(info.sceneName) != null; }
             catch (InvalidOperationException) { return true; } // catalog not installed yet: any map with a spawner
         }
