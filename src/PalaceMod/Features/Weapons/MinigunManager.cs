@@ -29,7 +29,7 @@ namespace PalaceMod
     public class MinigunManager : BaseManager
     {
         public override string FeatureSection => "Minigun";
-        public override string FeatureDescription => "Adds a minigun to the loadout's weapons: it spins up, sprays fast weak bullets and slows you while firing. Using it counts as a modded run.";
+        public override string FeatureDescription => "Adds a minigun to the loadout's weapons: it spins up, sprays fast weak bullets and slows you while firing. Using it makes the run unranked.";
 
         internal const string DisplayName = "PalaceMod Minigun";
         private const string BowDisplayName = "Long Bow";
@@ -104,6 +104,73 @@ namespace PalaceMod
                 if (bow != null && !pm.CurrentlyEquipped.Any(e => e is EquippableWeapon)) PerkManager.SetEquipped(bow, true);
             }
             MinigunGun.Active?.Revert();
+            WeaponRow_Patch.RestoreAll();
+        }
+
+        // ---- Loadout screen weapon row ----
+
+        // With every weapon unlocked the minigun is one weapon more than the row's columns, so the grid would wrap it
+        // onto a second line. Fit the row instead: same width, more columns (tighter spacing, slightly smaller cells if
+        // needed), and single-row navigation. The game computes every list's navigation with the weapons grid's column
+        // count, so it runs with the original count and only the weapons' up/down links and the perks' up links are fixed.
+        [HarmonyPatch(typeof(LoadoutUIHelper), "RecomputeNavigation")]
+        private static class WeaponRow_Patch
+        {
+            private static readonly Dictionary<UnityEngine.UI.GridLayoutGroup, (int columns, Vector2 cell, Vector2 spacing)> original = [];
+            private static readonly AccessTools.FieldRef<LoadoutUIHelper, List<TFUIEquippable>> weaponsOf =
+                AccessTools.FieldRefAccess<LoadoutUIHelper, List<TFUIEquippable>>("weapons");
+            private static readonly AccessTools.FieldRef<LoadoutUIHelper, List<TFUIEquippable>> perksOf =
+                AccessTools.FieldRefAccess<LoadoutUIHelper, List<TFUIEquippable>>("perks");
+
+            private static void Prefix(LoadoutUIHelper __instance) => Restore(__instance.weaponsParent);
+
+            private static void Postfix(LoadoutUIHelper __instance)
+            {
+                var grid = __instance.weaponsParent;
+                var weapons = weaponsOf(__instance);
+                if (grid == null || weapons == null || grid.constraint != UnityEngine.UI.GridLayoutGroup.Constraint.FixedColumnCount) return;
+                int columns = grid.constraintCount, n = weapons.Count;
+                if (n <= columns || n > columns + 2) return; // a couple of extra weapons fit; more wrap as the game does
+
+                var cell = grid.cellSize;
+                var spacing = grid.spacing;
+                original[grid] = (columns, cell, spacing);
+                float width = columns * cell.x + (columns - 1) * spacing.x;
+                float cellX = Mathf.Min(cell.x, (width - (n - 1) * spacing.x * 0.5f) / n);
+                float spacingX = (width - n * cellX) / (n - 1);
+                grid.cellSize = cell * (cellX / cell.x);
+                grid.spacing = new Vector2(spacingX, spacing.y);
+                grid.constraintCount = n;
+
+                var perks = perksOf(__instance);
+                for (int i = 0; i < n; i++)
+                {
+                    weapons[i].topNav = __instance.playButton;
+                    weapons[i].botNav = perks != null && perks.Count > 0 ? perks[Mathf.Min(i, perks.Count - 1)] : __instance.playButton;
+                }
+                if (perks != null)
+                {
+                    for (int j = 0; j < Mathf.Min(columns, perks.Count); j++) perks[j].topNav = weapons[Mathf.Min(j, n - 1)];
+                }
+            }
+
+            private static void Restore(UnityEngine.UI.GridLayoutGroup grid)
+            {
+                if (grid == null || !original.TryGetValue(grid, out var o)) return;
+                grid.constraintCount = o.columns;
+                grid.cellSize = o.cell;
+                grid.spacing = o.spacing;
+                original.Remove(grid);
+            }
+
+            internal static void RestoreAll()
+            {
+                foreach (var grid in original.Keys.ToList())
+                {
+                    if (grid != null) Restore(grid);
+                    else original.Remove(grid);
+                }
+            }
         }
 
         private static void Create()

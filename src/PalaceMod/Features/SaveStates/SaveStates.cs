@@ -259,7 +259,7 @@ namespace PalaceMod
         private static void Prune(string level)
         {
             var all = List(level);
-            int history = Feature<SaveStatesManager>.Instance?.AutoHistory ?? 10;
+            int history = Feature<SaveStatesManager>.Instance?.AutoHistory ?? 40;
             foreach (var old in all.Where(s => s.Kind is SaveStateKind.AutoDawn or SaveStateKind.AutoDusk).Skip(history)) Delete(old);
             foreach (var old in all.Where(s => s.Kind == SaveStateKind.BeforeLoad).Skip(3)) Delete(old);
         }

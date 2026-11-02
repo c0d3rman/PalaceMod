@@ -12,6 +12,9 @@ using HarmonyLib;
     BepInEx keeps values from the file that no code has bound yet in ConfigFile.OrphanedEntries, and Bind reads its
     value from there, so moving the orphaned value is the whole migration. Renaming a section also renames its keybinds
     ("<section>: <id>" keys in the Keybinds section).
+
+    A changed default: players whose saved value is still the old default get the new one, once (a hidden marker in
+    the "Migrations" section records it, so a player who sets the old value again keeps it).
 */
 namespace PalaceMod
 {
@@ -33,6 +36,13 @@ namespace PalaceMod
             ("Diagnostics", "Summary interval (s)", "Summary interval"),
             ("Advanced", "Max busy-wait (ms)", "Max busy-wait"),
         ];
+
+        private static readonly (string section, string key, string oldDefault, string id)[] Defaults =
+        [
+            ("Savestates", "Automatic history", "10", "Savestates.Automatic history 40"),
+        ];
+
+        private const string MarkerSection = "Migrations";
 
         internal static void Apply(ConfigFile config)
         {
@@ -57,10 +67,25 @@ namespace PalaceMod
                 }
                 orphaned.Remove(from);
             }
-            if (moves.Count == 0) return;
-            config.Save();
-            Plugin.Logger.LogInfo($"Config migrations: renamed {moved} setting(s): " +
-                string.Join(", ", moves.Select(m => $"{m.from.Section}.{m.from.Key} -> {m.to.Section}.{m.to.Key}")));
+            if (moves.Count > 0)
+                Plugin.Logger.LogInfo($"Config migrations: renamed {moved} setting(s): " +
+                    string.Join(", ", moves.Select(m => $"{m.from.Section}.{m.from.Key} -> {m.to.Section}.{m.to.Key}")));
+
+            bool changed = moves.Count > 0;
+            foreach (var (section, key, oldDefault, id) in Defaults)
+            {
+                var marker = new ConfigDefinition(MarkerSection, id);
+                if (orphaned.ContainsKey(marker)) continue;
+                var definition = new ConfigDefinition(section, key);
+                if (orphaned.TryGetValue(definition, out var value) && value.Trim() == oldDefault)
+                {
+                    orphaned.Remove(definition); // Bind falls back to the new default
+                    Plugin.Logger.LogInfo($"Config migrations: {section}.{key} was the old default ({oldDefault}); using the new default");
+                }
+                orphaned[marker] = "done";
+                changed = true;
+            }
+            if (changed) config.Save();
         }
 
         private static ConfigDefinition Renamed(ConfigDefinition definition)

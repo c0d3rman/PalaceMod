@@ -170,6 +170,18 @@ namespace PalaceMod
                 .Where(e => e != null).ToList();
             if (save.currentLoadout.Count != native.loadout.Count)
                 Plugin.Logger.LogWarning($"Savestates: {native.loadout.Count - save.currentLoadout.Count} perk(s) in the state no longer exist");
+            // The state's weapon isn't available (e.g. the minigun with its feature off): the king gets the Long Bow,
+            // as the game's own save does in that case, instead of no weapon.
+            if (!save.currentLoadout.OfType<EquippableWeapon>().Any())
+            {
+                var weapons = all.OfType<EquippableWeapon>().ToList();
+                var bow = weapons.FirstOrDefault(w => w.displayName == "Long Bow") ?? weapons.FirstOrDefault();
+                if (bow != null)
+                {
+                    save.currentLoadout.Insert(0, bow);
+                    Plugin.Logger.LogInfo($"Savestates: the state's weapon isn't available; using the {bow.displayName}");
+                }
+            }
             return save;
         }
 
