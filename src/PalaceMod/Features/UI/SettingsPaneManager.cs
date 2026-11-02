@@ -13,9 +13,9 @@ using Object = UnityEngine.Object;
     Adds a "Mods" tab to the game's own Settings screen, generated from PalaceMod's BepInEx config entries:
     bools become checkboxes, enums and value lists become the game's arrow selectors, numeric ranges become sliders.
     A section selector at the top switches between config sections (the game's tabs don't scroll), and a line under
-    the rows describes the selected setting. The sections in SectionOrder come first, the rest alphabetically; a
-    feature's Enabled switch is its section's first row, and a section with more than RowsPerPage rows is split into
-    pages ("Name (1/2)").
+    the rows describes the selected setting. Feature sections come first, alphabetically, then the performance
+    sections in SectionOrder; a feature's Enabled switch is its section's first row, and a section with more than
+    RowsPerPage rows is split into pages ("Name (1/2)").
 
     Everything is cloned from the game's existing widgets, found through SettingsUIHelper's fields and by component
     type rather than by GameObject path, and the game's localisation and settings-binding components are stripped
@@ -28,7 +28,7 @@ namespace PalaceMod
     public class SettingsPaneManager : BaseManager
     {
         private const string TabLabel = "Mods";
-        private static readonly string[] SectionOrder = ["Frame rate", "Battery", "Optimizations", "Memory", "Diagnostics", "Advanced"];
+        private static readonly string[] SectionOrder = ["Performance", "Frame rate", "Battery", "Optimizations", "Memory", "Diagnostics", "Advanced"];
 
         private SettingsUIHelper helper;
         private bool injected;
@@ -245,7 +245,7 @@ namespace PalaceMod
         private List<string> CollectSections()
         {
             var present = Plugin.Config.Keys.Select(d => d.Section).Distinct().Where(s => Entries(s).Any()).ToList();
-            var ordered = SectionOrder.Where(present.Contains).Concat(present.Except(SectionOrder).OrderBy(s => s, StringComparer.OrdinalIgnoreCase));
+            var ordered = present.Except(SectionOrder).OrderBy(s => s, StringComparer.OrdinalIgnoreCase).Concat(SectionOrder.Where(present.Contains));
             var labels = new List<string>();
             pages = [];
             foreach (var section in ordered)

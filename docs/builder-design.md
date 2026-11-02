@@ -67,10 +67,10 @@ Evidence comes from the decompiled `Assembly-CSharp`, `AstarPathfindingProject.d
 | WP1 Data model and loader | **Landed** (PR #8). `Model/`, `Contracts/`, `PackRepository`, `EditHistory`. |
 | WP2 Catalog and runtime | **Landed** (feat/builder-core). `Runtime/`, `BuilderManager`, `builder` dev command, sample pack, interim `SessionLauncher`, leaderboard guard. Enemies only: player units aren't in the catalog yet (see Spike results). |
 | WP3 Session and level select | **Landed.** `Session/`: Custom runs entry in every map's pre-level menu, session lifecycle, isolation, `scores.json`, `builder-session` dev command. |
-| WP4a Editor UI | Open. |
+| WP4a Editor UI | **Landed** (stage 1): `Editor/`, see "Editor (WP4a, as built)". Stage 2 is planned below. |
 | WP4b / WP4c Level overlay, placement editor | Stage 2. Data shape fixed (`LevelDef`), stub `ILevelOverlay`. |
 | WP5 Asset import | Open. Stub `IAssetProvider` returns null. |
-| WP6 Sharing | Open. Stub `IShareCodec` refuses. |
+| WP6 Sharing | **Landed.** `Sharing/`: `ShareCodec`, `PackArchive` (`.tfpack` and Thunderstore zips), import folder watcher, `SharingUI`, `builder-share` dev command, `tests/PalaceMod.Tests`. |
 
 ## Architecture (as built, WP1 and WP2)
 
@@ -105,6 +105,10 @@ BepInEx/PalaceBuilder/                       IPackRepository.Root
   packs/<packId>/assets/...                  files the pack's "assets" entries point at (WP5 loads them)
   trash/<packId>-<yyyyMMdd-HHmmss>/          Delete() moves packs here; nothing is ever deleted outright
   cache/<sha256>                             downloaded assets (WP5)
+  import/                                    drop .tfpack/.zip/.txt (share code) files here; moved to import/imported or
+                                             import/failed (with <file>.why.txt) once handled (WP6)
+  exports/                                   .tfpack and Thunderstore zips written by Export (WP6)
+  staging/<guid>/                            temporary extraction folder during an import (WP6, removed after)
   scores.json                                per-design results (WP3)
   catalog.json                               written by `builder dump`
 BepInEx/plugins/<mod>/PalaceBuilder/packs/<packId>/   read-only "Plugin" packs shipped as Thunderstore mods
@@ -261,7 +265,8 @@ All are in `Features/Builder/Contracts/Contracts.cs` and reached through `Builde
 | `BuilderServices.Sessions` | `ISessionLauncher`: `Current`, `Launch(SessionRequest, out error)`, `End`, `Started`, `Ended` | WP3 | `SessionLauncher` |
 | `BuilderServices.Overlay` | `ILevelOverlay`: `Apply(pack, level, issues)` | WP4b | `NullLevelOverlay` (warns) |
 | `BuilderServices.Assets` | `IAssetProvider`: `GetSprite`, `GetAudio`, `GetMesh(PackEntry, assetRef)` | WP5 | `NullAssetProvider` (null) |
-| `BuilderServices.Share` | `IShareCodec`: `Encode(pack)`, `Decode(code, issues)` | WP6 | `NullShareCodec` (refuses) |
+| `BuilderServices.Share` | `IShareCodec`: `Encode(pack)`, `Decode(code, issues)` | WP6 | `ShareCodec` |
+| `BuilderServices.Archives` | `IPackArchive`: `ExportFolder`, `Export(entry, path)`, `Import(path, issues)`, `ExportThunderstore(entry, path)` (**added by WP6**, additive; stub `NullPackArchive`) | WP6 | `PackArchive` |
 
 Interfaces are frozen. If a package needs a change, add a member (don't change existing signatures), keep the stub compiling, and note it in the PR and in this table.
 
@@ -304,7 +309,7 @@ Shared data types (also in `Contracts.cs`): `PackEntry {Pack, Folder, Source, Re
 - `Validator` issues carry a JSON path (`units[0].stats.maxHp`): map them to the field to highlight it.
 - `Ids.FromName(name)` for ids, and `Validator.IsTag` for tag pickers (names are `TagManager.ETag`).
 - Test button: `BuilderServices.Packs.Save(pack)` then `BuilderServices.Sessions.Launch(new SessionRequest { Pack = pack, WaveSetId = id }, out err)`.
-- Export and import buttons: `BuilderServices.Share.Encode/Decode` (WP6), then `Packs.InstallNew(decoded)`.
+- Export and import buttons: call `PalaceMod.Builder.Sharing.SharingUI` (WP6): `Open()` (the "Share designs" frame: paste a code, import folder, export a pack), `OpenPack(entry)` (one pack's export actions), `CopyCode(pack)` and `ImportFromClipboard()`. They notify the player themselves. For custom flows use `BuilderServices.Share` and `BuilderServices.Archives` directly.
 - Live preview model: instantiate `IUnitFactory.Resolve(pack, unitId)` with `Object.Instantiate` under a preview camera, and destroy it after. Never activate or modify the returned template itself.
 
 **Not stubbed:** everything it needs exists except share codes (stub refuses) and icons (stub returns null).
@@ -325,22 +330,65 @@ Shared data types (also in `Contracts.cs`): `PackEntry {Pack, Folder, Source, Re
 
 **Spike results that matter here:** see "Tint and skin" below (how unit meshes are coloured).
 
-### WP6: sharing
+### WP6: sharing (as built)
 
-**Goal:** trade designs as copy/paste codes and files.
+**Goal:** trade designs as copy/paste codes and files, with no server.
 
-**Owns:** `Features/Builder/Sharing/` (new). Install with `BuilderServices.Share = new ShareCodec();`.
+**Owns:** `Features/Builder/Sharing/`: `ShareCodec.cs`, `PackArchive.cs` (no Unity references, unit-tested), `BuilderSharingManager.cs` (installs `BuilderServices.Share` and `BuilderServices.Archives`, the import folder watcher, the `builder-share` dev command), `SharingUI.cs` (the frames). Tests: `tests/PalaceMod.Tests` (`dotnet run --project tests/PalaceMod.Tests`; needs `dev.py setup` for `lib/`). It follows `Builder.Enabled` (`Feature<BuilderManager>.On`); its one setting is `Builder.Import folder`.
 
-**Contract:** `Encode(DesignPack)` returns `"TFB1:" + base64url(raw deflate(PackSerializer.WriteCompact(pack)))`; asset entries keep only `url` and `sha256` (drop `path`-only assets, or keep them so the receiver sees "missing"). `Decode(code, issues)` tolerates whitespace and line breaks, rejects unknown prefixes, inflates, then calls `PackSerializer.Read(json, issues)` (which migrates and validates the format). Return null on failure.
+**Share code:** `TFB1:` + base64url(raw deflate(`PackSerializer.WriteCompact(pack)`) ++ CRC-32 of the JSON, 4 bytes big-endian). The digit is the code format version (a newer one is refused with "update PalaceMod"); the pack schema version is inside the JSON and migrated by `PackSerializer`. Assets keep `path`, `url` and `sha256`, never bytes, so a receiver without the file falls back to base visuals. The sample pack (2,500 bytes of JSON) is a 1,051-character code; `SharingUI.CopyCode` suggests a `.tfpack` above 2,000.
 
-**Also:**
+Gotcha for anyone using `System.IO.Compression` in the game: Unity's Mono `DeflateStream` throws `IOException` ("Corrupted data ReadInternal") on bad input, where .NET throws `InvalidDataException`. Catch both. `builder-share selftest` checks this path in-game.
 
-- Clipboard via `GUIUtility.systemCopyBuffer`.
-- `.tfpack` zip (`System.IO.Compression`, already in `Managed/`; add a csproj `Reference` with `Private=false` like `Newtonsoft.Json`; `dev.py build` copies new references into `lib/`) holding `pack.json` and `assets/`. Import through `BuilderServices.Packs.InstallNew(pack, extractedFolder)`, which never overwrites and renames clashing ids to `<id>-2`. Zip-slip check every entry path.
-- A Thunderstore template: `manifest.json` plus `PalaceBuilder/packs/<id>/pack.json` inside the mod folder, which `PackRepository` already scans read-only.
-- Keep codes under about 2,000 characters for typical packs. Measure with the sample pack.
+Decoding treats input as hostile and never throws: it finds the `TFB<n>:` prefix anywhere in the text (so a whole chat message can be pasted), skips whitespace and line breaks, stops at the first non-base64 character (closing quotes or backticks), and accepts the standard base64 alphabet too. It caps the code at 512K characters and the inflated JSON at 2 MB (counted while inflating), checks the CRC, requires strict UTF-8, parses with a JSON depth cap of 32, then migrates and reads. Null lists become empty. Any failure is one player-facing error issue. Decode doesn't validate against the catalog; installing does (`InstallNew` → `Refresh`), and a pack with errors still installs so the editor can fix it.
 
-**Not stubbed:** nothing else is needed. `PackSerializer.WriteCompact`, `Read` and `InstallNew` exist.
+**.tfpack:** a zip of `tfpack.json` (`{"format":"tfpack","version":1,"pack":"<id>"}`, the archive layout version), `pack.json` and `assets/...`. Export writes to `PalaceBuilder/exports/<id>.tfpack` (never overwriting: `-2`, `-3`, ...) and only includes assets with media extensions (`PackArchive.AssetExtensions`: png, jpg, wav, ogg, mp3, obj, mtl, gltf, glb, bin, json, txt; WP5: add any new type there). Because `InstallNew` copies only `assets/`, an `assets` entry whose `path` points elsewhere in the pack folder (e.g. `art/skin.png`) is moved to `assets/art/skin.png` in the archive and its path is rewritten. Export also checks the finished file against the import limits, so anything it writes imports again. Import:
+
+- Caps: 64 MB archive, 1,000 entries, 32 MB per entry, 128 MB total, 2 MB `pack.json`. Sizes are counted while inflating, never taken from the headers, and a partial file is deleted.
+- Zip-slip: every entry name is checked first, and one bad name rejects the whole archive: no rooted paths, drive letters or `:`, `\`, `..`, `.` or empty segments, trailing dots or spaces, or control characters. Each target path is also checked to resolve inside the staging folder.
+- Layout: exactly one `pack.json` anywhere in the archive; its folder is the pack root. So a zip of a pack folder and a Thunderstore package (`PalaceBuilder/packs/<id>/pack.json`) import too. Only `assets/` files with known extensions are unpacked; anything else is skipped with a warning.
+- Migration hooks: `PackArchive.Steps[n]` upgrades an extracted staging folder from layout n to n+1, and a newer layout is refused. A missing `tfpack.json` counts as layout 1.
+- It extracts to `PalaceBuilder/staging/<guid>`, then `InstallNew(pack, staging)` (never overwrites; a clashing id becomes `<id>-2`, reported as a warning), then deletes staging.
+
+**Thunderstore:** `ExportThunderstore` writes `exports/<Name>-thunderstore.zip` with `manifest.json` (name made Thunderstore-safe, `version_number` 1.0.0, empty `dependencies`), a README with a publishing checklist, a generated 256x256 `icon.png` and `PalaceBuilder/packs/<id>/`. Mod managers install loose files to `BepInEx/plugins/<package>/`, where `PackRepository` finds the pack read-only. Creators must add PalaceMod's Thunderstore id to `dependencies` (it isn't published yet; see `PackArchive.ThunderstoreManifest`).
+
+**Import UX:** `SharingUI.Open()` is a "Share designs" frame with two tabs. **Import** has "Paste code from clipboard", the import folder (an "Open import folder" button and a row per waiting file) and the last result. **Export** lists packs, and each opens `OpenPack(entry)`: copy share code, save `.tfpack`, save for Thunderstore, open exports folder. With `Builder.Import folder` on (the default), files dropped into `PalaceBuilder/import` (`.tfpack`, `.zip`, or `.txt` holding a code) are imported within about 2 s (paused during a custom session and while the Builder is off). The watcher waits until a file has been unchanged for 1.5 s and isn't locked, then moves it to `import/imported/` or `import/failed/` (with `<file>.why.txt`). Every result is a `Notify`. There is no pause-menu entry of its own: WP4a's Builder menu opens it.
+
+**Dev command** `builder-share`: `code <pack>` (copies too), `decode [code]` (clipboard by default; doesn't install), `paste` (installs the clipboard), `export <pack>`, `thunderstore <pack>`, `import <path>`, `ui [pack]`, `selftest` (codec round trip, rejections and the clipboard under the game's Mono).
+
+### Editor (WP4a, as built)
+
+Open it from **Builder** in the title menu or the in-match pause menu, from WP3's custom-runs menu ("Create your own", "Edit"), or with `builder-ui open`. Files in `Features/Builder/Editor/`:
+
+| File | Does |
+|---|---|
+| `BuilderEditorManager.cs` | menu entries, undo/redo keys (Cmd+Z, Cmd+Shift+Z, Ctrl+Z/Ctrl+Y), first-use hint, `builder-ui` dev command, sets WP3's `SessionMenu` hooks |
+| `BuilderEditor.cs` | public entry points `Open()`, `OpenPack(id)`, `IsAvailable`; drafts; save, undo, test-play, share code, problem navigation |
+| `PackDraft.cs` | the working copy of one pack: `EditHistory`, dirty state, validation (`Packs.Validate` plus editor-only warnings), save / save a copy / id rename |
+| `EditorPage.cs` | base screen: fields bound to JSON paths, so issues mark the field and its tooltip; `Picker` (full-screen pick-one / toggle-many list) |
+| `PackPages.cs` | pack list; pack screen with Units, Wave Sets, Pack (details and actions) and Problems tabs |
+| `UnitPage.cs` | unit property panel: identity and base prefab, stats (generated from `StatsDef` by reflection, base values from `CatalogUnit`), weapon and damage modifier lists, tags, look (tint, size, icon), behaviours, test, duplicate, delete |
+| `WavePage.cs` | wave set timeline: map, starting gold, nights as rows with their groups as chips; applying a night or chip opens its fields underneath |
+| `EditorCatalog.cs` | never-throwing catalog lookups, and `Schema` (labels, help, ranges and steps for every numeric field) |
+
+Behaviour worth knowing:
+
+- **Drafts.** Opening a pack copies it into a `PackDraft` kept until the game quits, so closing the editor never loses work; the pack list shows "unsaved". Built-in and plugin packs are editable and saved as a new user pack (`InstallNew`). Changing a saved pack's id saves the new folder, then moves the old one to trash. A draft with no unsaved changes picks up edits made on disk.
+- **Undo.** Every change goes through `PackDraft.Edit(label, change)`, which calls `EditHistory.Record` first. Held steppers coalesce into one step per field (1.5 s window).
+- **Fields** (UI kit `Core/UI/ModFields.cs`, additive): `Stepper` (left/right, accelerating while held), `Choice`, `Toggle` and `TextInput`, all `ModPage.Row`s. Text entry blocks the game's menu input while typing (prefixes on `UIFrame.Update` and `UIFrameManager.Update`), and `Keybinds` treats it as a focused text field. A null override shows the base value dimmed ("100 (base)"); typing an empty value resets it.
+- **Validation feedback.** Issues are matched to fields by path prefix: a red (error) or amber (warning) diamond on the label, the message in the tooltip, and a Problems tab whose rows jump to the field. Editor-only warning: a group on a spawn line that doesn't allow its unit (flying on ground lines, large on small-only lines).
+- **Entry points.** "Builder" in the title menu (UI kit `Core/UI/TitleMenu.cs`, added for this: `TitleMenu.AddButton(id, label, onClick, visible)`) and the in-match pause menu; both hide while `Builder.Enabled` is off, and switching it off closes an open editor.
+- **Test play.** Wave sets: save (writable packs without errors), then `Sessions.Launch` with the draft. Units: an unsaved copy of the pack with a generated two-night wave set "editor-test" on the pack's first map (or Nordfels). The editor closes before the map loads.
+- **Share codes.** "Copy share code" and "Import share code" call `BuilderServices.Share` (WP6) and `Packs.InstallNew`; with WP6's stub they explain that codes aren't available yet.
+- **Not built:** the live 3D preview model (planned: a preview camera rendering a stripped `Instantiate` of the template into a `RawImage`; components other than renderers removed before activation so no game script runs); editing `warning` text is stored but not yet shown in play.
+
+### Stage 2 plan: level overlay editor (WP4b/WP4c)
+
+Not started. The plan, in order:
+
+1. **Data first, no 3D.** A Levels tab on the pack screen: host, wave set, and the `buildSlots.edit` list (per vanilla slot: upgrade costs, income, HP) as property panels, using `catalog.json`-style host data (slot names and their upgrade trees) that WP2's catalog would need to add (`CatalogHost.BuildSlots`). This needs `ILevelOverlay` to apply edits, but no placement UI.
+2. **Placement mode** inside the host scene (launched like a test play, with a flag that makes the session an edit session): a free camera, a palette (build slot bases, spawn lines, props from the catalog), a ghost that snaps to the navmesh (`AstarPath.active.GetNearest`), move/rotate gizmos, and the same property panel docked on the right for the selected object. Editing writes `LevelDef` through `PackDraft.Edit`, so undo and validation work unchanged.
+3. **Play from edit mode**: save, reload the host with the overlay (WP4b applies it before `Start`, then rescans).
 
 ### WP4b / WP4c (stage 2)
 
