@@ -144,7 +144,7 @@ namespace PalaceMod
         internal static string ValueText(float baseValue, float actual) =>
             CompendiumStats.SameShown(baseValue, actual)
                 ? CompendiumStats.Format(actual)
-                : $"<alpha=#99>{CompendiumStats.Format(baseValue)}</alpha>{Arrow}{CompendiumStats.Format(actual)}";
+                : $"<alpha=#99>{CompendiumStats.Format(baseValue)}<alpha=#FF>{Arrow}{CompendiumStats.Format(actual)}";
 
         /// <summary>What changed the numbers, and damage against other targets where it differs.</summary>
         internal static string DetailLines(CombatantStats stats, bool isEnemy)
