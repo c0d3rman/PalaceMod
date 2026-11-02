@@ -19,10 +19,11 @@ using UnityEngine;
       Input and gets no row.
     - Persistence lives in the BepInEx config, never in the game's ControlsConfig_v2.json: Keybind.Entry holds the
       primary binding (a keyboard key with modifiers, or a mouse button if there's no key), and a hidden
-      "<key> (more)" entry holds any further mouse and controller bindings. Around every save of the controls file
-      the mod's bindings are copied into the config and stripped from the maps, so the file stays exactly vanilla
-      (removing the mod or a game update that adds actions can't misassign anything), then put back. After the game
-      loads the file, or resets controls, the bindings are re-applied from the config.
+      "<key> (more)" entry holds any further mouse and controller bindings. Before every save of the controls file
+      the mod's bindings are copied into the config, and they're dropped from the serialized maps, so the file stays
+      exactly vanilla (removing the mod, or a game update that adds actions, can't misassign anything). After the game
+      loads the file, or resets controls, the bindings are re-applied from the config. A mouse button with modifiers
+      can't be a Rewired binding, so such a keybind keeps reading Unity Input.
     - Polling reads the action from Rewired (GetButtonDown etc.), which ignores unrelated held keys.
 */
 namespace PalaceMod
@@ -180,6 +181,9 @@ namespace PalaceMod
         private const int FirstMouseButtonId = 3;
         private static bool IsMouseKey(KeyCode key) => key >= KeyCode.Mouse0 && key <= KeyCode.Mouse6;
 
+        // Rewired mouse maps have no modifiers, so a mouse button with modifiers stays on Unity Input.
+        private static bool UnityOnly(Keybind keybind) => IsMouseKey(keybind.Shortcut.MainKey) && keybind.Shortcut.Modifiers.Any();
+
         private static ControllerMap KeyboardMap => Plugin.Input?.controllers.maps.GetMap(ControllerType.Keyboard, 0, 0, 0);
         private static ControllerMap MouseMap => Plugin.Input?.controllers.maps.GetMap(ControllerType.Mouse, 0, 0, 0);
 
@@ -204,7 +208,8 @@ namespace PalaceMod
             foreach (var map in Plugin.Input.controllers.maps.GetAllMaps()) map.DeleteElementMapsWithAction(id);
 
             var primary = keybind.Shortcut;
-            if (IsMouseKey(primary.MainKey))
+            if (UnityOnly(keybind)) { }
+            else if (IsMouseKey(primary.MainKey))
             {
                 MouseMap?.CreateElementMap(id, Pole.Positive, FirstMouseButtonId + (primary.MainKey - KeyCode.Mouse0),
                     ControllerElementType.Button, AxisRange.Positive, false);
@@ -253,7 +258,7 @@ namespace PalaceMod
             KeyboardShortcut primary;
             if (keyboard != null) primary = new KeyboardShortcut(keyboard.keyCode, FromFlags(keyboard.modifierKeyFlags));
             else if (mouse != null) primary = new KeyboardShortcut(KeyCode.Mouse0 + (mouse.elementIdentifierId - FirstMouseButtonId));
-            else primary = KeyboardShortcut.Empty;
+            else primary = UnityOnly(keybind) ? keybind.Shortcut : KeyboardShortcut.Empty;
             if (keyboard != null && mouse != null) rest.Insert(0, (MouseMap, mouse));
 
             // Bindings for controllers that aren't plugged in stay as they were.
@@ -313,7 +318,7 @@ namespace PalaceMod
             public bool Held(Keybind k) => Use(k) ? Plugin.Input.GetButton(k.ActionId) : Keybinds.UnityInput.Held(k);
             public bool Up(Keybind k) => Use(k) ? Plugin.Input.GetButtonUp(k.ActionId) : Keybinds.UnityInput.Up(k);
 
-            private static bool Use(Keybind k) => k.ActionId >= 0 && Ready;
+            private static bool Use(Keybind k) => k.ActionId >= 0 && Ready && !UnityOnly(k);
         }
 
         // ---- Patches ----------------------------------------------------------------------------------------------
@@ -344,35 +349,43 @@ namespace PalaceMod
         {
             private static void Postfix()
             {
-                if (categoryId >= 0 && ReInput.isReady) ApplyAll();
+                if (categoryId < 0 || !ReInput.isReady) return;
+                ApplyAll();
+                RefreshControlsScreen();
             }
         }
 
-        // Keep the controls file vanilla: copy our bindings into the config, strip them for the save, put them back.
+        // Keep the controls file vanilla: copy our bindings into the config, then drop them from the serialized maps
+        // (a copy; the live maps keep their element maps, which the open Controls rows hold on to).
         [HarmonyPatch(typeof(ControlConfigSaveLoad), nameof(ControlConfigSaveLoad.SaveControlConfigToJson))]
         private static class Save_Patch
         {
-            private static void Prefix(out bool __state)
+            private static void Prefix()
             {
-                __state = Ready;
-                if (!__state) return;
-                foreach (var keybind in byAction.Values)
-                {
-                    if (!resetting) Sync(keybind);
-                    foreach (var map in Plugin.Input.controllers.maps.GetAllMaps()) map.DeleteElementMapsWithAction(keybind.ActionId);
-                }
-            }
-
-            private static void Finalizer(bool __state)
-            {
-                if (__state) ApplyAll();
+                if (!Ready || resetting) return;
+                foreach (var keybind in byAction.Values) Sync(keybind);
             }
         }
 
         [HarmonyPatch(typeof(ControlConfig.ControllerData), MethodType.Constructor, [typeof(ControllerType), typeof(int), typeof(string)])]
         private static class ControllerData_Patch
         {
-            private static void Postfix(ControlConfig.ControllerData __instance) => __instance.knownActionIds.RemoveAll(byAction.ContainsKey);
+            private static void Postfix(ControlConfig.ControllerData __instance)
+            {
+                if (byAction.Count == 0) return;
+                __instance.knownActionIds.RemoveAll(byAction.ContainsKey);
+                try
+                {
+                    var copy = ControllerMap.CreateFromJson(__instance.controllerType, __instance.jsonMap);
+                    if (copy == null || !copy.AllMaps.Any(e => byAction.ContainsKey(e.actionId))) return;
+                    foreach (var id in byAction.Keys) copy.DeleteElementMapsWithAction(id);
+                    __instance.jsonMap = copy.ToJsonString();
+                }
+                catch (Exception e)
+                {
+                    Plugin.Logger.LogError($"Keybinds: couldn't strip mod bindings from the controls file: {e}");
+                }
+            }
         }
 
         [HarmonyPatch(typeof(KeyRebinder), nameof(KeyRebinder.TriggerControlsReset))]

@@ -25,6 +25,8 @@ namespace PalaceMod
             AccessTools.FieldRefAccess<ControlMapButton, InputAction>("actionToMap");
         private static readonly AccessTools.FieldRef<ControlMapButton, ActionElementMap> rowKeyMap =
             AccessTools.FieldRefAccess<ControlMapButton, ActionElementMap>("keyMap");
+        private static readonly AccessTools.FieldRef<ControlMapButton, ControlMapButton.AxisMode> rowAxisMode =
+            AccessTools.FieldRefAccess<ControlMapButton, ControlMapButton.AxisMode>("axisMode");
         private static readonly AccessTools.FieldRef<KeyRebinder, InputMapper> keyboardMapper =
             AccessTools.FieldRefAccess<KeyRebinder, InputMapper>("keyboardMapper");
 
@@ -44,13 +46,16 @@ namespace PalaceMod
         [HarmonyPatch(typeof(KeyRebinder), nameof(KeyRebinder.RegenerateButtons))]
         private static class RegenerateButtons_Patch
         {
-            private static void Prefix(KeyRebinder __instance)
+            // The old rows are only scheduled for destruction, so they're still children during the postfix.
+            private static void Prefix(KeyRebinder __instance, out HashSet<Transform> __state)
             {
+                __state = new HashSet<Transform>();
+                foreach (Transform child in __instance.buttonParent) __state.Add(child);
                 if (HasActions && !__instance.actionCategoriesToShow.Contains(CategoryName))
                     __instance.actionCategoriesToShow.Add(CategoryName);
             }
 
-            private static void Postfix(KeyRebinder __instance)
+            private static void Postfix(KeyRebinder __instance, HashSet<Transform> __state)
             {
                 var rows = __instance.buttons.Where(IsModRow).ToList();
                 if (rows.Count == 0) return;
@@ -65,12 +70,15 @@ namespace PalaceMod
                     section = keybind.Section;
                 }
 
-                // ScrollArea maps a selection's ScrollElementID onto the child count, so keep ids equal to positions.
-                var parent = __instance.buttonParent;
-                for (int i = 0; i < parent.childCount; i++)
+                // ScrollArea maps a selection's ScrollElementID onto the child count, so keep ids equal to positions
+                // among the children that will remain.
+                int position = 0;
+                foreach (Transform child in __instance.buttonParent)
                 {
-                    var id = parent.GetChild(i).GetComponent<ScrollElementID>();
-                    if (id != null) id.id = i;
+                    if (__state.Contains(child)) continue;
+                    var id = child.GetComponent<ScrollElementID>();
+                    if (id != null) id.id = position;
+                    position++;
                 }
                 __instance.GetComponentInParent<UIFrame>()?.RefetchManagedElements();
             }
@@ -103,16 +111,30 @@ namespace PalaceMod
         [HarmonyPatch(typeof(ControlMapButton), nameof(ControlMapButton.SetData))]
         private static class SetData_Patch
         {
-            private static void Postfix(ControlMapButton __instance) => UpdateRow(__instance);
+            private static void Postfix(ControlMapButton __instance) => UpdateRow(__instance, decorateKeys: false);
         }
 
+        // Refresh rewrites the key glyphs, so that's where modifiers are added (SetData calls Refresh first).
         [HarmonyPatch(typeof(ControlMapButton), nameof(ControlMapButton.Refresh))]
         private static class Refresh_Patch
         {
-            private static void Postfix(ControlMapButton __instance) => UpdateRow(__instance);
+            private static void Postfix(ControlMapButton __instance) => UpdateRow(__instance, decorateKeys: true);
         }
 
-        private static void UpdateRow(ControlMapButton row)
+        // The I2 term the game uses for a row's label (axis rows have Positive/Negative variants).
+        private static string NativeLabel(ControlMapButton row)
+        {
+            var action = rowAction(row);
+            string term = rowAxisMode(row) switch
+            {
+                ControlMapButton.AxisMode.Positive => action.name + " Positive",
+                ControlMapButton.AxisMode.Negative => action.name + " Negative",
+                _ => action.name,
+            };
+            return LocalizationManager.GetTermTranslation("Controls/" + term);
+        }
+
+        private static void UpdateRow(ControlMapButton row, bool decorateKeys)
         {
             var action = rowAction(row);
             if (action == null || !HasActions) return;
@@ -122,16 +144,16 @@ namespace PalaceMod
             if (!mine && conflicts.Count == 0)
             {
                 if (row.target.GetComponent<TextMeshProUGUI>()?.text.Contains(ConflictColor) == true)
-                    row.target.SetOriginalString(LocalizationManager.GetTermTranslation("Controls/" + action.name));
+                    row.target.SetOriginalString(NativeLabel(row));
                 return;
             }
-            string label = mine ? keybind.DisplayName : LocalizationManager.GetTermTranslation("Controls/" + action.name);
+            string label = mine ? keybind.DisplayName : NativeLabel(row);
             if (conflicts.Count > 0) label += $" <color={ConflictColor}><size=70%>(also {string.Join(", ", conflicts)})</size></color>";
             row.target.SetOriginalString(label);
 
             // The native glyph shows only the key; show held modifiers in front of it.
             var keyMap = rowKeyMap(row);
-            if (mine && keyMap != null && keyMap.modifierKeyFlags != ModifierKeyFlags.None)
+            if (decorateKeys && mine && keyMap != null && keyMap.modifierKeyFlags != ModifierKeyFlags.None)
                 row.displayKeyboard.text = $"<color=#C8A674>{ModifierText(keyMap.modifierKeyFlags)}</color>{row.displayKeyboard.text}";
         }
 
