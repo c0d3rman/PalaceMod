@@ -20,7 +20,7 @@ namespace PalaceMod
         public override string FeatureSection => "Stat details";
         public override string FeatureDescription => "The pause menu's enemy and unit stats show base → actual values, including night difficulty, elite bonuses, perks and upgrades.";
 
-        internal const string Arrow = " → ";
+        internal const string Arrow = " <sprite name=\"arrow_right\"> ";
 
         private static readonly AccessTools.FieldRef<PerkSelectionTooltipHelper, TFUIEnemy> CurrentEnemy = AccessTools.FieldRefAccess<PerkSelectionTooltipHelper, TFUIEnemy>("currentEnemyElement");
         private static readonly AccessTools.FieldRef<PerkSelectionTooltipHelper, TFUIPlayerUnit> CurrentUnit = AccessTools.FieldRefAccess<PerkSelectionTooltipHelper, TFUIPlayerUnit>("currentPlayerUnitElement");
