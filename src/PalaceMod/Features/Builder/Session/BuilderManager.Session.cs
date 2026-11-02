@@ -246,7 +246,7 @@ namespace PalaceMod
                 int? best = l.Armed != null ? l.Armed.Best : l.Current.Scores.highscoreBest;
                 if (__instance.highscore != null)
                     __instance.highscore.text = "Custom best: <style=Body Light>" + (best is > 0 ? best.ToString() : "-");
-                if (__instance.friendsRank != null) __instance.friendsRank.text = "<style=Body Light>Kept apart from your highscores";
+                if (__instance.friendsRank != null) __instance.friendsRank.text = "<style=Body Light>Custom run";
             }
         }
 

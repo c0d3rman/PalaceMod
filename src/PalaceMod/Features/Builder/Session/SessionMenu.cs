@@ -268,6 +268,7 @@ namespace PalaceMod.Builder
             }
             entry.SetOriginalString(armed != null ? $"Custom: {armed.Name}" : "Custom runs");
             entry.gameObject.SetActive(true);
+            Grow(true);
             // Navigation: the game re-links the highscore button on every show; put the entry right after it.
             var hs = helper.highscoreButton;
             entryAbove = hs;
@@ -297,7 +298,12 @@ namespace PalaceMod.Builder
                 entry = GameWidgets.Button(source, hs.transform.parent, "PalaceMod Custom Runs", "Custom runs", Open);
                 entry.transform.SetSiblingIndex(hs.transform.GetSiblingIndex() + 1);
                 PlaceBelow((RectTransform)entry.transform, (RectTransform)hs.transform);
-                ModStyle.AddEmblem(entry.transform);
+                var follower = ModStyle.AddEmblem(entry.transform, 9f).gameObject.AddComponent<EmblemFollower>();
+                follower.Text = entry.GetComponent<TextMeshProUGUI>();
+                follower.Gap = 16f;
+                panel = hs.transform.parent as RectTransform;
+                panelHeight = panel != null ? panel.sizeDelta.y : 0f;
+                grown = false;
                 ModTooltip.Attach(entry, "Custom runs", () => launcher.Armed != null
                     ? $"Playing {launcher.Armed.Name}. Pick another design, or the map's normal waves."
                     : "Play this map with custom enemies and waves from design packs.");
@@ -313,15 +319,27 @@ namespace PalaceMod.Builder
             }
         }
 
-        // Without a layout group, sit just below the highscore entry, matching its width.
+        // The menu panel is laid out by hand (title anchored to the top, play buttons to the bottom, scores in the
+        // middle), so the entry sits under "Show Leaderboard" and the panel grows by one row to make room for it.
+        private const float RowHeight = 50f;
+        private static RectTransform panel;
+        private static float panelHeight;
+        private static bool grown;
+
         private static void PlaceBelow(RectTransform rect, RectTransform above)
         {
-            if (above.parent.GetComponent<UnityEngine.UI.LayoutGroup>() != null) return;
             rect.anchorMin = above.anchorMin;
             rect.anchorMax = above.anchorMax;
             rect.pivot = above.pivot;
-            rect.sizeDelta = new Vector2(above.sizeDelta.x, Mathf.Max(40f, rect.sizeDelta.y));
-            rect.anchoredPosition = above.anchoredPosition - new Vector2(0f, above.rect.height + 6f);
+            rect.sizeDelta = new Vector2(above.sizeDelta.x, RowHeight);
+            rect.anchoredPosition = above.anchoredPosition - new Vector2(0f, RowHeight + 12f);
+        }
+
+        private static void Grow(bool on)
+        {
+            if (panel == null || grown == on) return;
+            grown = on;
+            panel.sizeDelta = new Vector2(panel.sizeDelta.x, panelHeight + (on ? RowHeight : 0f));
         }
 
         /// <summary>Hides the entry (feature switched off).</summary>
@@ -329,6 +347,7 @@ namespace PalaceMod.Builder
         {
             if (entry == null) return;
             entry.gameObject.SetActive(false);
+            Grow(false);
             // Give the game's elements their links back.
             if (entryAbove != null && entryAbove.botNav == entry) entryAbove.botNav = entryBelow;
             if (entryBelow != null && entryBelow.topNav == entry) entryBelow.topNav = entryAbove;
