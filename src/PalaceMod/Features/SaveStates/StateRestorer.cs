@@ -75,7 +75,6 @@ namespace PalaceMod
                 MatchSaveLoadHandler.OverwriteCurrentSave = false;
                 injected.ApplyLoadout();
                 UIFrameManager.instance?.CloseAllFrames();
-                if (Feature<SaveStatesManager>.Instance?.FastLoad ?? false) Plugin.Instance.StartCoroutine(FastTransition(transitions));
                 transitions.RestartCurrentLevel();
             }
             catch (Exception e)
@@ -140,19 +139,6 @@ namespace PalaceMod
             Busy = false;
             Plugin.Logger.LogError($"Savestates: loading {state} failed: {what}{(e != null ? $": {e}" : "")}");
             Notify.Show($"Couldn't load \"{state.Name}\": {what}", NotifyKind.Error, 5f, "savestates");
-        }
-
-        // Shortens the cloud transition while a state loads, then puts the game's timings back.
-        private static IEnumerator FastTransition(SceneTransitionManager transitions)
-        {
-            float fadeIn = transitions.cloudFadeInTime, fadeOut = transitions.cloudFadeOutTime;
-            transitions.cloudFadeInTime = Mathf.Min(fadeIn, 0.2f);
-            transitions.cloudFadeOutTime = Mathf.Min(fadeOut, 0.6f);
-            yield return null;
-            while (transitions != null && transitions.SceneTransitionIsRunning) yield return null;
-            if (transitions == null) yield break;
-            transitions.cloudFadeInTime = fadeIn;
-            transitions.cloudFadeOutTime = fadeOut;
         }
 
         // ---- Native save ----------------------------------------------------------------------------------------

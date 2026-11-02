@@ -34,7 +34,6 @@ namespace PalaceMod
         private ConfigEntry<bool> confirmLoad;
         private ConfigEntry<bool> loadOnDefeat;
         private ConfigEntry<bool> protectSave;
-        private ConfigEntry<bool> fastLoad;
         private ConfigEntry<bool> hintShown;
 
         internal Keybind QuickSaveKey { get; private set; }
@@ -44,7 +43,6 @@ namespace PalaceMod
         internal AutoStateMode AutoMode => autoMode.Value;
         internal int AutoHistory => autoHistory.Value;
         internal bool ConfirmLoad => confirmLoad.Value;
-        internal bool FastLoad => fastLoad.Value;
 
         private SaveStateBrowser browser;
         private string lastLevel;
@@ -65,8 +63,6 @@ namespace PalaceMod
                 "When the castle falls, load the last state instead of ending the run."));
             protectSave = config.Bind(FeatureSection, "Protect real save", true, new ConfigDescription(
                 "After loading a state, the game stops saving this run's progress, so the run you continue from the level select stays as it was."));
-            fastLoad = config.Bind(FeatureSection, "Fast load", true, new ConfigDescription(
-                "Shorten the cloud transition when loading a state."));
             hintShown = config.Bind(FeatureSection, "Hint shown", false, new ConfigDescription(
                 "Whether the first-use hint was shown.", null, new SettingTags { Hidden = true }));
 

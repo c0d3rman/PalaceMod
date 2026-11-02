@@ -335,7 +335,7 @@ namespace PalaceMod
                 shot = ScreenCapture.CaptureScreenshotAsTexture();
                 const int height = 270;
                 int width = Mathf.Max(1, Mathf.RoundToInt(height * (float)shot.width / shot.height));
-                rt = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32);
+                rt = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
                 Graphics.Blit(shot, rt);
                 RenderTexture.active = rt;
                 small = new Texture2D(width, height, TextureFormat.RGB24, false);
