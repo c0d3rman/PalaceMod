@@ -210,7 +210,7 @@ namespace PalaceMod
         private static int? devPaid;
         private static DayNightCycle stackCycle;
 
-        private static UndoAction Settling => stack.Count > 0 && !stack[^1].Settled ? stack[^1] : null;
+        private static UndoAction Settling => stack.LastOrDefault(a => !a.Settled);
 
         // ---- Lifecycle --------------------------------------------------------------------------------------------
 
@@ -235,7 +235,7 @@ namespace PalaceMod
                 stackCycle = cycle;
                 return;
             }
-            if (Settling is { } settling && Time.frameCount >= settling.SettleFrame) Settle(settling);
+            foreach (var due in stack.Where(a => !a.Settled && Time.frameCount >= a.SettleFrame).ToList()) Settle(due);
             if (undoKey.Down) Plugin.Logger.LogInfo("Undo upgrade: " + TryUndo(requireNear: true));
         }
 
