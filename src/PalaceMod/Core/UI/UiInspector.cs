@@ -91,7 +91,7 @@ namespace PalaceMod
                 case MPUIKIT.MPImageBasic mp:
                     return $"MPImageBasic({mp.sprite?.name ?? "none"} {Col(mp.color)} mat={mp.material?.name})";
                 case MPUIKIT.MPImage mpi:
-                    return $"MPImage({mpi.sprite?.name ?? "none"} {Col(mpi.color)} mat={mpi.material?.name})";
+                    return $"MPImage({mpi.sprite?.name ?? "none"} {Col(mpi.color)} {mpi.DrawShape} r={mpi.Rectangle.CornerRadius} stroke={mpi.StrokeWidth} outline={mpi.OutlineWidth} {Col(mpi.OutlineColor)} falloff={mpi.FalloffDistance})";
                 case Image img:
                     return $"Image({img.sprite?.name ?? "none"} {img.type} {Col(img.color)} mat={img.material?.name})";
                 case LayoutGroup lg:
