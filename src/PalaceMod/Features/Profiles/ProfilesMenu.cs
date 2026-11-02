@@ -44,6 +44,8 @@ namespace PalaceMod.Profiles
 
         public void Update()
         {
+            // The title screen may live in the menu scene, which is reloaded; build again for the new one.
+            if (built && (titleFrame == null || frame == null || titleButton == null)) Remove();
             if (!built && !failed) TryBuild();
             if (!built) return;
             if (titleButton != null) titleButton.gameObject.SetActive(true);
@@ -63,8 +65,8 @@ namespace PalaceMod.Profiles
             EndRename(false);
             var frames = UIFrameManager.instance;
             if (frames == null) return;
-            if (frames.ActiveFrame == confirmFrame) frames.CloseActiveFrame();
-            if (frames.ActiveFrame == frame) frames.CloseActiveFrame();
+            if (confirmFrame != null && frames.ActiveFrame == confirmFrame) frames.CloseActiveFrame();
+            if (frame != null && frames.ActiveFrame == frame) frames.CloseActiveFrame();
         }
 
         /// <summary>Takes everything out of the game's UI (feature turned off).</summary>
@@ -366,7 +368,8 @@ namespace PalaceMod.Profiles
 
         private void EndRename(bool keep)
         {
-            if (renaming == null) return;
+            Typing = false;
+            if (renaming == null) { renaming = null; return; }
             var profile = rows.First(r => r.button == renaming).profile;
             renaming = null;
             Typing = false;
