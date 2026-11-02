@@ -62,7 +62,7 @@ namespace PalaceMod
             GameplayImpact.Marked += OnMarked;
             GameplayImpact.Reset += RefreshBadges;
 
-            DevCommands.Register("unranked", "unranked [new|continue <scene> | save | score <n> | win | lose]   unranked state and level bests; drive a run like the level select does", args =>
+            DevCommands.Register("unranked", "unranked [new|continue <scene> | save | score <n> | win | lose | hover | unhover]   unranked state and level bests; drive a run like the level select does", args =>
             {
                 string action = args.Length > 0 ? args[0].ToLowerInvariant() : "";
                 switch (action)
@@ -72,6 +72,8 @@ namespace PalaceMod
                     case "new":
                     case "continue":
                         if (args.Length < 2) throw new System.ArgumentException("usage: unranked new|continue <scene>");
+                        if (SceneTransitionManager.instance == null || SceneTransitionManager.instance.SceneTransitionIsRunning)
+                            throw new System.InvalidOperationException("the game isn't ready for a scene change");
                         MatchSaveLoadHandler.TryLoadRun(args[1]);
                         MatchSaveLoadHandler.OverwriteCurrentSave = action == "new";
                         LocalGamestate.SelectedGameMode = LocalGamestate.GameMode.Classic;
@@ -82,10 +84,19 @@ namespace PalaceMod
                             throw new System.InvalidOperationException("not in a level"), null);
                         return "saved: " + Describe();
                     case "score":
-                        if (ScoreManager.Instance == null || args.Length < 2) throw new System.ArgumentException("usage: unranked score <n> (in a level)");
+                        if (ScoreManager.Instance == null || ActiveLevelData == null || args.Length < 2)
+                            throw new System.ArgumentException("usage: unranked score <n> (in a level)");
                         AccessTools.Field(typeof(ScoreManager), "currentScore").SetValue(ScoreManager.Instance, int.Parse(args[1]));
                         ActiveLevelData.highscore = int.Parse(args[1]);
                         break;
+                    case "hover":
+                        var badge = Feature<HighscoreGuardManager>.Instance?.badges.FirstOrDefault(b => b != null && b.isActiveAndEnabled)
+                            ?? throw new System.InvalidOperationException("no badge showing");
+                        badge.OnPointerEnter(null);
+                        return "tooltip shown";
+                    case "unhover":
+                        foreach (var b in Feature<HighscoreGuardManager>.Instance?.badges ?? []) if (b != null) b.OnPointerExit(null);
+                        return "";
                     case "win":
                     case "lose":
                         if (LocalGamestate.Instance == null) throw new System.InvalidOperationException("not in a level");
