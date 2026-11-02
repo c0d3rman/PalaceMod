@@ -82,8 +82,22 @@ namespace PalaceMod
         // that reach into game state, localisation) is removed.
         private static readonly HashSet<Type> KeepTypes =
         [
-            typeof(TFUITextButton), typeof(TFUIAudioHelper),
+            typeof(TFUITextButton), typeof(TFUIAudioHelper), typeof(TFUIEnumSelectorButton),
         ];
+
+        /// <summary>The pause menu's Night row arrows (decrease, increase): clickable MPImage arrows that light up
+        /// on hover. Null if the game's layout changed.</summary>
+        public static (TFUIEnumSelectorButton decrease, TFUIEnumSelectorButton increase) Arrows
+        {
+            get
+            {
+                var arrows = PauseHelper?.nightButton?.GetComponentsInChildren<TFUIEnumSelectorButton>(true);
+                if (arrows == null || arrows.Length < 2) return (null, null);
+                // Order by x: the left one decreases.
+                var sorted = arrows.OrderBy(a => a.transform.position.x).ToArray();
+                return (sorted[0], sorted[sorted.Length - 1]);
+            }
+        }
 
         /// <summary>
         /// Instantiates <paramref name="source"/> under <paramref name="parent"/>, inactive, and strips it: no

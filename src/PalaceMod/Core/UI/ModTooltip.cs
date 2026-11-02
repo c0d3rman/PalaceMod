@@ -18,11 +18,12 @@ namespace PalaceMod
 {
     public static class ModTooltip
     {
-        private const float Offset = 24f;
+        private const float Offset = 48f;
 
         private static RectTransform panel;
         private static TextMeshProUGUI title, body;
         private static object owner;
+        private static RectTransform anchor; // what the tooltip sits beside; followed while it moves (e.g. scrolling)
         private static bool failed;
 
         /// <summary>Shows the tooltip beside <paramref name="near"/> (right of it if there's room, else left).</summary>
@@ -38,6 +39,7 @@ namespace PalaceMod
             panel.SetAsLastSibling();
             panel.gameObject.SetActive(true);
             LayoutRebuilder.ForceRebuildLayoutImmediate(panel);
+            anchor = near;
             Place(near);
         }
 
@@ -117,6 +119,7 @@ namespace PalaceMod
                 var rect = (RectTransform)obj.transform;
                 rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
                 rect.pivot = new Vector2(0f, 1f);
+                obj.AddComponent<Follower>();
                 obj.SetActive(false);
                 panel = rect;
                 title = cloneTitle;
@@ -129,6 +132,16 @@ namespace PalaceMod
                 failed = true;
                 Plugin.Logger.LogError($"ModTooltip: couldn't build the tooltip from the game's: {e}");
                 return false;
+            }
+        }
+
+        private class Follower : MonoBehaviour
+        {
+            private void LateUpdate()
+            {
+                if (anchor == null) return;
+                if (!anchor.gameObject.activeInHierarchy) Hide();
+                else Place(anchor);
             }
         }
 
