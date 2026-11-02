@@ -97,7 +97,7 @@ public class Plugin : BaseUnityPlugin
                 Logger.LogError($"{manager.GetType().Name}.{phase} failed; the manager is disabled: {e}");
                 managers.Remove(manager);
                 managerCache.Clear();
-                manager.UnpatchAll();
+                manager.Retire();
                 typeof(Feature<>).MakeGenericType(manager.GetType()).GetProperty(nameof(Feature<BaseManager>.Instance))
                     .SetValue(null, null);
             }

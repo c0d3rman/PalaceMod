@@ -1,0 +1,124 @@
+using System.Collections.Generic;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+
+namespace PalaceMod.Builder.Model
+{
+    public static class UnitSide
+    {
+        public const string Enemy = "enemy";
+        public const string Player = "player";
+    }
+
+    /// <summary>
+    /// A custom unit or enemy: a vanilla prefab ("base") plus overrides. Every override is optional; null keeps the
+    /// base prefab's value. Stats are absolute values (the night's difficulty, elite status and perks still scale
+    /// them on spawn, exactly as for vanilla enemies).
+    /// </summary>
+    public sealed class UnitDef
+    {
+        /// <summary>Unique within the pack: lowercase letters, digits, '_' and '-'.</summary>
+        [JsonProperty("id", Order = -10)] public string Id { get; set; }
+        /// <summary>"enemy" or "player". Only enemies can be spawned by wave sets.</summary>
+        [JsonProperty("side", Order = -9)] public string Side { get; set; } = UnitSide.Enemy;
+        /// <summary>Base prefab, "vanilla:&lt;catalog id&gt;", e.g. "vanilla:E Racer". `builder dump` lists the ids.</summary>
+        [JsonProperty("base", Order = -8)] public string Base { get; set; }
+
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("description")] public string Description { get; set; }
+
+        [JsonProperty("visuals")] public VisualsDef Visuals { get; set; }
+        [JsonProperty("stats")] public StatsDef Stats { get; set; }
+        [JsonProperty("weapon")] public WeaponDef Weapon { get; set; }
+        [JsonProperty("tags")] public TagEditDef Tags { get; set; }
+        /// <summary>Whitelisted behaviour modules, applied in order (see BehaviourTypes).</summary>
+        [JsonProperty("behaviours")] public List<BehaviourDef> Behaviours { get; set; }
+
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    public sealed class VisualsDef
+    {
+        /// <summary>Night-preview / tooltip icon, "asset:&lt;key&gt;". Resolved by IAssetProvider; missing = base icon.</summary>
+        [JsonProperty("icon")] public string Icon { get; set; }
+        /// <summary>Multiplies the unit's body colour, "#rrggbb". Elites still use the game's elite material.</summary>
+        [JsonProperty("tint")] public string Tint { get; set; }
+        /// <summary>Uniform scale factor relative to the base prefab (1 = unchanged). Visual only.</summary>
+        [JsonProperty("scale")] public float? Scale { get; set; }
+        /// <summary>Replacement mesh, "asset:&lt;key&gt;" (WP5; ignored until asset import lands).</summary>
+        [JsonProperty("mesh")] public string Mesh { get; set; }
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    public sealed class StatsDef
+    {
+        [JsonProperty("maxHp")] public float? MaxHp { get; set; }
+        /// <summary>Movement speed in the game's units per second (vanilla foot soldiers are about 4 to 6).</summary>
+        [JsonProperty("moveSpeed")] public float? MoveSpeed { get; set; }
+        /// <summary>Seconds between attacks, for every attack the unit has.</summary>
+        [JsonProperty("attackCooldown")] public float? AttackCooldown { get; set; }
+        /// <summary>Targeting range of every attack priority.</summary>
+        [JsonProperty("attackRange")] public float? AttackRange { get; set; }
+        /// <summary>Distance a ranged enemy keeps from its target.</summary>
+        [JsonProperty("keepDistance")] public float? KeepDistance { get; set; }
+        /// <summary>Seconds an enemy chases the player after being hit by them.</summary>
+        [JsonProperty("aggroTime")] public float? AggroTime { get; set; }
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>
+    /// The unit's weapon. The base weapon (a shared ScriptableObject) is cloned per design before editing, so vanilla
+    /// units are never affected.
+    /// </summary>
+    public sealed class WeaponDef
+    {
+        /// <summary>"inherit" (the base prefab's weapon) or "vanilla:&lt;weapon name&gt;" from the catalog.</summary>
+        [JsonProperty("base")] public string Base { get; set; } = "inherit";
+        /// <summary>Replaces the direct-damage modifier list when set. Applied in order, like the game does.</summary>
+        [JsonProperty("damage")] public List<DamageModDef> Damage { get; set; }
+        /// <summary>Replaces the splash-damage modifier list when set.</summary>
+        [JsonProperty("splash")] public List<DamageModDef> Splash { get; set; }
+        /// <summary>Multiplies all damage the unit deals (stacks with the game's own multipliers).</summary>
+        [JsonProperty("damageMult")] public float? DamageMult { get; set; }
+        [JsonProperty("projectileSpeed")] public float? ProjectileSpeed { get; set; }
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>One damage modifier: if the target has all <see cref="Tags"/>, damage = (damage + Add) * Mult.</summary>
+    public sealed class DamageModDef
+    {
+        /// <summary>TagManager.ETag names the target must all have; empty = any target.</summary>
+        [JsonProperty("tags")] public List<string> Tags { get; set; } = [];
+        [JsonProperty("add")] public float Add { get; set; }
+        [JsonProperty("mult")] public float Mult { get; set; } = 1f;
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>TagManager.ETag names to add to or remove from the base prefab's tags.</summary>
+    public sealed class TagEditDef
+    {
+        [JsonProperty("add")] public List<string> Add { get; set; } = [];
+        [JsonProperty("remove")] public List<string> Remove { get; set; } = [];
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>A behaviour module: a type from BehaviourTypes plus its parameters (other JSON fields).</summary>
+    public sealed class BehaviourDef
+    {
+        [JsonProperty("type", Order = -10)] public string Type { get; set; }
+        /// <summary>The module's parameters, e.g. {"unit": "vanilla:E Slime"} for SpawnOnDeath.</summary>
+        [JsonExtensionData] public IDictionary<string, JToken> Params { get; set; } = new Dictionary<string, JToken>();
+
+        public string GetString(string key) => Params != null && Params.TryGetValue(key, out var v) && v.Type == JTokenType.String ? (string)v : null;
+        public float? GetFloat(string key) => Params != null && Params.TryGetValue(key, out var v) && (v.Type == JTokenType.Float || v.Type == JTokenType.Integer) ? (float)v : null;
+    }
+
+    /// <summary>Behaviour module types the runtime understands. Anything else is a validation error.</summary>
+    public static class BehaviourTypes
+    {
+        /// <summary>{"unit": unit ref} - spawns that unit where this one dies (like the game's slimes).</summary>
+        public const string SpawnOnDeath = "SpawnOnDeath";
+
+        public static readonly string[] All = [SpawnOnDeath];
+    }
+}
