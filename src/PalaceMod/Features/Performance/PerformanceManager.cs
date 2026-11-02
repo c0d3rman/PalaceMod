@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using BepInEx.Configuration;
 using Pathfinding;
 using UnityEngine;
@@ -69,6 +70,7 @@ namespace PalaceMod
         {
             base.Awake(plugin);
             BindSettings(plugin.Config);
+            RemoveOldSettings(plugin.Config);
             configWriteTime = System.IO.File.GetLastWriteTimeUtc(plugin.Config.ConfigFilePath);
 
             if (IsMac)
@@ -159,6 +161,19 @@ namespace PalaceMod
                 "Threads A* uses to compute paths, applied when a level loads.");
 
             BindOptimizations(config);
+        }
+
+        // Earlier versions kept everything in one "Performance" section; BepInEx would otherwise keep those orphaned
+        // entries in the file forever.
+        private static void RemoveOldSettings(ConfigFile config)
+        {
+            var orphans = HarmonyLib.Traverse.Create(config).Property("OrphanedEntries").GetValue<Dictionary<ConfigDefinition, string>>();
+            if (orphans == null) return;
+            var old = orphans.Keys.Where(d => d.Section == "Performance").ToList();
+            if (old.Count == 0) return;
+            foreach (var definition in old) orphans.Remove(definition);
+            config.Save();
+            Plugin.Logger.LogInfo($"Performance: removed {old.Count} settings left over from an older version");
         }
 
         private static void TryLog(string what, Func<string> action)

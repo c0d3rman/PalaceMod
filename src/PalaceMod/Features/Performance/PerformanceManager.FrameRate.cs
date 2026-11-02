@@ -66,12 +66,19 @@ namespace PalaceMod
                 return;
             }
 
-            pacer.TargetFps = 0;
-            if (vSync.Value != VSyncMode.GameDefault)
+            if (pacer.Enabled)
             {
-                int count = vSync.Value == VSyncMode.On ? 1 : 0;
-                if (QualitySettings.vSyncCount != count) QualitySettings.vSyncCount = count;
+                // Pacing was just turned off: hand frame limiting back to the game's own settings.
+                pacer.TargetFps = 0;
+                Application.targetFrameRate = -1;
             }
+            int vSyncCount = vSync.Value switch
+            {
+                VSyncMode.On => 1,
+                VSyncMode.Off => 0,
+                _ => SettingsManager.Instance != null && !SettingsManager.Instance.VSync ? 0 : 1,
+            };
+            if (QualitySettings.vSyncCount != vSyncCount) QualitySettings.vSyncCount = vSyncCount;
             // Without the pacer, apply caps through Unity's limiter (which also works on other platforms).
             int limit = targetFrameRate.Value;
             if (cap > 0 && (limit <= 0 || limit > cap)) limit = (int)cap;
