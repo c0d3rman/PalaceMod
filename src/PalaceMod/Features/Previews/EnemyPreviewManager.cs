@@ -41,6 +41,9 @@ namespace PalaceMod
         private PauseUILoadoutHelper helper;
         private GameObject container;
         private readonly HashSet<ThronefallUIElement> ownElements = [];
+        // Our icons line by line, top to bottom, for keyboard/controller navigation.
+        private readonly List<List<ThronefallUIElement>> navLines = [];
+        private static readonly System.Reflection.MethodInfo AssignNavigationTargets = AccessTools.Method(typeof(PauseUILoadoutHelper), "AssignNavigationTargets");
 
         public override void Awake(Plugin plugin)
         {
@@ -65,10 +68,17 @@ namespace PalaceMod
 
         protected override void OnFeatureEnabled()
         {
-            if (helper != null && helper.isActiveAndEnabled) Rebuild(helper);
+            if (helper == null || !helper.isActiveAndEnabled) return;
+            Rebuild(helper);
+            AssignNavigationTargets.Invoke(helper, null);
         }
 
-        protected override void OnFeatureDisabled() => DestroyPanel();
+        protected override void OnFeatureDisabled()
+        {
+            DestroyPanel();
+            // Our patches are gone, so this restores the native navigation links we redirected.
+            if (helper != null && helper.isActiveAndEnabled) AssignNavigationTargets.Invoke(helper, null);
+        }
 
         // ---- Data ----
 
@@ -258,6 +268,7 @@ namespace PalaceMod
             Object.Destroy(container);
             container = null;
             ownElements.Clear();
+            navLines.Clear();
             if (frame != null)
             {
                 frame.RefetchManagedElements();
@@ -386,11 +397,15 @@ namespace PalaceMod
             iconsLayout.preferredWidth = grid.constraintCount * IconSize + (grid.constraintCount - 1) * IconSpacing;
             iconsLayout.preferredHeight = lines * cellHeight + (lines - 1) * IconSpacing;
 
-            foreach (var enemy in group.Enemies) AddIcon(icons.transform, enemy, style, live);
+            for (int i = 0; i < group.Enemies.Count; i++)
+            {
+                if (i % IconsPerLine == 0) navLines.Add([]);
+                navLines[navLines.Count - 1].Add(AddIcon(icons.transform, group.Enemies[i], style, live));
+            }
             return label;
         }
 
-        private void AddIcon(Transform parent, EnemyEntry enemy, TextMeshProUGUI style, bool live)
+        private TFUIEnemy AddIcon(Transform parent, EnemyEntry enemy, TextMeshProUGUI style, bool live)
         {
             var cell = new GameObject(enemy.Info.enemyName, typeof(RectTransform));
             cell.transform.SetParent(parent, false);
@@ -401,7 +416,7 @@ namespace PalaceMod
             buttonRect.anchoredPosition = Vector2.zero;
             buttonRect.sizeDelta = new Vector2(IconSize, IconSize);
             button.SetDataSimple(enemy.Info);
-            if (!live) return;
+            if (!live) return button;
 
             bool done = enemy.Spawned >= enemy.Info.enemyCount;
             if (done) cell.AddComponent<CanvasGroup>().alpha = 0.45f;
@@ -423,6 +438,42 @@ namespace PalaceMod
             caption.alignment = TextAlignmentOptions.Bottom;
             caption.enableWordWrapping = false;
             caption.raycastTarget = false;
+            return button;
+        }
+
+        // Runs after the game links its own grids. Our icons form a grid of their own: up from the top line goes to the
+        // Night selector, left from the first column to the native enemy grid's last column (whose right now leads here),
+        // and right/down go where the native grid's right/down went.
+        private void LinkNavigation(PauseUILoadoutHelper pause)
+        {
+            if (navLines.Count == 0 || pause != helper) return;
+            var native = NativeEnemyGrid(pause);
+            int columns = (native.Count + 1) / 2;
+            var nativeTop = native.Count > 0 ? native[2 * (columns - 1)] : null;
+            var nativeBottom = native.Count > 0 ? native[Math.Min(native.Count - 1, 2 * (columns - 1) + 1)] : null;
+            var rightExit = nativeTop?.rightNav;
+            var downExit = nativeBottom?.botNav ?? pause.topmostButton;
+
+            for (int r = 0; r < navLines.Count; r++)
+            {
+                var line = navLines[r];
+                for (int c = 0; c < line.Count; c++)
+                {
+                    var e = line[c];
+                    e.leftNav = c > 0 ? line[c - 1] : (r < navLines.Count / 2 || nativeBottom == null ? nativeTop : nativeBottom) ?? pause.nightButton;
+                    e.rightNav = c < line.Count - 1 ? line[c + 1] : rightExit;
+                    e.topNav = r > 0 ? navLines[r - 1][Math.Min(c, navLines[r - 1].Count - 1)] : pause.nightButton;
+                    e.botNav = r < navLines.Count - 1 ? navLines[r + 1][Math.Min(c, navLines[r + 1].Count - 1)] : downExit;
+                }
+            }
+            if (nativeTop != null) nativeTop.rightNav = navLines[0][0];
+            if (nativeBottom != null && nativeBottom != nativeTop) nativeBottom.rightNav = navLines[navLines.Count - 1][0];
+        }
+
+        [HarmonyPatch(typeof(PauseUILoadoutHelper), "AssignNavigationTargets")]
+        private static class AssignNavigationTargets_Patch
+        {
+            private static void Postfix(PauseUILoadoutHelper __instance) => Feature<EnemyPreviewManager>.Instance.LinkNavigation(__instance);
         }
 
         [HarmonyPatch(typeof(PauseUILoadoutHelper), "RefreshOnlyEnemyPreview")]
