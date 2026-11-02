@@ -213,16 +213,15 @@ namespace PalaceMod
                     dice.leftNav = items[0].leftNav;
                     dice.botNav = items[0];
                     dice.rightNav = items[0];
+                    // Only forward moves (down into the grid, or right onto its first item) stop at the dice;
+                    // moving up or left into the grid still lands on its last row / last item.
                     foreach (var e in all)
                     {
                         if (e == null) continue;
-                        bool inside = set.Contains(e);
-                        if (!inside)
+                        if (!set.Contains(e))
                         {
-                            if (set.Contains(e.topNav)) e.topNav = dice;
                             if (set.Contains(e.botNav)) e.botNav = dice;
-                            if (set.Contains(e.leftNav)) e.leftNav = dice;
-                            if (set.Contains(e.rightNav)) e.rightNav = dice;
+                            if (e.rightNav == items[0]) e.rightNav = dice;
                         }
                         else
                         {
@@ -230,13 +229,6 @@ namespace PalaceMod
                             if (index < columns && !set.Contains(e.topNav)) e.topNav = dice;
                             if (index == 0) e.leftNav = dice;
                         }
-                    }
-                    // Other dice that pointed into this grid now point at this dice.
-                    foreach (var other in ui.dice.Values)
-                    {
-                        if (other == null || other == dice) continue;
-                        if (set.Contains(other.topNav)) other.topNav = dice;
-                        if (set.Contains(other.leftNav)) other.leftNav = dice;
                     }
                 }
 
@@ -474,7 +466,10 @@ namespace PalaceMod
         private void ToggleExcludeFocused(LoadoutUIHelper helper)
         {
             var frame = helper.frame;
-            var tile = (frame.CurrentFocus ?? frame.CurrentSelection) as TFUIEquippable;
+            // The mouse's hover target only counts while the mouse is driving; after keyboard/controller moves
+            // CurrentFocus is stale and the selection is what the player sees.
+            var target = !frame.MouseSleeping && frame.CurrentFocus != null ? frame.CurrentFocus : frame.CurrentSelection;
+            var tile = target as TFUIEquippable;
             if (tile == null || tile.Locked || tile.Data == null) return;
             ToggleExcluded(tile.Data);
         }
