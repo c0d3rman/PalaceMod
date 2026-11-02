@@ -141,7 +141,7 @@ namespace PalaceMod
             }
             else if (ScoreCalculator.LastNight is NightScore last)
             {
-                pauseNightLabel.text = $"{Term("Menu/Night", "Night")} {last.Night}";
+                pauseNightLabel.text = $"{Term("Menu/Night", "Night")} <style=Body Numerals>{last.Night}</style>";
                 pauseNight.Root.SetActive(true);
                 pauseNight.Show(last, score, ExplainBase(), ExplainProtection(last), ExplainTime(last), timeSuffix: TimeSuffix(last));
             }
@@ -249,7 +249,7 @@ namespace PalaceMod
             endFitter.horizontalFit = endFitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
             var label = CloneLabel(helper.baseScoreName, endPanel.transform, "Label", 1f);
-            label.text = $"{Term("Menu/Night", "Night")} {last.Night}";
+            label.text = $"{Term("Menu/Night", "Night")} <style=Body Numerals>{last.Night}</style>";
             var panel = NightPanel.Clone(endPanel.transform, "Night breakdown");
             panel.Show(last, ScoreCalculator.CurrentScore, ExplainBase(), ExplainProtection(last), ExplainTime(last), TimeSuffix(last));
         }
@@ -276,10 +276,11 @@ namespace PalaceMod
         private static string ExplainTime(NightScore n)
         {
             float full = ScoreCalculator.TimeBonusFullUntil, gone = ScoreCalculator.TimeBonusGoneAfter;
+            bool tonight = ScoreCalculator.IsNight && n.Night == ScoreCalculator.NightNumber;
             string when = n.SecondsAfterSpawning < 0f ? ""
-                : EnemySpawner.instance != null && EnemySpawner.instance.SpawningInProgress && n.Night == ScoreCalculator.NightNumber && ScoreCalculator.IsNight
-                    ? "Enemies are still arriving.\n"
-                    : $"Night ended {Mathf.FloorToInt(n.SecondsAfterSpawning)}s after the last enemy arrived.\n";
+                : tonight && EnemySpawner.instance.SpawningInProgress ? "Enemies are still arriving.\n"
+                : tonight ? $"{Mathf.FloorToInt(n.SecondsAfterSpawning)}s since the last enemy arrived.\n"
+                : $"Night ended {Mathf.FloorToInt(n.SecondsAfterSpawning)}s after the last enemy arrived.\n";
             return $"{when}Full {ScoreManager.Instance.timeScorePerNight} if you clear the night within {full:0}s of the last enemy arriving, falling to 0 at {gone:0}s.";
         }
 
