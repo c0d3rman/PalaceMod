@@ -63,6 +63,23 @@ namespace PalaceMod
             holdKey = Keybinds.Register(FeatureSection, "show", "Show income", new KeyboardShortcut(KeyCode.LeftAlt),
                 "Hold to show each building's income.");
             DevCommands.Register("incomeprobe", "incomeprobe   dump building interactors", _ => Probe());
+            DevCommands.Register("buildall", "buildall [passes]   build every available slot for free (random choices), for testing", args =>
+            {
+                var player = PlayerInteraction.instance;
+                if (player == null) throw new System.InvalidOperationException("not in a level");
+                int passes = args.Length > 0 ? int.Parse(args[0]) : 1;
+                int built = 0;
+                for (int p = 0; p < passes; p++)
+                {
+                    foreach (var slot in Object.FindObjectsOfType<BuildSlot>())
+                    {
+                        if (slot.Level != 0 || slot.ActivatorUpgradesThis || !slot.CanBeUpgraded || !slot.gameObject.activeInHierarchy) continue;
+                        slot.ExecuteBuildOrUpgrade(player, false);
+                        built++;
+                    }
+                }
+                return $"built {built}";
+            });
             DevCommands.Register("incomelabels", "incomelabels   list the income labels currently computed", _ => Describe());
         }
 
