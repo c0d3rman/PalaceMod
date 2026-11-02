@@ -54,12 +54,14 @@ namespace PalaceMod
 
             float cap = ComputeCap(out string reason, out bool saveCpu);
             FrameRateReason = reason;
-            if (PrecisePacing)
+            // Caps (menu, background, battery, ...) always go through the pacer: Unity ignores its own limiter while
+            // VSync is on, and on macOS that limiter oversleeps badly (a 30 fps limit ran at 10 fps).
+            if (PrecisePacing || cap > 0)
             {
                 if (QualitySettings.vSyncCount != 0) QualitySettings.vSyncCount = 0;
                 if (Application.targetFrameRate != -1) Application.targetFrameRate = -1;
-                double refresh = DisplayRefreshRate();
-                float target = maxFrameRate.Value > 0 ? Math.Max(MinGameplayFps, maxFrameRate.Value) : (float)refresh;
+                float target = !PrecisePacing ? cap
+                    : maxFrameRate.Value > 0 ? Math.Max(MinGameplayFps, maxFrameRate.Value) : (float)DisplayRefreshRate();
                 pacer.TargetFps = cap > 0 ? Math.Min(target, cap) : target;
                 pacer.LockToDisplay = lockToDisplay.Value;
                 pacer.MaxSpinMs = saveCpu ? Math.Min(BatterySpinMs, maxSpinMs.Value) : maxSpinMs.Value;
@@ -68,7 +70,7 @@ namespace PalaceMod
 
             if (pacer.Enabled)
             {
-                // Pacing was just turned off: hand frame limiting back to the game's own settings.
+                // Pacing just stopped: hand frame limiting back to the game's own settings.
                 pacer.TargetFps = 0;
                 Application.targetFrameRate = -1;
             }
@@ -79,10 +81,8 @@ namespace PalaceMod
                 _ => SettingsManager.Instance != null && !SettingsManager.Instance.VSync ? 0 : 1,
             };
             if (QualitySettings.vSyncCount != vSyncCount) QualitySettings.vSyncCount = vSyncCount;
-            // Without the pacer, apply caps through Unity's limiter (which also works on other platforms).
             // 0 means no limit of our own; the game never sets the limiter, so "no limit" is Unity's default of -1.
             int limit = targetFrameRate.Value > 0 ? Math.Max(MinGameplayFps, targetFrameRate.Value) : -1;
-            if (cap > 0 && (limit <= 0 || limit > cap)) limit = (int)cap;
             if (Application.targetFrameRate != limit) Application.targetFrameRate = limit;
         }
 
@@ -202,29 +202,30 @@ namespace PalaceMod
             TryLog("refresh rate", () => DisplayMode.RaiseRefreshRate(raiseRefreshRate.Value));
         }
 
-        // The render scale the game itself wants, remembered while we override it so it can be put back.
-        private float? gameRenderScale;
+        // Whether we're overriding the render scale, so the game's own setting can be put back afterwards.
+        private bool overridingRenderScale;
 
         // The game's URP asset isn't referenced at compile time, so set its properties by name.
         private void ApplyRenderOverrides()
         {
             bool battery = (PowerState.OnBattery || PowerState.LowPowerMode) && batteryRenderScale.Value > 0f;
             float scale = battery ? batteryRenderScale.Value : renderScale.Value;
-            if (scale <= 0f && msaa.Value <= 0 && gameRenderScale == null) return;
+            if (scale <= 0f && msaa.Value <= 0 && !overridingRenderScale) return;
             var pipeline = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
             if (pipeline == null) return;
             var type = pipeline.GetType();
             var scaleProperty = type.GetProperty("renderScale");
             if (scale > 0f)
             {
-                gameRenderScale ??= scaleProperty?.GetValue(pipeline) as float?;
+                overridingRenderScale = true;
                 SetIfDifferent(scaleProperty, pipeline, scale);
             }
-            else if (gameRenderScale != null)
+            else if (overridingRenderScale)
             {
-                // No override any more (e.g. plugged back in): restore the game's own value.
-                SetIfDifferent(scaleProperty, pipeline, gameRenderScale.Value);
-                gameRenderScale = null;
+                // No override any more (e.g. plugged back in): restore the game's current setting, which the player
+                // may have changed in Video settings meanwhile.
+                overridingRenderScale = false;
+                if (SettingsManager.Instance != null) SetIfDifferent(scaleProperty, pipeline, SettingsManager.Instance.Renderscale);
             }
             if (msaa.Value > 0) SetIfDifferent(type.GetProperty("msaaSampleCount"), pipeline, msaa.Value);
         }
