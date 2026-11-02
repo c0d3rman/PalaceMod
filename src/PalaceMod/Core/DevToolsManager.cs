@@ -18,6 +18,8 @@ using UnityEngine.SceneManagement;
         circle <seconds>       run in a circle, for testing camera motion
         sprint <on|off>        hold sprint while running
         stop                   release all fake input
+        night                  start the next night (wave) now
+        timescale <x>          set Time.timeScale
         resolutions            list the current and available display modes
         setres <w> <h> <hz>    switch display mode (keeps the fullscreen mode)
     Each command logs "Dev command done: <command>" or "Dev command failed: <command>: <reason>".
@@ -35,6 +37,7 @@ namespace PalaceMod
 
         // Fake input, read by the Rewired patch below.
         private static bool inputActive;
+        public static bool FakeInputActive => inputActive;
         private static float moveHorizontal, moveVertical;
         private static bool sprint;
         private float inputUntil;
@@ -120,6 +123,14 @@ namespace PalaceMod
                     return "";
                 case "stop":
                     inputActive = circling = sprint = false;
+                    return "";
+                case "night":
+                    if (DayNightCycle.Instance == null) throw new InvalidOperationException("not in a level");
+                    DayNightCycle.Instance.SwitchToNight();
+                    return "";
+                case "timescale":
+                    if (args.Length < 2) throw new ArgumentException("usage: timescale <x>");
+                    Time.timeScale = float.Parse(args[1]);
                     return "";
                 case "resolutions":
                     return $"current {Screen.currentResolution.width}x{Screen.currentResolution.height}@{Screen.currentResolution.refreshRateRatio.value:0.##} " +

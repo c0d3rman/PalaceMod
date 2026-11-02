@@ -17,6 +17,7 @@ namespace PalaceMod
         [DllImport(LibObjC)] private static extern IntPtr sel_registerName(string name);
         [DllImport(LibObjC, EntryPoint = "objc_msgSend")] private static extern IntPtr Send(IntPtr receiver, IntPtr selector);
         [DllImport(LibObjC, EntryPoint = "objc_msgSend")] private static extern IntPtr Send(IntPtr receiver, IntPtr selector, string utf8);
+        [DllImport(LibObjC, EntryPoint = "objc_msgSend")] private static extern IntPtr Send(IntPtr receiver, IntPtr selector, IntPtr argument);
         [DllImport(LibObjC, EntryPoint = "objc_msgSend")] private static extern IntPtr Send(IntPtr receiver, IntPtr selector, ulong options, IntPtr reason);
 
         // Held for the life of the process; the activity ends when this token is released.
@@ -32,5 +33,17 @@ namespace PalaceMod
             token = Send(activity, sel_registerName("retain"));
             return true;
         }
+
+        /// <summary>End the activity, letting macOS nap and coalesce timers again (e.g. while the game is in the background).</summary>
+        public static void End()
+        {
+            if (token == IntPtr.Zero) return;
+            IntPtr processInfo = Send(objc_getClass("NSProcessInfo"), sel_registerName("processInfo"));
+            Send(processInfo, sel_registerName("endActivity:"), token);
+            Send(token, sel_registerName("release"));
+            token = IntPtr.Zero;
+        }
+
+        public static bool Active => token != IntPtr.Zero;
     }
 }
