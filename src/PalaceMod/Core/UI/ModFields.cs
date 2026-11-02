@@ -46,7 +46,18 @@ namespace PalaceMod
             this.value = value;
             this.arrows = arrows;
             row.Button.onSelectionStateChange.AddListener(Refresh);
+            // Values stay on one line to the right of the label, cut with an ellipsis rather than wrapping over it.
+            var valueText = row.Button.transform.Find("Value")?.GetComponent<TextMeshProUGUI>();
+            if (valueText != null)
+            {
+                valueText.enableWordWrapping = false;
+                valueText.overflowMode = TextOverflowModes.Ellipsis;
+                valueText.margin = new Vector4(ValueIndent, 0f, 0f, 0f);
+            }
         }
+
+        /// <summary>Space kept for the label at the left of a field's row.</summary>
+        public const float ValueIndent = 340f;
 
         public bool Selected => Button != null && Button.CurrentState is ThronefallUIElement.SelectionState.Selected or ThronefallUIElement.SelectionState.FocussedAndSelected;
 
@@ -83,8 +94,8 @@ namespace PalaceMod
         {
             string mark = marker switch
             {
-                ModFieldMarker.Error => $"  <color=#{ModStyle.Hex(ModStyle.KindColor(NotifyKind.Error))}>◆</color>",
-                ModFieldMarker.Warning => $"  <color=#{ModStyle.Hex(ModStyle.KindColor(NotifyKind.Warning))}>◆</color>",
+                ModFieldMarker.Error => $"  <size=130%><color=#{ModStyle.Hex(ModStyle.KindColor(NotifyKind.Error))}>◆</color></size>",
+                ModFieldMarker.Warning => $"  <size=130%><color=#{ModStyle.Hex(ModStyle.KindColor(NotifyKind.Warning))}>◆</color></size>",
                 _ => "",
             };
             Row.SetLabel(Label + mark);
@@ -197,14 +208,14 @@ namespace PalaceMod
     /// <summary>Keyboard text entry into a ModField (see ModFields).</summary>
     public static class ModTextInput
     {
-        private static ModField field;
+        private static ModField editing;
         private static Action<string> commit;
         private static readonly StringBuilder text = new();
         private static bool replaceAll;
         private static int maxLength, startFrame, endFrame = -1;
 
         /// <summary>Whether the player is typing into a field right now.</summary>
-        public static bool Active => field != null;
+        public static bool Active => editing != null;
 
         /// <summary>True while typing and on the frame typing ended, when game menu input is held back.</summary>
         internal static bool BlocksInput => Active || endFrame == Time.frameCount;
@@ -215,7 +226,7 @@ namespace PalaceMod
         {
             if (target == null) return;
             if (Active) End(confirm: true);
-            field = target;
+            editing = target;
             commit = onCommit;
             ModTextInput.maxLength = Math.Max(1, maxLength);
             text.Clear().Append(initial ?? "");
@@ -229,10 +240,10 @@ namespace PalaceMod
         public static void End(bool confirm)
         {
             if (!Active) return;
-            var target = field;
+            var target = editing;
             var action = commit;
             string result = text.ToString();
-            field = null;
+            editing = null;
             commit = null;
             endFrame = Time.frameCount;
             target.Override = null;
@@ -244,7 +255,7 @@ namespace PalaceMod
             target.Refresh();
         }
 
-        /// <summary>Dev-command hook: types <paramref name="s"/> into the active field and confirms.</summary>
+        /// <summary>Dev-command hook: types <paramref name="s"/> into the active editing and confirms.</summary>
         internal static void Debug(string s)
         {
             if (!Active) return;
@@ -256,8 +267,8 @@ namespace PalaceMod
         internal static void Tick()
         {
             if (!Active) return;
-            // The field's row was destroyed (page rebuilt, menu closed): drop the edit.
-            if (field.Button == null || !field.Button.gameObject.activeInHierarchy) { field = null; commit = null; endFrame = Time.frameCount; return; }
+            // The editing's row was destroyed (page rebuilt, menu closed): drop the edit.
+            if (editing.Button == null || !editing.Button.gameObject.activeInHierarchy) { editing = null; commit = null; endFrame = Time.frameCount; return; }
             if (Time.frameCount == startFrame) return; // the key that started typing
             if (Input.GetKeyDown(KeyCode.Escape)) { End(confirm: false); return; }
             if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1)) { End(confirm: true); return; }
@@ -301,13 +312,13 @@ namespace PalaceMod
 
         private static void Redraw()
         {
-            if (field == null) return;
+            if (editing == null) return;
             bool caret = (int)(Time.unscaledTime * 2f) % 2 == 0;
             string body = ModFields.TMPEscape(text.ToString());
             string accent = ModStyle.Hex(ModStyle.Accent);
             if (replaceAll) body = $"<mark=#{accent}55>{body}</mark>";
-            field.Override = $"{body}<color=#{accent}>{(caret ? "|" : "<alpha=#00>|")}</color>";
-            field.Refresh();
+            editing.Override = $"{body}<color=#{accent}>{(caret ? "|" : "<alpha=#00>|")}</color>";
+            editing.Refresh();
         }
     }
 

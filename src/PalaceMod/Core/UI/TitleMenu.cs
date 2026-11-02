@@ -8,7 +8,7 @@ using UnityEngine.UI;
 using Object = UnityEngine.Object;
 
 /*
-    Mod buttons in the title screen's menu, just above its last entry (Quit):
+    Mod buttons in the title screen's menu, just before its last entry (Quit):
 
         TitleMenu.AddButton("builder", "Builder", () => editor.Open(), visible: () => Feature<BuilderManager>.On);
 
@@ -56,6 +56,7 @@ namespace PalaceMod
     {
         private UIFrame hooked;
         private TFUITextButton anchor, last;
+        private bool horizontal;
         private readonly HashSet<string> failed = [];
 
         private static UIFrame TitleFrame =>
@@ -119,18 +120,28 @@ namespace PalaceMod
             }
             last.transform.SetSiblingIndex(index);
 
-            // Navigation: anchor -> ours... -> last.
+            // Navigation: anchor -> ours... -> last, along the menu's direction (the title menu is a row).
             ThronefallUIElement previous = anchor;
             foreach (var w in shown)
             {
-                previous.botNav = w;
-                w.topNav = previous;
-                w.leftNav = anchor.leftNav;
-                w.rightNav = anchor.rightNav;
+                if (horizontal)
+                {
+                    previous.rightNav = w;
+                    w.leftNav = previous;
+                    w.topNav = anchor.topNav;
+                    w.botNav = anchor.botNav;
+                }
+                else
+                {
+                    previous.botNav = w;
+                    w.topNav = previous;
+                    w.leftNav = anchor.leftNav;
+                    w.rightNav = anchor.rightNav;
+                }
                 previous = w;
             }
-            previous.botNav = last;
-            last.topNav = previous;
+            if (horizontal) { previous.rightNav = last; last.leftNav = previous; }
+            else { previous.botNav = last; last.topNav = previous; }
         }
 
         // The menu column: the parent holding the most of the frame's text buttons. Our buttons go between its
@@ -144,6 +155,7 @@ namespace PalaceMod
             var ordered = column.OrderBy(b => b.transform.GetSiblingIndex()).ToList();
             last = ordered[ordered.Count - 1];
             anchor = ordered[ordered.Count - 2];
+            horizontal = anchor.rightNav == last || last.leftNav == anchor || anchor.transform.parent.GetComponent<HorizontalLayoutGroup>() != null;
             return true;
         }
 

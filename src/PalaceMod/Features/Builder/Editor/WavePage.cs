@@ -51,7 +51,7 @@ namespace PalaceMod.Builder.Editor
             page.Header("Wave set");
             Text(page, "Name", P + ".name", () => Set?.Name, (p, v) => p.WaveSets[Index].Name = v, "Shown when choosing a custom run.");
             Text(page, "Id", P + ".id", () => Set?.Id, (p, v) => p.WaveSets[Index].Id = v ?? p.WaveSets[Index].Id,
-                "Unique within the pack: lowercase letters, digits, '.', '_' or '-'.");
+                "Unique within the pack: lowercase letters, digits, '.', '_' or '-'.", isId: true);
             Choice(page, "Map", P + ".host", EditorCatalog.Hosts.Select(h => (h.Scene, h.DisplayName)).ToList(), () => Set?.Host,
                 (p, v) => p.WaveSets[Index].Host = v,
                 "The map the run is played on. Spawn lines are the map's; groups on lines it doesn't have are marked.",
@@ -204,8 +204,8 @@ namespace PalaceMod.Builder.Editor
                 var issues = IssuesAt(sp_).ToList();
                 string mark = issues.Any(i => i.Severity == Severity.Error) ? $" <color=#{ModStyle.Hex(ModStyle.KindColor(NotifyKind.Error))}>◆</color>"
                     : issues.Count > 0 ? $" <color=#{ModStyle.Hex(ModStyle.KindColor(NotifyKind.Warning))}>◆</color>" : "";
-                string label = $"<b>{sp?.Count ?? 0}×</b> {Escape(EditorCatalog.UnitName(Pack, sp?.Unit))}{mark}\n" +
-                    $"<size=75%><color=#{ModStyle.Hex(ModStyle.Dim)}>{Escape(sp?.Line ?? "no line")} · {EditorCatalog.Num(sp?.Delay ?? 0)} s{(sp?.Elite == true ? " · elite" : "")}</color></size>";
+                string label = $"<b>{sp?.Count ?? 0}×</b> {Escape(Short(EditorCatalog.UnitName(Pack, sp?.Unit), 13))}{mark}\n" +
+                    $"<size=75%><color=#{ModStyle.Hex(ModStyle.Dim)}>{Escape(Short(sp?.Line ?? "no line", 14))} · {EditorCatalog.Num(sp?.Delay ?? 0)} s{(sp?.Elite == true ? " · elite" : "")}</color></size>";
                 var chip = Chip(area, label, EditorCatalog.UnitIcon(Draft, sp?.Unit), () => Focus(n, k), night == n && spawn == k);
                 ModTooltip.Attach(chip, EditorCatalog.UnitName(Pack, sp?.Unit), () =>
                     $"{sp?.Count} from {sp?.Line}, one every {EditorCatalog.Num(sp?.Interval ?? 0)} s, starting {EditorCatalog.Num(sp?.Delay ?? 0)} s into the night; " +
@@ -249,7 +249,7 @@ namespace PalaceMod.Builder.Editor
             text.fontSize = ChipFont;
             text.enableAutoSizing = false;
             text.enableWordWrapping = false;
-            text.overflowMode = TextOverflowModes.Ellipsis;
+            text.overflowMode = TextOverflowModes.Overflow;
             text.alignment = TextAlignmentOptions.MidlineLeft;
             text.lineSpacing = -20f;
             float left = 10f;
@@ -259,7 +259,7 @@ namespace PalaceMod.Builder.Editor
             plate.transform.SetAsFirstSibling();
             plate.GetComponent<LayoutElement>().ignoreLayout = true;
             var plateImage = plate.GetComponent<Image>();
-            plateImage.color = open ? new Color(ModStyle.Accent.r, ModStyle.Accent.g, ModStyle.Accent.b, 0.22f) : new Color(1f, 1f, 1f, 0.05f);
+            plateImage.color = open ? new Color(ModStyle.Accent.r, ModStyle.Accent.g, ModStyle.Accent.b, 0.22f) : new Color(1f, 1f, 1f, 0.035f);
             plateImage.raycastTarget = true;
             var plateRect = (RectTransform)plate.transform;
             plateRect.anchorMin = Vector2.zero;
@@ -286,6 +286,8 @@ namespace PalaceMod.Builder.Editor
             button.gameObject.SetActive(true);
             return button;
         }
+
+        private static string Short(string text, int max) => text == null || text.Length <= max ? text : text.Substring(0, max - 1).TrimEnd() + "\u2026";
 
         // ---- Spawn group ----------------------------------------------------------------------------------------------
 

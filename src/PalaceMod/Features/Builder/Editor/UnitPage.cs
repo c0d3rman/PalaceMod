@@ -63,7 +63,7 @@ namespace PalaceMod.Builder.Editor
                 if (v == null || v == unit.Id) return;
                 RenameRefs(p, unit.Id, v);
                 unit.Id = v;
-            }, "How wave sets refer to this unit: lowercase letters, digits, '.', '_' or '-'. Renaming updates this pack's references.");
+            }, "How wave sets refer to this unit: lowercase letters, digits, '.', '_' or '-'. Renaming updates this pack's references.", isId: true);
             Choice(page, "Base unit", P + ".base", EditorCatalog.Units(u.Side).Select(c => (ContentRef.Vanilla(c.Id), c.DisplayName)).ToList(),
                 () => Unit?.Base, (p, v) => p.Units[Index].Base = v,
                 "The vanilla unit this one is built from: its model, animations and every stat you don't override. Apply for the full list.",

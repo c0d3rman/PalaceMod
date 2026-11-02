@@ -140,7 +140,7 @@ namespace PalaceMod.Builder.Editor
                         if (nullable) Draft.Edit($"Reset {label.ToLowerInvariant()}", p => set(p, null));
                         return;
                     }
-                    if (!ModFields.TryParseNumber(text.Replace(spec.Unit.Trim(), ""), out float value))
+                    if (!ModFields.TryParseNumber(text.Replace("×", "").Replace("x", "").Replace("s", ""), out float value))
                     {
                         Notify.Show($"\"{text}\" isn't a number", NotifyKind.Warning, key: "builder-edit");
                         return;
@@ -153,12 +153,20 @@ namespace PalaceMod.Builder.Editor
             return Bind(field, path);
         }
 
-        protected ModField Text(ModPage page, string label, string path, Func<string> get, Action<DesignPack, string> set, string help, int maxLength = 64)
+        protected ModField Text(ModPage page, string label, string path, Func<string> get, Action<DesignPack, string> set, string help, int maxLength = 64,
+            bool isId = false)
         {
             var field = page.TextInput(label, get, text =>
             {
                 text = text.Trim();
                 if (text == (get() ?? "")) return;
+                if (isId && !Ids.IsValid(text))
+                {
+                    string suggestion = Ids.FromName(text);
+                    Notify.Show($"Ids use lowercase a-z, 0-9, '.', '_' and '-'" + (Ids.IsValid(suggestion) && suggestion != get() ? $"; using \"{suggestion}\"" : ""), NotifyKind.Warning, 4f, key: "builder-edit");
+                    if (!Ids.IsValid(suggestion) || suggestion == get()) return;
+                    text = suggestion;
+                }
                 Draft.Edit($"Set {label.ToLowerInvariant()}", p => set(p, text.Length == 0 ? null : text));
             }, Tip(help, path), maxLength);
             return Bind(field, path);

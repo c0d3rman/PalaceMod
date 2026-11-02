@@ -171,7 +171,7 @@ namespace PalaceMod.Builder.Editor
             page.Header("Details");
             Text(page, "Name", "name", () => Pack.Name, (p, v) => p.Name = v, "Shown in pack lists and to players you share it with.");
             Text(page, "Id", "id", () => Pack.Id, (p, v) => p.Id = v ?? p.Id,
-                "Unique pack id and folder name: lowercase letters, digits, '.', '_' or '-'. Changing it moves the pack's folder when you save.");
+                "Unique pack id and folder name: lowercase letters, digits, '.', '_' or '-'. Changing it moves the pack's folder when you save.", isId: true);
             Text(page, "Author", "author", () => Pack.Author, (p, v) => p.Author = v, "Your name, shown with the pack.");
             Text(page, "Description", "description", () => Pack.Description, (p, v) => p.Description = v, "A sentence or two about the pack.", 300);
 
@@ -227,8 +227,9 @@ namespace PalaceMod.Builder.Editor
                 foreach (var issue in group)
                 {
                     string path = issue.Path;
-                    var row = page.Row(Capital(issue.Message), Dim(Where(issue.Path)), $"{Where(issue.Path)}: {issue.Message}\nApply to go there.", () => BuilderEditor.GoTo(path));
-                    row.SetLabel(Capital(Escape(issue.Message)));
+                    string message = Escape(Capital(issue.Message));
+                    var row = Marked(page, Where(issue.Path), () => message, message + "\nApply to go there.", null, () => BuilderEditor.GoTo(path));
+                    row.SetMarker(issue.Severity == Severity.Error ? ModFieldMarker.Error : ModFieldMarker.Warning);
                 }
             }
         }
