@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Unit tests for the game-independent parts of PalaceMod (the Builder's share codec and .tfpack handling).
+    A plain console runner, so it needs no test framework packages:
+
+        dotnet run (project: tests/PalaceMod.Tests)
+
+    Needs `python3 scripts/dev.py setup` first (for lib/Newtonsoft.Json.dll and lib/Assembly-CSharp.dll).
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+    <NoWarn>$(NoWarn);CS0436;MSB3277</NoWarn>
+    <RootNamespace>PalaceMod.Tests</RootNamespace>
+    <RestoreAdditionalProjectSources>
+      https://api.nuget.org/v3/index.json;
+      https://nuget.bepinex.dev/v3/index.json
+    </RestoreAdditionalProjectSources>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="*.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Model/DesignPack.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Model/UnitDef.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Model/WaveSetDef.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Model/LevelDef.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Model/ContentRef.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Model/Validation.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Model/PackSerializer.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Contracts/Contracts.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Sharing/ShareCodec.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Sharing/PackArchive.cs" />
+    <EmbeddedResource Include="../../src/PalaceMod/Assets/builder-sample.json" LogicalName="builder-sample.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="UnityEngine.Modules" Version="2022.3.50" IncludeAssets="compile" />
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>../../lib/Newtonsoft.Json.dll</HintPath>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>../../lib/Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>
