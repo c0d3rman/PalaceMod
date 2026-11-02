@@ -190,7 +190,7 @@ namespace PalaceMod
                     ? $"{cost}<sprite name=\"coin\">"
                     : $"<color=#{ModStyle.Hex(ModStyle.Dim)}>{cost}<sprite name=\"coin\">  (need {cost - balance} more)</color>";
                 AddSectionLabel(content, $"{label} · {costText}");
-                AddOptions(slot, n, affordable ? TileSize : TileSize, dim: !affordable, withNames: true);
+                AddOptions(slot, n, TileSize, dim: !affordable, withNames: true);
             }
             else if (UpgradeInfo.HasRemaining(slot))
             {
@@ -202,7 +202,6 @@ namespace PalaceMod
             if (ShowFuture.Value)
             {
                 var later = UpgradeInfo.Future(slot);
-                if (next == null && UpgradeInfo.HasRemaining(slot) && later.Count > 0) later = later.Skip(0).ToList();
                 if (later.Count > 0)
                 {
                     AddSectionLabel(content, "Later");

@@ -15,6 +15,11 @@ namespace PalaceMod
         private void StartPauseOverview()
         {
             overview = new ModFrame("Upgrades").SetContent(BuildOverview);
+            DevCommands.Register("upgv.overview", "upgv.overview          open the pause-screen upgrades overview", _ =>
+            {
+                overview.Open();
+                return overview.IsOpen ? "open" : "not open";
+            });
             RefreshPauseButton();
         }
 

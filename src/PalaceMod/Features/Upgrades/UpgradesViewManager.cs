@@ -46,9 +46,8 @@ namespace PalaceMod
             PauseOverview.SettingChanged += (_, _) => RefreshPauseButton();
 
             RegisterDevCommands();
+            StartPauseOverview();
         }
-
-        public override void Start() => StartPauseOverview();
 
         public override void Update()
         {
