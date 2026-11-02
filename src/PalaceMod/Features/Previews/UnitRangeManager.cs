@@ -36,7 +36,6 @@ namespace PalaceMod
         public override string FeatureDescription => "Shows attack-range rings for your units, like the ones towers show.";
 
         private const int MaxAttackRanges = 3;
-        private const int MaxGroupRings = 4;
         private const float SameRangeTolerance = 0.25f;
         private const float HoldEngageRange = 7f; // PathfindMovementPlayerunit.FindTargetPosition's limit while holding
         private const RangeIndicatorHandler.IndicatorType AttackStyle = RangeIndicatorHandler.IndicatorType.Built;
@@ -71,8 +70,8 @@ namespace PalaceMod
         private readonly Stack<UnitInfo> infoPool = new();
         private readonly Stack<GameObject> keyPool = new();
         private readonly List<PathfindMovementPlayerunit> staleUnits = new();
-        private readonly GameObject[] groupAttackKeys = new GameObject[MaxGroupRings];
-        private readonly GameObject[] groupEngageKeys = new GameObject[MaxGroupRings];
+        private readonly List<GameObject> groupAttackKeys = new();
+        private readonly List<GameObject> groupEngageKeys = new();
         private readonly List<float> groupAttack = new();
         private readonly List<float> groupEngage = new();
         private HashSet<RingId> shownRings = new();
@@ -91,12 +90,6 @@ namespace PalaceMod
             showAllKey = Keybinds.Register(FeatureSection, "show-all", "Show all unit ranges", KeyboardShortcut.Empty,
                 "Hold to show the ranges of all your units.");
             showEngageRange.SettingChanged += (_, _) => { HideAll(); ForgetUnits(); };
-
-            for (int i = 0; i < MaxGroupRings; i++)
-            {
-                groupAttackKeys[i] = NewKey();
-                groupEngageKeys[i] = NewKey();
-            }
 
             SceneManager.sceneLoaded += (_, _) => { shownRings.Clear(); ForgetUnits(); };
 
@@ -159,8 +152,14 @@ namespace PalaceMod
                 if (info.engage > 0f) AddDistinct(groupEngage, info.engage);
             }
             Vector3 king = command.transform.position;
-            for (int i = 0; i < groupAttack.Count && i < MaxGroupRings; i++) Show(handler, king, groupAttack[i], groupAttackKeys[i], AttackStyle);
-            for (int i = 0; i < groupEngage.Count && i < MaxGroupRings; i++) Show(handler, king, groupEngage[i], groupEngageKeys[i], EngageStyle);
+            for (int i = 0; i < groupAttack.Count; i++) Show(handler, king, groupAttack[i], GroupKey(groupAttackKeys, i), AttackStyle);
+            for (int i = 0; i < groupEngage.Count; i++) Show(handler, king, groupEngage[i], GroupKey(groupEngageKeys, i), EngageStyle);
+        }
+
+        private static GameObject GroupKey(List<GameObject> keys, int index)
+        {
+            while (keys.Count <= index) keys.Add(NewKey());
+            return keys[index];
         }
 
         private void WantUnit(PathfindMovementPlayerunit unit, RangeIndicatorHandler handler)
