@@ -196,7 +196,7 @@ namespace PalaceMod.Builder.Editor
             var issues = IssuesAt($"{P}.nights[{n}].spawns[{s}]").ToList();
             string mark = issues.Any(i => i.Severity == Severity.Error) ? $" <color=#{ModStyle.Hex(ModStyle.KindColor(NotifyKind.Error))}>\u25c6</color>"
                 : issues.Count > 0 ? $" <color=#{ModStyle.Hex(ModStyle.KindColor(NotifyKind.Warning))}>\u25c6</color>" : "";
-            return $"<b>{sp?.Count ?? 0}×</b> {Escape(Short(EditorCatalog.UnitName(Pack, sp?.Unit), 13))}{mark}\n" +
+            return $"<b>{sp?.Count ?? 0}×</b> {Escape(Short(EditorCatalog.UnitName(Pack, sp?.Unit), 12))}{mark}\n" +
                 $"<size=75%><color=#{ModStyle.Hex(ModStyle.Dim)}>{Escape(Short(sp?.Line ?? "no line", 14))} · {EditorCatalog.Num(sp?.Delay ?? 0)} s{(sp?.Elite == true ? " · elite" : "")}</color></size>";
         }
 

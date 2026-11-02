@@ -348,7 +348,7 @@ Open it from **Builder** in the title menu or the in-match pause menu, from WP3'
 
 | File | Does |
 |---|---|
-| `BuilderEditorManager.cs` | menu entries, undo/redo keys (Cmd+Z, Cmd+Shift+Z, Ctrl+Z/Ctrl+Y), first-use hint, `builder-ui` dev command, links WP3's `SessionMenu` hooks by reflection |
+| `BuilderEditorManager.cs` | menu entries, undo/redo keys (Cmd+Z, Cmd+Shift+Z, Ctrl+Z/Ctrl+Y), first-use hint, `builder-ui` dev command, sets WP3's `SessionMenu` hooks |
 | `BuilderEditor.cs` | public entry points `Open()`, `OpenPack(id)`, `IsAvailable`; drafts; save, undo, test-play, share code, problem navigation |
 | `PackDraft.cs` | the working copy of one pack: `EditHistory`, dirty state, validation (`Packs.Validate` plus editor-only warnings), save / save a copy / id rename |
 | `EditorPage.cs` | base screen: fields bound to JSON paths, so issues mark the field and its tooltip; `Picker` (full-screen pick-one / toggle-many list) |

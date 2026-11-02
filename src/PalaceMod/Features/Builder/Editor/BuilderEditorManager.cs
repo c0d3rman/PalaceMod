@@ -1,6 +1,5 @@
 using System;
 using System.Linq;
-using System.Reflection;
 using BepInEx.Configuration;
 using PalaceMod.Builder;
 using PalaceMod.Builder.Editor;
@@ -54,24 +53,12 @@ namespace PalaceMod
             Notify.Show("Builder: left/right changes a value, apply edits it, Cmd+Z undoes", NotifyKind.Info, 6f, key: "builder-hint");
         }
 
-        // WP3's custom-runs menu links to the editor through hooks it exposes (no compile-time dependency either way).
+        // WP3's custom-runs menu ("Create your own", per-pack "Edit") links here through its hooks.
         private static void HookSessionMenu()
         {
-            var type = typeof(BuilderManager).Assembly.GetType("PalaceMod.Builder.SessionMenu");
-            if (type == null) return;
-            Set("EditorAvailable", (Func<bool>)(() => BuilderEditor.IsAvailable));
-            Set("OpenEditor", (Action)BuilderEditor.Open);
-            Set("OpenPackInEditor", (Action<string>)BuilderEditor.OpenPack);
-
-            void Set(string name, object value)
-            {
-                const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
-                var field = type.GetField(name, flags);
-                var property = field == null ? type.GetProperty(name, flags) : null;
-                if (field != null && field.FieldType.IsInstanceOfType(value)) field.SetValue(null, value);
-                else if (property != null && property.CanWrite && property.PropertyType.IsInstanceOfType(value)) property.SetValue(null, value);
-                else Plugin.Logger.LogWarning($"Builder editor: SessionMenu.{name} not found; the custom-runs menu won't link to the editor");
-            }
+            SessionMenu.EditorAvailable = () => BuilderEditor.IsAvailable;
+            SessionMenu.OpenEditor = BuilderEditor.Open;
+            SessionMenu.OpenPackInEditor = BuilderEditor.OpenPack;
         }
 
         private void RegisterDevCommand()
