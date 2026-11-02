@@ -43,6 +43,8 @@ namespace PalaceMod
             {
                 if (unit == null || unit.Tags.Contains(group)) continue;
                 unit.AddUnitGroupTag(group);
+                // The unit's marker saw the stripped tag at Start and queued its hide; cancel that.
+                foreach (var indicator in unit.GetComponentsInChildren<UnitGroupIndicator>(true)) indicator.StopAllCoroutines();
                 restored++;
             }
             pending.Clear();
@@ -103,6 +105,10 @@ namespace PalaceMod
                     {
                         var saver = UnityEngine.Object.FindObjectOfType<LocalMatchSaveLoad>()
                             ?? throw new InvalidOperationException("no LocalMatchSaveLoad in this scene");
+                        var spawner = EnemySpawner.instance;
+                        if (LocalGamestate.Instance?.CurrentState != LocalGamestate.State.InMatch || spawner == null
+                            || spawner.Wavenumber >= spawner.waves.Count - 1)
+                            throw new InvalidOperationException("the game only saves during a match, before the last wave");
                         AccessTools.Method(typeof(LocalMatchSaveLoad), "Save").Invoke(saver, null);
                         return "saved";
                     }
@@ -160,6 +166,7 @@ namespace PalaceMod
                 slot.TryToBuildOrUpgradeAndPay(null, false);
                 built++;
             }
+            if (built > 0) GameplayImpact.Mark("Dev: free unit buildings");
             return $"built {built} building(s)";
         }
     }
