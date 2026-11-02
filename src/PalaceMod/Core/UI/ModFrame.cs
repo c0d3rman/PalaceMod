@@ -33,7 +33,27 @@ namespace PalaceMod
     {
         private const float Left = 200f, ContentWidth = 860f;
 
-        public string Title { get; }
+        public string Title { get; private set; }
+        private TextMeshProUGUI titleText;
+
+        /// <summary>Renames the frame, also while it's open.</summary>
+        public void SetTitle(string title)
+        {
+            Title = title;
+            if (titleText != null) titleText.text = title;
+        }
+
+        /// <summary>Runs each time the frame is shown and its selection set: on Open, and when the player comes back
+        /// from a menu opened on top of it. A good place to Refresh.</summary>
+        public event Action Activated;
+
+        internal void RaiseActivated()
+        {
+            try { Activated?.Invoke(); }
+            catch (Exception e) { Plugin.Logger.LogError($"ModFrame \"{Title}\": Activated handler failed: {e}"); }
+        }
+
+        internal static readonly Dictionary<UIFrame, ModFrame> Frames = [];
         private readonly List<(string Label, Action<ModPage> Build)> tabs = [];
         private Action<ModPage> content;
 
@@ -90,7 +110,7 @@ namespace PalaceMod
         public void Refresh()
         {
             if (root == null) return;
-            ShowTab(currentTab, select: true);
+            ShowTab(currentTab, select: true, keepScroll: true);
         }
 
         // ---- Build ----------------------------------------------------------------------------------------------
@@ -112,6 +132,7 @@ namespace PalaceMod
                 Stretch((RectTransform)obj.transform);
                 // Added while inactive: the frame registers itself with UIFrameManager when first activated.
                 frame = obj.AddComponent<UIFrame>();
+                Frames[frame] = this;
                 frame.freezeTime = true;
                 frame.freezePlayer = true;
                 frame.storeLastSelectedElementInFrameStack = true;
@@ -145,6 +166,7 @@ namespace PalaceMod
                 if (c is not (RectTransform or CanvasRenderer or TextMeshProUGUI or ContentSizeFitter)) Object.DestroyImmediate(c);
             }
             title.text = Title;
+            titleText = title;
             title.alignment = TextAlignmentOptions.TopLeft;
             title.raycastTarget = false;
             var titleRect = title.rectTransform;
@@ -242,7 +264,7 @@ namespace PalaceMod
             back.gameObject.SetActive(true);
         }
 
-        private void ShowTab(int index, bool select)
+        private void ShowTab(int index, bool select, bool keepScroll = false)
         {
             if (frame == null) return;
             currentTab = Mathf.Clamp(index, 0, Math.Max(0, tabs.Count - 1));
@@ -274,7 +296,12 @@ namespace PalaceMod
             }
             back.topNav = elements.LastOrDefault() ?? up;
             frame.RefetchManagedElements();
-            scroll.ResetTo(0f);
+            if (!keepScroll) scroll.ResetTo(0f);
+            else
+            {
+                LayoutRebuilder.ForceRebuildLayoutImmediate(contentRoot);
+                scroll.Clamp();
+            }
             if (select && selectedIndex >= 0 && elements.Count > 0) frame.Select(elements[Math.Min(selectedIndex, elements.Count - 1)]);
             UpdateTabMarker();
         }
@@ -305,6 +332,21 @@ namespace PalaceMod
         }
     }
 
+    /// <summary>Hosts the ModFrame hooks into the game's frame code.</summary>
+    [ManagerOrder(-44)]
+    public class ModFrameManager : BaseManager
+    {
+        // After Activate the frame has its selection (fresh or restored from the frame stack).
+        [HarmonyLib.HarmonyPatch(typeof(UIFrame), nameof(UIFrame.Activate))]
+        private class UIFrame_Activate_Patch
+        {
+            private static void Postfix(UIFrame __instance)
+            {
+                if (__instance != null && ModFrame.Frames.TryGetValue(__instance, out var frame)) frame.RaiseActivated();
+            }
+        }
+    }
+
     /// <summary>Builds the contents of one ModFrame page, top to bottom.</summary>
     public sealed class ModPage
     {
@@ -312,6 +354,13 @@ namespace PalaceMod
 
         /// <summary>The page's selectable elements, in navigation order.</summary>
         internal List<ThronefallUIElement> Elements { get; } = [];
+
+        /// <summary>The page's content area (a vertical layout), for parenting custom widgets.</summary>
+        public RectTransform Content => (RectTransform)content;
+
+        /// <summary>Adds a selectable you made yourself to the page's up/down navigation, after what's there.
+        /// Its topNav/botNav are overwritten; set leftNav/rightNav yourself.</summary>
+        public void AddElement(ThronefallUIElement element) => Elements.Add(element);
 
         internal ModPage(Transform content) => this.content = content;
 
@@ -430,6 +479,27 @@ namespace PalaceMod
             this.viewport = viewport;
             this.content = content;
             frame.onNewSelection.AddListener(KeepSelectionVisible);
+            // A thin scroll bar right of the page, in the game's slider colours; shown only when the page overflows.
+            track = Bar("Scroll Bar", viewport.parent, new Color(ModStyle.Dim.r, ModStyle.Dim.g, ModStyle.Dim.b, 0.6f), 2f);
+            track.anchorMin = track.anchorMax = new Vector2(0f, 1f);
+            track.pivot = new Vector2(0.5f, 1f);
+            thumb = Bar("Thumb", track, ModStyle.Gold, 4f);
+            thumb.anchorMin = thumb.anchorMax = new Vector2(0.5f, 1f);
+            thumb.pivot = new Vector2(0.5f, 1f);
+        }
+
+        private RectTransform track, thumb;
+
+        private static RectTransform Bar(string name, Transform parent, Color color, float width)
+        {
+            var obj = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            obj.transform.SetParent(parent, false);
+            var image = obj.GetComponent<Image>();
+            image.color = color;
+            image.raycastTarget = false;
+            var rect = (RectTransform)obj.transform;
+            rect.sizeDelta = new Vector2(width, 0f);
+            return rect;
         }
 
         public void ResetTo(float y)
@@ -438,6 +508,8 @@ namespace PalaceMod
             velocity = 0f;
             content.anchoredPosition = new Vector2(content.anchoredPosition.x, y);
         }
+
+        public void Clamp() => target = Mathf.Clamp(target, 0f, MaxScroll);
 
         private float MaxScroll => Mathf.Max(0f, content.rect.height - viewport.rect.height);
 
@@ -465,6 +537,16 @@ namespace PalaceMod
             }
             float y = Mathf.SmoothDamp(content.anchoredPosition.y, target, ref velocity, 0.12f, float.PositiveInfinity, Time.unscaledDeltaTime);
             content.anchoredPosition = new Vector2(content.anchoredPosition.x, y);
+
+            float max = MaxScroll, height = viewport.rect.height;
+            track.gameObject.SetActive(max > 1f);
+            if (max <= 1f) return;
+            // Track sits just right of the viewport, over its full height.
+            track.anchoredPosition = new Vector2(viewport.offsetMax.x + 16f, viewport.offsetMax.y);
+            track.sizeDelta = new Vector2(2f, height);
+            float thumbHeight = Mathf.Max(30f, height * height / content.rect.height);
+            thumb.sizeDelta = new Vector2(4f, thumbHeight);
+            thumb.anchoredPosition = new Vector2(0f, -(height - thumbHeight) * Mathf.Clamp01(y / max));
         }
     }
 }
