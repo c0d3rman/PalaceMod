@@ -69,6 +69,8 @@ namespace PalaceMod
                 page.Text("Body text wraps to the page width. It uses the game's Cormorant Garamond in the game's gold, slightly dimmed so rows stand out.");
                 page.Text("A second paragraph, to show spacing.");
                 page.Row("A row after text", "42", tooltip: "Rows and text mix freely.");
+                var tall = page.Custom("Tall block", 1100f);
+                GameWidgets.Text(tall, "Tall label", "A tall custom block: keyboard and controller scroll through it a page at a time.", ModStyle.BodyFont, 25f, ModStyle.Dim);
                 var icon = PerkManager.instance?.allEquippables?.FirstOrDefault(e => e != null && e.icon != null)?.icon;
                 if (icon != null) page.Row("A row with an icon", "7", tooltip: "Icons sit left of the label.", icon: icon);
             })
