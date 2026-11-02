@@ -1,0 +1,13 @@
+bin/
+obj/
+lib/
+.decompiled/
+.local/
+.backups/
+**/__pycache__/
+.DS_Store
+.idea/
+.vscode/
+*.user
+*.suo
+install.cfg

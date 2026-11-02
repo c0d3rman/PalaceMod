@@ -1,0 +1,242 @@
+using UnityEngine;
+using System;
+using System.Collections.Generic;
+using HarmonyLib;
+using Rewired;
+using System.Reflection;
+using System.Reflection.Emit;
+using System.Linq;
+
+namespace PalaceMod
+{
+    public class FormationManager : BaseManager
+    {
+        // Key constants
+        private const KeyCode CYCLE_FORMATION_KEY = KeyCode.F7;
+        private const KeyCode PLACE_ONE_UNIT_KEY = KeyCode.O;
+
+        public enum FormationType
+        {
+            Normal,
+            Line,
+            Circle,
+            Dot,
+            Semicircle
+        }
+
+        private FormationType currentFormation = FormationType.Normal;
+
+        // For press-and-hold tracking
+        private float timeSincePlaceOne = 0f;
+        private bool switchedToHold = false;
+
+        // Flag to indicate if we should place only one unit on next placement (used for PlaceCommandedUnitsAndCalculateTargetPositions)
+        public static bool placeOnlyOneUnit = false;
+
+        public override void Update()
+        {
+            if (Input.GetKeyDown(CYCLE_FORMATION_KEY))
+            {
+                CycleFormation();
+            }
+
+            // Place one unit key pressed
+            if (Input.GetKeyDown(PLACE_ONE_UNIT_KEY))
+            {
+                placeOnlyOneUnit = true;
+                CommandUnits.instance.PlaceCommandedUnitsAndCalculateTargetPositions(false);
+            }
+
+            // Place one unit key released
+            if (Input.GetKeyUp(PLACE_ONE_UNIT_KEY))
+            {
+                // Clear the buffer so press-and-holding O again doesn't cause the last unit to hold position
+                AccessTools.Field(typeof(CommandUnits), "playerUnitsCommandingBuffer").SetValue(CommandUnits.instance, new List<PathfindMovementPlayerunit>());
+            }
+
+            // Place one unit key held
+            if (Input.GetKey(PLACE_ONE_UNIT_KEY))
+            {
+                timeSincePlaceOne += Time.deltaTime;
+                if (timeSincePlaceOne > CommandUnits.instance.holdToHoldPositionTime && !switchedToHold)
+                {
+                    switchedToHold = true;
+                    CommandUnits.instance.MakeUnitsInBufferHoldPosition();
+                }
+            }
+            else
+            {
+                timeSincePlaceOne = 0f;
+                switchedToHold = false;
+            }
+        }
+
+        private void CycleFormation()
+        {
+            currentFormation = (FormationType)(((int)currentFormation + 1) % Enum.GetValues(typeof(FormationType)).Length);
+            string formationName = Enum.GetName(typeof(FormationType), currentFormation);
+            Plugin.ShowMessage($"Formation: {formationName}");
+        }
+
+        public void SetUnitPosition(PathfindMovementPlayerunit unit, Vector3 position)
+        {
+            unit.HomePosition = position;
+            if (DayNightCycle.Instance.CurrentTimestate == DayNightCycle.Timestate.Day)
+            {
+                unit.transform.position = position;
+            }
+        }
+
+        // Helper function for the transpiler to call so we don't have to write IL code for it
+        public static void ModifyToBePlaced()
+        {
+            if (!placeOnlyOneUnit) return;
+
+            // Keep only the first unit
+            var toBePlacedField = AccessTools.Field(typeof(CommandUnits), "toBePlaced");
+            var toBePlaced = (List<PathfindMovementPlayerunit>)toBePlacedField.GetValue(CommandUnits.instance);
+            if (toBePlaced.Count > 0)
+            {
+                toBePlaced = toBePlaced.Take(1).ToList();
+                toBePlacedField.SetValue(CommandUnits.instance, toBePlaced);
+            }
+
+            // Reset this flag for internals of CommandUnits
+            AccessTools.Field(typeof(CommandUnits), "commandUnitsButtonLast").SetValue(CommandUnits.instance, false);
+        }
+
+        [HarmonyPatch(typeof(CommandUnits), "PlaceCommandedUnitsAndCalculateTargetPositions")]
+        private class CommandUnits_PlaceCommandedUnits_Patch
+        {
+            static FormationManager Instance => Plugin.Instance.GetManager<FormationManager>();
+
+            // Transpiler that inserts a call to ModifyToBePlaced() after the foreach loop immediately after toBePlaced.Clear()
+            [HarmonyTranspiler]
+            private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+            {
+                var toBePlacedClearFound = false;
+                var codeInserted = false;
+
+                foreach (var instruction in instructions)
+                {
+                    // First continue until toBePlaced.Clear()
+                    if (!toBePlacedClearFound)
+                    {
+                        if (instruction.Calls(AccessTools.Method(typeof(List<PathfindMovementPlayerunit>), "Clear")))
+                        {
+                            toBePlacedClearFound = true;
+                        }
+                        yield return instruction;
+                        continue;
+                    }
+
+                    // Then find the end of the foreach loop and insert our code
+                    if (!codeInserted && instruction.opcode == OpCodes.Endfinally)
+                    {
+                        yield return instruction;
+
+                        // Call FormationManager.ModifyToBePlaced()
+                        yield return new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(FormationManager), "ModifyToBePlaced"));
+                        codeInserted = true;
+                        continue;
+                    }
+
+                    yield return instruction;
+                }
+            }
+
+            // Postfix mostly handles placing units in formations
+            private static void Postfix(CommandUnits __instance, List<PathfindMovementPlayerunit> ___toBePlaced, float ___unitDistanceFromEachOther)
+            {
+                // If we just placed one unit, don't do formations
+                if (placeOnlyOneUnit)
+                {
+                    placeOnlyOneUnit = false;
+
+                    // Fix a glitch - if we placed the last unit, we should stop commanding
+                    var playerUnitsCommanding = (List<PathfindMovementPlayerunit>)AccessTools.Field(typeof(CommandUnits), "playerUnitsCommanding").GetValue(__instance);
+                    if (playerUnitsCommanding.Count == 0)
+                    {
+                        AccessTools.Field(typeof(CommandUnits), "commanding").SetValue(__instance, false);
+                    }
+                    return;
+                }
+
+                // If there are no units to place, don't do formations
+                if (___toBePlaced == null || ___toBePlaced.Count == 0) return;
+
+                // Handle formations
+                var player = PlayerManager.Instance.RegisteredPlayers[0];
+                float unitSpacing = ___unitDistanceFromEachOther;
+                Vector3 playerForward = player.meshParent.forward;
+
+                switch (Instance.currentFormation)
+                {
+                    case FormationType.Normal:
+                        return;
+                    case FormationType.Line:
+                        PlaceInLine(___toBePlaced, player, playerForward, unitSpacing);
+                        break;
+                    case FormationType.Circle:
+                        PlaceInCircle(___toBePlaced, player, unitSpacing);
+                        break;
+                    case FormationType.Dot:
+                        PlaceInDot(___toBePlaced, player);
+                        break;
+                    case FormationType.Semicircle:
+                        PlaceInSemicircle(___toBePlaced, player, playerForward, unitSpacing);
+                        break;
+                }
+            }
+
+            private static void PlaceInLine(List<PathfindMovementPlayerunit> units, PlayerMovement player, Vector3 playerForward, float spacing)
+            {
+                float totalWidth = (units.Count - 1) * spacing;
+                Vector3 lineStart = player.transform.position - (playerForward * totalWidth / 2f);
+
+                for (int i = 0; i < units.Count; i++)
+                {
+                    Vector3 targetPos = lineStart + (playerForward * i * spacing);
+                    Instance.SetUnitPosition(units[i], targetPos);
+                }
+            }
+
+            private static void PlaceInCircle(List<PathfindMovementPlayerunit> units, PlayerMovement player, float spacing)
+            {
+                float radius = spacing * 2f; // Make circle radius proportional to unit spacing
+                float angleStep = 360f / units.Count;
+
+                for (int i = 0; i < units.Count; i++)
+                {
+                    float angle = i * angleStep * Mathf.Deg2Rad;
+                    Vector3 offset = new Vector3(Mathf.Sin(angle) * radius, 0, Mathf.Cos(angle) * radius);
+                    Vector3 targetPos = player.transform.position + offset;
+                    Instance.SetUnitPosition(units[i], targetPos);
+                }
+            }
+
+            private static void PlaceInDot(List<PathfindMovementPlayerunit> units, PlayerMovement player)
+            {
+                foreach (var unit in units)
+                {
+                    Instance.SetUnitPosition(unit, player.transform.position);
+                }
+            }
+
+            private static void PlaceInSemicircle(List<PathfindMovementPlayerunit> units, PlayerMovement player, Vector3 playerForward, float spacing)
+            {
+                float radius = spacing * 2f;
+                float angleStep = 180f / (units.Count - 1); // 180 degrees for semicircle
+
+                for (int i = 0; i < units.Count; i++)
+                {
+                    float angle = (-90f + (i * angleStep)) * Mathf.Deg2Rad; // Start from -90 degrees to center the semicircle
+                    Vector3 right = Vector3.Cross(playerForward, Vector3.up);
+                    Vector3 offset = playerForward * Mathf.Cos(angle) + right * Mathf.Sin(angle);
+                    Vector3 targetPos = player.transform.position + (offset * radius);
+                    Instance.SetUnitPosition(units[i], targetPos);
+                }
+            }
+        }
+    }
+}
