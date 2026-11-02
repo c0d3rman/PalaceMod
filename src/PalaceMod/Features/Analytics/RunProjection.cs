@@ -67,7 +67,7 @@ namespace PalaceMod
         public float AssumedSpendShare;
         public int FinalScore;
         public int FinalBank;
-        public VictoryBonus Victory;
+        public MatchEndScore Victory;
     }
 
     public static class RunProjection
