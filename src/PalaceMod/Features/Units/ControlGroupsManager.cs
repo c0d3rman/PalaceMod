@@ -34,6 +34,9 @@ namespace PalaceMod
                 RunDevCommand);
         }
 
+        // The save patch keeps writing while disabled so the saved groups never go stale; only restoring is gated.
+        protected override bool UnpatchWhenDisabled => false;
+
         protected override void OnFeatureDisabled() => pending.Clear();
 
         public override void Update()
@@ -86,6 +89,7 @@ namespace PalaceMod
         {
             private static void Postfix(TaggedObject __instance, string guid)
             {
+                if (!Feature<ControlGroupsManager>.On) return;
                 int saved = 0;
                 if (!MatchSaveLoadHandler.TryLoadValue(guid, GroupKey(__instance), ref saved)) return;
                 var group = (TagManager.ETag)saved;
