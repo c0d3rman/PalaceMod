@@ -40,6 +40,10 @@ namespace PalaceMod
 
     public class WikiDataManager : BaseManager
     {
+        public override string FeatureSection => "Wiki";
+        public override string FeatureDescription => "Adds an unfinished in-game wiki of units, buildings and enemies to the pause menu.";
+        protected override void OnFeatureDisabled() => OnDestroy();
+
         public Dictionary<string, WikiEntry> wikiEntries = [];
         private readonly HashSet<string> nonInterestingTags =
         [

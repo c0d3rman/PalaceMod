@@ -6,6 +6,14 @@ namespace PalaceMod
 {
     public class BuildPreviewManager : BaseManager
     {
+        public override string FeatureSection => "Build previews";
+        public override string FeatureDescription => "Shows what every empty build slot can become: toggled with the game's preview button and switched on automatically at dawn.";
+        protected override void OnFeatureDisabled()
+        {
+            previewsEnabled = false;
+            BuildingInteractor.displayAllBuildPreviews = false;
+        }
+
         private bool previewsEnabled = false;
         public bool EnablePreviewsAtDawn = true;  // Configuration flag
 

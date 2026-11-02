@@ -9,6 +9,9 @@ namespace PalaceMod
 {
     public class EnemyPreviewManager : BaseManager
     {
+        public override string FeatureSection => "Enemy previews";
+        public override string FeatureDescription => "Replaces the pause menu's enemy preview with a list of the coming night's enemies and their counts, grouped by spawn location.";
+
         private List<GameObject> createdObjects = new List<GameObject>();
 
         [HarmonyPatch(typeof(NightPreviewElement))]

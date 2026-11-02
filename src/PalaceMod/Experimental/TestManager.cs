@@ -3,7 +3,7 @@
 // using System.Reflection;
 // using System.Collections.Generic;
 
-// namespace PalaceMod
+// namespace PalaceMod.Experimental
 // {
 //     public class TestManager : BaseManager
 //     {

@@ -9,6 +9,10 @@ namespace PalaceMod
 {
     public class UnitRangeManager : BaseManager
     {
+        public override string FeatureSection => "Unit ranges";
+        public override string FeatureDescription => "Shows the attack ranges of the units you're commanding.";
+        protected override void OnFeatureDisabled() => OnDestroy();
+
         // Indicator types in order of how they should be displayed (smallest to largest range, prioritizing smallest)
         private readonly List<RangeIndicatorHandler.IndicatorType> orderedIndicatorTypes = [
             RangeIndicatorHandler.IndicatorType.Built,
