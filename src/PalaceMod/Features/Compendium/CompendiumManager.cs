@@ -16,6 +16,7 @@ namespace PalaceMod
         public override string FeatureDescription => "Adds a Compendium to the pause menu: this level's waves, enemies, your units, buildings and upgrades, and all perks, with actual values.";
 
         private ModFrame frame;
+        private bool showEarlierNights;
 
         public override void Awake(Plugin plugin)
         {
@@ -26,13 +27,19 @@ namespace PalaceMod
                 .AddTab("Units", BuildUnits)
                 .AddTab("Buildings", BuildBuildings)
                 .AddTab("Perks", BuildPerks);
-            PauseMenu.AddButton("compendium", "Compendium", () => frame.Open(), order: 10, visible: () => IsEnabled);
+            PauseMenu.AddButton("compendium", "Compendium", Open, order: 10, visible: () => IsEnabled);
             DevCommands.Register("compendium", "compendium [close]     open (or close) the Compendium", args =>
             {
                 if (args.Length > 0 && args[0] == "close") frame.Close();
-                else frame.Open();
+                else Open();
                 return frame.IsOpen ? "open" : "closed";
             });
+        }
+
+        private void Open()
+        {
+            showEarlierNights = false;
+            frame.Open();
         }
 
         protected override void OnFeatureDisabled()
@@ -79,7 +86,17 @@ namespace PalaceMod
             var spawner = EnemySpawner.instance;
             if (spawner == null || spawner.waves.Count == 0) { NotInLevel(page); return; }
             int next = CompendiumStats.NextWaveIndex();
-            for (int w = 0; w < spawner.waves.Count; w++)
+            int first = 0;
+            if (next > 0 && !showEarlierNights)
+            {
+                first = Mathf.Min(next, spawner.waves.Count - 1);
+                page.Button($"Show earlier nights ({first})", () =>
+                {
+                    showEarlierNights = true;
+                    frame.Refresh();
+                });
+            }
+            for (int w = first; w < spawner.waves.Count; w++)
             {
                 var wave = spawner.waves[w];
                 string state = w < next ? " (done)" : w == next ? (DayNightCycle.Instance?.CurrentTimestate == DayNightCycle.Timestate.Night ? " (now)" : " (next)") : "";
@@ -115,7 +132,7 @@ namespace PalaceMod
                         return body;
                     }, icon: stats.Icon);
                 }
-                if (gold > 0) page.Row("Gold carried", Coin(gold), "Gold dropped by this night's enemies.");
+                if (gold > 0) page.Row("Gold dropped", Coin(gold), "Gold this night's enemies drop when killed.");
             }
         }
 
