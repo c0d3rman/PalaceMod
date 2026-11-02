@@ -18,6 +18,21 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("startingGold")] public int? StartingGold { get; set; }
         /// <summary>One entry per night, in order. The run is won after the last one.</summary>
         [JsonProperty("nights")] public List<NightDef> Nights { get; set; } = [];
+        /// <summary>Custom player units that stand in for the troops buildings train on this run (optional).</summary>
+        [JsonProperty("troops")] public List<TroopDef> Troops { get; set; }
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>
+    /// A custom player unit that replaces a vanilla troop for the run: every troop of the unit's base type ("P Archer",
+    /// "P Knight", ...) that a building trains gets the unit's overrides. `builder dump` lists troops and their buildings.
+    /// </summary>
+    public sealed class TroopDef
+    {
+        /// <summary>A player unit in this pack (or "&lt;packId&gt;/&lt;unitId&gt;"); its base is the troop it replaces.</summary>
+        [JsonProperty("unit")] public string Unit { get; set; }
+        /// <summary>Only troops trained by this building (the game's building name, e.g. "Archery Range"); null = all.</summary>
+        [JsonProperty("building")] public string Building { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
