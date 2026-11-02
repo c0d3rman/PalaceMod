@@ -40,6 +40,12 @@ namespace PalaceMod
         public override string FeatureSection => "Bonus-safe saves";
         public override string FeatureDescription => "Quitting at the very start of a day, before spending, building or starting the night, keeps your no-restart score bonus when you continue.";
 
+        // Bookkeeping (binding the level, invalidating records) has to keep running while the feature is off, or a
+        // save played on with the feature off could later be continued as if untouched. Behaviour is gated on On.
+        protected override bool UnpatchWhenDisabled => false;
+
+        private static bool On => Feature<BonusSafeSaveManager>.On;
+
         private const string SidecarFileName = "PalaceMod.BonusSafeSaves.json";
         private const float DiffInterval = 0.5f;
 
@@ -276,7 +282,7 @@ namespace PalaceMod
                 memoryMap = map;
                 memoryHash = hash;
                 if (hash == null) return;
-                if (inDaySave && saveLoad != null && map == sessionMap && Applicable)
+                if (inDaySave && On && saveLoad != null && map == sessionMap && Applicable && SaveWritten(map))
                 {
                     WriteEntry(map, hash, true, null);
                     sessionClean = true;
@@ -288,7 +294,7 @@ namespace PalaceMod
                 else
                 {
                     sessionClean = false;
-                    WriteEntry(map, hash, false, inDaySave ? "not tracked" : "the match ended");
+                    WriteEntry(map, hash, false, !inDaySave ? "the match ended" : !On ? "saved while the feature was off" : "not tracked");
                 }
             }
         }
@@ -306,7 +312,11 @@ namespace PalaceMod
                 var entry = ReadSidecar().entries.FirstOrDefault(e => e.map == map);
                 bool safe = entry != null && entry.clean && memoryMap == map && memoryHash != null && entry.hash == memoryHash
                     && HashSaveFile(map) == memoryHash;
-                if (hadRestartsBeforeLoad)
+                if (!On)
+                {
+                    loadOutcome = "lost (feature off)";
+                }
+                else if (hadRestartsBeforeLoad)
                 {
                     loadOutcome = "already lost";
                 }
@@ -336,6 +346,14 @@ namespace PalaceMod
                 pendingBaseline = false;
                 dirtyReason = "no save yet";
                 if (!Applicable) return;
+                if (!On)
+                {
+                    // Played with the feature off: whatever happens this session isn't tracked.
+                    var stale = ReadSidecar().entries.FirstOrDefault(e => e.map == sessionMap);
+                    if (stale != null && stale.clean) WriteEntry(stale.map, stale.hash, false, "played while the feature was off");
+                    loadOutcome = null;
+                    return;
+                }
                 if (LocalMatchSaveLoad.CurrentlyLoadingMatch)
                 {
                     if (loadOutcome == "kept")
@@ -374,6 +392,7 @@ namespace PalaceMod
         {
             private static void Postfix(PauseUILoadoutHelper __instance)
             {
+                if (!On) return;
                 CheckNow();
                 Instance?.ShowHint(__instance);
             }
@@ -483,6 +502,21 @@ namespace PalaceMod
             catch (Exception e)
             {
                 Plugin.Logger.LogWarning($"Bonus-safe saves: couldn't write {SidecarFileName}: {e.Message}");
+            }
+        }
+
+        // SaveRun swallows write failures, so check the file now holds exactly what it was asked to write.
+        private static bool SaveWritten(string map)
+        {
+            try
+            {
+                var services = SaveServicesLocator.Instance;
+                string path = services.GetFullSavePath(map + ".json");
+                return services.Exists(path) && services.ReadAllText(path) == JsonUtility.ToJson(MatchSaveLoadHandler.CurrentSave);
+            }
+            catch (Exception)
+            {
+                return false;
             }
         }
 
