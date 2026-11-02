@@ -41,7 +41,7 @@ namespace PalaceMod.Builder.Level
         public static BuildSlot FindSlot(Scene scene, string name) => Slots(scene).FirstOrDefault(s => s.name == name);
 
         public static List<EnemySpawnLine> Lines(Scene scene) =>
-            Resources.FindObjectsOfTypeAll<EnemySpawnLine>().Where(l => l != null && l.gameObject.scene == scene).OrderBy(l => l.name, StringComparer.Ordinal).ToList();
+            Resources.FindObjectsOfTypeAll<EnemySpawnLine>().Where(l => l != null && l.gameObject.scene == scene && l.gameObject.activeInHierarchy).OrderBy(l => l.name, StringComparer.Ordinal).ToList();
 
         public static bool IsCastle(BuildSlot slot) => slot.GetComponentInChildren<CastleCenter>(true) != null;
 
@@ -91,7 +91,7 @@ namespace PalaceMod.Builder.Level
                 float max = Mathf.Max(size.x, size.y, size.z);
                 if (max < 0.4f || max > 40f) continue;
                 string name = mf.sharedMesh.name;
-                if (name.StartsWith("Combined") || name == "Plane" || name == "Cube" || name == "Quad" || name.StartsWith("quad")) continue;
+                if (name.StartsWith("Combined") || name is "Plane" or "Cube" or "Quad" or "Cylinder" or "Sphere" or "Capsule" || name.StartsWith("quad")) continue;
                 if (byMesh.TryGetValue(name, out var existing)) { existing.Count++; continue; }
                 var rot = mf.transform.rotation;
                 byMesh[name] = new PropBase
@@ -188,7 +188,9 @@ namespace PalaceMod.Builder.Level
             if (slot != null)
             {
                 Traverse.Create(slot).Field("bluepringParent").GetValue<GameObject>()?.SetActive(true);
-                Traverse.Create(slot).Field("buildingParent").GetValue<GameObject>()?.SetActive(false);
+                // The built building (and the units inside it) is never shown here.
+                var built = Traverse.Create(slot).Field("buildingParent").GetValue<GameObject>();
+                if (built != null && built != copy) UnityEngine.Object.DestroyImmediate(built);
             }
             Strip(copy);
             copy.transform.SetParent(parent, true);
@@ -200,15 +202,35 @@ namespace PalaceMod.Builder.Level
         /// <summary>Removes everything but transforms, meshes and renderers.</summary>
         public static void Strip(GameObject go)
         {
-            // Scripts first (they may require the components below), then physics and the rest.
-            for (int pass = 0; pass < 3; pass++)
-                foreach (var c in go.GetComponentsInChildren<Component>(true))
+            // Only remove a component once nothing left on its object requires it (Unity logs an error otherwise).
+            foreach (var t in go.GetComponentsInChildren<Transform>(true))
+            {
+                var left = t.GetComponents<Component>().Where(c => c != null && !Keep(c)).ToList();
+                for (int guard = 0; left.Count > 0 && guard < 16; guard++)
                 {
-                    if (c == null || c is Transform || c is MeshFilter || c is MeshRenderer || c is SkinnedMeshRenderer) continue;
-                    if (pass == 0 && c is not MonoBehaviour) continue;
-                    try { UnityEngine.Object.DestroyImmediate(c); }
-                    catch (Exception) { /* required by another component; the next pass gets it */ }
+                    var removable = left.Where(c => !left.Any(o => o != c && Requires(o.GetType(), c.GetType()))).ToList();
+                    if (removable.Count == 0) break;
+                    foreach (var c in removable)
+                    {
+                        UnityEngine.Object.DestroyImmediate(c);
+                        left.Remove(c);
+                    }
                 }
+            }
+
+            static bool Keep(Component c) => c is Transform || c is MeshFilter || c is MeshRenderer || c is SkinnedMeshRenderer;
+        }
+
+        private static readonly Dictionary<(Type, Type), bool> requires = [];
+
+        private static bool Requires(Type owner, Type needed)
+        {
+            if (requires.TryGetValue((owner, needed), out bool r)) return r;
+            r = false;
+            foreach (RequireComponent rc in owner.GetCustomAttributes(typeof(RequireComponent), true))
+                foreach (var t in new[] { rc.m_Type0, rc.m_Type1, rc.m_Type2 })
+                    if (t != null && t.IsAssignableFrom(needed)) r = true;
+            return requires[(owner, needed)] = r;
         }
     }
 }

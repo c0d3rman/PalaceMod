@@ -33,7 +33,7 @@ namespace PalaceMod.Builder.Level
             }
             if (!HasEdits(level)) return;
             int moved = 0, added = 0, removed = 0, props = 0, lines = 0;
-            var slots = LayoutScene.Slots(scene).ToDictionary(s => s.name, StringComparer.Ordinal);
+            var slots = LayoutScene.Slots(scene).GroupBy(s => s.name, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
 
             // Moves and price changes on the host's own slots.
             foreach (var edit in level.BuildSlots?.Edit ?? [])
@@ -95,7 +95,7 @@ namespace PalaceMod.Builder.Level
             }
 
             // Spawn lines.
-            var hostLines = LayoutScene.Lines(scene).ToDictionary(l => l.name, StringComparer.Ordinal);
+            var hostLines = LayoutScene.Lines(scene).GroupBy(l => l.name, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
             foreach (var edit in level.SpawnLines?.Edit ?? [])
             {
                 if (edit?.Ref == null) continue;
@@ -106,7 +106,7 @@ namespace PalaceMod.Builder.Level
             if ((level.SpawnLines?.Add?.Count ?? 0) > 0) issues.Add(Warn("new spawn lines aren't supported yet; they're skipped"));
 
             // Props.
-            var bases = (level.Props?.Count ?? 0) > 0 ? LayoutScene.Props(scene).ToDictionary(p => p.Id) : [];
+            var bases = (level.Props?.Count ?? 0) > 0 ? LayoutScene.Props(scene).GroupBy(p => p.Id).ToDictionary(g => g.Key, g => g.First()) : [];
             foreach (var prop in level.Props ?? [])
             {
                 if (prop?.Id == null) continue;

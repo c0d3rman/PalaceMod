@@ -72,6 +72,16 @@ namespace PalaceMod
                         if (!LayoutEditor.Launch(draft, level, out string error)) throw new InvalidOperationException(error);
                         return "launching the layout editor";
                     }
+                    case "new":
+                    {
+                        // A user pack with one empty level on a map (test setup).
+                        string id = Arg(args, 1), scene = Arg(args, 2);
+                        var pack = new Builder.Model.DesignPack { Id = id, Name = "Layout " + id, Author = "dev" };
+                        pack.Levels.Add(new Builder.Model.LevelDef { Id = Builder.Model.Ids.FromName(scene + "-layout"), Name = scene + " Layout", Host = scene });
+                        BuilderServices.Packs.Save(pack);
+                        BuilderServices.Packs.Refresh();
+                        return $"saved {id} with level {pack.Levels[0].Id}";
+                    }
                     case "state":
                         return LayoutEditor.Describe();
                     case "add":
@@ -95,36 +105,40 @@ namespace PalaceMod
                     }
                     case "select":
                         RequireActive();
-                        LayoutEditor.Select(Item(args, 1).Key);
+                        LayoutEditor.Select(Item(args, 0).Key);
                         return "selected " + LayoutEditor.Selected?.Key;
                     case "move":
                     {
-                        var item = Item(args, 1);
-                        LayoutEditor.Move(item, LayoutScene.Ground(new Vector3(F(args, 2), item.Pos.y, F(args, 3))), item.Yaw);
+                        var item = Item(args, 2);
+                        LayoutEditor.Move(item, LayoutScene.Ground(new Vector3(F(args, args.Length - 2), item.Pos.y, F(args, args.Length - 1))), item.Yaw);
                         return $"{item.Key} at {item.Pos}";
                     }
                     case "rotate":
                     {
                         var item = Item(args, 1);
-                        LayoutEditor.Rotate(item, F(args, 2));
+                        LayoutEditor.Rotate(item, F(args, args.Length - 1));
                         return $"{item.Key} yaw {item.Yaw}";
                     }
                     case "remove":
                     {
-                        var item = Item(args, 1);
+                        var item = Item(args, 0);
                         LayoutEditor.RemoveOrRestore(item);
                         return $"{item.Key} removed={item.Removed}";
                     }
                     case "cost":
                     {
-                        var item = Item(args, 1);
-                        int level = int.Parse(Arg(args, 2));
-                        LayoutEditor.SetCost(item, level, Arg(args, 3) == "base" ? null : int.Parse(args[3]));
+                        var item = Item(args, 2);
+                        int level = int.Parse(args[args.Length - 2]);
+                        LayoutEditor.SetCost(item, level, args[args.Length - 1] == "base" ? null : int.Parse(args[args.Length - 1]));
                         return $"{item.Key} costs {string.Join("/", item.BaseCosts.Select((c, n) => LayoutEditor.CostOverride(item, n) ?? c))}";
                     }
                     case "cursor":
                         LayoutEditor.DevCursor = Arg(args, 1) == "off" ? null : new Vector3(F(args, 1), 0f, F(args, 2));
                         return "cursor " + (LayoutEditor.DevCursor?.ToString() ?? "mouse");
+                    case "click":
+                        RequireActive();
+                        LayoutEditor.DevClick = true;
+                        return "clicked";
                     case "tool":
                         RequireActive();
                         if (Arg(args, 1) == "none") LayoutEditor.CancelTool();
@@ -176,11 +190,12 @@ namespace PalaceMod
             {
                 if (!LayoutEditor.Active) throw new InvalidOperationException("the layout editor isn't running (builder-level edit <pack> <level>)");
             }
-            static LayoutEditor.Item Item(string[] args, int i)
+            // The key is everything between the subcommand and the trailing numbers (names have spaces).
+            static LayoutEditor.Item Item(string[] args, int trailing)
             {
                 RequireActive();
-                string key = string.Join(" ", args.Skip(i).TakeWhile(a => !float.TryParse(a, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _) && a != "base"));
-                if (key.Length == 0) key = Arg(args, i);
+                string key = string.Join(" ", args.Skip(1).Take(args.Length - 1 - trailing));
+                if (key.Length == 0) throw new ArgumentException("missing item key");
                 return LayoutEditor.Items.TryGetValue(key, out var item) ? item
                     : LayoutEditor.Items.Values.FirstOrDefault(x => x.Id == key) ?? throw new ArgumentException($"no item \"{key}\" (keys look like slot:<name>, add:<id>, prop:<id>, line:<name>)");
             }
@@ -198,14 +213,14 @@ namespace PalaceMod.Builder.Level
         public static void Register()
         {
             const string s = "Builder";
-            Menu = Keybinds.Register(s, "layout-menu", "Layout: menu", new KeyboardShortcut(KeyCode.Tab), "In the layout editor: opens the menu to add slots and scenery, save, check paths and play.");
-            Rotate = Keybinds.Register(s, "layout-rotate", "Layout: turn", new KeyboardShortcut(KeyCode.R), "In the layout editor: turns the selected object (or the one being placed) by 15°.");
-            RotateBack = Keybinds.Register(s, "layout-rotate-back", "Layout: turn back", new KeyboardShortcut(KeyCode.R, KeyCode.LeftShift), "In the layout editor: turns it the other way.");
+            Menu = Keybinds.Register(s, "layout-menu", "Layout: menu", new KeyboardShortcut(KeyCode.B), "In the layout editor: opens the menu to add slots and scenery, save, check paths and play.");
+            Rotate = Keybinds.Register(s, "layout-rotate", "Layout: turn", new KeyboardShortcut(KeyCode.T), "In the layout editor: turns the selected object (or the one being placed) by 15°.");
+            RotateBack = Keybinds.Register(s, "layout-rotate-back", "Layout: turn back", new KeyboardShortcut(KeyCode.T, KeyCode.LeftShift), "In the layout editor: turns it the other way.");
             Delete = Keybinds.Register(s, "layout-delete", "Layout: remove", new KeyboardShortcut(KeyCode.Delete), "In the layout editor: removes (or restores) the selected object.");
-            Properties = Keybinds.Register(s, "layout-details", "Layout: details", new KeyboardShortcut(KeyCode.F), "In the layout editor: shows the selected object's costs and options.");
+            Properties = Keybinds.Register(s, "layout-details", "Layout: details", new KeyboardShortcut(KeyCode.I), "In the layout editor: shows the selected object's costs and options.");
             Snap = Keybinds.Register(s, "layout-snap", "Layout: snap", new KeyboardShortcut(KeyCode.G), "In the layout editor: turns snapping to the 1 m grid on or off.");
-            TurnLeft = Keybinds.Register(s, "layout-view-left", "Layout: turn view left", new KeyboardShortcut(KeyCode.Q), "In the layout editor: turns the camera.");
-            TurnRight = Keybinds.Register(s, "layout-view-right", "Layout: turn view right", new KeyboardShortcut(KeyCode.E), "In the layout editor: turns the camera the other way.");
+            TurnLeft = Keybinds.Register(s, "layout-view-left", "Layout: turn view left", new KeyboardShortcut(KeyCode.Comma), "In the layout editor: turns the camera.");
+            TurnRight = Keybinds.Register(s, "layout-view-right", "Layout: turn view right", new KeyboardShortcut(KeyCode.Period), "In the layout editor: turns the camera the other way.");
         }
 
         public static string Label(Keybind k)
@@ -219,6 +234,8 @@ namespace PalaceMod.Builder.Level
                 KeyCode.LeftCommand or KeyCode.RightCommand => "Cmd",
                 KeyCode.LeftAlt or KeyCode.RightAlt => "Alt",
                 KeyCode.Delete => "Del",
+                KeyCode.Comma => ",",
+                KeyCode.Period => ".",
                 _ => c.ToString(),
             };
             if (sc.MainKey == KeyCode.None) return "(unbound)";

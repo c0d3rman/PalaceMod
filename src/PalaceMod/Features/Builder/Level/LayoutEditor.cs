@@ -218,6 +218,7 @@ namespace PalaceMod.Builder.Level
             // Hide the map's build slots; keep a blueprint-look copy of each to show instead.
             foreach (var slot in LayoutScene.Slots(scene))
             {
+                if (natives.ContainsKey(slot.name)) continue; // the overlay also only knows the first of a name
                 var info = new NativeSlot
                 {
                     Name = slot.name, Type = LayoutScene.TypeName(slot), Pos = slot.transform.position, Rot = slot.transform.rotation,
@@ -225,8 +226,12 @@ namespace PalaceMod.Builder.Level
                     Costs = slot.OwnUpgrades.Select(u => u.cost).ToList(),
                 };
                 if (slot.ActivatorUpgradesThis) info.Costs = [];
-                slot.gameObject.SetActive(false);
-                info.Look = LayoutScene.Proxy(slot.gameObject, looks, "look " + slot.name);
+                // The castle stays as it is (it can't move, and the game's tips read it every frame).
+                if (!info.Castle)
+                {
+                    slot.gameObject.SetActive(false);
+                    info.Look = LayoutScene.Proxy(slot.gameObject, looks, "look " + slot.name);
+                }
                 natives[slot.name] = info;
             }
             foreach (var line in LayoutScene.Lines(scene).Where(l => l.canSpawnSmallGround || l.canSpawnBigGround || l.canSpawnFlying))
@@ -278,8 +283,11 @@ namespace PalaceMod.Builder.Level
                 item.Moved = n.CanMove && (edit?.Pos != null || edit?.RotY != null);
                 item.Removed = removed.Contains(n.Name);
                 item.BaseCosts = n.Costs;
-                EnsureProxy(item, () => UnityEngine.Object.Instantiate(n.Look, root));
-                Pose(item, n.Rot);
+                if (n.Look != null)
+                {
+                    EnsureProxy(item, () => UnityEngine.Object.Instantiate(n.Look, root));
+                    Pose(item, n.Rot);
+                }
                 seen.Add(item.Key);
             }
             foreach (var add in lv.BuildSlots?.Add ?? [])
@@ -506,8 +514,13 @@ namespace PalaceMod.Builder.Level
             return best;
         }
 
+        /// <summary>Dev command: a left click at DevCursor on the next frame.</summary>
+        public static bool DevClick;
+
         private static void UpdatePointer()
         {
+            bool click = Input.GetMouseButtonDown(0) || DevClick;
+            DevClick = false;
             bool haveGround = CursorGround(out var ground);
             string prevHover = hoverKey;
             hoverKey = tool == null && haveGround && !dragging ? ItemAt(ground)?.Key : hoverKey;
@@ -517,12 +530,12 @@ namespace PalaceMod.Builder.Level
             {
                 UpdateGhost(haveGround, ground);
                 if (Input.GetMouseButtonDown(1)) { CancelTool(); return; }
-                if (Input.GetMouseButtonDown(0) && haveGround) PlaceTool(Snapped(ground), ghostYaw, keep: Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift));
+                if (click && haveGround) PlaceTool(Snapped(ground), ghostYaw, keep: Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift));
                 return;
             }
 
             if (Input.GetMouseButtonDown(1)) { Select(null); return; }
-            if (Input.GetMouseButtonDown(0))
+            if (click)
             {
                 var hit = haveGround ? ItemAt(ground) : null;
                 Select(hit?.Key);
@@ -937,7 +950,7 @@ namespace PalaceMod.Builder.Level
             return $"{title}{dirty}\n{line2}\n{keys}";
         }
 
-        private static string Dim(string s) => $"<color=#{ModStyle.Hex(ModStyle.Dim)}>{Esc(s)}</color>";
+        private static string Dim(string s) => $"<color=#{ModStyle.Hex(Color.Lerp(ModStyle.Dim, ModStyle.Gold, 0.55f))}>{Esc(s)}</color>";
         private static string Esc(string s) => ModFields.TMPEscape(s ?? "");
 
         // ---- Dev ------------------------------------------------------------------------------------------------

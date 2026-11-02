@@ -73,7 +73,8 @@ namespace PalaceMod.Builder.Level
                     path.traversalConstraint.graphMask = nn.graphMask;
                     AstarPath.StartPath(path);
                     path.BlockUntilCalculated();
-                    if (!path.error) route.Points = path.vectorPath.ToList();
+                    // The raw path zigzags through triangle centres; every fourth point reads as a route.
+                    if (!path.error) route.Points = path.vectorPath.Where((_, i) => i % 4 == 0 || i == path.vectorPath.Count - 1).ToList();
                 }
             }
             catch (Exception e)
