@@ -18,7 +18,7 @@ namespace PalaceMod
 {
     public static class ModTooltip
     {
-        private const float Offset = 24f;
+        private const float Offset = 48f;
 
         private static RectTransform panel;
         private static TextMeshProUGUI title, body;

@@ -239,4 +239,24 @@ namespace PalaceMod.Builder
         /// <summary>Parses a share code (whitespace tolerated). Returns null and fills issues on failure.</summary>
         DesignPack Decode(string code, List<ValidationIssue> issues);
     }
+
+    /// <summary>
+    /// .tfpack files: a zip of pack.json plus the pack's assets/ folder (WP6; added after the freeze, additive).
+    /// Imports always go through IPackRepository.InstallNew, so they never overwrite an existing pack.
+    /// </summary>
+    public interface IPackArchive
+    {
+        /// <summary>Folder exports go to by default: PalaceBuilder/exports.</summary>
+        string ExportFolder { get; }
+        /// <summary>Writes the pack and its assets to a .tfpack (default ExportFolder/&lt;id&gt;.tfpack, never
+        /// overwriting). Returns the file written. Throws IOException/InvalidOperationException with a player-facing
+        /// message on failure.</summary>
+        string Export(PackEntry pack, string path = null);
+        /// <summary>Imports a .tfpack (or a Thunderstore zip holding one pack) as a new user pack. Returns null and
+        /// fills issues on failure; warnings (skipped files, renamed id) are added on success too.</summary>
+        PackEntry Import(string path, List<ValidationIssue> issues);
+        /// <summary>Writes a Thunderstore-ready zip (manifest.json, README.md, icon.png and
+        /// PalaceBuilder/packs/&lt;id&gt;/) to ExportFolder. Returns the file written.</summary>
+        string ExportThunderstore(PackEntry pack, string path = null);
+    }
 }
