@@ -937,7 +937,8 @@ namespace PalaceMod.Builder.Level
         /// <summary>Leaves the editor and the map (unsaved changes stay in the draft).</summary>
         public static void Leave()
         {
-            // End first: menus stay up under the clouds of the trip to the map select, like the game's Back to Map.
+            // End first: menus stay up under the clouds of the trip back (to the Builder where it was opened, see
+            // EditorReturn, else the map select), like the game's Back to Map.
             BuilderServices.Sessions.End();
             Stop();
             if (!TransitionRunning) UIFrameManager.instance?.CloseAllFrames();

@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using BepInEx.Configuration;
+using HarmonyLib;
 using PalaceMod.Builder;
 using PalaceMod.Builder.Editor;
 using UnityEngine;
@@ -39,6 +40,7 @@ namespace PalaceMod
 
         public override void Update()
         {
+            EditorReturn.Update();
             if (!BuilderEditor.EditorFocused && !Builder.Level.LayoutEditor.Active) return;
             if (!Feature<BuilderManager>.On) { BuilderEditor.Shutdown(); return; }
             if (ModTextInput.Active) return;
@@ -125,6 +127,20 @@ namespace PalaceMod
             static void RequireDraft()
             {
                 if (BuilderEditor.Draft == null) throw new InvalidOperationException("no pack open (builder-ui pack <id>)");
+            }
+        }
+
+        // A custom run the editor started goes back to where the Builder was opened (see EditorReturn).
+        [HarmonyPatch(typeof(SceneTransitionManager), "TransitionToScene")]
+        private static class ReturnToEditor_Patch
+        {
+            // First, so other prefixes (and the navtrace) see where the transition really goes.
+            [HarmonyPriority(Priority.First)]
+            private static void Prefix(SceneTransitionManager __instance, ref string _scenename)
+            {
+                if (__instance.SceneTransitionIsRunning) return;
+                try { EditorReturn.OnTransition(ref _scenename); }
+                catch (Exception e) { Log.For<BuilderManager>().Error("Couldn't send the transition back to the Builder", e); }
             }
         }
     }
