@@ -8,8 +8,14 @@ using System.Linq;
         uikit buttons <n>    put n demo buttons in the pause menu (0 removes them; past 3 they overflow into "More")
         uikit tooltip [off]  show the shared tooltip in the middle of the screen
         uikit mouse <object> [fx fy] | <x> <y> | off
-                             move a simulated mouse for hover tooltips (ModTooltip.AttachHover) to a point in the named
-                             object's rect (fractions from its bottom-left, default the centre) or to screen pixels
+                             move a simulated mouse to a point in the named object's rect (fractions from its
+                             bottom-left, default the centre) or to screen pixels. The game sees it (Rewired and Unity
+                             Input), so menus hover and raycast through their normal path; "off" gives the real mouse back
+        uikit click [<object> [fx fy] | <x> <y>]
+                             (move there, then) press and release the simulated left button
+        uikit scroll <delta> [frames]
+                             add delta to the scroll wheel on each of the next frames (default 1: one wheel notch;
+                             many small deltas over many frames is a trackpad swipe)
         uikit shown          which tooltip is showing
 */
 namespace PalaceMod
@@ -24,7 +30,7 @@ namespace PalaceMod
         public override void Awake(Plugin plugin)
         {
             base.Awake(plugin);
-            DevCommands.Register("uikit", "uikit <frame|notify|buttons <n>|tooltip [off]|mouse <object> [fx fy]|mouse off|shown>   exercise the UI kit (Core/UI)", args =>
+            DevCommands.Register("uikit", "uikit <frame|notify|buttons <n>|tooltip [off]|mouse <object> [fx fy]|mouse off|click [...]|scroll <d> [frames]|shown>   exercise the UI kit (Core/UI)", args =>
             {
                 switch (args.FirstOrDefault()?.ToLowerInvariant())
                 {
@@ -57,6 +63,16 @@ namespace PalaceMod
                         return ModTooltip.Visible ? "shown" : "hidden";
                     case "mouse":
                         return SimulateMouse(args.Skip(1).ToArray());
+                    case "click":
+                        string at = args.Length > 1 ? SimulateMouse(args.Skip(1).ToArray()) : "";
+                        if (SimulatedPointer.Position == null) throw new InvalidOperationException("move the simulated mouse first (uikit mouse ...)");
+                        SimulatedPointer.Click();
+                        return $"clicked {at}".Trim();
+                    case "scroll":
+                        if (args.Length < 2) throw new ArgumentException("usage: uikit scroll <delta> [frames]");
+                        int frames = args.Length > 2 ? int.Parse(args[2]) : 1;
+                        SimulatedPointer.Scroll(float.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture), frames);
+                        return $"scrolling {args[1]} x {frames} frames";
                     case "shown":
                         return ModTooltip.Describe() ?? "hidden";
                     default:
@@ -70,7 +86,7 @@ namespace PalaceMod
             if (args.Length == 0) throw new ArgumentException("usage: uikit mouse <object> [fx fy] | <x> <y> | off");
             if (args[0] == "off")
             {
-                ModTooltip.HoverSource.SimulatedMouse = null;
+                SimulatedPointer.Release();
                 return "real mouse";
             }
             UnityEngine.Vector2 point;
@@ -86,7 +102,7 @@ namespace PalaceMod
                 target.GetWorldCorners(corners); // screen pixels on the game's overlay canvas
                 point = new UnityEngine.Vector2(UnityEngine.Mathf.Lerp(corners[0].x, corners[2].x, fx), UnityEngine.Mathf.Lerp(corners[0].y, corners[2].y, fy));
             }
-            ModTooltip.HoverSource.SimulatedMouse = point;
+            SimulatedPointer.MoveTo(point);
             return $"mouse at {point.x:0},{point.y:0}";
         }
 

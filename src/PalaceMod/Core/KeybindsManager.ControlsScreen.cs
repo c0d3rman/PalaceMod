@@ -277,6 +277,23 @@ namespace PalaceMod
             Log.For<KeybindsManager>().Info($"Restored the default binding of {Keybinds.ConfigKey(keybind)}: {keybind.Shortcut}");
         }
 
+        /// <summary>Puts the matching keybinds back to their defaults (Settings > Mods' reset buttons); returns how
+        /// many had changed.</summary>
+        internal static int ResetKeybinds(Func<Keybind, bool> which)
+        {
+            var changed = Keybinds.All.Where(k => which(k) && IsCustomized(k)).ToList();
+            foreach (var keybind in changed)
+            {
+                if (Ready) ResetKeybind(keybind);
+                else
+                {
+                    keybind.Shortcut = keybind.DefaultShortcut;
+                    if (moreEntries.TryGetValue(keybind, out var more)) more.Value = "";
+                }
+            }
+            return changed.Count;
+        }
+
         [HarmonyPatch(typeof(ControlMapButton), nameof(ControlMapButton.SetData))]
         private static class SetData_Patch
         {
