@@ -11,6 +11,8 @@ using UnityEngine;
     Controls follow the game's own king-centric commanding. While units follow the king, the patrol key drops a point
     at the king (an optional, unbound key drops one at the cursor). Placing the units as usual (Space, or right-click from unit placement)
     starts the patrol: the drop spot becomes the last point. Back and forth (StarCraft's convention) or loop.
+    Dropping a point, or placing the units, back near the first point closes the route into a loop whatever the Route
+    setting says (the near-duplicate point is merged into the first).
     Picking the units up again, or making them hold position, ends their patrol.
 
     How units are driven: the game's unit AI (PathfindMovementPlayerunit) walks to HomePosition and, once it has
@@ -73,18 +75,22 @@ namespace PalaceMod
         private readonly Dictionary<PathfindMovementPlayerunit, Patroller> patrollers = [];
         private readonly List<Route> routes = [];
         private readonly List<Vector3> pending = [];
+        /// <summary>The pending points were closed into a loop by dropping a point back at the first one.</summary>
+        private bool pendingLoop;
         private readonly PatrolMarkers markers = new();
 
         private const float ArriveDistance = 2.5f;
         private const float MergeDistance = 3f;
         private const float MaxOffset = 3.5f;
+        /// <summary>A point (or the drop spot) this close to the first point closes the route into a loop.</summary>
+        private const float CloseLoopDistance = 4.5f;
 
         public override void Awake(Plugin plugin)
         {
             base.Awake(plugin);
             var config = plugin.Config;
             routeMode = config.Bind(FeatureSection, "Route", PatrolRouteMode.BackAndForth, new ConfigDescription(
-                "How units walk a patrol route with three or more points: back and forth along it, or around it in a loop."));
+                "How units walk an open patrol route with three or more points: back and forth along it, or around it in a loop. Ending a route back at its first point always makes a loop."));
             markerMode = config.Bind(FeatureSection, "Route markers", PatrolMarkerMode.FaintAtNight, new ConfigDescription(
                 "Shows patrol routes on the ground: always, faint at night, only while you lead units, or never."));
             hints = config.Bind(FeatureSection, "Hints", true, new ConfigDescription(
@@ -97,12 +103,93 @@ namespace PalaceMod
                 "While leading units, drops a patrol point under the mouse cursor.");
 
             RegisterDevCommands();
+            SaveStates.RegisterState("patrols", CaptureState, RestoreState);
+        }
+
+        // ---- Savestates -------------------------------------------------------------------------------------------
+
+        internal sealed class SavedPatrols
+        {
+            public List<SavedRoute> routes = [];
+            public List<V3> pending = [];
+        }
+
+        internal sealed class SavedRoute
+        {
+            public List<V3> points = [];
+            public bool loop;
+            public List<SavedPatroller> units = [];
+        }
+
+        internal sealed class SavedPatroller
+        {
+            public string unit;
+            public V3 offset, placedHome;
+            public int index, direction = 1;
+            public float legTime;
+            public bool started;
+        }
+
+        private SavedPatrols CaptureState()
+        {
+            if (routes.Count == 0 && pending.Count == 0) return null;
+            var saved = new SavedPatrols { pending = pending.Select(p => (V3)p).ToList() };
+            foreach (var route in routes)
+            {
+                var r = new SavedRoute { points = route.Points.Select(p => (V3)p).ToList(), loop = route.Loop };
+                foreach (var (unit, p) in patrollers)
+                {
+                    if (unit == null || p.Route != route) continue;
+                    r.units.Add(new SavedPatroller
+                    {
+                        unit = SaveStates.PathOf(unit), offset = p.Offset, placedHome = p.PlacedHome,
+                        index = p.Index, direction = p.Direction, legTime = p.LegTime, started = p.Started,
+                    });
+                }
+                if (r.units.Count > 0) saved.routes.Add(r);
+            }
+            return saved;
+        }
+
+        // The reload dropped every patrol (the units are new objects); hand the captured ones to the same units.
+        private void RestoreState(SavedPatrols saved)
+        {
+            if (!IsEnabled) return;
+            Reset();
+            pending.AddRange(saved.pending.Select(p => (Vector3)p));
+            var units = SaveStates.FindByPath<PathfindMovementPlayerunit>();
+            int restored = 0;
+            foreach (var r in saved.routes)
+            {
+                var route = new Route { Loop = r.loop };
+                route.Points.AddRange(r.points.Select(p => (Vector3)p));
+                if (route.Points.Count < 2) continue;
+                foreach (var s in r.units)
+                {
+                    if (s.unit == null || !units.TryGetValue(s.unit, out var unit) || patrollers.ContainsKey(unit)) continue;
+                    patrollers[unit] = new Patroller
+                    {
+                        Route = route, Offset = s.offset, PlacedHome = s.placedHome,
+                        Index = Mathf.Clamp(s.index, 0, route.Points.Count - 1), Direction = s.direction >= 0 ? 1 : -1,
+                        LegTime = s.legTime, Started = s.started,
+                    };
+                    route.Units++;
+                    if (s.started) unit.HasReachedHomePositionAlready = true;
+                }
+                if (route.Units > 0)
+                {
+                    routes.Add(route);
+                    restored += route.Units;
+                }
+            }
+            if (restored > 0) GameplayImpact.Mark("Unit patrols");
+            Log.Debug($"Restored {routes.Count} patrol routes ({restored} units), {pending.Count} pending points from a savestate");
         }
 
         protected override void OnFeatureDisabled()
         {
             StopAll(keepPosition: true);
-            pending.Clear();
+            ClearPending();
             markers.Hide();
         }
 
@@ -131,7 +218,7 @@ namespace PalaceMod
             if (!leading && wasLeading && pending.Count > 0)
             {
                 // Stopped leading without placing anyone (all knocked out, king down): the points have no units.
-                pending.Clear();
+                ClearPending();
             }
             wasLeading = leading;
 
@@ -144,7 +231,7 @@ namespace PalaceMod
             {
                 if (leading && pending.Count > 0)
                 {
-                    pending.Clear();
+                    ClearPending();
                     Notify.Show("Patrol points removed", key: "patrol");
                 }
                 else if (!leading && patrollers.Count > 0)
@@ -182,10 +269,35 @@ namespace PalaceMod
             Notify.Show($"{KeyLabel(pointKey)}: patrol point{cursor}, then place units to patrol. Hold {KeyLabel(pointKey)} to clear", seconds: 7f, key: "patrol-hint");
         }
 
+        private void ClearPending()
+        {
+            pending.Clear();
+            pendingLoop = false;
+        }
+
+        /// <summary>Whether a point here would close the pending route back onto its first point, making a loop of
+        /// at least three points.</summary>
+        private bool ClosesLoop(Vector3 position) =>
+            pending.Count >= 3 && Flat(position - pending[0]).magnitude < CloseLoopDistance;
+
         private void AddPoint(Vector3 position, CommandUnits cu)
         {
             var units = cu.PlayerUnitsCommanding;
             if (units.Count > 0) position = units[0].GetNearestGroundPosition(position);
+            if (!pendingLoop && ClosesLoop(position))
+            {
+                // Back at the start: merge into the first point and close the route.
+                pendingLoop = true;
+                if (cu.dropWaypointFx != null) cu.dropWaypointFx.Emit(cu.drowWaypointParticleCount / 3);
+                Notify.Show($"Patrol: loop of {pending.Count} points. Place your units to start.", key: "patrol");
+                Log.Info($"Patrol route closed into a {pending.Count}-point loop");
+                return;
+            }
+            if (pendingLoop && Flat(position - pending[0]).magnitude < CloseLoopDistance)
+            {
+                Notify.Show("Patrol: already a loop. Place your units to start.", key: "patrol");
+                return;
+            }
             if (pending.Count > 0 && Flat(position - pending[pending.Count - 1]).magnitude < MergeDistance)
             {
                 Notify.Show("Patrol point is too close to the last one", NotifyKind.Warning, key: "patrol");
@@ -209,7 +321,7 @@ namespace PalaceMod
             if (units.All(u => u.HoldPosition))
             {
                 // A hold-position placement is a different command: the units stay put.
-                pending.Clear();
+                ClearPending();
                 Notify.Show("Holding position: patrol points dropped", key: "patrol");
                 return;
             }
@@ -219,10 +331,13 @@ namespace PalaceMod
             foreach (var unit in units) center += unit.HomePosition;
             center /= units.Count;
 
-            var route = new Route { Loop = loop ?? routeMode.Value == PatrolRouteMode.Loop };
+            // Placed back at the first point: that closes the loop too (the drop spot merges into the first point).
+            bool closed = pendingLoop || ClosesLoop(center);
+            var route = new Route { Loop = closed || (loop ?? routeMode.Value == PatrolRouteMode.Loop) };
             route.Points.AddRange(pending);
-            pending.Clear();
-            if (Flat(center - route.Points[route.Points.Count - 1]).magnitude >= MergeDistance) route.Points.Add(center);
+            ClearPending();
+            // On a closed loop the drop spot isn't a point; otherwise it becomes the last one.
+            if (!closed && Flat(center - route.Points[route.Points.Count - 1]).magnitude >= MergeDistance) route.Points.Add(center);
             if (route.Points.Count < 2)
             {
                 Notify.Show("A patrol needs two points: drop one, then place units somewhere else", NotifyKind.Warning, key: "patrol");
@@ -232,19 +347,29 @@ namespace PalaceMod
             if (route.Points.Count == 2) route.Loop = false;
             routes.Add(route);
 
+            // Units start where they were dropped (the last point) and head back along the route. On a closed loop
+            // they join it at the point nearest the drop spot and carry on around.
+            int start = route.Points.Count - 1;
+            if (closed)
+            {
+                int nearest = 0;
+                for (int i = 1; i < route.Points.Count; i++)
+                    if (Flat(route.Points[i] - center).sqrMagnitude < Flat(route.Points[nearest] - center).sqrMagnitude) nearest = i;
+                start = (nearest - 1 + route.Points.Count) % route.Points.Count;
+            }
             foreach (var unit in units)
             {
                 Vector3 offset = Flat(unit.HomePosition - center);
                 if (offset.magnitude > MaxOffset) offset = offset.normalized * MaxOffset;
                 Remove(unit, keepPosition: false);
-                // Units start where they were dropped (the last point) and head back along the route.
-                var patroller = new Patroller { Route = route, Offset = offset, Index = route.Points.Count - 1, PlacedHome = unit.HomePosition };
+                var patroller = new Patroller { Route = route, Offset = offset, Index = start, PlacedHome = unit.HomePosition };
                 patrollers[unit] = patroller;
                 route.Units++;
                 unit.HasReachedHomePositionAlready = true;
             }
             GameplayImpact.Mark("Unit patrols");
-            Notify.Show($"{units.Count} {(units.Count == 1 ? "unit" : "units")} patrolling {route.Points.Count} points", NotifyKind.Success, key: "patrol");
+            string shape = route.Loop ? $"a loop of {route.Points.Count} points" : $"{route.Points.Count} points";
+            Notify.Show($"{units.Count} {(units.Count == 1 ? "unit" : "units")} patrolling {shape}", NotifyKind.Success, key: "patrol");
             Log.Info($"{units.Count} units on a {route.Points.Count}-point {(route.Loop ? "loop" : "back-and-forth")} route");
         }
 
@@ -252,7 +377,7 @@ namespace PalaceMod
         internal void Assign(IEnumerable<PathfindMovementPlayerunit> units, IList<Vector3> points, bool? loop = null)
         {
             if (points == null || points.Count < 2) throw new ArgumentException("a patrol needs at least two points");
-            pending.Clear();
+            ClearPending();
             pending.AddRange(points.Take(points.Count - 1));
             var list = units.ToList();
             // Pretend the units were dropped at the last point, keeping their spread.
@@ -369,7 +494,7 @@ namespace PalaceMod
         {
             patrollers.Clear();
             routes.Clear();
-            pending.Clear();
+            ClearPending();
         }
 
         internal bool IsPatrolling(PathfindMovementPlayerunit unit) => unit != null && patrollers.ContainsKey(unit);
@@ -395,7 +520,7 @@ namespace PalaceMod
             Vector3? next = null;
             var cu = CommandUnits.instance;
             if (leading && pending.Count > 0) next = cu.transform.position;
-            markers.Show(routes, pending, next, alpha);
+            markers.Show(routes, pending, pendingLoop, next, alpha);
         }
 
         // ---- Patches ----------------------------------------------------------------------------------------------
@@ -502,7 +627,7 @@ namespace PalaceMod
                 RequireLevel();
                 int n = patrollers.Count;
                 StopAll(keepPosition: true);
-                pending.Clear();
+                ClearPending();
                 return $"stopped {n} patrolling units";
             });
             DevCommands.Register("patrol-ko", "patrol-ko              knock out one patrolling unit (to test respawn)", _ =>
@@ -524,7 +649,7 @@ namespace PalaceMod
         {
             Vector3 king = cu.transform.position;
             string P(Vector3 v) => $"({v.x - king.x:F1}, {v.z - king.z:F1})";
-            var lines = new List<string> { $"{routes.Count} routes, {patrollers.Count} patrolling, {pending.Count} pending: {string.Join(" ", pending.Select(P))}  (relative to king)" };
+            var lines = new List<string> { $"{routes.Count} routes, {patrollers.Count} patrolling, {pending.Count} pending{(pendingLoop ? " (closed loop)" : "")}: {string.Join(" ", pending.Select(P))}  (relative to king)" };
             for (int r = 0; r < routes.Count; r++)
                 lines.Add($"  route {r}: {(routes[r].Loop ? "loop" : "back and forth")}, {routes[r].Units} units: {string.Join(" -> ", routes[r].Points.Select(P))}");
             foreach (var (unit, p) in patrollers)

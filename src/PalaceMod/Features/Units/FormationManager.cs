@@ -13,7 +13,10 @@ using UnityEngine;
     - Prefix: for a "place N units" request, hides the other commanded units from the game's list for the duration of
       the call (and re-hides their auto-attacks afterwards), and applies the Spacing setting.
     - Postfix: overrides the home positions with the chosen formation, at the king or at a mouse-picked spot, and
-      optionally makes the placed units hold position.
+      optionally makes the placed units hold position (Shift with a cursor placement).
+    Holding the game's own place-units key still gives the game's hold position, in any formation; pressed while a
+    cursor placement is aimed, that key sends the units to the cursor. Faint markers show where following units would
+    land in the chosen formation, and while the place key is held markers show where they went (gold once holding).
     Everything else (sounds, effects, the hold-position buffer, day-time teleport) stays the game's own. While a cursor
     placement is aimed, PlayerMovement's "Move Towards Mouse" read (the same right mouse button) is ignored.
 
@@ -73,12 +76,17 @@ namespace PalaceMod
             facing = config.Bind(FeatureSection, "Facing", PlacementFacing.WalkingDirection, new ConfigDescription(
                 "Which way Line and Arc formations face: where the king walks, toward the mouse cursor, or toward the nearest enemies (or the next wave's spawn)."));
             mousePlacement = config.Bind(FeatureSection, "Mouse placement", true, new ConfigDescription(
-                "While units follow you, right-click to send them to the cursor, or right-drag to draw a line for them. Hold the click, or Shift, to make them hold position. Using it makes the run unranked."));
+                "While units follow you, right-click to send them to the cursor, or right-drag to draw a line for them. To make them hold position, hold Shift, or press and hold the game's place-units key while aiming. Using it makes the run unranked."));
             preview = config.Bind(FeatureSection, "Placement preview", true, new ConfigDescription(
-                "Shows markers on the ground where units will stand while you aim a mouse placement."));
+                "Shows markers on the ground where units will stand: faintly while they follow you in a formation, while you aim a mouse placement, and while you hold the place-units key (gold once they hold position)."));
             hints = config.Bind(FeatureSection, "Hints", true, new ConfigDescription(
                 "Shows a short reminder of the placement keys the first time you lead units each session."));
-            preview.SettingChanged += (_, _) => { if (!preview.Value) previewMarkers.Hide(); };
+            preview.SettingChanged += (_, _) =>
+            {
+                if (preview.Value) return;
+                previewMarkers.Hide();
+                followMarkers.Hide();
+            };
             mousePlacement.SettingChanged += (_, _) => { if (!mousePlacement.Value) CancelDrag(); };
 
             cycleKey = Keybinds.Register(FeatureSection, "cycle", "Change formation", new KeyboardShortcut(KeyCode.F7),
@@ -96,11 +104,19 @@ namespace PalaceMod
         protected override void OnFeatureDisabled()
         {
             CancelDrag();
+            followMarkers.Hide();
             placeOneActive = false;
             devPress = devHeld = devRelease = devWalk = false;
+            devCommandUntil = 0f;
+            heldPlaced.Clear();
+            previewMarkers.Hide();
         }
 
-        public override void OnDestroy() => previewMarkers.Destroy();
+        public override void OnDestroy()
+        {
+            previewMarkers.Destroy();
+            followMarkers.Destroy();
+        }
 
         // ---- Input ------------------------------------------------------------------------------------------------
 
@@ -114,6 +130,8 @@ namespace PalaceMod
             if (cu == null)
             {
                 CancelDrag();
+                followMarkers.Hide();
+                heldPlaced.Clear();
                 wasLeading = false;
                 return;
             }
@@ -124,6 +142,96 @@ namespace PalaceMod
             if (cycleKey.Down) CycleFormation();
             UpdatePlaceOne(cu, leading);
             UpdateMouse(cu, leading);
+            UpdateFollowPreview(cu, leading);
+            UpdateHeldPlacement(cu);
+        }
+
+        // ---- Follow preview ---------------------------------------------------------------------------------------
+
+        // Faint markers where the following units would stand if placed now (at the king, facing as the Facing setting
+        // says). Normal is the game's own randomised cluster, which can't be known before it's placed, so it shows none.
+        private readonly PlacementPreview followMarkers = new("Follow Preview", alpha: 0.4f, scale: 0.8f);
+
+        private void UpdateFollowPreview(CommandUnits cu, bool leading)
+        {
+            bool show = preview.Value && leading && !dragging && formation.Value != FormationType.Normal
+                && (UIFrameManager.instance == null || UIFrameManager.instance.ActiveFrame == null)
+                && LocalGamestate.Instance != null && !LocalGamestate.Instance.PlayerFrozen;
+            if (!show || !Assign(cu, cu.PlayerUnitsCommanding, DefaultRequest(cu), assigned, out var center, out var forward))
+            {
+                followMarkers.Hide();
+                return;
+            }
+            slots.Clear();
+            foreach (var (_, position) in assigned) slots.Add(new FormationSlot { Position = position });
+            followMarkers.Show(slots, center, forward, hold: false);
+        }
+
+        // ---- Holding the game's place key -------------------------------------------------------------------------
+
+        // Hold position comes from the game itself: pressing its place-units key places the units (in the chosen
+        // formation, via the placement patch), and keeping it held for CommandUnits.holdToHoldPositionTime makes them
+        // hold position. While the key stays held, markers show where the units went and turn gold once they hold.
+        // Pressed while a cursor placement is aimed, the key sends the units to the cursor instead of the king.
+        private const float HeldMarkerDelay = 0.15f; // a quick tap shows no markers
+        private readonly List<PathfindMovementPlayerunit> heldPlaced = [];
+        private Vector3 heldCenter, heldForward;
+        private bool heldArrow, heldReported;
+        private float heldSince;
+
+        private void OnGameKeyPlaced(List<PathfindMovementPlayerunit> placed, bool arranged, Vector3 center, Vector3 forward, bool aimed)
+        {
+            heldPlaced.Clear();
+            foreach (var unit in placed) if (unit != null) heldPlaced.Add(unit);
+            heldArrow = arranged;
+            heldCenter = center;
+            heldForward = forward;
+            heldSince = Time.unscaledTime;
+            heldReported = false;
+            if (!aimed) return;
+            // The cursor placement is done; releasing the mouse button afterwards must not place again.
+            CancelDrag();
+            GameplayImpact.Mark("Mouse unit placement");
+            Log.Info($"Cursor placement confirmed with the place-units key ({heldPlaced.Count} units)");
+        }
+
+        private static bool PlaceKeyHeld()
+        {
+            var input = Plugin.Input;
+            return input != null && (input.GetButton("Command Units") || input.GetButton("Smart Command Units"));
+        }
+
+        private void UpdateHeldPlacement(CommandUnits cu)
+        {
+            if (heldPlaced.Count == 0) return;
+            if (!PlaceKeyHeld())
+            {
+                heldPlaced.Clear();
+                if (!dragging) previewMarkers.Hide();
+                return;
+            }
+            if (dragging || Time.unscaledTime - heldSince < HeldMarkerDelay) return;
+            slots.Clear();
+            bool hold = false;
+            foreach (var unit in heldPlaced)
+            {
+                if (unit == null) continue;
+                slots.Add(new FormationSlot { Position = unit.HomePosition });
+                hold |= unit.HoldPosition;
+            }
+            if (hold && !heldReported)
+            {
+                heldReported = true;
+                Log.Info($"Place key held {Time.unscaledTime - heldSince:F1}s: {slots.Count} units hold position");
+            }
+            if (!preview.Value || slots.Count == 0) return;
+            if (!heldArrow)
+            {
+                heldCenter = Vector3.zero;
+                foreach (var slot in slots) heldCenter += slot.Position;
+                heldCenter /= slots.Count;
+            }
+            previewMarkers.Show(slots, heldCenter, heldForward, hold, showArrow: heldArrow);
         }
 
         private void OnStartLeading()
@@ -134,6 +242,7 @@ namespace PalaceMod
             if (Bound(cycleKey)) parts.Add($"{KeyLabel(cycleKey)}: formation ({Words(formation.Value)})");
             if (Bound(placeOneKey)) parts.Add($"{KeyLabel(placeOneKey)}: drop one unit");
             if (mousePlacement.Value && Bound(mouseKey)) parts.Add($"{KeyLabel(mouseKey)}: send to cursor (drag for a line)");
+            parts.Add("hold the place key: hold position");
             if (parts.Count > 0) Notify.Show(string.Join("   ", parts), seconds: 7f, key: "placement-hint");
         }
 
@@ -170,14 +279,20 @@ namespace PalaceMod
 
         // ---- Mouse placement --------------------------------------------------------------------------------------
 
+        // A press becomes a drag (a drawn line) once the cursor has moved this far on screen AND the ground point under
+        // it this far from where the press started. The screen test matters because the camera follows the king: while
+        // he walks or coasts to a stop the ground under a still cursor slides away, which alone isn't a drag.
         private const float DragThreshold = 1.5f;
+        private static float ScreenDragThreshold => Mathf.Max(12f, Screen.height * 0.025f);
 
-        private readonly PlacementPreview previewMarkers = new();
+        private readonly PlacementPreview previewMarkers = new("Placement Preview");
         private bool dragging, dragMoved;
         private Vector3 dragStart;
+        private Vector2 dragStartScreen;
         private float dragStartTime;
 
-        // Dev-command stand-ins for the mouse, so placement can be driven without a real cursor.
+        // Dev-command stand-ins for the mouse, so placement can be driven without a real cursor. They feed the same
+        // pressed/held/released flags as the keybind, so everything below runs as for a real click.
         private Vector2? devCursor;
         private bool devPress, devHeld, devRelease;
         private bool devWalk; // stands in for holding the game's "Move Towards Mouse"
@@ -198,7 +313,9 @@ namespace PalaceMod
             {
                 dragging = true;
                 dragMoved = false;
-                dragStartTime = Time.time;
+                dragStartScreen = CursorScreen();
+                dragStartTime = Time.unscaledTime;
+                Log.Debug($"Cursor placement: press at {dragStart}");
             }
             if (!dragging) return;
             if (!held && !released)
@@ -208,10 +325,10 @@ namespace PalaceMod
                 return;
             }
 
-            if (!TryCursorWorld(out var current)) current = dragStart;
-            var request = MouseRequest(cu, current);
+            var request = CurrentMouseRequest(cu);
             if (released)
             {
+                Log.Info($"Cursor placement after {Time.unscaledTime - dragStartTime:F1}s: {(dragMoved ? $"line {request.Width:F1}m wide" : "point")}{(request.Hold ? ", hold position (hold key)" : "")}");
                 CancelDrag();
                 // The user's call: sending units to the cursor goes beyond vanilla controls, so the run is unranked.
                 GameplayImpact.Mark("Mouse unit placement");
@@ -221,13 +338,23 @@ namespace PalaceMod
             if (preview.Value) ShowPreview(cu, request);
         }
 
+        private PlacementRequest CurrentMouseRequest(CommandUnits cu)
+        {
+            if (!TryCursorWorld(out var current)) current = dragStart;
+            return MouseRequest(cu, current);
+        }
+
+        private Vector2 CursorScreen() =>
+            devCursor.HasValue ? new Vector2(devCursor.Value.x * Screen.width, devCursor.Value.y * Screen.height) : (Vector2)Input.mousePosition;
+
         private PlacementRequest MouseRequest(CommandUnits cu, Vector3 current)
         {
             Vector3 chord = current - dragStart;
             chord.y = 0f;
-            if (chord.magnitude >= DragThreshold) dragMoved = true;
+            if (!dragMoved && chord.magnitude >= DragThreshold && (CursorScreen() - dragStartScreen).magnitude >= ScreenDragThreshold)
+                dragMoved = true;
 
-            bool hold = holdKey.Held || (!dragMoved && Time.time - dragStartTime >= cu.holdToHoldPositionTime);
+            bool hold = holdKey.Held;
             if (!dragMoved)
             {
                 return new PlacementRequest
@@ -258,7 +385,7 @@ namespace PalaceMod
 
         private void ShowPreview(CommandUnits cu, PlacementRequest request)
         {
-            if (!Assign(cu, cu.PlayerUnitsCommanding, request, assigned)) return;
+            if (!Assign(cu, cu.PlayerUnitsCommanding, request, assigned, out _, out _)) return;
             slots.Clear();
             foreach (var (_, position) in assigned) slots.Add(new FormationSlot { Position = position });
             previewMarkers.Show(slots, request.Center, request.Forward, request.Hold);
@@ -277,8 +404,7 @@ namespace PalaceMod
             var cam = Camera.main;
             var cu = CommandUnits.instance;
             if (cam == null || cu == null) return false;
-            Vector3 screen = devCursor.HasValue ? new Vector3(devCursor.Value.x * Screen.width, devCursor.Value.y * Screen.height) : Input.mousePosition;
-            var ray = cam.ScreenPointToRay(screen);
+            var ray = cam.ScreenPointToRay(CursorScreen());
             var units = cu.PlayerUnitsCommanding;
             float height = cu.transform.position.y;
             // Intersect a ground plane, snap to the navmesh, and repeat once at the snapped height for sloped ground.
@@ -377,11 +503,13 @@ namespace PalaceMod
 
         private static readonly List<(PathfindMovementPlayerunit unit, Vector3 position)> assigned = [];
 
-        private void Arrange(CommandUnits cu, List<PathfindMovementPlayerunit> units, PlacementRequest request)
+        /// <returns>False if the game's own placement was kept (Normal at the king).</returns>
+        private bool Arrange(CommandUnits cu, List<PathfindMovementPlayerunit> units, PlacementRequest request, out Vector3 center, out Vector3 forward)
         {
+            center = forward = default;
             // Normal at the king is the game's own placement.
-            if (request.Formation == FormationType.Normal && !request.HasCenter) return;
-            if (!Assign(cu, units, request, assigned)) return;
+            if (request.Formation == FormationType.Normal && !request.HasCenter) return false;
+            if (!Assign(cu, units, request, assigned, out center, out forward)) return false;
             bool day = DayNightCycle.Instance != null && DayNightCycle.Instance.CurrentTimestate == DayNightCycle.Timestate.Day;
             foreach (var (unit, position) in assigned)
             {
@@ -393,36 +521,40 @@ namespace PalaceMod
                     unit.ClearCurrentPath();
                 }
             }
+            return true;
         }
 
         /// <summary>Works out where each unit stands (snapped to that unit's navmesh); shared by placement and preview.</summary>
-        private bool Assign(CommandUnits cu, List<PathfindMovementPlayerunit> units, PlacementRequest request, List<(PathfindMovementPlayerunit, Vector3)> result)
+        private bool Assign(CommandUnits cu, List<PathfindMovementPlayerunit> units, PlacementRequest request,
+            List<(PathfindMovementPlayerunit, Vector3)> result, out Vector3 center, out Vector3 forward)
         {
             result.Clear();
+            center = request.HasCenter ? request.Center : cu.transform.position;
+            forward = Vector3.forward;
             if (units.Count == 0) return false;
 
-            Vector3 center = request.HasCenter ? request.Center : cu.transform.position;
-            Vector3 forward = request.Forward.sqrMagnitude > 1e-6f ? request.Forward : Facing(cu, center, awayFromKing: false);
+            forward = request.Forward.sqrMagnitude > 1e-6f ? request.Forward : Facing(cu, center, awayFromKing: false);
             forward = Flat(forward).normalized;
             if (forward.sqrMagnitude < 1e-6f) forward = Vector3.forward;
             Vector3 right = Vector3.Cross(Vector3.up, forward);
             FormationLayout.Compute(request.Formation, units.Count, center, forward, spacing.Value, request.Width, slots);
 
-            // Melee units first, so they get the front rows (the outer ring of a circle).
+            // Melee units first, so they get the front rows (the outer ring of a circle). Runs every frame for the
+            // follow preview, so no LINQ here.
             ordered.Clear();
-            ordered.AddRange(units);
-            var melee = ordered.Select(IsMeleeOnly).ToList();
-            var indices = Enumerable.Range(0, ordered.Count).OrderBy(i => melee[i] ? 0 : 1).ThenBy(i => i).ToList();
-            var byPriority = indices.Select(i => ordered[i]).ToList();
+            foreach (var unit in units) if (IsMeleeOnly(unit)) ordered.Add(unit);
+            foreach (var unit in units) if (!IsMeleeOnly(unit)) ordered.Add(unit);
+            var byPriority = ordered;
+            Vector3 c = center, f = forward;
 
             // Within a row, match units to slots left-to-right (or by angle) so their paths don't cross.
             bool ring = request.Formation == FormationType.Circle;
             float Key(Vector3 p)
             {
-                Vector3 d = p - center;
+                Vector3 d = p - c;
                 float x = Vector3.Dot(d, right);
                 if (!ring) return x;
-                float a = Mathf.Atan2(x, Vector3.Dot(d, forward));
+                float a = Mathf.Atan2(x, Vector3.Dot(d, f));
                 return a < 0f ? a + 2f * Mathf.PI : a;
             }
 
@@ -464,6 +596,19 @@ namespace PalaceMod
 
         // The game's "Move Towards Mouse" (right mouse button by default) would walk the king toward the cursor while
         // a placement is aimed with the same button; it's ignored during that window only.
+        // Dev: "place-press" holds the game's place-units key by answering the same Rewired read the game makes, so
+        // CommandUnits' own press, long-press hold and release logic runs as for a real key.
+        private static float devCommandUntil;
+
+        [HarmonyPatch(typeof(Rewired.Player), nameof(Rewired.Player.GetButton), [typeof(string)])]
+        private static class DevPlaceKeyPatch
+        {
+            private static void Postfix(string actionName, ref bool __result)
+            {
+                if (devCommandUntil > 0f && !__result && actionName == "Command Units" && Time.unscaledTime < devCommandUntil) __result = true;
+            }
+        }
+
         [HarmonyPatch(typeof(PlayerMovement), "Update")]
         private static class MoveTowardsMousePatch
         {
@@ -506,6 +651,11 @@ namespace PalaceMod
                 public float VanillaSpacing;
                 public List<PathfindMovementPlayerunit> Held;
                 public List<AutoAttack> HeldAttacks;
+                public PlacementRequest Request;
+                /// <summary>Started by the game (its place-units key), not by the mod.</summary>
+                public bool GameKey;
+                /// <summary>The game's key was pressed while a cursor placement was aimed: it goes to the cursor.</summary>
+                public bool Aimed;
             }
 
             private static void Prefix(CommandUnits __instance, List<PathfindMovementPlayerunit> ___playerUnitsCommanding,
@@ -518,7 +668,10 @@ namespace PalaceMod
                 __state.VanillaSpacing = __instance.unitDistanceFromEachOther;
                 __instance.unitDistanceFromEachOther = manager.spacing.Value;
 
-                var request = pending ?? manager.DefaultRequest(__instance);
+                __state.GameKey = pending == null;
+                __state.Aimed = __state.GameKey && manager.dragging;
+                var request = pending ?? (__state.Aimed ? manager.CurrentMouseRequest(__instance) : manager.DefaultRequest(__instance));
+                __state.Request = request;
                 if (request.MaxUnits <= 0 || ___playerUnitsCommanding.Count <= request.MaxUnits) return;
 
                 // Hide the units that stay with the king, so the game places only the first MaxUnits.
@@ -537,7 +690,7 @@ namespace PalaceMod
                 if (!__state.Active) return;
                 __instance.unitDistanceFromEachOther = __state.VanillaSpacing;
                 var manager = Feature<FormationManager>.Instance;
-                var request = pending ?? manager.DefaultRequest(__instance);
+                var request = __state.Request;
 
                 if (__state.Held != null)
                 {
@@ -550,8 +703,9 @@ namespace PalaceMod
                     }
                 }
 
-                manager.Arrange(__instance, ___toBePlaced, request);
+                bool arranged = manager.Arrange(__instance, ___toBePlaced, request, out var center, out var forward);
                 if (request.Hold) __instance.MakeUnitsInBufferHoldPosition();
+                if (__state.GameKey) manager.OnGameKeyPlaced(___toBePlaced, arranged, center, forward, __state.Aimed);
             }
 
             // Exceptions in the prefix must not leave units hidden from the game's list.
@@ -663,6 +817,13 @@ namespace PalaceMod
                 }
                 string king = $"king at {CommandUnits.instance.transform.position}, aiming {AimingAtCursor}";
                 return TryCursorWorld(out var p) ? $"cursor at ground {p}; {king}" : $"cursor not over ground; {king}";
+            });
+            DevCommands.Register("place-press", "place-press [seconds]  hold the game's place-units key for a while (default 0.1 s); 1.2+ makes units hold position", args =>
+            {
+                RequireLevel();
+                float seconds = args.Length > 0 ? float.Parse(args[0]) : 0.1f;
+                devCommandUntil = Time.unscaledTime + seconds;
+                return $"holding the place key for {seconds:0.##}s; aiming at cursor: {dragging}";
             });
             DevCommands.Register("place-status", "place-status           following units and every placed unit's home and hold state", _ => Status(RequireLevel()));
         }

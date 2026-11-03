@@ -26,7 +26,7 @@ namespace PalaceMod
         private int builtHash;
         private readonly List<Vector3> samples = [];
 
-        public void Show(List<PatrolManager.Route> routes, List<Vector3> pending, Vector3? king, float alpha)
+        public void Show(List<PatrolManager.Route> routes, List<Vector3> pending, bool pendingLoop, Vector3? king, float alpha)
         {
             if (root == null) Build();
             root.SetActive(true);
@@ -35,11 +35,11 @@ namespace PalaceMod
             SetAlpha(pendingRingMaterial, PendingColor, alpha);
             SetAlpha(pendingLineMaterial, PendingColor, alpha);
 
-            int hash = Hash(routes, pending);
+            int hash = Hash(routes, pending, pendingLoop);
             if (hash != builtHash)
             {
                 builtHash = hash;
-                Rebuild(routes, pending);
+                Rebuild(routes, pending, pendingLoop);
             }
 
             bool showKing = king.HasValue && pending.Count > 0;
@@ -72,7 +72,7 @@ namespace PalaceMod
         private static void SetAlpha(Material material, Color color, float alpha) =>
             material.color = new Color(color.r, color.g, color.b, color.a * alpha);
 
-        private static int Hash(List<PatrolManager.Route> routes, List<Vector3> pending)
+        private static int Hash(List<PatrolManager.Route> routes, List<Vector3> pending, bool pendingLoop)
         {
             unchecked
             {
@@ -82,13 +82,13 @@ namespace PalaceMod
                     h = h * 31 + (route.Loop ? 1 : 2);
                     foreach (var p in route.Points) h = h * 31 + p.GetHashCode();
                 }
-                h = h * 31 + 7;
+                h = h * 31 + (pendingLoop ? 7 : 11);
                 foreach (var p in pending) h = h * 31 + p.GetHashCode();
                 return h == 0 ? 1 : h;
             }
         }
 
-        private void Rebuild(List<PatrolManager.Route> routes, List<Vector3> pending)
+        private void Rebuild(List<PatrolManager.Route> routes, List<Vector3> pending, bool pendingLoop)
         {
             int ring = 0, line = 0;
             foreach (var route in routes)
@@ -106,6 +106,8 @@ namespace PalaceMod
                 PlaceRing(ring++, pending[i], pendingRingMaterial);
                 if (i + 1 < pending.Count) Drape(Line(line++, pendingLineMaterial), pending[i], pending[i + 1]);
             }
+            // A route closed back onto its first point.
+            if (pendingLoop && pending.Count > 2) Drape(Line(line++, pendingLineMaterial), pending[pending.Count - 1], pending[0]);
             for (int i = ring; i < rings.Count; i++) rings[i].SetActive(false);
             for (int i = line; i < lines.Count; i++) lines[i].gameObject.SetActive(false);
         }
