@@ -320,6 +320,7 @@ namespace PalaceMod
 
             var header = Object.Instantiate(headerSource.gameObject, rect, false);
             header.name = "Header";
+            header.SetActive(true); // the source is hidden while there are no units (Fixes)
             foreach (var loc in header.GetComponents<I2.Loc.Localize>()) Object.DestroyImmediate(loc);
             var headerText = header.GetComponent<TextMeshProUGUI>();
             headerText.text = "Spawns:";
