@@ -42,6 +42,7 @@ namespace PalaceMod
     public class PatrolManager : BaseManager
     {
         public override string FeatureSection => "Patrols";
+        public override bool AffectsRanking => true; // off while "Gameplay-changing features" is off
         public override string FeatureDescription =>
             "Units walk a route you set and fight what they meet on the way. While leading units, drop patrol points, then place the units to start.";
 

@@ -18,6 +18,10 @@ using HarmonyLib;
     - OnFeatureDisabled / OnFeatureEnabled run whenever the setting changes (from the pane or a live config reload).
     Patches that stay applied can early-out with `if (!Feature<MyManager>.On) return;`.
     Managers that leave FeatureSection null are infrastructure and are always on.
+
+    A feature that can make a run unranked overrides AffectsRanking => true: it then also counts as disabled while the
+    master switch Settings > Mods > General > "Gameplay-changing features" is off (see GameplayFeatures), with the same
+    hooks firing, and its own Enabled value is left as it was.
 */
 namespace PalaceMod
 {
@@ -38,10 +42,22 @@ namespace PalaceMod
         /// and gate them with Feature&lt;T&gt;.On instead.</summary>
         protected virtual bool UnpatchWhenDisabled => true;
 
+        /// <summary>Whether using this feature can make a run unranked (it calls GameplayImpact.Mark). Such a feature
+        /// is also off while GameplayFeatures.Allowed is false.</summary>
+        public virtual bool AffectsRanking => false;
+
         /// <summary>The feature's Enabled setting; null for infrastructure managers.</summary>
         public ConfigEntry<bool> EnabledEntry { get; private set; }
 
-        public bool IsEnabled => EnabledEntry == null || EnabledEntry.Value;
+        /// <summary>Whether the feature runs: its Enabled setting is on and, for AffectsRanking features, the master
+        /// switch allows it.</summary>
+        public bool IsEnabled => EnabledEntry == null || (EnabledEntry.Value && (!AffectsRanking || GameplayFeatures.Allowed));
+
+        /// <summary>Enabled by its own setting but held off by the "Gameplay-changing features" master switch.</summary>
+        public bool HeldOffByMasterSwitch => EnabledEntry != null && EnabledEntry.Value && AffectsRanking && !GameplayFeatures.Allowed;
+
+        /// <summary>Raised after IsEnabled changes at runtime (the Enabled setting or the master switch).</summary>
+        public event Action EnabledChanged;
 
         private Log log;
 
@@ -70,6 +86,8 @@ namespace PalaceMod
                 EnabledEntry = plugin.Config.Bind(FeatureSection, "Enabled", EnabledByDefault, new ConfigDescription(
                     FeatureDescription ?? $"Turns {FeatureSection} on or off."));
                 EnabledEntry.SettingChanged += OnEnabledChanged;
+                _ = GameplayFeatures.Entry; // bind the master switch before anything reads IsEnabled
+                if (AffectsRanking) GameplayFeatures.Changed += ApplyEnabled;
             }
             lastEnabled = IsEnabled;
             if (IsEnabled || !UnpatchWhenDisabled) Patch();
@@ -85,6 +103,7 @@ namespace PalaceMod
         {
             retired = true;
             if (EnabledEntry != null) EnabledEntry.SettingChanged -= OnEnabledChanged;
+            GameplayFeatures.Changed -= ApplyEnabled;
             Unpatch();
         }
 
@@ -103,11 +122,19 @@ namespace PalaceMod
                 }
                 if (enabled) OnFeatureEnabled();
                 else OnFeatureDisabled();
-                Log.Info(enabled ? "Enabled" : "Disabled");
+                Log.Info(enabled ? "Enabled" : HeldOffByMasterSwitch ? "Disabled (gameplay-changing features are off)" : "Disabled");
             }
             catch (Exception e)
             {
                 Log.Error($"Switching {(enabled ? "on" : "off")} failed", e);
+            }
+            try
+            {
+                EnabledChanged?.Invoke();
+            }
+            catch (Exception e)
+            {
+                Log.Caught("An EnabledChanged handler failed", e);
             }
         }
 

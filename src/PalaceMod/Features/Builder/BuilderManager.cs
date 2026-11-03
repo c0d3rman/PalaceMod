@@ -39,6 +39,7 @@ namespace PalaceMod
         public override void Awake(Plugin plugin)
         {
             base.Awake(plugin);
+            GameplayFeatures.RegisterPart("Builder: custom runs");
             CatalogImpl = new Catalog();
             Repository = new PackRepository(() => Catalog.GameReady ? CatalogImpl : null);
             CatalogImpl.PackUnitExists = (packId, unitId) => Repository.Find(packId)?.Pack?.FindUnit(unitId) != null;

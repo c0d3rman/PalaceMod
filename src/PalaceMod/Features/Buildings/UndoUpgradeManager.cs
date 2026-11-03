@@ -47,6 +47,7 @@ namespace PalaceMod
     public class UndoUpgradeManager : BaseManager
     {
         public override string FeatureSection => "Undo upgrade";
+        public override bool AffectsRanking => true; // off while "Gameplay-changing features" is off
         public override string FeatureDescription => "Undo a misclicked build, upgrade, branch choice (castle upgrades included) or teleporter during the same day: press the undo key near it to get the gold back.";
 
         private const float NearDistance = 14f;

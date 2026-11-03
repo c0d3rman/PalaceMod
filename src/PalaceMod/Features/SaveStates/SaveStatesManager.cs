@@ -23,6 +23,7 @@ namespace PalaceMod
     public class SaveStatesManager : BaseManager
     {
         public override string FeatureSection => "Savestates";
+        public override bool AffectsRanking => true; // off while "Gameplay-changing features" is off
         public override string FeatureDescription =>
             "Save and load the whole game mid-level, for practice. Pause > Savestates lists them. Loading a state makes the run unranked.";
 
