@@ -66,7 +66,7 @@ namespace PalaceMod
         private void RegisterDevCommand()
         {
             DevCommands.Register("builder-ui",
-                "builder-ui open | pack <id> | unit <i> | wave <i> [night [group]] | goto <path> | undo | redo | save | issues | test <waveSet> | type <text>   drive the Builder editor", args =>
+                "builder-ui open | pack <id> | unit <i> | wave <i> [night [group]] | goto <path> | undo | redo | save | issues | test <waveSet> | type <text> | key <keys...>   drive the Builder editor", args =>
             {
                 string sub = args.FirstOrDefault()?.ToLowerInvariant();
                 switch (sub)
@@ -115,11 +115,21 @@ namespace PalaceMod
                         if (!ModTextInput.Active) throw new InvalidOperationException("no field is being edited (apply a text or number field first)");
                         ModTextInput.Debug(string.Join(" ", args.Skip(1)));
                         return "typed";
+                    case "key":
+                        // Keys or text into the field being edited, one argument each ("hello", left, shift+enter, ...);
+                        // "_" types a space. Prints the text with the caret as ‸.
+                        foreach (var k in args.Skip(1)) ModTextInput.DebugKey(k == "_" ? " " : k);
+                        return ModTextInput.DebugState;
+                    case "loadout":
+                        // "loadout [last|<weapon asset name>]": sets the Test loadout choice; prints it and what's equipped.
+                        if (args.Length > 1) TestLoadout.Choice = args[1] == "last" ? null
+                            : TestLoadout.Weapons.FirstOrDefault(w => w.name == args[1])?.name ?? throw new ArgumentException("weapons: " + string.Join(", ", TestLoadout.Weapons.Select(w => w.name)));
+                        return $"choice={TestLoadout.Choice ?? "last used"}; equipped: {TestLoadout.List(PerkManager.instance?.CurrentlyEquipped?.ToList() ?? [])}";
                     case "json":
                         RequireDraft();
                         return "\n" + Builder.Model.PackSerializer.Write(BuilderEditor.Draft.Pack);
                     default:
-                        throw new ArgumentException("usage: builder-ui open|pack <id>|unit <i>|wave <i> [night [group]]|goto <path>|undo|redo|save|issues|test <waveSet>|testunit <i>|type <text>|json");
+                        throw new ArgumentException("usage: builder-ui open|pack <id>|unit <i>|wave <i> [night [group]]|goto <path>|undo|redo|save|issues|test <waveSet>|testunit <i>|type <text>|key <keys...>|json");
                 }
             });
 

@@ -10,6 +10,7 @@ using UnityEngine.SceneManagement;
 
     Two ways in:
     - Launch(request): validates, starts the session and loads the host straight away (editor "Test", `builder play`).
+      There's no loadout screen on this path, so it equips TestLoadout's (last used on the map, or a chosen weapon).
     - Arm(request): the player picked a design in the Custom Runs menu of a map's pre-level menu. The pre-level menu
       then shows the design, keeps the game's own loadout and perk selection, and its Play button starts the session
       (BuilderManager.Session.cs turns TransitionFromLevelSelectToLevel into BeginArmed()).
@@ -58,7 +59,12 @@ namespace PalaceMod.Builder
         {
             var transitions = SceneTransitionManager.instance;
             if (transitions == null || transitions.SceneTransitionIsRunning) { error = "can't start a level right now"; return false; }
+            // No loadout screen on this path: equip the test loadout (read before the session's stand-in scores
+            // replace the host's record).
+            if (!Resolve(request, out var ws, out var lv, out error)) return false;
+            var loadout = TestLoadout.For(lv?.Host ?? ws.Host);
             if (!Start(request, out error)) return false;
+            TestLoadout.Apply(Current.HostScene, loadout);
             transitions.TransitionFromNullToLevel(Current.HostScene);
             return true;
         }

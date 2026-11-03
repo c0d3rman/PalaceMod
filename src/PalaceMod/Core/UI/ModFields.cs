@@ -21,8 +21,13 @@ using Object = UnityEngine.Object;
     runs it on click / apply instead of stepping. ModField.Refresh re-reads the value; SetMarker flags the label.
 
     Text entry (TextInput, or ModTextInput.Begin for any field) types into the value with the keyboard: Enter or a
-    click confirms, Escape cancels, Cmd/Ctrl+V pastes. While typing, the game's menu input (and Escape) is held back so
-    keys don't also navigate or close the menu, and mod keybinds are inert.
+    click confirms, Escape cancels. The caret moves with the arrows (Alt for words, Cmd for the line), Home/End, and
+    Backspace/Delete edit at the caret; Cmd/Ctrl+V pastes, Cmd/Ctrl+A selects all, Cmd/Ctrl+C copies. A multiline
+    field takes Shift+Enter for a new line. While typing, the game's menu input (and Escape) is held back so keys don't
+    also navigate or close the menu, and mod keybinds are inert.
+
+    A text field's value wraps instead of being cut off: when it doesn't fit on one line beside the label, it's shown
+    as a left-aligned block beside the label and the row grows to fit it.
 */
 namespace PalaceMod
 {
@@ -38,6 +43,8 @@ namespace PalaceMod
         private readonly bool arrows;
         private ModFieldMarker marker;
         internal string Override;   // shown instead of the value while typing
+        private readonly TextMeshProUGUI valueText;
+        private bool wrap;
 
         internal ModField(ModRow row, string label, Func<string> value, bool arrows)
         {
@@ -47,7 +54,7 @@ namespace PalaceMod
             this.arrows = arrows;
             row.Button.onSelectionStateChange.AddListener(Refresh);
             // Values stay on one line to the right of the label, cut with an ellipsis rather than wrapping over it.
-            var valueText = row.Button.transform.Find("Value")?.GetComponent<TextMeshProUGUI>();
+            valueText = row.Button.transform.Find("Value")?.GetComponent<TextMeshProUGUI>();
             if (valueText != null)
             {
                 valueText.enableWordWrapping = false;
@@ -58,6 +65,54 @@ namespace PalaceMod
 
         /// <summary>Space kept for the label at the left of a field's row.</summary>
         public const float ValueIndent = 340f;
+
+        private const float RowHeight = 46f, WrapPad = 7f, FallbackWidth = 860f;
+
+        /// <summary>Lets a long value wrap onto more lines (the row grows) instead of being cut with an ellipsis.</summary>
+        internal void EnableWrap()
+        {
+            wrap = true;
+            Fit();
+        }
+
+        // One line, right-aligned, when the value fits beside the label; otherwise a wrapped block and a taller row.
+        private void Fit()
+        {
+            if (!wrap || valueText == null || Button == null) return;
+            var label = Button.GetComponent<TextMeshProUGUI>();
+            var element = Button.GetComponent<LayoutElement>();
+            float width = valueText.rectTransform.rect.width;
+            if (width <= 1f) width = FallbackWidth;
+            float available = Mathf.Max(100f, width - ValueIndent);
+            string shown = valueText.text ?? "";
+            bool multi = shown.IndexOf('\n') >= 0 || valueText.GetPreferredValues(shown, 100000f, 0f).x > available;
+            float height = RowHeight;
+            if (multi)
+            {
+                valueText.enableWordWrapping = true;
+                valueText.overflowMode = TextOverflowModes.Overflow;
+                valueText.alignment = TextAlignmentOptions.TopLeft;
+                valueText.margin = new Vector4(ValueIndent, WrapPad, 0f, WrapPad);
+                height = Mathf.Max(RowHeight, valueText.GetPreferredValues(shown, available, 0f).y + 2f * WrapPad + 2f);
+            }
+            else
+            {
+                valueText.enableWordWrapping = false;
+                valueText.overflowMode = TextOverflowModes.Ellipsis;
+                valueText.alignment = TextAlignmentOptions.MidlineRight;
+                valueText.margin = new Vector4(ValueIndent, 0f, 0f, 0f);
+            }
+            if (label != null)
+            {
+                label.alignment = multi ? TextAlignmentOptions.TopLeft : TextAlignmentOptions.MidlineLeft;
+                label.margin = new Vector4(label.margin.x, multi ? WrapPad : 0f, label.margin.z, 0f);
+            }
+            if (element != null && !Mathf.Approximately(element.preferredHeight, height))
+            {
+                element.preferredHeight = height;
+                if (Button.transform.parent is RectTransform parent) LayoutRebuilder.MarkLayoutForRebuild(parent);
+            }
+        }
 
         public bool Selected => Button != null && Button.CurrentState is ThronefallUIElement.SelectionState.Selected or ThronefallUIElement.SelectionState.FocussedAndSelected;
 
@@ -74,6 +129,7 @@ namespace PalaceMod
                 if (arrows && Selected) v = $"<color=#{ModStyle.Hex(ModStyle.Dim)}>‹</color>  {v}  <color=#{ModStyle.Hex(ModStyle.Dim)}>›</color>";
             }
             Row.SetValue(v);
+            Fit();
         }
 
         public void SetLabel(string label)
@@ -160,13 +216,15 @@ namespace PalaceMod
             return field;
         }
 
-        /// <summary>A text field: apply starts typing into it; Enter confirms (calls <paramref name="onCommit"/>).</summary>
+        /// <summary>A text field: apply starts typing into it; Enter confirms (calls <paramref name="onCommit"/>). A long
+        /// value wraps and the row grows to show all of it. <paramref name="multiline"/> lets Shift+Enter add line breaks.</summary>
         public static ModField TextInput(this ModPage page, string label, Func<string> value, Action<string> onCommit,
-            Func<string> tooltip = null, int maxLength = 64, Func<string> display = null)
+            Func<string> tooltip = null, int maxLength = 64, Func<string> display = null, bool multiline = false)
         {
             ModField field = null;
-            var row = page.Row(label, "", tooltip, () => ModTextInput.Begin(field, value() ?? "", onCommit, maxLength));
+            var row = page.Row(label, "", tooltip, () => ModTextInput.Begin(field, value() ?? "", onCommit, maxLength, multiline));
             field = new ModField(row, label, display ?? (() => Placeholder(value())), arrows: false);
+            field.EnableWrap();
             field.Refresh();
             return field;
         }
@@ -211,8 +269,19 @@ namespace PalaceMod
         private static ModField editing;
         private static Action<string> commit;
         private static readonly StringBuilder text = new();
-        private static bool replaceAll;
-        private static int maxLength, startFrame, endFrame = -1;
+        private static bool replaceAll, multiline;
+        private static int caret, maxLength, startFrame, endFrame = -1;
+
+        // Held-key repeat for the keys handled here (arrows, Backspace, Delete): first repeat after a pause, then fast.
+        private static KeyCode heldKey = KeyCode.None;
+        private static float nextRepeat;
+        private const float RepeatDelay = 0.45f, RepeatRate = 0.035f;
+
+        private static readonly KeyCode[] EditKeys =
+        [
+            KeyCode.LeftArrow, KeyCode.RightArrow, KeyCode.UpArrow, KeyCode.DownArrow, KeyCode.Home, KeyCode.End,
+            KeyCode.Backspace, KeyCode.Delete,
+        ];
 
         /// <summary>Whether the player is typing into a field right now.</summary>
         public static bool Active => editing != null;
@@ -221,18 +290,24 @@ namespace PalaceMod
         internal static bool BlocksInput => Active || endFrame == Time.frameCount;
 
         /// <summary>Starts typing into <paramref name="target"/>, starting from <paramref name="initial"/> (selected, so the
-        /// first key replaces it). <paramref name="onCommit"/> gets the text when the player presses Enter.</summary>
-        public static void Begin(ModField target, string initial, Action<string> onCommit, int maxLength = 64)
+        /// first key replaces it). <paramref name="onCommit"/> gets the text when the player presses Enter.
+        /// <paramref name="allowNewlines"/> lets Shift+Enter (and paste) add line breaks.</summary>
+        public static void Begin(ModField target, string initial, Action<string> onCommit, int maxLength = 64, bool allowNewlines = false)
         {
             if (target == null) return;
             if (Active) End(confirm: true);
             editing = target;
             commit = onCommit;
+            multiline = allowNewlines;
             ModTextInput.maxLength = Math.Max(1, maxLength);
             text.Clear().Append(initial ?? "");
+            if (text.Length > ModTextInput.maxLength) text.Length = ModTextInput.maxLength;
+            caret = text.Length;
             replaceAll = text.Length > 0;
+            heldKey = KeyCode.None;
             startFrame = Time.frameCount;
-            Notify.Show("Type, then Enter to confirm or Esc to cancel", NotifyKind.Info, 3f, key: "modtextinput");
+            Notify.Show(multiline ? "Type, Shift+Enter for a new line, Enter to confirm, Esc to cancel" : "Type, then Enter to confirm or Esc to cancel",
+                NotifyKind.Info, 3f, key: "modtextinput");
             Redraw();
         }
 
@@ -245,6 +320,7 @@ namespace PalaceMod
             string result = text.ToString();
             editing = null;
             commit = null;
+            heldKey = KeyCode.None;
             endFrame = Time.frameCount;
             target.Override = null;
             if (confirm)
@@ -260,9 +336,47 @@ namespace PalaceMod
         {
             if (!Active) return;
             text.Clear().Append(s);
+            caret = text.Length;
             replaceAll = false;
             End(confirm: true);
         }
+
+        /// <summary>Dev-command hook: one key or text, handled like the keyboard. Keys: left, right, up, down, home,
+        /// end, backspace, delete, enter, shift+enter, esc, selectall, alt+left/right/backspace, cmd+left/right;
+        /// "paste:..." pastes (\n for a line break); anything else is typed.</summary>
+        internal static void DebugKey(string key)
+        {
+            if (!Active) throw new InvalidOperationException("no field is being edited");
+            switch (key)
+            {
+                case "left": Key(KeyCode.LeftArrow, false, false); break;
+                case "right": Key(KeyCode.RightArrow, false, false); break;
+                case "up": Key(KeyCode.UpArrow, false, false); break;
+                case "down": Key(KeyCode.DownArrow, false, false); break;
+                case "home": Key(KeyCode.Home, false, false); break;
+                case "end": Key(KeyCode.End, false, false); break;
+                case "backspace": Key(KeyCode.Backspace, false, false); break;
+                case "alt+backspace": Key(KeyCode.Backspace, true, false); break;
+                case "delete": Key(KeyCode.Delete, false, false); break;
+                case "alt+left": Key(KeyCode.LeftArrow, true, false); break;
+                case "alt+right": Key(KeyCode.RightArrow, true, false); break;
+                case "cmd+left": Key(KeyCode.LeftArrow, false, true); break;
+                case "cmd+right": Key(KeyCode.RightArrow, false, true); break;
+                case "enter": Return(false); return;
+                case "shift+enter": Return(true); break;
+                case "esc": End(confirm: false); return;
+                case "selectall": replaceAll = text.Length > 0; break;
+                default:
+                    if (key.StartsWith("paste:")) Paste(key.Substring(6).Replace("\\n", "\n"));
+                    else Insert(key);
+                    break;
+            }
+            Redraw();
+        }
+
+        /// <summary>Dev-command hook: the text being typed, the caret shown as ‸ and line breaks as ⏎.</summary>
+        internal static string DebugState => !Active ? "not editing"
+            : (replaceAll ? "[all selected] " : "") + text.ToString().Insert(caret, "‸").Replace("\n", "⏎");
 
         internal static void Tick()
         {
@@ -273,10 +387,17 @@ namespace PalaceMod
             if (Input.GetKeyDown(KeyCode.Escape)) { End(confirm: false); return; }
             if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1)) { End(confirm: true); return; }
             bool command = Input.GetKey(KeyCode.LeftCommand) || Input.GetKey(KeyCode.RightCommand) || Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+            bool alt = Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
+            bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
             bool changed = false;
-            if (command && Input.GetKeyDown(KeyCode.V))
+            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
             {
-                Insert(GUIUtility.systemCopyBuffer?.Replace("\r", "").Replace("\n", " ") ?? "");
+                if (!Return(shift || alt)) return;
+                changed = true;
+            }
+            else if (command && Input.GetKeyDown(KeyCode.V))
+            {
+                Paste(GUIUtility.systemCopyBuffer ?? "");
                 changed = true;
             }
             else if (command && Input.GetKeyDown(KeyCode.A))
@@ -284,40 +405,170 @@ namespace PalaceMod
                 replaceAll = text.Length > 0;
                 changed = true;
             }
+            else if (command && Input.GetKeyDown(KeyCode.C))
+            {
+                GUIUtility.systemCopyBuffer = text.ToString();
+                Notify.Show("Copied", NotifyKind.Info, 1.5f, key: "modtextinput");
+            }
             else
             {
-                foreach (char c in Input.inputString)
+                changed |= EditKeysHeld(alt, command);
+                if (!command)
                 {
-                    if (c == '\n' || c == '\r') { End(confirm: true); return; }
-                    if (c == '\b')
+                    foreach (char c in Input.inputString)
                     {
-                        if (replaceAll) text.Clear();
-                        else if (text.Length > 0) text.Length--;
-                        replaceAll = false;
+                        // Enter, Backspace and Delete are handled as keys above. macOS also sends the arrow, Home/End
+                        // and function keys as private-use characters (U+F700-U+F8FF); they're never text.
+                        if (char.IsControl(c) || (c >= '' && c <= '')) continue;
+                        Insert(c.ToString());
+                        changed = true;
                     }
-                    else if (!char.IsControl(c) && !command) Insert(c.ToString());
-                    changed = true;
                 }
             }
             if (changed || Time.frameCount % 15 == 0) Redraw();
         }
 
+        // Arrows, Home/End, Backspace and Delete, repeating while held.
+        private static bool EditKeysHeld(bool alt, bool command)
+        {
+            float now = Time.unscaledTime;
+            bool acted = false;
+            foreach (var k in EditKeys)
+            {
+                if (!Input.GetKeyDown(k)) continue;
+                heldKey = k;
+                nextRepeat = now + RepeatDelay;
+                Key(k, alt, command);
+                acted = true;
+            }
+            if (acted || heldKey == KeyCode.None) return acted;
+            if (!Input.GetKey(heldKey)) { heldKey = KeyCode.None; return false; }
+            if (now < nextRepeat) return false;
+            nextRepeat = now + RepeatRate;
+            Key(heldKey, alt, command);
+            return true;
+        }
+
+        /// <summary>Enter: a new line (multiline fields, with Shift or Alt) or confirm. False when typing ended.</summary>
+        private static bool Return(bool newline)
+        {
+            if (newline && multiline) { Insert("\n"); return true; }
+            End(confirm: true);
+            return false;
+        }
+
+        private static void Key(KeyCode key, bool alt, bool command)
+        {
+            // With everything selected, a move collapses the selection to that end; Backspace/Delete clear it.
+            if (replaceAll)
+            {
+                replaceAll = false;
+                switch (key)
+                {
+                    case KeyCode.Backspace or KeyCode.Delete: text.Clear(); caret = 0; return;
+                    case KeyCode.LeftArrow or KeyCode.UpArrow or KeyCode.Home: caret = 0; return;
+                    default: caret = text.Length; return;
+                }
+            }
+            switch (key)
+            {
+                case KeyCode.LeftArrow: caret = command ? LineStart(caret) : alt ? WordLeft(caret) : Math.Max(0, caret - 1); break;
+                case KeyCode.RightArrow: caret = command ? LineEnd(caret) : alt ? WordRight(caret) : Math.Min(text.Length, caret + 1); break;
+                case KeyCode.Home: caret = command ? 0 : LineStart(caret); break;
+                case KeyCode.End: caret = command ? text.Length : LineEnd(caret); break;
+                case KeyCode.UpArrow: caret = command ? 0 : VerticalMove(-1); break;
+                case KeyCode.DownArrow: caret = command ? text.Length : VerticalMove(1); break;
+                case KeyCode.Backspace:
+                {
+                    int from = command ? LineStart(caret) : alt ? WordLeft(caret) : Math.Max(0, caret - 1);
+                    if (from == caret && caret > 0) from = caret - 1; // Cmd+Backspace at a line start joins the lines
+                    text.Remove(from, caret - from);
+                    caret = from;
+                    break;
+                }
+                case KeyCode.Delete:
+                {
+                    int to = alt ? WordRight(caret) : Math.Min(text.Length, caret + 1);
+                    text.Remove(caret, to - caret);
+                    break;
+                }
+            }
+        }
+
+        private static int LineStart(int i)
+        {
+            while (i > 0 && text[i - 1] != '\n') i--;
+            return i;
+        }
+
+        private static int LineEnd(int i)
+        {
+            while (i < text.Length && text[i] != '\n') i++;
+            return i;
+        }
+
+        private static int WordLeft(int i)
+        {
+            while (i > 0 && char.IsWhiteSpace(text[i - 1])) i--;
+            while (i > 0 && !char.IsWhiteSpace(text[i - 1])) i--;
+            return i;
+        }
+
+        private static int WordRight(int i)
+        {
+            while (i < text.Length && char.IsWhiteSpace(text[i])) i++;
+            while (i < text.Length && !char.IsWhiteSpace(text[i])) i++;
+            return i;
+        }
+
+        // Up/down move between typed lines, keeping the column; on the first/last line they go to its start/end.
+        private static int VerticalMove(int direction)
+        {
+            int start = LineStart(caret), column = caret - start;
+            if (direction < 0)
+            {
+                if (start == 0) return 0;
+                int previous = LineStart(start - 1);
+                return Math.Min(previous + column, start - 1);
+            }
+            int end = LineEnd(caret);
+            if (end >= text.Length) return text.Length;
+            return Math.Min(end + 1 + column, LineEnd(end + 1));
+        }
+
+        private static void Paste(string s)
+        {
+            s = s.Replace("\r\n", "\n").Replace('\r', '\n').Replace('\t', ' ');
+            if (!multiline) s = s.Replace('\n', ' ');
+            Insert(s);
+        }
+
         private static void Insert(string s)
         {
-            if (replaceAll) text.Clear();
+            if (replaceAll) { text.Clear(); caret = 0; }
             replaceAll = false;
-            text.Append(s);
-            if (text.Length > maxLength) text.Length = maxLength;
+            int room = maxLength - text.Length;
+            if (room <= 0)
+            {
+                Notify.Show($"At most {maxLength} characters", NotifyKind.Warning, 2f, key: "modtextinput");
+                return;
+            }
+            if (s.Length > room) s = s.Substring(0, room);
+            text.Insert(caret, s);
+            caret += s.Length;
         }
 
         private static void Redraw()
         {
             if (editing == null) return;
-            bool caret = (int)(Time.unscaledTime * 2f) % 2 == 0;
-            string body = ModFields.TMPEscape(text.ToString());
+            bool on = (int)(Time.unscaledTime * 2f) % 2 == 0;
             string accent = ModStyle.Hex(ModStyle.Accent);
-            if (replaceAll) body = $"<mark=#{accent}55>{body}</mark>";
-            editing.Override = $"{body}<color=#{accent}>{(caret ? "|" : "<alpha=#00>|")}</color>";
+            string all = text.ToString();
+            // A thin bar that takes almost no room, so moving or blinking it barely reflows the text.
+            string bar = $"<color=#{accent}>{(on ? "" : "<alpha=#00>")}<space=-0.1em>|<space=-0.1em></color><alpha=#FF>";
+            editing.Override = replaceAll
+                ? $"<mark=#{accent}55>{ModFields.TMPEscape(all)}</mark>{bar}"
+                : ModFields.TMPEscape(all.Substring(0, caret)) + bar + ModFields.TMPEscape(all.Substring(caret));
             editing.Refresh();
         }
     }
