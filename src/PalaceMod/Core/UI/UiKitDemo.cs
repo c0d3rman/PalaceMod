@@ -7,6 +7,10 @@ using System.Linq;
         uikit notify         show one notification of each kind, plus a long one
         uikit buttons <n>    put n demo buttons in the pause menu (0 removes them; past 3 they overflow into "More")
         uikit tooltip [off]  show the shared tooltip in the middle of the screen
+        uikit mouse <object> [fx fy] | <x> <y> | off
+                             move a simulated mouse for hover tooltips (ModTooltip.AttachHover) to a point in the named
+                             object's rect (fractions from its bottom-left, default the centre) or to screen pixels
+        uikit shown          which tooltip is showing
 */
 namespace PalaceMod
 {
@@ -20,7 +24,7 @@ namespace PalaceMod
         public override void Awake(Plugin plugin)
         {
             base.Awake(plugin);
-            DevCommands.Register("uikit", "uikit <frame|notify|buttons <n>|tooltip [off]>   exercise the UI kit (Core/UI)", args =>
+            DevCommands.Register("uikit", "uikit <frame|notify|buttons <n>|tooltip [off]|mouse <object> [fx fy]|mouse off|shown>   exercise the UI kit (Core/UI)", args =>
             {
                 switch (args.FirstOrDefault()?.ToLowerInvariant())
                 {
@@ -51,10 +55,39 @@ namespace PalaceMod
                         if (args.Length > 1 && args[1] == "off") ModTooltip.Hide();
                         else ModTooltip.Show("Tooltip", "The shared tooltip: the game's selection tooltip with PalaceMod's edge.", null);
                         return ModTooltip.Visible ? "shown" : "hidden";
+                    case "mouse":
+                        return SimulateMouse(args.Skip(1).ToArray());
+                    case "shown":
+                        return ModTooltip.Describe() ?? "hidden";
                     default:
-                        throw new ArgumentException("usage: uikit <frame|notify|buttons <n>|tooltip [off]>");
+                        throw new ArgumentException("usage: uikit <frame|notify|buttons <n>|tooltip [off]|mouse ...|shown>");
                 }
             });
+        }
+
+        private static string SimulateMouse(string[] args)
+        {
+            if (args.Length == 0) throw new ArgumentException("usage: uikit mouse <object> [fx fy] | <x> <y> | off");
+            if (args[0] == "off")
+            {
+                ModTooltip.HoverSource.SimulatedMouse = null;
+                return "real mouse";
+            }
+            UnityEngine.Vector2 point;
+            if (args.Length == 2 && float.TryParse(args[0], out float x) && float.TryParse(args[1], out float y)) point = new UnityEngine.Vector2(x, y);
+            else
+            {
+                bool fractions = args.Length >= 3 && float.TryParse(args[args.Length - 2], out _) && float.TryParse(args[args.Length - 1], out _);
+                string name = string.Join(" ", fractions ? args.Take(args.Length - 2) : args);
+                var target = UnityEngine.Object.FindObjectsOfType<UnityEngine.RectTransform>().FirstOrDefault(t => t.name == name)
+                    ?? throw new InvalidOperationException($"no active object called \"{name}\"");
+                float fx = fractions ? float.Parse(args[args.Length - 2]) : 0.5f, fy = fractions ? float.Parse(args[args.Length - 1]) : 0.5f;
+                var corners = new UnityEngine.Vector3[4];
+                target.GetWorldCorners(corners); // screen pixels on the game's overlay canvas
+                point = new UnityEngine.Vector2(UnityEngine.Mathf.Lerp(corners[0].x, corners[2].x, fx), UnityEngine.Mathf.Lerp(corners[0].y, corners[2].y, fy));
+            }
+            ModTooltip.HoverSource.SimulatedMouse = point;
+            return $"mouse at {point.x:0},{point.y:0}";
         }
 
         private ModFrame BuildDemo() => new ModFrame("UI Kit Demo")
