@@ -103,37 +103,42 @@ namespace PalaceMod
                 page.Header($"{CompendiumStats.Translate("Menu/Night")} {w + 1}/{spawner.waves.Count}{state}");
                 if (wave.difficultyMulti != 1f)
                     page.Text($"{CompendiumStats.Translate("Menu/DifficultyBoost")}: {CompendiumStats.Percent(wave.difficultyMulti)} health, {CompendiumStats.Percent(Mathf.Lerp(1f, wave.difficultyMulti, 0.5f))} damage");
-                // Group like the pause menu (same enemy and elite), keeping the spawn locations.
-                var groups = new List<(GameObject Prefab, bool Elite, int Count, List<string> Lines)>();
+                // A subheading per spawn location (named like the pause menu's spawn panel); under it, enemies grouped
+                // like the pause menu (same enemy and elite).
+                var places = new List<(string Name, List<(GameObject Prefab, bool Elite, int Count)> Enemies)>();
                 int gold = 0;
                 foreach (var spawn in wave.spawns)
                 {
                     gold += spawn.goldCoins;
                     if (spawn.enemyPrefab == null || spawn.enemyPrefab.GetComponent<ScreenMarkerIcon>() == null) continue;
-                    int i = groups.FindIndex(g => g.Prefab == spawn.enemyPrefab && g.Elite == spawn.eliteEnemies);
-                    string line = spawn.spawnLine != null ? spawn.spawnLine.name : null;
-                    if (i < 0) groups.Add((spawn.enemyPrefab, spawn.eliteEnemies, spawn.count, line != null ? [line] : []));
-                    else
-                    {
-                        var g = groups[i];
-                        if (line != null && !g.Lines.Contains(line)) g.Lines.Add(line);
-                        groups[i] = (g.Prefab, g.Elite, g.Count + spawn.count, g.Lines);
-                    }
+                    string name = spawn.spawnLine != null ? SpawnLocations.Name(spawn.spawnLine) : "Elsewhere";
+                    int p = places.FindIndex(x => x.Name == name);
+                    if (p < 0) { places.Add((name, [])); p = places.Count - 1; }
+                    var enemies = places[p].Enemies;
+                    int i = enemies.FindIndex(g => g.Prefab == spawn.enemyPrefab && g.Elite == spawn.eliteEnemies);
+                    if (i < 0) enemies.Add((spawn.enemyPrefab, spawn.eliteEnemies, spawn.count));
+                    else enemies[i] = (enemies[i].Prefab, enemies[i].Elite, enemies[i].Count + spawn.count);
                 }
                 int waveIndex = w;
-                foreach (var g in groups)
+                foreach (var (place, enemies) in places)
                 {
-                    var stats = CompendiumStats.Enemy(g.Prefab, g.Elite, waveIndex);
-                    var lines = g.Lines;
-                    page.Row($"{g.Count}× {EliteName(stats.Name, g.Elite)}", $"{CompendiumStats.Format(stats.Actual.Hp)}<sprite name=\"heart\">", () =>
+                    Subheading(page, place);
+                    foreach (var g in enemies)
                     {
-                        var body = StatBlock(CompendiumStats.Enemy(g.Prefab, g.Elite, waveIndex), true);
-                        if (lines.Count > 0) body += "\n\nFrom: " + string.Join(", ", lines);
-                        return body;
-                    }, icon: stats.Icon);
+                        var stats = CompendiumStats.Enemy(g.Prefab, g.Elite, waveIndex);
+                        page.Row($"{g.Count}× {EliteName(stats.Name, g.Elite)}", $"{CompendiumStats.Format(stats.Actual.Hp)}<sprite name=\"heart\">",
+                            () => StatBlock(CompendiumStats.Enemy(g.Prefab, g.Elite, waveIndex), true), icon: stats.Icon);
+                    }
                 }
                 if (gold > 0) page.Row("Gold dropped", Coin(gold), "Gold this night's enemies drop when killed.");
             }
+        }
+
+        // A spawn location under a night's header: smaller than the header, in the game's bold body font.
+        private static void Subheading(ModPage page, string text)
+        {
+            var tmp = GameWidgets.Text(page.Content, "Subheading", text, ModStyle.BoldFont, 28f, ModStyle.Gold, TMPro.TextAlignmentOptions.BottomLeft);
+            tmp.margin = new Vector4(0f, 10f, 0f, 0f);
         }
 
         private void BuildEnemies(ModPage page)

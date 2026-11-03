@@ -92,7 +92,6 @@ namespace PalaceMod
         private sealed class SpawnGroup
         {
             public Transform Line;
-            public Vector3 Position;
             public string Label;
             public readonly List<EnemyEntry> Enemies = [];
         }
@@ -126,7 +125,7 @@ namespace PalaceMod
                 var group = groups.FirstOrDefault(g => g.Line == spawn.spawnLine);
                 if (group == null)
                 {
-                    group = new SpawnGroup { Line = spawn.spawnLine, Position = MarkerPosition(spawn.spawnLine) };
+                    group = new SpawnGroup { Line = spawn.spawnLine, Label = SpawnLocations.Name(spawn.spawnLine) };
                     groups.Add(group);
                 }
 
@@ -142,7 +141,6 @@ namespace PalaceMod
                 entry.Info.enemyCount += spawn.count;
                 if (live) entry.Spawned += spawn.SpawnedUnits;
             }
-            SpawnNames.Assign(groups);
             return Merge(groups);
         }
 
@@ -170,92 +168,6 @@ namespace PalaceMod
             enemyCount = e.enemyCount, eliteEnemy = e.eliteEnemy, maxHP = e.maxHP, speed = e.speed, range = e.range,
             attackDamage = e.attackDamage, attackCooldown = e.attackCooldown, projectileSpeed = e.projectileSpeed,
         };
-
-        // Same point the game puts the daytime spawn marker at.
-        private static Vector3 MarkerPosition(Transform line) => line.childCount > 0
-            ? (line.GetChild(0).position + line.GetChild(line.childCount - 1).position) / 2f
-            : line.position;
-
-        // ---- Names ----
-
-        // Level designers named most spawn lines after landmarks ("Main Bridge", "Graveyard"); some are generic
-        // ("Spawn 3", "Marker Pos" under a summoning statue, "SpawnLine" under a boss). Those get the landmark they're
-        // attached to, or else a compass direction from the castle (north = up the screen). Same-named lines are merged.
-        private static class SpawnNames
-        {
-            private static readonly HashSet<string> Generic = new(StringComparer.OrdinalIgnoreCase)
-                { "", "spawn", "spawnline", "spawn line", "spawnpoint", "spawn point", "marker", "marker pos", "markerpos", "line", "pos", "position" };
-
-            public static void Assign(List<SpawnGroup> groups)
-            {
-                var basis = CameraBasis();
-                var named = groups.Select(g =>
-                {
-                    var (name, air) = Clean(g.Line.name);
-                    string landmark = IsGeneric(name) ? Landmark(g.Line.parent) : name;
-                    return (Group: g, Name: landmark, Air: air, Compass: Compass(g.Position, basis));
-                }).ToList();
-
-                foreach (var n in named) n.Group.Label = n.Air ? $"{n.Name ?? n.Compass} (air)" : n.Name ?? n.Compass;
-            }
-
-            private static (string Name, bool Air) Clean(string raw)
-            {
-                string name = raw.Trim();
-                bool air = false;
-                if (name.StartsWith("Fly - ", StringComparison.OrdinalIgnoreCase)) { name = name.Substring(6); air = true; }
-                if (name.EndsWith(" air", StringComparison.OrdinalIgnoreCase)) { name = name.Substring(0, name.Length - 4); air = true; }
-                if (name.Equals("air", StringComparison.OrdinalIgnoreCase)) { name = ""; air = true; }
-                name = StripCopySuffix(name);
-                if (name.StartsWith("Bot ", StringComparison.Ordinal)) name = "Bottom " + name.Substring(4);
-                if (name.Any(char.IsLetter) && !name.Any(char.IsLower)) name = TitleCase(name);
-                return (name.Trim(), air);
-            }
-
-            // "Eldermolde Statue (2)" -> "Eldermolde Statue"
-            private static string StripCopySuffix(string name)
-            {
-                name = name.Trim();
-                int open = name.LastIndexOf(" (", StringComparison.Ordinal);
-                if (open > 0 && name.EndsWith(")") && name.Substring(open + 2, name.Length - open - 3).All(char.IsDigit)) name = name.Substring(0, open);
-                return name;
-            }
-
-            private static bool IsGeneric(string name) => Generic.Contains(name.TrimEnd(' ', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'));
-
-            private static string Landmark(Transform parent)
-            {
-                if (parent == null) return null;
-                string name = StripCopySuffix(parent.name);
-                if (name.StartsWith("ES ", StringComparison.Ordinal)) return null; // the level's spawn container, not a place
-                if (name.StartsWith("E ", StringComparison.Ordinal)) name = name.Substring(2); // enemy prefab prefix
-                name = Clean(name).Name;
-                return IsGeneric(name) ? null : name;
-            }
-
-            private static string TitleCase(string s) =>
-                string.Join(" ", s.ToLowerInvariant().Split(' ').Select(w => w.Length == 0 ? w : char.ToUpperInvariant(w[0]) + w.Substring(1)));
-
-            private static (Vector3 Up, Vector3 Right) CameraBasis()
-            {
-                var cam = Camera.main;
-                if (cam == null) return (Vector3.forward, Vector3.right);
-                var up = Vector3.ProjectOnPlane(cam.transform.forward, Vector3.up);
-                if (up.sqrMagnitude < 1e-4f) up = Vector3.ProjectOnPlane(cam.transform.up, Vector3.up);
-                up.Normalize();
-                return (up, Vector3.Cross(Vector3.up, up));
-            }
-
-            private static readonly string[] Directions = ["North", "Northeast", "East", "Southeast", "South", "Southwest", "West", "Northwest"];
-
-            private static string Compass(Vector3 position, (Vector3 Up, Vector3 Right) basis)
-            {
-                var d = position - CastleCenter.CastleCenterPosition;
-                float angle = Mathf.Atan2(Vector3.Dot(d, basis.Right), Vector3.Dot(d, basis.Up)) * Mathf.Rad2Deg;
-                int sector = Mathf.RoundToInt((angle + 360f) % 360f / 45f) % 8;
-                return Directions[sector];
-            }
-        }
 
         // ---- UI ----
 
