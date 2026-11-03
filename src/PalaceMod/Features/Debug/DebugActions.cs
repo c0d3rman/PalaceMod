@@ -642,8 +642,10 @@ namespace PalaceMod
                 remarkAfterRestart = true;
             }
             Mark("change loadout");
-            UIFrameManager.instance?.CloseAllFrames();
+            // Like the game's own Restart, the menu stays up (frozen) until the clouds cover it, and the transition
+            // closes it at its midpoint; closing it first would flash the running map before the clouds come in.
             SceneTransitionManager.instance.RestartCurrentLevel();
+            if (!SceneTransitionManager.instance.SceneTransitionIsRunning) UIFrameManager.instance?.CloseAllFrames();
             return keep ? "loadout applied, reloading today" : "loadout applied, restarting the level";
         }
 

@@ -277,15 +277,10 @@ namespace PalaceMod.Builder.Editor
 
         private static void Launch(DesignPack pack, string waveSetId)
         {
-            // Close the editor first; the launcher starts the scene transition right away.
+            // The editor stays up under the clouds, like the game's own menus when they load a level: the scene
+            // transition closes every menu at its midpoint, so nothing is left open over the loading map.
             if (!BuilderServices.Sessions.Launch(new SessionRequest { Pack = pack, WaveSetId = waveSetId }, out string error))
-            {
                 Notify.Show("Can't test: " + error, NotifyKind.Error, 6f, key: "builder-editor");
-                return;
-            }
-            CloseAll();
-            // In a match the pause menu is under the editor; leave no menu open over the loading map.
-            if (UnityEngine.SceneManagement.SceneManager.GetActiveScene().name != "_StartMenu") UIFrameManager.instance?.CloseAllFrames();
         }
 
         internal static void CopyShareCode()

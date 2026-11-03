@@ -118,13 +118,9 @@ namespace PalaceMod.Builder.Editor
         {
             var lv = Level;
             if (lv == null) return;
+            // On success the editor stays up under the clouds; the scene transition closes it (see BuilderEditor.Launch).
             if (!LayoutEditor.Launch(Draft, lv.Id, out string error))
-            {
                 Notify.Show("Can't open the layout editor: " + error, NotifyKind.Error, 6f, key: "builder-editor");
-                return;
-            }
-            BuilderEditor.CloseAll();
-            if (UnityEngine.SceneManagement.SceneManager.GetActiveScene().name != "_StartMenu") UIFrameManager.instance?.CloseAllFrames();
         }
 
         private void Play()
@@ -134,12 +130,7 @@ namespace PalaceMod.Builder.Editor
             if (!Draft.ReadOnly && Draft.Dirty && Draft.ErrorCount == 0 && !Draft.Save(out string saveError))
                 Notify.Show(saveError, NotifyKind.Warning, key: "builder-editor");
             if (!BuilderServices.Sessions.Launch(new SessionRequest { Pack = Draft.Pack, LevelId = lv.Id }, out string error))
-            {
                 Notify.Show("Can't test: " + error, NotifyKind.Error, 6f, key: "builder-editor");
-                return;
-            }
-            BuilderEditor.CloseAll();
-            if (UnityEngine.SceneManagement.SceneManager.GetActiveScene().name != "_StartMenu") UIFrameManager.instance?.CloseAllFrames();
         }
     }
 }
