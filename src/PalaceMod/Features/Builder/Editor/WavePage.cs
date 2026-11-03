@@ -69,6 +69,7 @@ namespace PalaceMod.Builder.Editor
                 baseValue: () => Host?.StartingGold);
             var test = page.Row("Test play", Dim(PackListPage.Count(ws.Nights.Count, "night")), () => "Saves the pack and plays this wave set. Scores and saves aren't recorded." +
                 (Draft.ErrorCount > 0 ? "\nFix the pack's problems first (Problems tab)." : ""), () => BuilderEditor.TestWaveSet(Set.Id));
+            TestLoadoutRow(page, () => Set?.Host);
 
             page.Header("Nights");
             for (int n = 0; n < ws.Nights.Count; n++) BuildNight(page, n);

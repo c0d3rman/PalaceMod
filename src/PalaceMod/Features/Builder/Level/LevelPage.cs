@@ -90,7 +90,7 @@ namespace PalaceMod.Builder.Editor
             Frame.SetTitle(string.IsNullOrWhiteSpace(lv.Name) ? "Level" : lv.Name);
             page.Header("Level");
             Text(page, "Name", P + ".name", () => Level?.Name, (p, v) => p.Levels[Index].Name = v, "Shown in the Custom runs list.");
-            Text(page, "Description", P + ".description", () => Level?.Description, (p, v) => p.Levels[Index].Description = v, "A sentence about the level, shown in its tooltip.", 300);
+            Text(page, "Description", P + ".description", () => Level?.Description, (p, v) => p.Levels[Index].Description = v, "A sentence about the level, shown in its tooltip.", 300, multiline: true);
             var host = EditorCatalog.Host(lv.Host);
             Marked(page, "Map", () => host?.DisplayName ?? lv.Host ?? "?", "The map the level is built on. Make a new level to use another map.", P + ".host", null);
             var sets = new List<(string Value, string Display)> { (null, "The map's own nights") };
@@ -107,6 +107,7 @@ namespace PalaceMod.Builder.Editor
             page.Header("Play");
             var test = page.Row("Test play", Draft.ErrorCount > 0 ? Dim("fix the pack's problems first") : "",
                 "Saves the pack and plays this level (a custom run: no saves, scores or achievements).", Play);
+            TestLoadoutRow(page, () => Level?.Host);
             Danger(page, "Delete level", "Removes this level from the pack (you can undo this).", () =>
             {
                 Draft.Edit("Delete level", p => p.Levels.RemoveAt(Index), structural: true);

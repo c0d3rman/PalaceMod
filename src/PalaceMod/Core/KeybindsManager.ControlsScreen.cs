@@ -535,9 +535,11 @@ namespace PalaceMod
                     case "press":
                     {
                         // Fake a physical key press through Unity's Input (which Rewired reads): keybinds press <KeyCode>
-                        if (args.Length < 2) throw new ArgumentException("usage: keybinds press <KeyCode>");
-                        FakeKey.Press((KeyCode)Enum.Parse(typeof(KeyCode), args[1], true));
-                        return $"pressing {args[1]} for {FakeKey.Frames} frames";
+                        // An optional hold time keeps it down that long (seconds, unscaled): keybinds press <KeyCode> [seconds]
+                        if (args.Length < 2) throw new ArgumentException("usage: keybinds press <KeyCode> [seconds]");
+                        float seconds = args.Length > 2 ? float.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture) : 0f;
+                        FakeKey.Press((KeyCode)Enum.Parse(typeof(KeyCode), args[1], true), seconds);
+                        return seconds > 0f ? $"holding {args[1]} for {seconds:0.##} s" : $"pressing {args[1]} for {FakeKey.Frames} frames";
                     }
                     case "camera":
                     {
@@ -590,7 +592,10 @@ namespace PalaceMod
             private static int start = -1;
             private static bool patched;
 
-            internal static void Press(KeyCode pressed)
+            private static float until;
+            private static int release = -1;
+
+            internal static void Press(KeyCode pressed, float seconds = 0f)
             {
                 if (!patched)
                 {
@@ -604,13 +609,21 @@ namespace PalaceMod
                 }
                 key = pressed;
                 start = Time.frameCount + 1;
+                until = Time.unscaledTime + seconds;
+                release = -1;
+            }
+
+            // Down for at least Frames frames and until the hold time has passed; released on the frame after.
+            private static void Tick()
+            {
+                if (start >= 0 && release < 0 && Time.frameCount - start >= Frames && Time.unscaledTime >= until) release = Time.frameCount;
             }
 
             private static int Frame(KeyCode k) => k == key && start >= 0 ? Time.frameCount - start : -1;
-            private static void Held(KeyCode key, ref bool __result) { int f = Frame(key); if (f >= 0 && f < Frames) __result = true; }
+            private static void Held(KeyCode key, ref bool __result) { Tick(); if (Frame(key) >= 0 && (release < 0 || Time.frameCount < release)) __result = true; }
             private static void Down(KeyCode key, ref bool __result) { if (Frame(key) == 0) __result = true; }
-            private static void Up(KeyCode key, ref bool __result) { if (Frame(key) == Frames) __result = true; }
-            private static void Any(ref bool __result) { int f = Frame(key); if (f >= 0 && f <= Frames) __result = true; }
+            private static void Up(KeyCode key, ref bool __result) { Tick(); if (Frame(key) >= 0 && Time.frameCount == release) __result = true; }
+            private static void Any(ref bool __result) { Tick(); if (Frame(key) >= 0 && (release < 0 || Time.frameCount <= release)) __result = true; }
         }
 
         private static string Describe(Keybind k)
