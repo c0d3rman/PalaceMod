@@ -39,6 +39,7 @@ namespace PalaceMod
         private ConfigEntry<float> spacing;
         private ConfigEntry<PlacementFacing> facing;
         private ConfigEntry<bool> mousePlacement, preview, hints;
+        private bool MousePlacementOn => mousePlacement.Value && GameplayFeatures.Allowed;
 
         private Keybind cycleKey, placeOneKey, mouseKey, holdKey;
 
@@ -73,13 +74,17 @@ namespace PalaceMod
             facing = config.Bind(FeatureSection, "Facing", PlacementFacing.WalkingDirection, new ConfigDescription(
                 "Which way Line and Arc formations face: where the king walks, toward the mouse cursor, or toward the nearest enemies (or the next wave's spawn)."));
             mousePlacement = config.Bind(FeatureSection, "Mouse placement", true, new ConfigDescription(
-                "While units follow you, right-click to send them to the cursor, or right-drag to draw a line for them. Hold the click, or Shift, to make them hold position. Using it makes the run unranked."));
+                "While units follow you, right-click to send them to the cursor, or right-drag to draw a line for them. Hold the click, or Shift, to make them hold position. Using it makes the run unranked.",
+                null, new SettingTags { AffectsRanking = true }));
             preview = config.Bind(FeatureSection, "Placement preview", true, new ConfigDescription(
                 "Shows markers on the ground where units will stand while you aim a mouse placement."));
             hints = config.Bind(FeatureSection, "Hints", true, new ConfigDescription(
                 "Shows a short reminder of the placement keys the first time you lead units each session."));
             preview.SettingChanged += (_, _) => { if (!preview.Value) previewMarkers.Hide(); };
-            mousePlacement.SettingChanged += (_, _) => { if (!mousePlacement.Value) CancelDrag(); };
+            mousePlacement.SettingChanged += (_, _) => { if (!MousePlacementOn) CancelDrag(); };
+            // Mouse placement can make a run unranked, so the "Gameplay-changing features" master switch holds it off.
+            GameplayFeatures.RegisterPart("Formations: mouse placement");
+            GameplayFeatures.Changed += () => { if (!MousePlacementOn) CancelDrag(); };
 
             cycleKey = Keybinds.Register(FeatureSection, "cycle", "Change formation", new KeyboardShortcut(KeyCode.F7),
                 "Switches to the next unit formation.");
@@ -133,7 +138,7 @@ namespace PalaceMod
             var parts = new List<string>();
             if (Bound(cycleKey)) parts.Add($"{KeyLabel(cycleKey)}: formation ({Words(formation.Value)})");
             if (Bound(placeOneKey)) parts.Add($"{KeyLabel(placeOneKey)}: drop one unit");
-            if (mousePlacement.Value && Bound(mouseKey)) parts.Add($"{KeyLabel(mouseKey)}: send to cursor (drag for a line)");
+            if (MousePlacementOn && Bound(mouseKey)) parts.Add($"{KeyLabel(mouseKey)}: send to cursor (drag for a line)");
             if (parts.Count > 0) Notify.Show(string.Join("   ", parts), seconds: 7f, key: "placement-hint");
         }
 
@@ -189,7 +194,7 @@ namespace PalaceMod
             bool released = mouseKey.Up || devRelease;
             devPress = devRelease = false;
 
-            if (!mousePlacement.Value || !leading)
+            if (!MousePlacementOn || !leading)
             {
                 CancelDrag();
                 return;
@@ -458,7 +463,7 @@ namespace PalaceMod
             {
                 if (dragging) return true;
                 var cu = CommandUnits.instance;
-                return mousePlacement.Value && mouseKey.Held && cu != null && cu.commanding && cu.PlayerUnitsCommanding.Count > 0;
+                return MousePlacementOn && mouseKey.Held && cu != null && cu.commanding && cu.PlayerUnitsCommanding.Count > 0;
             }
         }
 

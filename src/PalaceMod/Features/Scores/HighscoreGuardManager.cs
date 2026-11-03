@@ -33,7 +33,7 @@ namespace PalaceMod
         public override string FeatureSection => "Unranked runs";
         public override string FeatureDescription =>
             "Runs that use gameplay-changing mod features (cheats, undo, save states...) don't record high scores, " +
-            "leaderboard entries, quests or achievements.";
+            "leaderboard entries, quests or achievements. To keep every run ranked, turn off General > Gameplay-changing features.";
         protected override bool UnpatchWhenDisabled => false;
 
         private static ConfigEntry<bool> countWins;

@@ -20,6 +20,7 @@ namespace PalaceMod
     public class DebugMenuManager : BaseManager
     {
         public override string FeatureSection => "Debug menu";
+        public override bool AffectsRanking => true; // off while "Gameplay-changing features" is off
         public override string FeatureDescription =>
             "Cheat menu for practice: gold, nights, waves, free buildings, god mode and loadout swaps. Open it from the pause menu. Using it makes the run unranked.";
         protected override bool EnabledByDefault => false;

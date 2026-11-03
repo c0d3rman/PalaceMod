@@ -108,7 +108,8 @@ namespace PalaceMod
                 if (manager.EnabledEntry != null && sections.Contains(manager.FeatureSection))
                 {
                     string section = manager.FeatureSection;
-                    manager.EnabledEntry.SettingChanged += (_, _) => OnFeatureToggled(section);
+                    // EnabledChanged also covers the "Gameplay-changing features" master switch.
+                    manager.EnabledChanged += () => OnFeatureToggled(section);
                 }
             }
             Log.For<KeybindsManager>().Debug($"Added {byAction.Count} Rewired actions in category {CategoryName} ({categoryId})");

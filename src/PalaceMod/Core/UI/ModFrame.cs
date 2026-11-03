@@ -568,6 +568,10 @@ namespace PalaceMod
         private RectTransform viewport, content;
         private float target, velocity;
 
+        /// <summary>Only follow the mouse wheel while the pointer is over the viewport (for several scroll areas on
+        /// one screen).</summary>
+        public bool WheelNeedsHover;
+
         public void Init(UIFrame frame, RectTransform viewport, RectTransform content)
         {
             this.frame = frame;
@@ -595,6 +599,13 @@ namespace PalaceMod
             var rect = (RectTransform)obj.transform;
             rect.sizeDelta = new Vector2(width, 0f);
             return rect;
+        }
+
+        private bool PointerOver()
+        {
+            var canvas = viewport.GetComponentInParent<Canvas>()?.rootCanvas;
+            var camera = canvas == null || canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.worldCamera;
+            return RectTransformUtility.RectangleContainsScreenPoint(viewport, Input.mousePosition, camera);
         }
 
         public void ResetTo(float y)
@@ -657,7 +668,7 @@ namespace PalaceMod
                     finally { stepping = false; }
                 }
             }
-            if (UIFrameManager.instance?.ActiveFrame == frame && Input.mouseScrollDelta.y != 0f)
+            if (UIFrameManager.instance?.ActiveFrame == frame && Input.mouseScrollDelta.y != 0f && (!WheelNeedsHover || PointerOver()))
             {
                 target = Mathf.Clamp(target - Input.mouseScrollDelta.y * 60f, 0f, MaxScroll);
             }

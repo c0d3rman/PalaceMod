@@ -20,6 +20,7 @@ namespace PalaceMod
     public class RetryEarlierDayManager : BaseManager
     {
         public override string FeatureSection => "Retry earlier day";
+        public override bool AffectsRanking => true; // off while "Gameplay-changing features" is off
         public override string FeatureDescription =>
             "Adds \"Earlier Day\" to the game's retry popup (pause > Restart, and Try Again after a defeat): go back to the dawn of any earlier day this run. Uses the savestates' automatic dawn states, so Savestates must be on.";
 
