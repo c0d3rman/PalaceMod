@@ -24,6 +24,31 @@ namespace PalaceMod
         private RectTransform content;
         private string panelKey;
         private bool panelFailed;
+        private bool showDetails; // the details key is held: every option's description is written out
+        private static bool forceDetails; // dev: as if the details key were held
+        // What each hover target says, for the dev command that shows it without a mouse.
+        private static readonly List<(RectTransform Target, string Title, Func<string> Body)> hoverTargets = [];
+
+        private void RegisterPanelDevCommands()
+        {
+            DevCommands.Register("upgv.details", "upgv.details [on|off]  show the building panel as if the details key were held", args =>
+            {
+                forceDetails = !(args.Length > 0 && args[0] == "off");
+                return forceDetails ? "details on" : "details off";
+            });
+            DevCommands.Register("upgv.hover", "upgv.hover [n|off]     show option n's hover tooltip in the building panel (no arg: list them)", args =>
+            {
+                hoverTargets.RemoveAll(t => t.Target == null);
+                if (args.Length == 0)
+                    return $"cursor visible={Cursor.visible}\n" + string.Join("\n", hoverTargets.Select((t, i) => $"{i + 1}: {t.Title}"));
+                if (args[0] == "off") { ModTooltip.Hide(); return "hidden"; }
+                int n = int.Parse(args[0]) - 1;
+                if (n < 0 || n >= hoverTargets.Count) throw new ArgumentException($"there are {hoverTargets.Count} options");
+                var (target, title, body) = hoverTargets[n];
+                ModTooltip.Show(title, body(), target);
+                return title;
+            });
+        }
 
         private void UpdatePanel()
         {
@@ -34,6 +59,7 @@ namespace PalaceMod
                 return;
             }
             if (!EnsurePanel()) return;
+            showDetails = DetailsKey.Held || forceDetails;
             string key = PanelKey(slot);
             if (key != panelKey)
             {
@@ -100,7 +126,7 @@ namespace PalaceMod
             // The deficit is shown ("need 6 more"), so it's part of the key; once affordable the balance no longer matters.
             int cost = slot.NextUpgradeOrBuildCost;
             int deficit = UpgradeInfo.Next(slot) == null ? 0 : Mathf.Max(0, cost - Purse(slot));
-            return $"{slot.GetInstanceID()}|{slot.Level}|{string.Join(",", slot.AppliedUpgrades)}|{cost}|{deficit}|{slot.CanBeUpgraded}|{ShowFuture.Value}";
+            return $"{slot.GetInstanceID()}|{slot.Level}|{string.Join(",", slot.AppliedUpgrades)}|{cost}|{deficit}|{slot.CanBeUpgraded}|{ShowFuture.Value}|{showDetails}";
         }
 
         private static readonly AccessTools.FieldRef<CostDisplay, int> FilledCoins =
@@ -174,6 +200,7 @@ namespace PalaceMod
 
         private void Rebuild(BuildSlot slot)
         {
+            hoverTargets.Clear();
             foreach (Transform child in content.Cast<Transform>().ToList())
             {
                 if (child.name == "PalaceMod Emblem") continue;
@@ -192,9 +219,11 @@ namespace PalaceMod
                 foreach (var (step, choice) in taken)
                 {
                     var row = AddRow(content, 10f);
-                    AddTile(row, choice, TileSize * 0.7f, dim: false);
+                    AddTile(row, choice, TileSize * 0.7f, dim: false, taken: true);
                     AddText(row, $"<color=#{ModStyle.Hex(ModStyle.Dim)}>Lv {step.Level}</color>  {UpgradeInfo.ChoiceName(slot, choice)}",
                         ModStyle.BodyFont, 24f, ModStyle.Gold, TextAlignmentOptions.MidlineLeft);
+                    AttachDescription(row.gameObject, slot, choice, taken: true);
+                    if (showDetails) AddDescription(content, slot, choice, 380f, taken: true);
                 }
             }
 
@@ -232,7 +261,7 @@ namespace PalaceMod
                         if (step.IsChoice)
                         {
                             foreach (var branch in step.Upgrade.upgradeBranches)
-                                AddTile(row, branch.choiceDetails, SmallTileSize, dim: true);
+                                AttachDescription(AddTile(row, branch.choiceDetails, SmallTileSize, dim: true).gameObject, slot, branch.choiceDetails);
                         }
                         else
                         {
@@ -242,7 +271,62 @@ namespace PalaceMod
                 }
             }
 
+            if (!showDetails && HasChoices(slot))
+            {
+                var key = DetailsKey.Shortcut.MainKey;
+                string hint = key == KeyCode.None ? "Hover an option to see what it does" : $"Hover an option or hold {KeyName(key)} for details";
+                var tmp = AddText(content, hint, ModStyle.ButtonFont, 18f, ModStyle.Dim);
+                tmp.margin = new Vector4(0f, 6f, 0f, 0f);
+            }
+
             LayoutRebuilder.ForceRebuildLayoutImmediate(panel);
+        }
+
+        // Whether the panel shows any upgrade choice (taken, next or later), i.e. anything with a description.
+        private bool HasChoices(BuildSlot slot)
+        {
+            if (UpgradeInfo.TakenChoices(slot).Count > 0) return true;
+            if (slot.Level < slot.OwnUpgrades.Count && !slot.OwnUpgrades[slot.Level].disableInThisMode && slot.OwnUpgrades[slot.Level].upgradeBranches.Count > 1) return true;
+            return ShowFuture.Value && UpgradeInfo.Future(slot).Any(s => s.IsChoice);
+        }
+
+        private static string KeyName(KeyCode key) => key switch
+        {
+            KeyCode.LeftShift or KeyCode.RightShift => "Shift",
+            KeyCode.LeftControl or KeyCode.RightControl => "Ctrl",
+            KeyCode.LeftAlt or KeyCode.RightAlt => "Alt",
+            >= KeyCode.Alpha0 and <= KeyCode.Alpha9 => ((int)(key - KeyCode.Alpha0)).ToString(),
+            _ => key.ToString(),
+        };
+
+        /// <summary>What an upgrade choice does, in the game's own words (or how to unlock it).</summary>
+        internal static string DescriptionText(BuildSlot slot, Choice choice, bool taken = false)
+        {
+            if (choice == null) return "";
+            if (!taken && UpgradeInfo.IsLocked(choice))
+                return choice.disabledInThisMode ? "Not available in this mode." : choice.requiresUnlocked != null ? choice.requiresUnlocked.GetLockedTooltip() : "Locked.";
+            return UpgradeInfo.ChoiceDescription(slot, choice);
+        }
+
+        private static string DescriptionTitle(BuildSlot slot, Choice choice, bool taken = false) =>
+            !taken && UpgradeInfo.IsLocked(choice) ? "Locked" : UpgradeInfo.ChoiceName(slot, choice);
+
+        // Mouse hover over an option shows its name and description in the mod tooltip.
+        private static void AttachDescription(GameObject target, BuildSlot slot, Choice choice, bool taken = false)
+        {
+            if (choice == null) return;
+            string title = DescriptionTitle(slot, choice, taken);
+            Func<string> body = () => slot == null ? "" : DescriptionText(slot, choice, taken);
+            ModTooltip.AttachHover(target, title, body);
+            hoverTargets.Add(((RectTransform)target.transform, title, body));
+        }
+
+        private static void AddDescription(Transform parent, BuildSlot slot, Choice choice, float width, bool taken = false)
+        {
+            string text = DescriptionText(slot, choice, taken);
+            if (string.IsNullOrEmpty(text)) return;
+            var tmp = AddText(parent, text, ModStyle.BodyFont, 19f, ModStyle.Gold, TextAlignmentOptions.TopLeft, wrapWidth: width);
+            tmp.characterSpacing = 0f;
         }
 
         private void AddOptions(BuildSlot slot, UpgradeInfo.Step step, float size, bool dim, bool withNames)
@@ -255,6 +339,7 @@ namespace PalaceMod
                 return;
             }
             var row = AddRow(content, 10f);
+            row.GetComponent<HorizontalLayoutGroup>().childAlignment = TextAnchor.UpperLeft; // descriptions differ in length
             foreach (var branch in step.Upgrade.upgradeBranches)
             {
                 var choice = branch.choiceDetails;
@@ -267,12 +352,21 @@ namespace PalaceMod
                 v.childForceExpandWidth = v.childForceExpandHeight = false;
                 bool locked = UpgradeInfo.IsLocked(choice);
                 AddTile(column.transform, choice, size, dim);
+                float width = showDetails ? 190f : 120f;
                 if (withNames)
                 {
                     string name = locked ? "Locked" : UpgradeInfo.ChoiceName(slot, choice);
                     AddText(column.transform, name, ModStyle.BodyFont, 19f, dim || locked ? ModStyle.Dim : ModStyle.Gold,
-                        TextAlignmentOptions.Top, width: 120f, wrapWidth: 120f);
+                        TextAlignmentOptions.Top, width: width, wrapWidth: width);
                 }
+                if (showDetails)
+                {
+                    var tmp = AddText(column.transform, DescriptionText(slot, choice), ModStyle.BodyFont, 17f, ModStyle.Gold,
+                        TextAlignmentOptions.Top, width: width, wrapWidth: width);
+                    tmp.characterSpacing = 0f;
+                    tmp.color = new Color(ModStyle.Gold.r, ModStyle.Gold.g, ModStyle.Gold.b, dim || locked ? 0.6f : 0.9f);
+                }
+                AttachDescription(column, slot, choice);
             }
         }
 
@@ -355,7 +449,7 @@ namespace PalaceMod
         }
 
         /// <summary>A copy of the choice popup's tile showing <paramref name="choice"/>, scaled to <paramref name="size"/>.</summary>
-        internal static RectTransform AddTile(Transform parent, Choice choice, float size, bool dim)
+        internal static RectTransform AddTile(Transform parent, Choice choice, float size, bool dim, bool taken = false)
         {
             var holder = new GameObject("Tile", typeof(RectTransform), typeof(LayoutElement), typeof(CanvasGroup));
             holder.transform.SetParent(parent, false);
@@ -366,7 +460,7 @@ namespace PalaceMod
             var holderRect = (RectTransform)holder.transform;
             holderRect.sizeDelta = new Vector2(size, size);
 
-            bool locked = UpgradeInfo.IsLocked(choice);
+            bool locked = !taken && UpgradeInfo.IsLocked(choice); // a choice already taken shows its icon either way
             var prefab = TilePrefab;
             if (prefab != null)
             {
