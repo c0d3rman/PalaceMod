@@ -231,33 +231,44 @@ namespace PalaceMod
                     if (upgrade.disableInThisMode) continue;
                     int lvl = level;
                     var label = level == 0 ? CompendiumStats.Translate("Tooltip/Build") : $"{CompendiumStats.Translate("Menu/Level")} {level + 1}";
-                    page.Row(label, Coin(upgrade.cost), () => UpgradeText(slot, lvl));
+                    var branches = Branches(upgrade);
+                    bool choice = branches.Count > 1;
+                    page.Row(label, Coin(upgrade.cost), () => LevelText(slot, lvl, withChanges: !choice));
+                    // A choice gets one row per option (its icon, its own short tooltip), so no tooltip lists them all.
+                    if (!choice) continue;
+                    foreach (var branch in branches)
+                    {
+                        var details = branch.choiceDetails;
+                        bool locked = details.requiresUnlocked != null && !details.requiresUnlocked.IsUnlocked;
+                        string name = CompendiumStats.Translate(slot.GET_LOCIDENTIFIER_CHOICENAME(details));
+                        page.Row(locked ? $"{name} ({CompendiumStats.Translate("Menu/Locked")})" : name, Changes(branch), () =>
+                        {
+                            var description = CompendiumStats.Translate(slot.GET_LOCIDENTIFIER_CHOICEDESCRIPTION(details));
+                            return locked ? $"{description}\n\n{details.requiresUnlocked.GetLockedTooltip()}".Trim() : description;
+                        }, icon: details.icon);
+                    }
                 }
             }
         }
 
-        private static string UpgradeText(BuildSlot slot, int level)
+        private static List<BuildSlot.UpgradeBranch> Branches(BuildSlot.Upgrade upgrade) =>
+            upgrade.upgradeBranches.Where(b => b.choiceDetails == null || !b.choiceDetails.disabledInThisMode).ToList();
+
+        // The game's text for a level, plus its health and income changes when it has no choice.
+        private static string LevelText(BuildSlot slot, int level, bool withChanges)
         {
-            var upgrade = slot.OwnUpgrades[level];
-            var sb = new StringBuilder(CompendiumStats.Translate(slot.GET_LOCIDENTIFIER_UPGRADE(level)));
-            var branches = upgrade.upgradeBranches.Where(b => b.choiceDetails == null || !b.choiceDetails.disabledInThisMode).ToList();
-            foreach (var branch in branches)
-            {
-                sb.Append("\n\n");
-                if (branches.Count > 1 && branch.choiceDetails != null)
-                {
-                    sb.Append("<b>").Append(CompendiumStats.Translate(slot.GET_LOCIDENTIFIER_CHOICENAME(branch.choiceDetails))).Append("</b>");
-                    var description = CompendiumStats.Translate(slot.GET_LOCIDENTIFIER_CHOICEDESCRIPTION(branch.choiceDetails));
-                    if (!string.IsNullOrEmpty(description)) sb.Append('\n').Append(description);
-                    if (branch.choiceDetails.requiresUnlocked != null && !branch.choiceDetails.requiresUnlocked.IsUnlocked) sb.Append("\n(").Append(CompendiumStats.Translate("Menu/Locked")).Append(')');
-                    sb.Append('\n');
-                }
-                var changes = new List<string>();
-                if (branch.hpChange != 0) changes.Add($"{(branch.hpChange > 0 ? "+" : "")}{branch.hpChange}<sprite name=\"heart\">");
-                if (branch.goldIncomeChange != 0) changes.Add($"{(branch.goldIncomeChange > 0 ? "+" : "")}{branch.goldIncomeChange}<sprite name=\"coin\"> per day");
-                if (changes.Count > 0) sb.Append(string.Join("   ", changes));
-            }
-            return sb.ToString().TrimEnd();
+            var text = CompendiumStats.Translate(slot.GET_LOCIDENTIFIER_UPGRADE(level));
+            if (!withChanges) return text;
+            var changes = string.Join("   ", Branches(slot.OwnUpgrades[level]).Select(Changes).Where(c => c.Length > 0));
+            return changes.Length > 0 ? (text + "\n\n" + changes).Trim() : text;
+        }
+
+        private static string Changes(BuildSlot.UpgradeBranch branch)
+        {
+            var changes = new List<string>();
+            if (branch.hpChange != 0) changes.Add($"{(branch.hpChange > 0 ? "+" : "")}{branch.hpChange}<sprite name=\"heart\">");
+            if (branch.goldIncomeChange != 0) changes.Add($"{(branch.goldIncomeChange > 0 ? "+" : "")}{branch.goldIncomeChange}<sprite name=\"coin\">/day");
+            return string.Join("  ", changes);
         }
 
         private void BuildPerks(ModPage page)

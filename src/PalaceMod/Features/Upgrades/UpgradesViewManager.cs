@@ -10,7 +10,7 @@ using UnityEngine;
 
     - Near a building: a compact panel beside the game's tooltip listing the choices taken, the next upgrade's
       options (greyed with their cost when you can't afford them yet) and optionally the later levels' options.
-      Hovering an option shows what it does; holding the details key (Tab) spells it out for every option.
+      Hovering an option shows what it does; holding the details key (H) spells it out for every option.
     - Pause screen: a grid of building cards (level pips, chosen upgrades) with a detail strip for the selected one.
     - Units: upgraded units get stars on their icons (pause-menu unit list, the command-mode icons over their heads),
       the pause-menu list keeps differently upgraded units of one type apart, and its hover text names the upgrades.
@@ -43,7 +43,7 @@ namespace PalaceMod
             MarkUnits = cfg.Bind(FeatureSection, "Mark upgraded units", true, new ConfigDescription(
                 "Stars on unit icons show how many times their building was upgraded; the pause menu lists differently upgraded units separately and names their upgrades."));
 
-            DetailsKey = Keybinds.Register(FeatureSection, "details", "Show upgrade details", new KeyboardShortcut(KeyCode.Tab),
+            DetailsKey = Keybinds.Register(FeatureSection, "details", "Show upgrade details", new KeyboardShortcut(KeyCode.H),
                 "While held next to a building, its upgrade panel spells out what each option does (hovering an option with the mouse shows the same).");
 
             NearBuilding.SettingChanged +=(_, _) => { if (!NearBuilding.Value) HidePanel(); };
@@ -59,6 +59,7 @@ namespace PalaceMod
             };
 
             RegisterDevCommands();
+            RegisterPanelDevCommands();
             StartPauseOverview();
         }
 

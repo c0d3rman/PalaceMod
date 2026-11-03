@@ -160,7 +160,18 @@ namespace PalaceMod
             var slot = group.First;
             if (slot == null) return;
 
-            var box = new GameObject("Details", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
+            var source = GameWidgets.PauseTooltip?.selectionTitle?.GetComponentInParent<MPUIKIT.MPImage>(true);
+            var box = source != null ? GameWidgets.Clone(source, overviewAside, "Details", keepChildren: false) : new GameObject("Details", typeof(RectTransform));
+            foreach (var c in box.GetComponents<Component>())
+                if (c is LayoutGroup or ContentSizeFitter or LayoutElement) Object.DestroyImmediate(c);
+            box.AddComponent<VerticalLayoutGroup>().padding = new RectOffset(28, 28, 20, 24);
+            box.AddComponent<ContentSizeFitter>();
+            if (box.GetComponent<MPUIKIT.MPImage>() is { } panelImage)
+            {
+                panelImage.raycastTarget = false;
+                ModStyle.MarkPanel(panelImage);
+            }
+            box.SetActive(true);
             box.transform.SetParent(overviewAside, false);
             var rect = (RectTransform)box.transform;
             rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0f, 1f);
@@ -173,12 +184,12 @@ namespace PalaceMod
             layout.childForceExpandWidth = layout.childForceExpandHeight = false;
             box.GetComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
 
-            AddText(box.transform, Title(group), ModStyle.TitleFont, 40f, ModStyle.Gold, wrapWidth: width);
+            AddText(box.transform, Title(group), ModStyle.TitleFont, 40f, ModStyle.Gold, wrapWidth: width - 56f);
             var levelRow = AddRow(box.transform, 14f);
             AddPips(levelRow, slot.Level, UpgradeInfo.MaxLevel(slot), 16f);
             AddText(levelRow, $"Level {slot.Level} of {UpgradeInfo.MaxLevel(slot)}", ModStyle.BodyFont, 24f, ModStyle.Gold, TextAlignmentOptions.MidlineLeft);
 
-            float textWidth = width - 72f;
+            float textWidth = width - 56f - 72f;
             var taken = UpgradeInfo.Taken(slot).Where(s => s.Level > 1 || s.IsChoice).ToList();
             if (taken.Count > 0)
             {
@@ -186,12 +197,12 @@ namespace PalaceMod
                 foreach (var step in taken)
                 {
                     if (step.IsChoice && step.TakenChoice != null)
-                        DetailChoice(box.transform, slot, step.TakenChoice, $"Lv {step.Level}", dim: false, textWidth);
+                        DetailChoice(box.transform, slot, step.TakenChoice, $"Lv {step.Level}", dim: false, textWidth, taken: true);
                     else
                     {
                         string text = UpgradeInfo.StepText(slot, step);
                         if (!string.IsNullOrEmpty(text))
-                            AddText(box.transform, $"<color=#{ModStyle.Hex(ModStyle.Dim)}>Lv {step.Level}</color>  {Shorten(text)}", ModStyle.BodyFont, 22f, ModStyle.Gold, wrapWidth: width);
+                            AddText(box.transform, $"<color=#{ModStyle.Hex(ModStyle.Dim)}>Lv {step.Level}</color>  {Shorten(text)}", ModStyle.BodyFont, 22f, ModStyle.Gold, wrapWidth: width - 56f);
                     }
                 }
             }
@@ -203,7 +214,7 @@ namespace PalaceMod
                 if (n.IsChoice)
                     foreach (var branch in n.Upgrade.upgradeBranches)
                         DetailChoice(box.transform, slot, branch.choiceDetails, null, dim: UpgradeInfo.IsLocked(branch.choiceDetails), textWidth);
-                else AddText(box.transform, Shorten(UpgradeInfo.StepText(slot, n)), ModStyle.BodyFont, 22f, ModStyle.Gold, wrapWidth: width);
+                else AddText(box.transform, Shorten(UpgradeInfo.StepText(slot, n)), ModStyle.BodyFont, 22f, ModStyle.Gold, wrapWidth: width - 56f);
             }
             else DetailSection(box.transform, UpgradeInfo.HasRemaining(slot) ? "Next upgrade needs a higher castle level" : "Fully upgraded");
 
@@ -221,21 +232,21 @@ namespace PalaceMod
         }
 
         // A choice tile, its name (with an optional prefix like "Lv 2") and the game's description beside it.
-        private static void DetailChoice(Transform parent, BuildSlot slot, Choice choice, string prefix, bool dim, float textWidth)
+        private static void DetailChoice(Transform parent, BuildSlot slot, Choice choice, string prefix, bool dim, float textWidth, bool taken = false)
         {
             var row = AddRow(parent, 14f);
             row.GetComponent<HorizontalLayoutGroup>().childAlignment = TextAnchor.UpperLeft;
-            AddTile(row, choice, 54f, dim);
+            AddTile(row, choice, 54f, dim, taken);
             var column = new GameObject("Text", typeof(RectTransform), typeof(VerticalLayoutGroup));
             column.transform.SetParent(row, false);
             var v = column.GetComponent<VerticalLayoutGroup>();
             v.spacing = 0f;
             v.childControlWidth = v.childControlHeight = true;
             v.childForceExpandWidth = v.childForceExpandHeight = false;
-            string name = DescriptionTitle(slot, choice);
+            string name = DescriptionTitle(slot, choice, taken);
             if (prefix != null) name = $"<color=#{ModStyle.Hex(ModStyle.Dim)}>{prefix}</color>  {name}";
             AddText(column.transform, name, ModStyle.BoldFont, 23f, dim ? ModStyle.Dim : ModStyle.Gold, wrapWidth: textWidth);
-            string description = DescriptionText(slot, choice);
+            string description = DescriptionText(slot, choice, taken);
             if (!string.IsNullOrEmpty(description))
             {
                 var tmp = AddText(column.transform, description, ModStyle.BodyFont, 20f, dim ? ModStyle.Dim : ModStyle.Gold, wrapWidth: textWidth);
@@ -314,7 +325,7 @@ namespace PalaceMod
                     tiles.anchorMin = tiles.anchorMax = tiles.pivot = new Vector2(0f, 0f);
                     tiles.anchoredPosition = new Vector2(16f, 14f);
                     tiles.sizeDelta = new Vector2(0f, CardTile);
-                    foreach (var (_, choice) in taken) AddTile(tiles, choice, CardTile, dim: false);
+                    foreach (var (_, choice) in taken) AddTile(tiles, choice, CardTile, dim: false, taken: true);
                 }
                 else
                 {
