@@ -240,6 +240,8 @@ namespace PalaceMod
                 var mouse = lastMouse = Mouse;
                 foreach (var source in hovered.OrderBy(h => (Center(h) - mouse).sqrMagnitude))
                 {
+                    // Faded out (e.g. the score panel while the game's own tooltip is up): it isn't really there.
+                    if (Faded(source)) continue;
                     if (ReferenceEquals(owner, source) && Visible) return;
                     var (t, b) = source.Content();
                     // Nothing to say right now (the content can change): try the next one.
@@ -248,6 +250,20 @@ namespace PalaceMod
                     return;
                 }
                 if (owner is HoverSource) Hide();
+            }
+
+            private static readonly List<CanvasGroup> groups = [];
+
+            private static bool Faded(HoverSource h)
+            {
+                h.GetComponentsInParent(false, groups);
+                float alpha = 1f;
+                foreach (var group in groups)
+                {
+                    alpha *= group.alpha;
+                    if (group.ignoreParentGroups) break;
+                }
+                return alpha < 0.5f;
             }
 
             private static Vector2 Center(HoverSource h)
