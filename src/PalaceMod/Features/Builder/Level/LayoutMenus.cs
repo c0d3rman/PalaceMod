@@ -108,7 +108,7 @@ namespace PalaceMod.Builder.Level
             page.Row("Play this layout", draft.ErrorCount > 0 ? Error($"{draft.ErrorCount} problem(s) in the pack") : "",
                 "Saves the pack and starts the level with your layout (a custom run: no saves, scores or achievements).", LayoutEditor.Play);
             page.Row("Open the pack editor", "", "The pack's units, wave sets and level settings. Close it to come back here.", () => BuilderEditor.OpenPack(draft.SourceId ?? draft.Pack.Id));
-            page.Row("Leave the layout editor", "", "Returns to the map select. Unsaved changes stay in the pack editor until the game quits.", LayoutEditor.Leave);
+            page.Row("Leave the layout editor", "", "Returns to where you opened the Builder from. Unsaved changes stay in the pack editor until the game quits.", LayoutEditor.Leave);
         }
 
         private static void BuildHelp(ModPage page)

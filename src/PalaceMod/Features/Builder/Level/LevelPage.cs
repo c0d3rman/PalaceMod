@@ -121,6 +121,7 @@ namespace PalaceMod.Builder.Editor
             // On success the editor stays up under the clouds; the scene transition closes it (see BuilderEditor.Launch).
             if (!LayoutEditor.Launch(Draft, lv.Id, out string error))
                 Notify.Show("Can't open the layout editor: " + error, NotifyKind.Error, 6f, key: "builder-editor");
+            else EditorReturn.Remember();
         }
 
         private void Play()
@@ -131,6 +132,7 @@ namespace PalaceMod.Builder.Editor
                 Notify.Show(saveError, NotifyKind.Warning, key: "builder-editor");
             if (!BuilderServices.Sessions.Launch(new SessionRequest { Pack = Draft.Pack, LevelId = lv.Id }, out string error))
                 Notify.Show("Can't test: " + error, NotifyKind.Error, 6f, key: "builder-editor");
+            else EditorReturn.Remember();
         }
     }
 }

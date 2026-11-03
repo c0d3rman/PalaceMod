@@ -68,8 +68,11 @@ namespace PalaceMod
                         BuilderEditor.OpenPack(pack);
                         var draft = BuilderEditor.Draft ?? throw new InvalidOperationException("no draft");
                         if (draft.Pack.FindLevel(level) == null) throw new ArgumentException($"no level {level} in {pack}");
-                        BuilderEditor.CloseAll();
+                        // As from the level page's "Edit the layout on the map": the page stays up under the clouds and
+                        // Leave comes back to it.
+                        BuilderEditor.GoTo($"levels[{draft.Pack.Levels.FindIndex(l => l.Id == level)}]");
                         if (!LayoutEditor.Launch(draft, level, out string error)) throw new InvalidOperationException(error);
+                        EditorReturn.Remember();
                         return "launching the layout editor";
                     }
                     case "new":

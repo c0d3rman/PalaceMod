@@ -281,6 +281,7 @@ namespace PalaceMod.Builder.Editor
             // transition closes every menu at its midpoint, so nothing is left open over the loading map.
             if (!BuilderServices.Sessions.Launch(new SessionRequest { Pack = pack, WaveSetId = waveSetId }, out string error))
                 Notify.Show("Can't test: " + error, NotifyKind.Error, 6f, key: "builder-editor");
+            else EditorReturn.Remember();
         }
 
         internal static void CopyShareCode()
@@ -361,6 +362,45 @@ namespace PalaceMod.Builder.Editor
                 return;
             }
             packPage?.SelectPath(path);
+        }
+
+        /// <summary>The open pack and the editor screen showing now, as a GoTo path ("" for the pack page, null for
+        /// the pack list); false when the editor isn't the active menu.</summary>
+        internal static bool CurrentPlace(out string packId, out string path)
+        {
+            packId = path = null;
+            var active = UIFrameManager.instance?.ActiveFrame;
+            if (active == null) return false;
+            if (list != null && list.Frame.Frame == active) return true;
+            packId = drafts.FirstOrDefault(kv => kv.Value == Draft).Key;
+            if (packId == null) return false;
+            if (levelPage != null && levelPage.Frame.Frame == active) path = $"levels[{levelPage.Index}]";
+            else if (unitPage != null && unitPage.Frame.Frame == active) path = $"units[{unitPage.Index}]";
+            else if (wavePage != null && wavePage.Frame.Frame == active) path = $"waveSets[{wavePage.Index}]";
+            else if (packPage != null && packPage.Frame.Frame == active) path = "";
+            else return false;
+            return true;
+        }
+
+        /// <summary>Opens the editor the way the player had walked into it: pack list, then the pack, then the screen
+        /// at <paramref name="path"/> (see CurrentPlace).</summary>
+        internal static void Reopen(string packId, string path)
+        {
+            Open();
+            if (packId == null || list == null || !list.Frame.IsOpen) return;
+            OpenPack(packId);
+            if (string.IsNullOrEmpty(path) || Draft == null || !packPage.Frame.IsOpen) return;
+            if (!InRange(path)) return;
+            GoTo(path);
+        }
+
+        private static bool InRange(string path)
+        {
+            var m = Regex.Match(path, @"^(levels|units|waveSets)\[(\d+)\]$");
+            if (!m.Success) return false;
+            int i = int.Parse(m.Groups[2].Value);
+            int count = m.Groups[1].Value switch { "levels" => Draft.Pack.Levels.Count, "units" => Draft.Pack.Units.Count, _ => Draft.Pack.WaveSets.Count };
+            return i < count;
         }
 
         /// <summary>Closes the editor and forgets the open pack (the feature was switched off).</summary>
