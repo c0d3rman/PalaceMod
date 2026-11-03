@@ -194,8 +194,10 @@ namespace PalaceMod
             heldSince = Time.unscaledTime;
             heldReported = false;
             if (!aimed) return;
-            // The cursor placement is done; releasing the mouse button afterwards must not place again.
+            // The cursor placement is done; releasing the mouse button afterwards must not place again. The king keeps
+            // ignoring Move Towards Mouse (same button) until the mouse button and the place key are both released.
             CancelDrag();
+            confirmLatch = true;
             GameplayImpact.Mark("Mouse unit placement");
             Log.Info($"Cursor placement confirmed with the place-units key ({heldPlaced.Count} units)");
         }
@@ -204,6 +206,15 @@ namespace PalaceMod
         {
             var input = Plugin.Input;
             return input != null && (input.GetButton("Command Units") || input.GetButton("Smart Command Units"));
+        }
+
+        /// <summary>The cursor-placement button, or the game's Move Towards Mouse, is physically down (ignoring the
+        /// keybind's menu gating).</summary>
+        private bool MouseButtonDown()
+        {
+            if (devHeld) return true;
+            var input = Plugin.Input;
+            return Keybinds.Backend.Held(mouseKey) || (input != null && input.GetButton(MoveTowardsMousePatch.Action));
         }
 
         private void UpdateHeldPlacement(CommandUnits cu)
@@ -587,13 +598,22 @@ namespace PalaceMod
             return tags != null && tags.Contains(TagManager.ETag.MeeleFighter) && !tags.Contains(TagManager.ETag.RangedFighter);
         }
 
+        // Set when the place-units key confirms an aimed cursor placement; held until the mouse button and the place
+        // key are both up, so the still-held right button doesn't walk the king toward the cursor meanwhile.
+        private bool confirmLatch;
+
         /// <summary>A mouse placement is being aimed, or its key is down and about to start one (the game may read its
-        /// input before this manager's Update does).</summary>
+        /// input before this manager's Update does), or was just confirmed and its buttons aren't released yet.</summary>
         private bool AimingAtCursor
         {
             get
             {
                 if (dragging) return true;
+                if (confirmLatch)
+                {
+                    if (MouseButtonDown() || PlaceKeyHeld()) return true;
+                    confirmLatch = false;
+                }
                 var cu = CommandUnits.instance;
                 return MousePlacementOn && mouseKey.Held && cu != null && cu.commanding && cu.PlayerUnitsCommanding.Count > 0;
             }
@@ -617,7 +637,7 @@ namespace PalaceMod
         [HarmonyPatch(typeof(PlayerMovement), "Update")]
         private static class MoveTowardsMousePatch
         {
-            private const string Action = "Move Towards Mouse";
+            internal const string Action = "Move Towards Mouse";
 
             private static bool GetButton(Rewired.Player player, string action)
             {

@@ -322,9 +322,35 @@ namespace PalaceMod
         }
 
         // The game points the menu's right arrow at the loadout grid each time it refreshes; ours follow Settings.
+        // The game also guards loadoutGrid[0] with playerGrid.Count, so with units but an empty loadout (a dev or
+        // Builder level started without a weapon) it throws inside UIFrame.Activate: time is frozen, but the pause frame
+        // never becomes active, so Escape can't close it and the game is soft-locked. The prefix runs the same method
+        // with the right guard in that one case.
         [HarmonyPatch(typeof(PauseUILoadoutHelper), "AssignNavigationTargets")]
         private class AssignNavigationTargets_Patch
         {
+            private static readonly AccessTools.FieldRef<PauseUILoadoutHelper, List<ThronefallUIElement>> LoadoutGrid =
+                AccessTools.FieldRefAccess<PauseUILoadoutHelper, List<ThronefallUIElement>>("loadoutGrid");
+            private static readonly AccessTools.FieldRef<PauseUILoadoutHelper, List<ThronefallUIElement>> EnemyGrid =
+                AccessTools.FieldRefAccess<PauseUILoadoutHelper, List<ThronefallUIElement>>("enemyGrid");
+            private static readonly AccessTools.FieldRef<PauseUILoadoutHelper, List<ThronefallUIElement>> PlayerGrid =
+                AccessTools.FieldRefAccess<PauseUILoadoutHelper, List<ThronefallUIElement>>("playerGrid");
+            private static readonly System.Reflection.MethodInfo CalculateGridNavigation =
+                AccessTools.Method(typeof(PauseUILoadoutHelper), "CalculateGridNavigation");
+
+            private static bool Prefix(PauseUILoadoutHelper __instance)
+            {
+                var loadout = LoadoutGrid(__instance);
+                var players = PlayerGrid(__instance);
+                if (CalculateGridNavigation == null || loadout == null || players == null || loadout.Count > 0 || players.Count == 0) return true;
+                var enemies = EnemyGrid(__instance) ?? [];
+                var h = __instance;
+                CalculateGridNavigation.Invoke(h, [enemies, players[0], h.botmostButton, h.rightMostElement, true, false, false]);
+                var top = enemies.Count > 0 ? enemies[0] : h.botmostButton;
+                CalculateGridNavigation.Invoke(h, [players, h.topmostButton, top, h.rightMostElement, false, true, false]);
+                return false;
+            }
+
             private static void Postfix(PauseUILoadoutHelper __instance)
             {
                 foreach (var b in PauseMenu.Buttons.Values)
