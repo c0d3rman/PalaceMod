@@ -127,6 +127,8 @@ namespace PalaceMod
             undoKey = Keybinds.Register(FeatureSection, "undo", "Undo loadout roll", new KeyboardShortcut(KeyCode.Z),
                 "On the loadout screen, puts back the loadout from before the last roll.", KeybindFlags.AllowInMenus,
                 KeybindContext.LoadoutScreen);
+            // While the randomizer is on screen, X and Z are its own: the camera's Zoom (Z) mustn't fire behind it.
+            Keybinds.ClaimContext(KeybindContext.LoadoutScreen, () => IsEnabled && ActiveUI() != null);
 
             RegisterDevCommands();
         }

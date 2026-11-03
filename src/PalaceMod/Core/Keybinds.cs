@@ -16,6 +16,9 @@ using UnityEngine.EventSystems;
     A keybind is inert while its feature is disabled, while a menu is open (unless AllowInMenus), and while a text field
     has keyboard focus. A key that only acts on one screen or in one mode can name it as its context (e.g.
     KeybindContext.LoadoutScreen); the Controls screen then only reports conflicts with keys that can act there too.
+    A feature that knows when its context is on screen can claim it (Keybinds.ClaimContext): while claimed, the
+    context's keys own their inputs, and every other action on the same input (the game's Zoom on Z, a mod key) is
+    blocked, so one press doesn't also act in the background.
 
     How keys are read is behind IKeybindBackend. KeybindsManager makes each keybind a Rewired action (so it gets a
     native row in Controls > Keyboard and can be bound to keyboard, mouse or controller) and reads it from Rewired;
@@ -135,6 +138,39 @@ namespace PalaceMod
             byKey[key] = keybind;
             Registered?.Invoke(keybind);
             return keybind;
+        }
+
+        // ---- Exclusive contexts ------------------------------------------------------------------------------------
+
+        private static readonly Dictionary<string, Func<bool>> claims = [];
+
+        /// <summary>Makes <paramref name="context"/>'s keys exclusive while <paramref name="whileActive"/> returns true:
+        /// any other game or mod action bound to the same input is blocked meanwhile (e.g. the camera's Zoom while the
+        /// loadout screen uses Z). Call once, typically in Awake; it's checked every frame, so keep it cheap.</summary>
+        public static void ClaimContext(string context, Func<bool> whileActive)
+        {
+            if (string.IsNullOrEmpty(context)) throw new ArgumentException("context is required", nameof(context));
+            claims[context] = whileActive ?? throw new ArgumentNullException(nameof(whileActive));
+        }
+
+        private static readonly HashSet<string> claimed = [];
+
+        /// <summary>The contexts claimed right now (a reused set; don't keep it).</summary>
+        internal static HashSet<string> ClaimedContexts()
+        {
+            claimed.Clear();
+            foreach (var claim in claims)
+            {
+                bool on;
+                try { on = claim.Value(); }
+                catch (Exception e)
+                {
+                    Log.For<KeybindsManager>().Caught($"Claim check for keybind context '{claim.Key}' failed", e);
+                    on = false;
+                }
+                if (on) claimed.Add(claim.Key);
+            }
+            return claimed;
         }
 
         internal static string ConfigKey(string section, string id) => $"{section}: {id}";
