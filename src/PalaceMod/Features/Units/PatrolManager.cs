@@ -97,6 +97,87 @@ namespace PalaceMod
                 "While leading units, drops a patrol point under the mouse cursor.");
 
             RegisterDevCommands();
+            SaveStates.RegisterState("patrols", CaptureState, RestoreState);
+        }
+
+        // ---- Savestates -------------------------------------------------------------------------------------------
+
+        internal sealed class SavedPatrols
+        {
+            public List<SavedRoute> routes = [];
+            public List<V3> pending = [];
+        }
+
+        internal sealed class SavedRoute
+        {
+            public List<V3> points = [];
+            public bool loop;
+            public List<SavedPatroller> units = [];
+        }
+
+        internal sealed class SavedPatroller
+        {
+            public string unit;
+            public V3 offset, placedHome;
+            public int index, direction = 1;
+            public float legTime;
+            public bool started;
+        }
+
+        private SavedPatrols CaptureState()
+        {
+            if (routes.Count == 0 && pending.Count == 0) return null;
+            var saved = new SavedPatrols { pending = pending.Select(p => (V3)p).ToList() };
+            foreach (var route in routes)
+            {
+                var r = new SavedRoute { points = route.Points.Select(p => (V3)p).ToList(), loop = route.Loop };
+                foreach (var (unit, p) in patrollers)
+                {
+                    if (unit == null || p.Route != route) continue;
+                    r.units.Add(new SavedPatroller
+                    {
+                        unit = SaveStates.PathOf(unit), offset = p.Offset, placedHome = p.PlacedHome,
+                        index = p.Index, direction = p.Direction, legTime = p.LegTime, started = p.Started,
+                    });
+                }
+                if (r.units.Count > 0) saved.routes.Add(r);
+            }
+            return saved;
+        }
+
+        // The reload dropped every patrol (the units are new objects); hand the captured ones to the same units.
+        private void RestoreState(SavedPatrols saved)
+        {
+            if (!IsEnabled) return;
+            Reset();
+            pending.AddRange(saved.pending.Select(p => (Vector3)p));
+            var units = SaveStates.FindByPath<PathfindMovementPlayerunit>();
+            int restored = 0;
+            foreach (var r in saved.routes)
+            {
+                var route = new Route { Loop = r.loop };
+                route.Points.AddRange(r.points.Select(p => (Vector3)p));
+                if (route.Points.Count < 2) continue;
+                foreach (var s in r.units)
+                {
+                    if (s.unit == null || !units.TryGetValue(s.unit, out var unit) || patrollers.ContainsKey(unit)) continue;
+                    patrollers[unit] = new Patroller
+                    {
+                        Route = route, Offset = s.offset, PlacedHome = s.placedHome,
+                        Index = Mathf.Clamp(s.index, 0, route.Points.Count - 1), Direction = s.direction >= 0 ? 1 : -1,
+                        LegTime = s.legTime, Started = s.started,
+                    };
+                    route.Units++;
+                    if (s.started) unit.HasReachedHomePositionAlready = true;
+                }
+                if (route.Units > 0)
+                {
+                    routes.Add(route);
+                    restored += route.Units;
+                }
+            }
+            if (restored > 0) GameplayImpact.Mark("Unit patrols");
+            Log.Debug($"Restored {routes.Count} patrol routes ({restored} units), {pending.Count} pending points from a savestate");
         }
 
         protected override void OnFeatureDisabled()

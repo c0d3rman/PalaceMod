@@ -49,6 +49,24 @@ namespace PalaceMod
             base.Awake(plugin);
             PauseMenu.AddButton("analytics", "Run Analytics", Open, order: 20, visible: () => IsEnabled && Rules.Available);
             DevCommands.Register("analytics", "analytics [open|kill|build <n>|reload [disk|fresh]|dump|scenario <income> <fromNight> <faster> <spend%|avg>]   run analytics: summary, open the frame, end the night, scenario", Command);
+            // The match save only holds the history as of the last dawn; a savestate keeps it as of the moment.
+            SaveStates.RegisterState("analytics",
+                () => IsEnabled && history != null && trackedScore != null && history.level == trackedScore.gameObject.scene.name ? new SavedHistory { json = history.ToJson() } : null,
+                RestoreState);
+        }
+
+        internal sealed class SavedHistory { public string json; }
+
+        private void RestoreState(SavedHistory saved)
+        {
+            if (!IsEnabled || ScoreManager.Instance == null) return;
+            var restored = RunHistory.FromJson(saved.json);
+            if (restored == null || restored.level != ScoreManager.Instance.gameObject.scene.name) return;
+            if (ScoreManager.Instance != trackedScore) Attach();
+            history = restored;
+            // A state taken at night already has that night's record; don't start another one.
+            wasNight = RunProjection.IsNight;
+            Log.Debug($"Restored {history.nights.Count} recorded nights from a savestate");
         }
 
         protected override void OnFeatureDisabled()

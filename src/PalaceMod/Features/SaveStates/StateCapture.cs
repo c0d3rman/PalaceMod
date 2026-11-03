@@ -111,6 +111,7 @@ namespace PalaceMod
             CapturePlayerObjects(data, paths);
             CaptureEnemies(data, paths);
             if (data.night) CaptureSpawner(data, spawner);
+            SaveStates.CaptureMods(data);
             return data;
         }
 
