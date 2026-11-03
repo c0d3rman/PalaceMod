@@ -3,7 +3,8 @@ using UnityEngine;
 
 /*
     Ground markers showing where units will stand before a mouse placement is confirmed: a ring per unit and an arrow
-    for the direction the formation faces. Markers are pooled and lie flat just above the ground.
+    for the direction the formation faces. Markers are pooled and lie flat just above the ground. A faint, smaller
+    style shows where units would land while they follow the king in a formation.
 */
 namespace PalaceMod
 {
@@ -15,6 +16,8 @@ namespace PalaceMod
         private const float ArrowSize = 2.2f;
         private const float Lift = 0.08f;
 
+        private readonly float alpha, scale;
+        private readonly string name;
         private readonly List<GameObject> rings = [];
         private GameObject root, arrow;
         private Material ringMaterial, arrowMaterial;
@@ -22,15 +25,25 @@ namespace PalaceMod
 
         public bool Visible => root != null && root.activeSelf;
 
-        public void Show(List<FormationSlot> slots, Vector3 center, Vector3 forward, bool hold)
+        /// <param name="alpha">Opacity multiplier (1: the aiming markers; lower for the faint follow preview).</param>
+        /// <param name="scale">Marker size multiplier.</param>
+        public PlacementPreview(string name, float alpha = 1f, float scale = 1f)
+        {
+            this.name = name;
+            this.alpha = alpha;
+            this.scale = scale;
+        }
+
+        public void Show(List<FormationSlot> slots, Vector3 center, Vector3 forward, bool hold, bool showArrow = true)
         {
             if (root == null) Build();
             root.SetActive(true);
             Color color = hold ? HoldColor : NormalColor;
+            color.a *= alpha;
             ringMaterial.color = color;
             arrowMaterial.color = color;
 
-            while (rings.Count < slots.Count) rings.Add(CreateMarker("Ring", ringMaterial, RingSize));
+            while (rings.Count < slots.Count) rings.Add(CreateMarker("Ring", ringMaterial, RingSize * scale));
             for (int i = 0; i < rings.Count; i++)
             {
                 bool used = i < slots.Count;
@@ -38,12 +51,13 @@ namespace PalaceMod
                 if (used) rings[i].transform.position = slots[i].Position + Vector3.up * Lift;
             }
 
+            arrow.SetActive(showArrow);
             forward.y = 0f;
             if (forward.sqrMagnitude < 1e-6f) forward = Vector3.forward;
             forward.Normalize();
             float front = 0f;
             foreach (var slot in slots) front = Mathf.Max(front, Vector3.Dot(slot.Position - center, forward));
-            arrow.transform.SetPositionAndRotation(center + forward * (front + 1.5f) + Vector3.up * Lift, Quaternion.LookRotation(forward));
+            arrow.transform.SetPositionAndRotation(center + forward * (front + 1.5f * scale) + Vector3.up * Lift, Quaternion.LookRotation(forward));
         }
 
         public void Hide()
@@ -69,13 +83,13 @@ namespace PalaceMod
 
         private void Build()
         {
-            root = new GameObject("PalaceMod Placement Preview");
+            root = new GameObject($"PalaceMod {name}");
             Object.DontDestroyOnLoad(root);
             quad = FlatQuad();
             var shader = Shader.Find("Sprites/Default");
             ringMaterial = new Material(shader) { mainTexture = RingTexture(), renderQueue = 3100 };
             arrowMaterial = new Material(shader) { mainTexture = ArrowTexture(), renderQueue = 3100 };
-            arrow = CreateMarker("Arrow", arrowMaterial, ArrowSize);
+            arrow = CreateMarker("Arrow", arrowMaterial, ArrowSize * scale);
         }
 
         private GameObject CreateMarker(string name, Material material, float size)
