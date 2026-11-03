@@ -10,8 +10,10 @@ using UnityEngine.SceneManagement;
 /*
     Player-placed teleporters.
 
-    During the day, press the place key to put a teleporter down where the king stands (for gold, or free); press it
-    again on a teleporter to pick it up for a refund. Standing on a linked teleporter for a moment sends the king to the
+    During the day, hold the place key to put a teleporter down where the king stands (for gold, or free); hold it
+    on a teleporter to pick it up for a refund. The hold takes as long as the game's hold-to-hold-position
+    (CommandUnits.holdToHoldPositionTime): a ring sweeps around the spot while the gold goes in coin by coin through a
+    copy of a build slot's cost display (TeleporterPayment), and letting go early sends the coins back. Standing on a linked teleporter for a moment sends the king to the
     next one, and the units following him come along.
 
     This reuses the game's own mine-shaft mechanic (MineShaft): standing in the entrance for a short channel
@@ -75,7 +77,7 @@ namespace PalaceMod
                 "Whether the one-time placement hint was shown.", null, new SettingTags { Hidden = true }));
 
             placeKey = Keybinds.Register(FeatureSection, "place", "Place teleporter", new KeyboardShortcut(KeyCode.T),
-                "During the day, places a teleporter where the king stands, or picks up the one he stands on.");
+                "Hold during the day to place a teleporter where the king stands, or to pick up the one he stands on.");
 
             RegisterDevCommands();
             SaveStates.RegisterState("teleporters", CaptureState, RestoreState);
@@ -114,6 +116,7 @@ namespace PalaceMod
 
         protected override void OnFeatureDisabled()
         {
+            AbortHold();
             foreach (var pad in pads) pad.SetVisible(false);
             channel = 0f;
             channelPad = null;
@@ -157,7 +160,7 @@ namespace PalaceMod
             bool inMatch = LocalGamestate.Instance != null && LocalGamestate.Instance.CurrentState == LocalGamestate.State.InMatch;
             if (hintPending && inMatch && !night) ShowHint();
 
-            if (placeKey.Down && inMatch) OnPlaceKey(king, night);
+            UpdateHold(king, night, inMatch);
 
             cooldownLeft = Mathf.Max(0f, cooldownLeft - Time.deltaTime);
             bool usable = inMatch && pads.Count >= 2 && (!night || useAtNight.Value) && KingAlive(king);
@@ -229,47 +232,194 @@ namespace PalaceMod
 
         // ---- Placing ----------------------------------------------------------------------------------------------
 
-        private void OnPlaceKey(PlayerMovement king, bool night)
+        // ---- Holding the key --------------------------------------------------------------------------------------
+
+        // While the key is held: what it will do, where, and how far along. After a hold completes (or is refused),
+        // nothing more happens until the key is released, so a long hold doesn't place and then pick up.
+        private enum HoldKind { None, Place, Pickup }
+
+        private const float HoldDrift = 1.2f; // walking further than this from the spot cancels, like leaving a build slot
+        private HoldKind hold;
+        private float holdTime, holdDuration;
+        private Vector3 holdAt;
+        private TeleporterPad holdPad;
+        private TeleporterHoldRing holdRing;
+        private TeleporterPayment payment;
+        private bool waitForRelease;
+
+        // The game's hold-to-hold-position delay (1 s in its prefab).
+        private static float HoldDelay => CommandUnits.instance != null && CommandUnits.instance.holdToHoldPositionTime > 0.05f
+            ? CommandUnits.instance.holdToHoldPositionTime : 1f;
+
+        private void UpdateHold(PlayerMovement king, bool night, bool inMatch)
         {
-            if (!KingAlive(king)) return;
+            // Keybind.Held is already false in menus (the pause menu included); a zero time scale covers the rest.
+            bool held = placeKey.Held && Time.timeScale > 0f;
+            if (!held) waitForRelease = false;
+
+            if (hold == HoldKind.None)
+            {
+                if (placeKey.Down && inMatch && Time.timeScale > 0f && !waitForRelease) BeginHold(king, night);
+                return;
+            }
+
+            var player = PlayerInteraction.instance;
+            bool stillValid = held && inMatch && !night && KingAlive(king) && Flat(king.transform.position - holdAt) <= HoldDrift &&
+                (hold != HoldKind.Pickup || pads.Contains(holdPad));
+            if (!stillValid)
+            {
+                CancelHold(player, released: !held);
+                return;
+            }
+
+            holdTime += Time.deltaTime;
+            float progress = Mathf.Clamp01(holdTime / holdDuration);
+            if (payment != null && !payment.Advance(progress, player))
+            {
+                // Out of gold mid-payment (spent elsewhere): stall like a build slot, showing the denied coin.
+                holdTime = Mathf.Max(0f, holdTime - Time.deltaTime);
+                return;
+            }
+            holdRing?.SetArc(hold == HoldKind.Place ? progress : 1f - progress);
+            if (progress >= 1f) CompleteHold(player);
+        }
+
+        private void BeginHold(PlayerMovement king, bool night)
+        {
+            waitForRelease = true;
+            if (!CanAct(king, night, out var on)) return;
+            hold = on != null ? HoldKind.Pickup : HoldKind.Place;
+            holdPad = on;
+            holdAt = on != null ? on.Position : king.transform.position;
+            holdTime = 0f;
+            holdDuration = HoldDelay;
+            holdRing = new TeleporterHoldRing(holdAt);
+            SceneManager.MoveGameObjectToScene(holdRing.Root, padScene);
+            holdRing.SetArc(hold == HoldKind.Place ? 0f : 1f);
+            if (hold == HoldKind.Place) payment = new TeleporterPayment(holdAt, cost.Value, holdDuration, padScene);
+            Log.For<TeleporterManager>().Debug($"Hold {hold} started at {holdAt} ({holdDuration:0.00} s)");
+        }
+
+        private void CompleteHold(PlayerInteraction player)
+        {
+            var kind = hold;
+            var pad = holdPad;
+            var at = holdAt;
+            int paidNow = payment?.Paid ?? 0;
+            payment?.Complete();
+            payment = null;
+            EndHold();
+            if (kind == HoldKind.Pickup)
+            {
+                PickUp(pad);
+                return;
+            }
+            // Recheck in case something changed during the hold (an undo, a pad placed by a dev command).
+            if (!CanPlaceAt(at, notify: true))
+            {
+                TeleporterPayment.FlyBack(at, paidNow, player);
+                return;
+            }
+            Place(at, paidNow);
+        }
+
+        private void CancelHold(PlayerInteraction player, bool released)
+        {
+            bool tapped = released && hold == HoldKind.Place && holdTime < holdDuration * 0.3f;
+            payment?.Cancel(player);
+            payment = null;
+            Log.For<TeleporterManager>().Debug($"Hold {hold} cancelled after {holdTime:0.00} s" + (released ? " (released)" : ""));
+            EndHold();
+            if (tapped) Notify.Show($"Hold {KeyLabel()} to place a teleporter.", key: "teleporter");
+        }
+
+        // The level or feature went away mid-hold: refund without animation.
+        private void AbortHold()
+        {
+            if (hold == HoldKind.None) return;
+            payment?.Abort(PlayerInteraction.instance);
+            payment = null;
+            EndHold();
+        }
+
+        private void EndHold()
+        {
+            hold = HoldKind.None;
+            holdPad = null;
+            holdTime = 0f;
+            holdRing?.Destroy();
+            holdRing = null;
+        }
+
+        // ---- Placing ----------------------------------------------------------------------------------------------
+
+        // Whether the key can act here now; on = the teleporter the king stands on (to pick up), else a placement.
+        private bool CanAct(PlayerMovement king, bool night, out TeleporterPad on)
+        {
+            on = null;
+            if (!KingAlive(king)) return false;
             Vector3 at = king.transform.position;
-            var on = PadAt(at, TeleporterPad.Radius);
             if (night)
             {
                 Notify.Show("Teleporters can only be placed or picked up during the day.", NotifyKind.Warning, key: "teleporter");
-                return;
+                return false;
             }
-            if (on != null)
-            {
-                Remove(on, refund: true);
-                return;
-            }
-            if (pads.Count >= maxCount.Value)
-            {
-                Notify.Show($"All {maxCount.Value} teleporters are placed. Stand on one and press {KeyLabel()} to pick it up.", NotifyKind.Warning, key: "teleporter");
-                return;
-            }
-            if (pads.Any(p => Flat(p.Position - at) < MinSpacing))
-            {
-                Notify.Show("Too close to another teleporter.", NotifyKind.Warning, key: "teleporter");
-                return;
-            }
-            var player = PlayerInteraction.instance;
-            if (player.Balance < cost.Value)
+            on = PadAt(at, TeleporterPad.Radius);
+            if (on != null) return true;
+            if (!CanPlaceAt(at, notify: true)) return false;
+            if (PlayerInteraction.instance.Balance < cost.Value)
             {
                 Notify.Show($"A teleporter costs {cost.Value} gold.", NotifyKind.Warning, key: "teleporter");
+                return false;
+            }
+            return true;
+        }
+
+        private bool CanPlaceAt(Vector3 at, bool notify)
+        {
+            string problem = null;
+            if (pads.Count >= maxCount.Value) problem = $"All {maxCount.Value} teleporters are placed. Stand on one and hold {KeyLabel()} to pick it up.";
+            else if (pads.Any(p => Flat(p.Position - at) < MinSpacing)) problem = "Too close to another teleporter.";
+            if (problem != null && notify) Notify.Show(problem, NotifyKind.Warning, key: "teleporter");
+            return problem == null;
+        }
+
+        // The key's action in one go, for dev commands: pays at once and skips the hold.
+        private void ActNow(PlayerMovement king, bool night)
+        {
+            AbortHold();
+            if (!CanAct(king, night, out var on)) return;
+            if (on != null)
+            {
+                PickUp(on);
                 return;
             }
-            if (cost.Value > 0) player.SpendCoins(cost.Value);
-            var pad = Add(at, paidFor: cost.Value);
+            if (cost.Value > 0) PlayerInteraction.instance.SpendCoins(cost.Value);
+            Place(king.transform.position, cost.Value);
+        }
+
+        private void Place(Vector3 at, int paidFor)
+        {
+            var pad = Add(at, paidFor);
             arrivedPad = pad; // don't fire under the king's feet straight away
             GameplayImpact.Mark("Teleporters");
+            ThronefallAudioManager.Oneshot(ThronefallAudioManager.AudioOneShot.BuildingBuild);
             // The undo key takes it back like a build (undo refunds what was paid); picking it up instead already refunds.
-            UndoUpgradeManager.RecordCustom("Place teleporter", "teleporter", cost.Value, at, () => pads.Contains(pad), () => Remove(pad, refund: false));
-            string costText = cost.Value > 0 ? $" for {cost.Value} gold" : "";
+            UndoUpgradeManager.RecordCustom("Place teleporter", "teleporter", paidFor, at, () => pads.Contains(pad), () => Remove(pad, refund: false));
+            string costText = paidFor > 0 ? $" for {paidFor} gold" : "";
             Notify.Show(pads.Count == 1
                 ? $"Teleporter placed{costText}. Place another to link them."
                 : $"Teleporter {pads.Count} placed{costText}. Stand on one to travel.", NotifyKind.Success, key: "teleporter");
+        }
+
+        // Picked up with the key: the gold paid for it flies back to the king from the pad.
+        private void PickUp(TeleporterPad pad)
+        {
+            int amount = paid.TryGetValue(pad, out var p) ? p : 0;
+            Vector3 at = pad.Position;
+            Remove(pad, refund: false);
+            TeleporterPayment.FlyBack(at, amount, PlayerInteraction.instance);
+            Notify.Show(amount > 0 ? $"Teleporter picked up, {amount} gold refunded." : "Teleporter picked up.", key: "teleporter");
         }
 
         private readonly Dictionary<TeleporterPad, int> paid = [];
@@ -312,6 +462,7 @@ namespace PalaceMod
 
         private void Clear()
         {
+            AbortHold();
             foreach (var pad in pads) pad.Destroy();
             pads.Clear();
             paid.Clear();
@@ -327,7 +478,7 @@ namespace PalaceMod
             hintPending = false;
             if (hintShown.Value || placeKey.Shortcut.MainKey == KeyCode.None) return;
             hintShown.Value = true;
-            Notify.Show($"New: press {KeyLabel()} during the day to place a teleporter, then stand on it to travel.", seconds: 7f, key: "teleporter");
+            Notify.Show($"New: hold {KeyLabel()} during the day to place a teleporter, then stand on it to travel.", seconds: 7f, key: "teleporter");
         }
 
         // ---- Save and load ----------------------------------------------------------------------------------------
@@ -443,7 +594,7 @@ namespace PalaceMod
 
         private void RegisterDevCommands()
         {
-            DevCommands.Register("tp", "tp place|pickup|list|goto <n>|clear|save   drive teleporters (place/pickup act at the king)", args =>
+            DevCommands.Register("tp", "tp place|pickup|list|goto <n>|clear|save|hold   drive teleporters (place/pickup act at the king at once, skipping the hold)", args =>
             {
                 var king = PlayerMovement.instance ?? throw new InvalidOperationException("not in a level");
                 if (!IsEnabled) throw new InvalidOperationException("Teleporters is disabled");
@@ -452,7 +603,7 @@ namespace PalaceMod
                 {
                     case "place":
                     case "pickup":
-                        OnPlaceKey(king, DayNightCycle.Instance.CurrentTimestate == DayNightCycle.Timestate.Night);
+                        ActNow(king, DayNightCycle.Instance.CurrentTimestate == DayNightCycle.Timestate.Night);
                         return List(king);
                     case "goto":
                     {
@@ -466,6 +617,8 @@ namespace PalaceMod
                         return List(king);
                     case "save":
                         return Serialize();
+                    case "hold":
+                        return $"hold={hold} t={holdTime:0.00}/{holdDuration:0.00} paid={payment?.Paid ?? 0} gold={PlayerInteraction.instance?.Balance}";
                     case "hint":
                         hintShown.Value = false;
                         hintPending = true;
