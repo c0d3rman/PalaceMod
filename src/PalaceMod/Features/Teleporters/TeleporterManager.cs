@@ -29,6 +29,7 @@ namespace PalaceMod
     public class TeleporterManager : BaseManager
     {
         public override string FeatureSection => "Teleporters";
+        public override bool AffectsRanking => true; // off while "Gameplay-changing features" is off
         public override string FeatureDescription =>
             "Place teleporters during the day and stand on one to jump to the next. Units following you come along. Placing one makes the run unranked.";
 

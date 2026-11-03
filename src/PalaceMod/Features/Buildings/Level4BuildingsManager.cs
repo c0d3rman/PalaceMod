@@ -28,6 +28,7 @@ namespace PalaceMod
     public class Level4BuildingsManager : BaseManager
     {
         public override string FeatureSection => "Level 4 buildings";
+        public override bool AffectsRanking => true; // off while "Gameplay-changing features" is off
         public override string FeatureDescription =>
             "Unlocks the game's hidden top building tier on every map: level 4 castle, towers and unit buildings, level 3 houses and walls. Applies when a level loads.";
         protected override bool EnabledByDefault => false;

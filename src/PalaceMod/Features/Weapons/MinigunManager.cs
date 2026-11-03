@@ -29,6 +29,7 @@ namespace PalaceMod
     public class MinigunManager : BaseManager
     {
         public override string FeatureSection => "Minigun";
+        public override bool AffectsRanking => true; // off while "Gameplay-changing features" is off
         public override string FeatureDescription => "Adds a minigun to the loadout's weapons: it spins up, sprays fast weak bullets and slows you while firing. Using it makes the run unranked.";
 
         internal const string DisplayName = "PalaceMod Minigun";
