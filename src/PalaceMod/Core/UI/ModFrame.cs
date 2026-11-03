@@ -722,9 +722,10 @@ namespace PalaceMod
                     finally { stepping = false; }
                 }
             }
-            if (UIFrameManager.instance?.ActiveFrame == frame && Input.mouseScrollDelta.y != 0f && (!WheelNeedsHover || PointerOver()))
+            float wheel = ScrollInput.Pixels; // wheel notches and trackpad swipes, evened out (Core/UI/ScrollInput.cs)
+            if (UIFrameManager.instance?.ActiveFrame == frame && wheel != 0f && (!WheelNeedsHover || PointerOver()))
             {
-                target = Mathf.Clamp(target - Input.mouseScrollDelta.y * 60f, 0f, MaxScroll);
+                target = Mathf.Clamp(target - wheel, 0f, MaxScroll);
             }
             float y = Mathf.SmoothDamp(content.anchoredPosition.y, target, ref velocity, 0.12f, float.PositiveInfinity, Time.unscaledDeltaTime);
             content.anchoredPosition = new Vector2(content.anchoredPosition.x, y);
