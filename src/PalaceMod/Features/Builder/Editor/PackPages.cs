@@ -178,7 +178,7 @@ namespace PalaceMod.Builder.Editor
             Text(page, "Id", "id", () => Pack.Id, (p, v) => p.Id = v ?? p.Id,
                 "Unique pack id and folder name: lowercase letters, digits, '.', '_' or '-'. Changing it moves the pack's folder when you save.", isId: true);
             Text(page, "Author", "author", () => Pack.Author, (p, v) => p.Author = v, "Your name, shown with the pack.");
-            Text(page, "Description", "description", () => Pack.Description, (p, v) => p.Description = v, "A sentence or two about the pack.", 300);
+            Text(page, "Description", "description", () => Pack.Description, (p, v) => p.Description = v, "A sentence or two about the pack.", 300, multiline: true);
 
             page.Header("Actions");
             var save = page.Row(Draft.ReadOnly ? "Save a copy" : "Save", Draft.Dirty ? Accent("unsaved changes") : Dim(Draft.ReadOnly ? "read-only pack" : "saved"),

@@ -194,6 +194,19 @@ namespace PalaceMod
             }
         }
 
+        // Every run started from a pre-level menu (custom or not): remember its loadout for test runs on that map.
+        [HarmonyPatch(typeof(SceneTransitionManager), nameof(SceneTransitionManager.TransitionFromLevelSelectToLevel))]
+        private static class RememberLoadout_Patch
+        {
+            [HarmonyPriority(Priority.Last)]
+            private static void Prefix(string _levelname)
+            {
+                if (!Feature<BuilderManager>.On) return;
+                try { TestLoadout.Remember(_levelname); }
+                catch (Exception e) { Log.For<BuilderManager>().Warn($"Couldn't remember the loadout: {e.Message}"); }
+            }
+        }
+
         [HarmonyPatch(typeof(LevelSelectUIFrameHelper), nameof(LevelSelectUIFrameHelper.OnShow))]
         private static class PreLevelShow_Patch
         {

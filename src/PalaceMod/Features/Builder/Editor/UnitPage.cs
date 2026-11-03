@@ -75,7 +75,7 @@ namespace PalaceMod.Builder.Editor
             if (u.Side != UnitSide.Enemy) Choice(page, "Side", P + ".side", [(UnitSide.Enemy, "Enemy"), (UnitSide.Player, "Player")], () => Unit?.Side,
                 (p, v) => p.Units[Index].Side = v, "Enemies come in wave sets. Player units stand in for the troops buildings train (a wave set's Troops).");
             Text(page, "Description", P + ".description", () => Unit?.Description, (p, v) => p.Units[Index].Description = v,
-                "One or two sentences for its tooltip.", 300);
+                "One or two sentences for its tooltip.", 300, multiline: true);
         }
 
         private static bool Referenced(DesignPack pack, string unitId) =>

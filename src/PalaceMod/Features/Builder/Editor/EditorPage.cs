@@ -161,8 +161,9 @@ namespace PalaceMod.Builder.Editor
         }
 
         protected ModField Text(ModPage page, string label, string path, Func<string> get, Action<DesignPack, string> set, string help, int maxLength = 64,
-            bool isId = false)
+            bool isId = false, bool multiline = false)
         {
+            if (multiline) help += "\nApply to edit. Shift+Enter starts a new line.";
             var field = page.TextInput(label, get, text =>
             {
                 text = text.Trim();
@@ -175,7 +176,7 @@ namespace PalaceMod.Builder.Editor
                     text = suggestion;
                 }
                 Draft.Edit($"Set {label.ToLowerInvariant()}", p => set(p, text.Length == 0 ? null : text));
-            }, Tip(help, path), maxLength);
+            }, Tip(help, path), maxLength, multiline: multiline);
             return Bind(field, path);
         }
 
@@ -206,6 +207,50 @@ namespace PalaceMod.Builder.Editor
 
         protected ModField Toggle(ModPage page, string label, string path, Func<bool> get, Action<DesignPack, bool> set, string help) =>
             Bind(page.Toggle(label, get, v => Draft.Edit($"{(v ? "Turn on" : "Turn off")} {label.ToLowerInvariant()}", p => set(p, v)), Tip(help, path)), path);
+
+        /// <summary>The loadout Test play starts with (Test play skips the loadout screen): last used on the map, or one
+        /// weapon alone. Not saved in the pack.</summary>
+        protected void TestLoadoutRow(ModPage page, Func<string> host)
+        {
+            const string last = "";
+            List<string> Options() => [last, .. TestLoadout.Weapons.Select(w => w.name)];
+            string Current() => TestLoadout.Choice ?? last;
+            string Display()
+            {
+                if (TestLoadout.IsFixed(host())) return Dim("fixed by the map");
+                var weapon = TestLoadout.Weapons.FirstOrDefault(w => w.name == TestLoadout.Choice);
+                if (weapon != null) return $"{TestLoadout.Name(weapon)} only";
+                return $"{(TestLoadout.HasLastUsed(host()) ? "Last used" : "Default")}: {TestLoadout.Describe(TestLoadout.For(host()))}";
+            }
+            void Set(string choice) => TestLoadout.Choice = string.IsNullOrEmpty(choice) ? null : choice;
+            ModField field = null;
+            field = page.Stepper("Test loadout", Display, delta =>
+            {
+                if (TestLoadout.IsFixed(host())) return;
+                var options = Options();
+                int i = Math.Max(0, options.IndexOf(Current()));
+                Set(options[((i + Math.Sign(delta)) % options.Count + options.Count) % options.Count]);
+            }, () =>
+            {
+                if (TestLoadout.IsFixed(host())) return;
+                var items = new List<Picker.Item>
+                {
+                    new() { Id = last, Label = "Last used on this map", Value = TestLoadout.Describe(LastUsedPreview()),
+                        Tooltip = "The loadout you last started this map with from its menu.\n" + TestLoadout.List(LastUsedPreview()) },
+                };
+                items.AddRange(TestLoadout.Weapons.Select(w => new Picker.Item { Id = w.name, Label = $"{TestLoadout.Name(w)} only", Icon = w.icon, Tooltip = "Just this weapon, no perks." }));
+                Picker.One("Test Loadout", items, Current(), id => { Set(id); field?.Refresh(); });
+            }, () => "What the king brings to Test play, which skips the loadout screen: the loadout you last started this map with, or one weapon alone.\n"
+                + TestLoadout.List(TestLoadout.For(host())));
+
+            List<Equippable> LastUsedPreview()
+            {
+                string saved = TestLoadout.Choice;
+                TestLoadout.Choice = null;
+                try { return TestLoadout.For(host()); }
+                finally { TestLoadout.Choice = saved; }
+            }
+        }
 
         /// <summary>A destructive action: the first press arms it ("Press again to ..."), a second within 3 s runs it.</summary>
         protected void Danger(ModPage page, string label, string help, Action action)
