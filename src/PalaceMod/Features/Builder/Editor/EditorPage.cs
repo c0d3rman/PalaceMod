@@ -219,7 +219,8 @@ namespace PalaceMod.Builder.Editor
             {
                 if (TestLoadout.IsFixed(host())) return Dim("fixed by the map");
                 var weapon = TestLoadout.Weapons.FirstOrDefault(w => w.name == TestLoadout.Choice);
-                return weapon != null ? $"{TestLoadout.Name(weapon)} only" : $"Last used: {TestLoadout.Describe(TestLoadout.For(host()))}";
+                if (weapon != null) return $"{TestLoadout.Name(weapon)} only";
+                return $"{(TestLoadout.HasLastUsed(host()) ? "Last used" : "Default")}: {TestLoadout.Describe(TestLoadout.For(host()))}";
             }
             void Set(string choice) => TestLoadout.Choice = string.IsNullOrEmpty(choice) ? null : choice;
             ModField field = null;

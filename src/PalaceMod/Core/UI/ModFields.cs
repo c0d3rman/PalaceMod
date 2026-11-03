@@ -72,7 +72,23 @@ namespace PalaceMod
         internal void EnableWrap()
         {
             wrap = true;
+            if (valueText != null) valueText.gameObject.AddComponent<RefitOnResize>().Field = this;
             Fit();
+        }
+
+        // The row's real width is only known after layout: fit again whenever it changes.
+        private sealed class RefitOnResize : MonoBehaviour
+        {
+            public ModField Field;
+            private float width = -1f;
+
+            private void OnRectTransformDimensionsChange()
+            {
+                float w = ((RectTransform)transform).rect.width;
+                if (Field == null || Mathf.Approximately(w, width)) return;
+                width = w;
+                Field.Fit();
+            }
         }
 
         // One line, right-aligned, when the value fits beside the label; otherwise a wrapped block and a taller row.
@@ -83,9 +99,9 @@ namespace PalaceMod
             var element = Button.GetComponent<LayoutElement>();
             float width = valueText.rectTransform.rect.width;
             if (width <= 1f) width = FallbackWidth;
-            float available = Mathf.Max(100f, width - ValueIndent);
             string shown = valueText.text ?? "";
-            bool multi = shown.IndexOf('\n') >= 0 || valueText.GetPreferredValues(shown, 100000f, 0f).x > available;
+            // TMP's preferred values include the text's margins (the label's indent on the left).
+            bool multi = shown.IndexOf('\n') >= 0 || valueText.GetPreferredValues(shown, 100000f, 0f).x > width;
             float height = RowHeight;
             if (multi)
             {
@@ -93,7 +109,16 @@ namespace PalaceMod
                 valueText.overflowMode = TextOverflowModes.Overflow;
                 valueText.alignment = TextAlignmentOptions.TopLeft;
                 valueText.margin = new Vector4(ValueIndent, WrapPad, 0f, WrapPad);
-                height = Mathf.Max(RowHeight, valueText.GetPreferredValues(shown, available, 0f).y + 2f * WrapPad + 2f);
+                // Wrapped at the value's real width (rect minus margins), margins included.
+                // Before the first layout there's no width yet: estimate; RefitOnResize fits it again.
+                float textHeight;
+                if (valueText.rectTransform.rect.width > 1f)
+                {
+                    valueText.ForceMeshUpdate();
+                    textHeight = valueText.preferredHeight;
+                }
+                else textHeight = valueText.GetPreferredValues(shown, FallbackWidth - ValueIndent, 0f).y + 2f * WrapPad;
+                height = Mathf.Max(RowHeight, textHeight + 2f);
             }
             else
             {

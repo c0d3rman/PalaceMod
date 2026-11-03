@@ -57,6 +57,9 @@ namespace PalaceMod.Builder
             return picked;
         }
 
+        /// <summary>Whether "last used" finds anything for the map (else it's the default: the first weapon).</summary>
+        public static bool HasLastUsed(string host) => LastUsed(host).Any(e => e != null && e.IsUnlocked);
+
         private static List<Equippable> LastUsed(string host)
         {
             Load();

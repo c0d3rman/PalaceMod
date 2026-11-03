@@ -117,8 +117,8 @@ namespace PalaceMod
                         return "typed";
                     case "key":
                         // Keys or text into the field being edited, one argument each ("hello", left, shift+enter, ...);
-                        // "_" types a space. Prints the text with the caret as ‸.
-                        foreach (var k in args.Skip(1)) ModTextInput.DebugKey(k == "_" ? " " : k);
+                        // "_" is a space. Prints the text with the caret as ‸.
+                        foreach (var k in args.Skip(1)) ModTextInput.DebugKey(k.Replace('_', ' '));
                         return ModTextInput.DebugState;
                     case "loadout":
                         // "loadout [last|<weapon asset name>]": sets the Test loadout choice; prints it and what's equipped.
