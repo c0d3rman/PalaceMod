@@ -13,8 +13,8 @@ using UnityEngine.EventSystems;
 
     Bindings are saved as KeyboardShortcut entries in the hidden "Keybinds" config section (key "<section>: <id>"), so
     they don't appear in Settings > Mods; they belong in the game's Controls > Keyboard screen under a "Mods" heading.
-    A keybind is inert while its feature is disabled, while a menu is open (unless AllowInMenus), and while a text field
-    has keyboard focus. A key that only acts on one screen or in one mode can name it as its context (e.g.
+    A keybind is inert while its feature is disabled, while a menu is open or the game is paused (unless AllowInMenus),
+    and while a text field has keyboard focus. A key that only acts on one screen or in one mode can name it as its context (e.g.
     KeybindContext.LoadoutScreen); the Controls screen then only reports conflicts with keys that can act there too.
     A feature that knows when its context is on screen can claim it (Keybinds.ClaimContext): while claimed, the
     context's keys own their inputs, and every other action on the same input (the game's Zoom on Z, a mod key) is
@@ -30,7 +30,7 @@ namespace PalaceMod
     public enum KeybindFlags
     {
         None = 0,
-        /// <summary>Also fire while a game menu (pause, settings, any UIFrame) is open.</summary>
+        /// <summary>Also fire while a game menu (pause, settings, any UIFrame) is open or time is paused.</summary>
         AllowInMenus = 1,
     }
 
@@ -195,10 +195,25 @@ namespace PalaceMod
             if (checkedFrame != Time.frameCount)
             {
                 checkedFrame = Time.frameCount;
-                menuOpen = UIFrameManager.instance != null && UIFrameManager.instance.ActiveFrame != null;
+                menuOpen = MenuOrPause();
                 typing = TextFieldFocused();
             }
             return !typing && (allowInMenus || !menuOpen);
+        }
+
+        // A menu is up, or the game is paused without one. ActiveFrame alone misses a pause menu whose activation
+        // failed part-way (time frozen, frame never set), and an end screen that froze time; gameplay keys must not
+        // act in either. The game only stops time for its menus and end screens, so time standing still means paused.
+        private static readonly HarmonyLib.AccessTools.FieldRef<UIFrameManager, UIFrame> PauseFrame =
+            HarmonyLib.AccessTools.FieldRefAccess<UIFrameManager, UIFrame>("inMatchPauseMenuFrame");
+
+        private static bool MenuOrPause()
+        {
+            var frames = UIFrameManager.instance;
+            if (frames != null && frames.ActiveFrame != null) return true;
+            if (Time.timeScale == 0f) return true;
+            var pause = frames != null ? PauseFrame(frames) : null;
+            return pause != null && pause.gameObject.activeInHierarchy;
         }
 
         // The game has no text fields of its own; this covers mod UIs (uGUI, TextMeshPro and IMGUI fields).
