@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using TMPro;
 using UnityEngine;
@@ -22,6 +23,16 @@ namespace PalaceMod
 
         private static RectTransform panel;
         private static TextMeshProUGUI title, body;
+        private static VerticalLayoutGroup textSection;
+        private static int textTop;
+
+        // The game's tooltip (measured with "uidump Tooltip Background"): a 520-wide panel whose text section is inset 20 on
+        // every side, followed by the icon/stats section and 32 below it. Its title's line height leaves about 11 above
+        // the capitals, so text sits about 31 from the top edge and the stats box 32 from the bottom. We keep only the
+        // text section, so these restore the same visible margins: 32 from the last line's glyphs to the bottom edge
+        // (a body line already ends with about 6 of leading), and with no title, the body's first line as far from the
+        // top as the title's would be (a body line starts with about 6 of leading).
+        private const int BottomPadding = 6, NoTitleExtraTop = 6;
         private static object owner;
         private static RectTransform anchor; // what the tooltip sits beside; followed while it moves (e.g. scrolling)
         private static bool failed;
@@ -36,6 +47,7 @@ namespace PalaceMod
             title.gameObject.SetActive(!string.IsNullOrEmpty(titleText));
             body.text = bodyText ?? "";
             body.gameObject.SetActive(!string.IsNullOrEmpty(bodyText));
+            if (textSection != null) textSection.padding.top = textTop + (title.gameObject.activeSelf ? 0 : NoTitleExtraTop);
             panel.SetAsLastSibling();
             panel.gameObject.SetActive(true);
             LayoutRebuilder.ForceRebuildLayoutImmediate(panel);
@@ -51,6 +63,9 @@ namespace PalaceMod
         }
 
         public static bool Visible => panel != null && panel.gameObject.activeSelf;
+
+        /// <summary>Dev: the shown tooltip's text and what it's beside, or null.</summary>
+        internal static string Describe() => Visible ? $"\"{title.text}\" / \"{body.text}\" beside {(anchor != null ? anchor.name : "nothing")}" : null;
 
         /// <summary>Shows a tooltip while a menu element is selected (controller/keyboard) or hovered (mouse).</summary>
         public static void Attach(ThronefallUIElement element, string titleText, Func<string> bodyText)
@@ -115,6 +130,11 @@ namespace PalaceMod
                 }
                 // The section is tinted for debugging in the game's scene (translucent red); keep only its layout.
                 if (section.GetComponent<Graphic>() is { } tint) tint.color = Color.clear;
+                // The panel's bottom padding is meant for below the dropped icon/stats section; under the text section
+                // (which has its own bottom margin) it would leave a gap twice the size of the top one.
+                if (obj.GetComponent<VerticalLayoutGroup>() is { } outer) outer.padding.bottom = BottomPadding;
+                textSection = section.GetComponent<VerticalLayoutGroup>();
+                textTop = textSection != null ? textSection.padding.top : 0;
                 foreach (var graphic in obj.GetComponentsInChildren<Graphic>(true)) graphic.raycastTarget = false;
                 ModStyle.MarkPanel(obj.GetComponent<MPUIKIT.MPImage>());
                 var rect = (RectTransform)obj.transform;
@@ -172,31 +192,90 @@ namespace PalaceMod
             private void OnDisable() => Hide(this);
         }
 
-        private class HoverSource : MonoBehaviour
+        /// <summary>
+        /// Mouse-hover tooltips. Neighbouring targets' rects often overlap (a text's rect is taller than its line), so the
+        /// mouse can be inside two at once, and targets update in no particular order. So targets don't show on enter and
+        /// hide on exit; each only reports whether the mouse is inside it, and the tooltip goes to the hovered target whose
+        /// centre is nearest the mouse (one with nothing to say is skipped). That's re-decided whenever the hovered set
+        /// changes or the mouse moves, so moving between adjacent rows in either direction shows the row under the mouse.
+        /// </summary>
+        internal class HoverSource : MonoBehaviour
         {
             public Func<(string, string)> Content;
             private bool over;
 
+            private static readonly List<HoverSource> hovered = [];
+            private static Vector2 lastMouse;
+
+            /// <summary>Dev: a screen point used instead of the real mouse (dev command "uikit mouse").</summary>
+            internal static Vector2? SimulatedMouse;
+
+            private static Vector2 Mouse => SimulatedMouse ?? (Vector2)Input.mousePosition;
+
             private void LateUpdate()
             {
-                var rect = (RectTransform)transform;
-                bool now = Cursor.visible && RectTransformUtility.RectangleContainsScreenPoint(rect, Input.mousePosition, null);
-                if (now == over) return;
-                over = now;
-                if (over)
+                bool now = (SimulatedMouse != null || Cursor.visible)
+                    && RectTransformUtility.RectangleContainsScreenPoint((RectTransform)transform, Mouse, null);
+                if (now != over)
                 {
-                    var (t, b) = Content();
-                    // Nothing to say right now (the content can change): stay hidden.
-                    if (string.IsNullOrEmpty(t) && string.IsNullOrEmpty(b)) over = false;
-                    else Show(t, b, rect, this);
+                    SetOver(now);
+                    return;
                 }
-                else Hide(this);
+                // Inside an overlap the nearest target changes as the mouse moves. Only re-decide when it has, so a
+                // tooltip someone else hid (e.g. while the game's own tooltip is up) stays hidden until the mouse moves.
+                if (over && hovered.Count > 1 && hovered[0] == this && Mouse != lastMouse) Arbitrate();
+            }
+
+            private void SetOver(bool now)
+            {
+                over = now;
+                hovered.Remove(this);
+                if (over) hovered.Add(this);
+                Arbitrate();
+            }
+
+            private static void Arbitrate()
+            {
+                hovered.RemoveAll(h => h == null);
+                var mouse = lastMouse = Mouse;
+                foreach (var source in hovered.OrderBy(h => (Center(h) - mouse).sqrMagnitude))
+                {
+                    // Faded out (e.g. the score panel while the game's own tooltip is up): it isn't really there.
+                    if (Faded(source)) continue;
+                    if (ReferenceEquals(owner, source) && Visible) return;
+                    var (t, b) = source.Content();
+                    // Nothing to say right now (the content can change): try the next one.
+                    if (string.IsNullOrEmpty(t) && string.IsNullOrEmpty(b)) continue;
+                    Show(t, b, (RectTransform)source.transform, source);
+                    return;
+                }
+                if (owner is HoverSource) Hide();
+            }
+
+            private static readonly List<CanvasGroup> groups = [];
+
+            private static bool Faded(HoverSource h)
+            {
+                h.GetComponentsInParent(false, groups);
+                float alpha = 1f;
+                foreach (var group in groups)
+                {
+                    alpha *= group.alpha;
+                    if (group.ignoreParentGroups) break;
+                }
+                return alpha < 0.5f;
+            }
+
+            private static Vector2 Center(HoverSource h)
+            {
+                var corners = new Vector3[4];
+                ((RectTransform)h.transform).GetWorldCorners(corners); // screen pixels on the game's overlay canvas
+                return (corners[0] + corners[2]) / 2f;
             }
 
             private void OnDisable()
             {
-                over = false;
-                Hide(this);
+                if (over) SetOver(false);
             }
         }
     }

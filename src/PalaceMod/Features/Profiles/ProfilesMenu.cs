@@ -70,6 +70,12 @@ namespace PalaceMod.Profiles
             if (frame != null && frames.ActiveFrame == frame) frames.CloseActiveFrame();
         }
 
+        /// <summary>Shows the store's current state (after a reset or a failed change), selecting the profile in use.</summary>
+        public void RefreshIfOpen()
+        {
+            if (built && frame != null && frame.gameObject.activeSelf) Refresh(manager.Store.Active.id);
+        }
+
         /// <summary>Takes everything out of the game's UI (feature turned off).</summary>
         public void Remove()
         {
@@ -203,13 +209,13 @@ namespace PalaceMod.Profiles
                 var p = profile;
                 bool active = p.id == store.Active.id;
                 // A mouse click applies the row before the selection is polled, so show its actions first.
-                var button = Button(listColumn, active ? $"{p.name}  (current)" : p.name, () => { ShowActions(p); FocusActions(); });
+                var button = Button(listColumn, active ? $"{p.name}  (in use)" : p.name, () => { ShowActions(p); FocusActions(); });
                 rows.Add((button, p));
             }
             newButton = Button(listColumn, "+ New profile", () => Run(() =>
             {
                 manager.CreateAndSwitch(null);
-                Notify.Show($"Started a fresh profile, \"{manager.Store.Active.name}\". Your other profiles are kept.", NotifyKind.Success, 6f, "profiles");
+                Notify.Show($"Now using new profile: {manager.Store.Active.name}", NotifyKind.Success, 5f, "profiles");
             }));
             var column = rows.Select(r => r.button).Append(newButton).ToList();
             for (int i = 0; i < column.Count; i++)
@@ -234,7 +240,7 @@ namespace PalaceMod.Profiles
                 selected = null;
                 foreach (Transform child in actionColumn.Cast<Transform>().ToList()) Object.Destroy(child.gameObject);
                 actions.Clear();
-                info.text = "Start over from the tutorial in a new, empty profile. Your current progress stays in its own profile.";
+                info.text = "Make an empty profile and switch to it, starting from the tutorial. Your other profiles are kept as they are.";
             }
         }
 
@@ -245,30 +251,32 @@ namespace PalaceMod.Profiles
             actions.Clear();
             var store = manager.Store;
             bool active = profile.id == store.Active.id;
-            if (!active) actions.Add(Button(actionColumn, "Play this profile", () => Run(() =>
+            if (!active) actions.Add(Button(actionColumn, "Switch to this profile", () => Run(() =>
             {
                 manager.SwitchTo(profile);
-                Notify.Show($"Now playing \"{profile.name}\"", NotifyKind.Success, 4f, "profiles");
+                Notify.Show($"Now using profile: {profile.name}", NotifyKind.Success, 4f, "profiles");
             })));
             actions.Add(Button(actionColumn, "Rename", () => BeginRename(profile)));
             actions.Add(Button(actionColumn, "Duplicate", () => Run(() =>
             {
                 var copy = manager.Duplicate(profile);
                 Refresh(copy.id);
+                Notify.Show($"Created {copy.name}", NotifyKind.Success, 4f, "profiles");
             })));
             if (active) actions.Add(Button(actionColumn, "Reset progress", () => Confirm(
                 $"Reset all progress in \"{profile.name}\"? A backup is kept in the profiles folder.",
                 () =>
                 {
                     manager.ResetActive();
-                    Notify.Show($"\"{profile.name}\" was reset. A backup was saved first.", NotifyKind.Success, 6f, "profiles");
+                    Notify.Show($"Reset {profile.name}. A backup was saved first.", NotifyKind.Success, 5f, "profiles");
                 })));
             else actions.Add(Button(actionColumn, "Delete", () => Confirm(
-                $"Delete \"{profile.name}\"? Its saves are moved to the backups in the profiles folder.",
+                $"Delete \"{profile.name}\"? A backup is kept in the profiles folder.",
                 () =>
                 {
                     manager.Delete(profile);
                     Refresh(manager.Store.Active.id);
+                    Notify.Show($"Deleted {profile.name}", NotifyKind.Success, 4f, "profiles");
                 })));
             var row = rows.FirstOrDefault(r => r.profile.id == profile.id).button;
             for (int i = 0; i < actions.Count; i++)
@@ -281,7 +289,7 @@ namespace PalaceMod.Profiles
             var (level, beaten) = store.Summary(profile);
             info.text = $"{profile.name}: perk level {level}, {beaten} {(beaten == 1 ? "map" : "maps")} beaten."
                 + (profile.id == ProfileStore.DefaultId ? "" : $" Created {profile.created}.")
-                + (active ? "\nThis is the profile you're playing. Steam Cloud keeps the profile in use." : "");
+                + (active ? "\nIn use now. Only the profile in use syncs to Steam Cloud." : "");
             frame.RefetchManagedElements();
         }
 
