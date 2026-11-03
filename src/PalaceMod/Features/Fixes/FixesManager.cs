@@ -19,6 +19,8 @@ using UnityEngine;
     - Regen perk on load: PerkPlayerHealthRegen applies its bonus in OnBeforeMainLoadPass, which LocalMatchSaveLoad.Awake
       can call before PlayerUpgradeManager.Awake has set the instance. On a cold Continue that throws; on Retry Day it
       writes into the previous scene's destroyed manager. Either way the bonus is lost. We defer it to Start instead.
+    - Empty Units row: since 2.13 the pause menu lists your living units under a "Units:" header, which stays up with
+      nothing under it while you have none (e.g. night 1). We hide the header while the row is empty.
 */
 namespace PalaceMod
 {
@@ -31,6 +33,7 @@ namespace PalaceMod
         private static ConfigEntry<bool> shrineParticlesFix;
         private static ConfigEntry<bool> loadedHealthFix;
         private static ConfigEntry<bool> regenPerkFix;
+        private static ConfigEntry<bool> emptyUnitsFix;
 
         private static readonly AccessTools.FieldRef<Shrine, ParticleSystem> UpgradeParticles =
             AccessTools.FieldRefAccess<Shrine, ParticleSystem>("upgradeParticles");
@@ -50,7 +53,56 @@ namespace PalaceMod
                 "Units with fractional max HP load at full health instead of slightly below or above it (saves round HP to whole numbers).");
             regenPerkFix = plugin.Config.Bind(FeatureSection, "Regen perks on load", true,
                 "Perks that boost your health regeneration keep working after a save loads or a day is retried.");
+            emptyUnitsFix = plugin.Config.Bind(FeatureSection, "Hide empty Units row", true,
+                "The pause menu hides its \"Units:\" header while you have no living units to list under it.");
+            emptyUnitsFix.SettingChanged += (_, _) => UpdateUnitsHeader();
             RegisterDevCommands();
+        }
+
+        protected override void OnFeatureEnabled() => UpdateUnitsHeader();
+
+        // Patches are removed while disabled, so put the header back by hand.
+        protected override void OnFeatureDisabled()
+        {
+            if (unitsHeader != null) unitsHeader.SetActive(true);
+        }
+
+        private static readonly AccessTools.FieldRef<PauseUILoadoutHelper, List<ThronefallUIElement>> PlayerGrid =
+            AccessTools.FieldRefAccess<PauseUILoadoutHelper, List<ThronefallUIElement>>("playerGrid");
+        private static PauseUILoadoutHelper pauseHelper;
+        private static GameObject unitsHeader;
+
+        [HarmonyPatch(typeof(PauseUILoadoutHelper), "RefreshOnlyPlayerPreview")]
+        private static class PauseUILoadoutHelper_RefreshOnlyPlayerPreview
+        {
+            private static void Postfix(PauseUILoadoutHelper __instance)
+            {
+                pauseHelper = __instance;
+                UpdateUnitsHeader();
+            }
+        }
+
+        private static void UpdateUnitsHeader()
+        {
+            if (pauseHelper == null || pauseHelper.unitsPreview == null) return;
+            if (unitsHeader == null || unitsHeader.transform.parent != pauseHelper.unitsPreview.transform.parent)
+                unitsHeader = FindUnitsHeader(pauseHelper.unitsPreview.transform.parent);
+            if (unitsHeader == null) return;
+            bool empty = !pauseHelper.unitsPreview.gameObject.activeSelf || (PlayerGrid(pauseHelper)?.Count ?? 0) == 0;
+            unitsHeader.SetActive(!(Feature<FixesManager>.On && emptyUnitsFix.Value && empty));
+        }
+
+        // The header is the text beside the units grid that's localised as "Menu/Units".
+        private static GameObject FindUnitsHeader(Transform column)
+        {
+            if (column == null) return null;
+            foreach (Transform child in column)
+            {
+                var loc = child.GetComponent<I2.Loc.Localize>();
+                if (loc != null && loc.Term == "Menu/Units") return child.gameObject;
+            }
+            Log.For<FixesManager>().Warn("Pause menu layout changed: the \"Units:\" header wasn't found");
+            return null;
         }
 
         [HarmonyPatch(typeof(BuildingDestructionHandler), "OnEnable")]
