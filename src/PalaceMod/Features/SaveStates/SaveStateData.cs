@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
 
 /*
@@ -64,6 +66,14 @@ namespace PalaceMod
         public List<V3> freeCoins = [];
         public bool hasSpawner;
         public SpawnerData spawner = new();
+
+        /// <summary>Other features' in-level state (SaveStates.RegisterState), by id. Empty in states saved before
+        /// this existed; those features then keep what the level reload gave them.</summary>
+        public Dictionary<string, JToken> mods = [];
+
+        /// <summary>In memory only: the loadout was swapped after capture (debug menu), so health is restored as a
+        /// fraction of the reloaded maximum (perks change maximums) and the king's attack cooldowns start fresh.</summary>
+        [JsonIgnore] public bool loadoutChanged;
     }
 
     [Serializable]

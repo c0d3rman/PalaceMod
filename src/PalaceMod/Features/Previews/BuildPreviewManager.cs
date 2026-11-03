@@ -41,7 +41,13 @@ namespace PalaceMod
                 if (args.Length > 0) SetLatched(args[0] == "on");
                 return $"latched={latched} shown={BuildingInteractor.displayAllBuildPreviews}";
             });
+            // The latch resets with each level, so a savestate load would drop it; keep it in the state.
+            SaveStates.RegisterState("build-preview-latch",
+                () => IsEnabled ? new LatchState { latched = latched } : null,
+                saved => { if (IsEnabled) SetLatched(saved.latched); });
         }
+
+        internal sealed class LatchState { public bool latched; }
 
         public override void Update()
         {
