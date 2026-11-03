@@ -21,8 +21,6 @@ namespace PalaceMod
 
         private ConfigEntry<LogVerbosity> level;
         private ConfigEntry<string> debugFeatures;
-        private ConfigEntry<bool> createBundle;
-        private bool bundleRequested;
         private float nextFlush;
 
         public override void Awake(Plugin plugin)
@@ -34,15 +32,14 @@ namespace PalaceMod
             debugFeatures = plugin.Config.Bind(Section, "Debug logging for", "", new ConfigDescription(
                 "Comma-separated feature names (the [Name] prefix of their log lines) that log at Debug level whatever " +
                 "the log level, or * for all.", null, new SettingTags { Hidden = true }));
-            createBundle = plugin.Config.Bind(Section, "Create debug bundle", false,
-                "Turn on to save a zip for a bug report (recent logs, settings, versions, system info) to " +
-                "BepInEx/PalaceMod/DebugBundles. Turns itself back off.");
-            createBundle.Value = false; // a leftover "true" from a crash shouldn't make a bundle at every launch
+            SettingsPane.DescribeSection(Section, "How much PalaceMod writes to its log, and a one-click bundle of logs and settings to attach to bug reports.");
+            SettingsPane.AddButton(Section, "Create debug bundle",
+                "Saves a zip for a bug report (recent logs, settings, versions, system info) to " +
+                "BepInEx/PalaceMod/DebugBundles and copies its path.", () => CreateBundleAndNotify());
 
             ApplySettings();
             level.SettingChanged += (_, _) => ApplySettings();
             debugFeatures.SettingChanged += (_, _) => ApplySettings();
-            createBundle.SettingChanged += (_, _) => bundleRequested |= createBundle.Value;
 
             Application.logMessageReceived += OnUnityLog;
             RegisterCommands();
@@ -56,12 +53,6 @@ namespace PalaceMod
 
         public override void Update()
         {
-            if (bundleRequested)
-            {
-                bundleRequested = false;
-                createBundle.Value = false;
-                CreateBundleAndNotify();
-            }
             if (Time.unscaledTime >= nextFlush)
             {
                 nextFlush = Time.unscaledTime + 5f;

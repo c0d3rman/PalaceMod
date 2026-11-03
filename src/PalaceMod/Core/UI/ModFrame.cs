@@ -65,7 +65,7 @@ namespace PalaceMod
         private GameObject root;
         private UIFrame frame;
         private readonly List<TFUITextButton> tabButtons = [];
-        private RectTransform tabMarker, viewport, contentRoot;
+        private RectTransform tabMarker, viewport, contentRoot, aside;
         private TFUITextButton back;
         private ModScroll scroll;
         private int currentTab;
@@ -260,6 +260,16 @@ namespace PalaceMod
             scroll = view.AddComponent<ModScroll>();
             scroll.Init(frame, viewport, contentRoot);
 
+            // Fixed area right of the page (past the scroll bar), for a page's detail view; empty unless a page uses it.
+            var side = new GameObject("Aside", typeof(RectTransform));
+            side.transform.SetParent(root, false);
+            aside = (RectTransform)side.transform;
+            aside.anchorMin = new Vector2(0f, 0f);
+            aside.anchorMax = new Vector2(1f, 1f);
+            aside.pivot = new Vector2(0f, 1f);
+            aside.offsetMin = new Vector2(Left + ContentWidth + 70f, 150f);
+            aside.offsetMax = new Vector2(-80f, top - 10f);
+
             // Back, bottom left, like the game's menus.
             back = GameWidgets.Button(GameWidgets.MenuButton, root, "Back", "Back", Close);
             back.GetComponent<TextMeshProUGUI>().alignment = TextAlignmentOptions.MidlineLeft;
@@ -280,7 +290,8 @@ namespace PalaceMod
             if (select && selectedIndex >= 0) frame.Select(tabButtons.Count > 0 ? tabButtons[currentTab] : back);
 
             foreach (Transform child in contentRoot.Cast<Transform>().ToList()) Object.DestroyImmediate(child.gameObject);
-            page = new ModPage(contentRoot);
+            foreach (Transform child in aside.Cast<Transform>().ToList()) Object.DestroyImmediate(child.gameObject);
+            page = new ModPage(contentRoot, aside);
             var build = tabs.Count > 0 ? tabs[currentTab].Build : content;
             try
             {
@@ -292,16 +303,21 @@ namespace PalaceMod
                 page.Text("This page couldn't be shown; the error is in the BepInEx log.");
             }
 
-            // Navigation: tabs <-> first element, elements in order, last element <-> Back.
+            // Navigation: tabs <-> first element, elements in order, last element <-> Back. Elements added as a row
+            // (AddElementRow) are one step: up/down goes to the same column of the row above/below.
             var elements = page.Elements;
+            var rows = page.NavigationRows();
             ThronefallUIElement up = tabButtons.Count > 0 ? tabButtons[currentTab] : null;
             foreach (var tab in tabButtons) tab.botNav = elements.FirstOrDefault() ?? back;
-            for (int i = 0; i < elements.Count; i++)
+            for (int r = 0; r < rows.Count; r++)
             {
-                elements[i].topNav = i == 0 ? up : elements[i - 1];
-                elements[i].botNav = i == elements.Count - 1 ? back : elements[i + 1];
+                for (int c = 0; c < rows[r].Count; c++)
+                {
+                    rows[r][c].topNav = r == 0 ? up : rows[r - 1][Math.Min(c, rows[r - 1].Count - 1)];
+                    rows[r][c].botNav = r == rows.Count - 1 ? back : rows[r + 1][Math.Min(c, rows[r + 1].Count - 1)];
+                }
             }
-            back.topNav = elements.LastOrDefault() ?? up;
+            back.topNav = rows.Count > 0 ? rows[rows.Count - 1][0] : up;
             frame.RefetchManagedElements();
             // Lay the page out now, so scrolling to the restored selection measures its real position.
             LayoutRebuilder.ForceRebuildLayoutImmediate(contentRoot);
@@ -384,7 +400,45 @@ namespace PalaceMod
         /// Its topNav/botNav are overwritten; set leftNav/rightNav yourself.</summary>
         public void AddElement(ThronefallUIElement element) => Elements.Add(element);
 
-        internal ModPage(Transform content) => this.content = content;
+        /// <summary>Adds selectables that sit side by side (one line of a grid) as one step of the up/down navigation:
+        /// left/right moves along the row, up/down to the nearest column of the row above or below. Call once per
+        /// line, top to bottom.</summary>
+        public void AddElementRow(IReadOnlyList<ThronefallUIElement> row)
+        {
+            if (row == null || row.Count == 0) return;
+            var line = row.ToList();
+            for (int i = 0; i < line.Count; i++)
+            {
+                line[i].leftNav = i > 0 ? line[i - 1] : null;
+                line[i].rightNav = i < line.Count - 1 ? line[i + 1] : null;
+                rowOf[line[i]] = line;
+                Elements.Add(line[i]);
+            }
+        }
+
+        private readonly Dictionary<ThronefallUIElement, List<ThronefallUIElement>> rowOf = [];
+
+        /// <summary>The page's elements as navigation rows, top to bottom (a lone element is a row of one).</summary>
+        internal List<List<ThronefallUIElement>> NavigationRows()
+        {
+            var rows = new List<List<ThronefallUIElement>>();
+            foreach (var e in Elements)
+            {
+                if (!rowOf.TryGetValue(e, out var line)) rows.Add([e]);
+                else if (line[0] == e) rows.Add(line);
+            }
+            return rows;
+        }
+
+        /// <summary>A fixed area to the right of the page that doesn't scroll, e.g. for details of the selected
+        /// element. It's emptied with the page; lay out its children yourself.</summary>
+        public RectTransform Aside { get; }
+
+        internal ModPage(Transform content, RectTransform aside = null)
+        {
+            this.content = content;
+            Aside = aside;
+        }
 
         /// <summary>A section heading in the game's title font.</summary>
         public TextMeshProUGUI Header(string text)
@@ -568,6 +622,10 @@ namespace PalaceMod
         private RectTransform viewport, content;
         private float target, velocity;
 
+        /// <summary>Only follow the mouse wheel while the pointer is over the viewport (for several scroll areas on
+        /// one screen).</summary>
+        public bool WheelNeedsHover;
+
         public void Init(UIFrame frame, RectTransform viewport, RectTransform content)
         {
             this.frame = frame;
@@ -595,6 +653,13 @@ namespace PalaceMod
             var rect = (RectTransform)obj.transform;
             rect.sizeDelta = new Vector2(width, 0f);
             return rect;
+        }
+
+        private bool PointerOver()
+        {
+            var canvas = viewport.GetComponentInParent<Canvas>()?.rootCanvas;
+            var camera = canvas == null || canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.worldCamera;
+            return RectTransformUtility.RectangleContainsScreenPoint(viewport, Input.mousePosition, camera);
         }
 
         public void ResetTo(float y)
@@ -657,7 +722,7 @@ namespace PalaceMod
                     finally { stepping = false; }
                 }
             }
-            if (UIFrameManager.instance?.ActiveFrame == frame && Input.mouseScrollDelta.y != 0f)
+            if (UIFrameManager.instance?.ActiveFrame == frame && Input.mouseScrollDelta.y != 0f && (!WheelNeedsHover || PointerOver()))
             {
                 target = Mathf.Clamp(target - Input.mouseScrollDelta.y * 60f, 0f, MaxScroll);
             }

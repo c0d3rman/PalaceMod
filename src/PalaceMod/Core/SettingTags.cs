@@ -17,5 +17,9 @@ namespace PalaceMod
 
         /// <summary>Leave the setting out of the in-game pane.</summary>
         public bool Hidden;
+
+        /// <summary>The setting turns on a part of its feature that can make a run unranked and is held off by the
+        /// "Gameplay-changing features" master switch (see GameplayFeatures); the pane says so while it's off.</summary>
+        public bool AffectsRanking;
     }
 }

@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using BepInEx;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -184,6 +185,100 @@ namespace PalaceMod
             if (fresh.JsonPath != state.JsonPath) Delete(state);
             return fresh;
         }
+
+        /// <summary>Captures the current moment in memory and loads it straight back with a different loadout, so
+        /// perks and the weapon are applied as at level start while buildings, units, gold and mod state stay. Keeps
+        /// an undo state when savestates are on. Throws InvalidOperationException with a player-facing reason.</summary>
+        internal static void RestoreWithLoadout(ICollection<Equippable> loadout)
+        {
+            if (!CanCapture(out string reason)) throw new InvalidOperationException(reason);
+            string level = CurrentLevel;
+            var data = StateCapture.Capture();
+            data.kind = SaveStateKind.Manual.ToString();
+            data.name = "Loadout change";
+            var names = loadout.Where(e => e != null).Select(e => e.displayName).ToList();
+            data.native.loadout = names;
+            // Retry-day from here should keep the new loadout too.
+            if (data.hasDawn) data.dawn.loadout = [.. names];
+            data.loadoutChanged = true;
+            // Never written: the path only gives the state an id.
+            var info = new SaveStateInfo(Path.Combine(LevelFolder(level), "loadout-change.json"), data);
+            if (!StateRestorer.CanRestore(info, out reason)) throw new InvalidOperationException(reason);
+            StateRestorer.Begin(info, backup: Feature<SaveStatesManager>.On, asLoadoutChange: true);
+        }
+
+        // ---- Mod state ----------------------------------------------------------------------------------------------
+
+        private sealed class StateProvider
+        {
+            public string Id;
+            public Func<JToken> Capture;
+            public Action<JToken> Restore;
+        }
+
+        private static readonly List<StateProvider> providers = [];
+        private static readonly JsonSerializer Serializer = JsonSerializer.Create(new JsonSerializerSettings
+        {
+            ObjectCreationHandling = ObjectCreationHandling.Replace,
+            MissingMemberHandling = MissingMemberHandling.Ignore,
+        });
+
+        /// <summary>
+        /// Keeps a feature's in-level state in every savestate. <paramref name="capture"/> runs at each capture and
+        /// returns a plain serializable object (public fields; V3 for vectors, PathOf names for scene objects), or
+        /// null for nothing to keep. <paramref name="restore"/> runs once a load has rebuilt the level (units,
+        /// buildings, king and enemies are back, and every manager has seen the new level), before Restored fires.
+        /// It isn't called for states saved without this id (older states), so the feature keeps what the reload
+        /// gave it. Call in Awake. Both run whether or not the feature is enabled.
+        /// </summary>
+        public static void RegisterState<T>(string id, Func<T> capture, Action<T> restore) where T : class
+        {
+            if (string.IsNullOrEmpty(id) || capture == null || restore == null) throw new ArgumentException("id, capture and restore are required");
+            providers.RemoveAll(p => p.Id == id);
+            providers.Add(new StateProvider
+            {
+                Id = id,
+                Capture = () => capture() is T value ? JToken.FromObject(value, Serializer) : null,
+                Restore = token => restore(token.ToObject<T>(Serializer)),
+            });
+        }
+
+        internal static void CaptureMods(SaveStateData data)
+        {
+            foreach (var provider in providers)
+            {
+                try
+                {
+                    var token = provider.Capture();
+                    if (token != null) data.mods[provider.Id] = token;
+                }
+                catch (Exception e) { Log.For<SaveStatesManager>().Error($"Capturing \"{provider.Id}\" state failed; the state is saved without it", e); }
+            }
+        }
+
+        internal static void RestoreMods(SaveStateData data)
+        {
+            if (data.mods == null || data.mods.Count == 0) return;
+            int restored = 0;
+            foreach (var provider in providers)
+            {
+                if (!data.mods.TryGetValue(provider.Id, out var token) || token == null || token.Type == JTokenType.Null) continue;
+                try
+                {
+                    provider.Restore(token);
+                    restored++;
+                }
+                catch (Exception e) { Log.For<SaveStatesManager>().Error($"Restoring \"{provider.Id}\" state failed", e); }
+            }
+            Log.For<SaveStatesManager>().Debug($"Restored mod state: {restored}/{data.mods.Count} ({string.Join(", ", data.mods.Keys)})");
+        }
+
+        /// <summary>A scene object's stable name, to find it again after a load with FindByPath.</summary>
+        public static string PathOf(Component component) => component == null ? null : new ScenePaths().Of(component.transform);
+
+        /// <summary>Every T in the level (inactive ones included) by its PathOf name.</summary>
+        public static Dictionary<string, T> FindByPath<T>() where T : Component =>
+            new ScenePaths().Index(UnityEngine.Object.FindObjectsOfType<T>(true));
 
         internal static void RaiseRestoring(SaveStateInfo s) => Restoring?.Invoke(s);
         internal static void RaiseRestored(SaveStateInfo s) => Restored?.Invoke(s);
