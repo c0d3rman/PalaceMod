@@ -26,10 +26,22 @@ namespace PalaceMod
         public override string FeatureDescription => "Adds a panel to the pause menu that groups the night's enemies by where they spawn. At night it shows how many of each have spawned so far.";
 
         private const string ContainerName = "PalaceMod Spawns";
-        private const float IconSize = 50f, IconSpacing = 14f, LineSpacing = 8f, CaptionHeight = 22f, RowSpacing = 18f, GroupSpacing = 28f;
+        private const float IconSize = 50f, IconSpacing = 14f, LineSpacing = 8f, CaptionHeight = 22f, CaptionGap = 4f, RowSpacing = 18f, GroupSpacing = 28f;
         private const float LabelGap = 10f, GapFromNative = 40f, GapAboveUnits = 10f, BadgeOverhang = 14f;
         private const float MinLeft = 280f, NightArrowsWidth = 35f, MaxRightFraction = 0.55f;
         private const int IconsPerLine = 4;
+
+        // How far a token grows past its cell on each side when hovered or selected (the game scales it from its centre),
+        // so the spawned count below it and the line above can be kept clear. Read from the game's button styles.
+        private float hoverPad;
+
+        private static float HoverPad(TFUIUnit button)
+        {
+            float scale = 1f;
+            foreach (var style in new[] { button.focussedStyle, button.selectedStyle, button.focussedAndSelectedStyle })
+                if (style != null) scale = Mathf.Max(scale, style.scale);
+            return IconSize * (scale - 1f) / 2f;
+        }
 
         private static readonly AccessTools.FieldRef<PauseUILoadoutHelper, int> PreviewWave =
             AccessTools.FieldRefAccess<PauseUILoadoutHelper, int>("currentPreviewWavenumber");
@@ -210,6 +222,7 @@ namespace PalaceMod
             bool live = IsLive(wave) && wave == TrueWave(pause);
             var groups = Gather(wave, live);
             if (groups.Count == 0) return;
+            hoverPad = HoverPad(pause.enemyButtonPrefab);
 
             var column = pause.enemyPreview.transform.parent as RectTransform;
             var unitsLabel = column.Find("Units") as RectTransform;
@@ -320,12 +333,13 @@ namespace PalaceMod
             var row = new GameObject("Row " + group.Label, typeof(RectTransform));
             row.transform.SetParent(parent, false);
             var hlg = row.AddComponent<VerticalLayoutGroup>();
-            hlg.spacing = LabelGap;
+            hlg.spacing = LabelGap + hoverPad; // the place name stays clear of a grown token's count badge
             hlg.childAlignment = TextAnchor.UpperLeft;
             hlg.childControlWidth = hlg.childControlHeight = true;
             hlg.childForceExpandWidth = hlg.childForceExpandHeight = false;
 
-            float cellHeight = IconSize + (live ? CaptionHeight : 0f);
+            // A live cell is the token, room for it to grow on hover, then the spawned count.
+            float cellHeight = IconSize + (live ? hoverPad + CaptionGap + CaptionHeight : 0f);
 
             var labelObj = new GameObject("Label", typeof(RectTransform));
             labelObj.transform.SetParent(row.transform, false);
@@ -345,13 +359,13 @@ namespace PalaceMod
             icons.transform.SetParent(row.transform, false);
             var grid = icons.AddComponent<GridLayoutGroup>();
             grid.cellSize = new Vector2(IconSize, cellHeight);
-            grid.spacing = new Vector2(IconSpacing, LineSpacing);
+            grid.spacing = new Vector2(IconSpacing, LineSpacing + hoverPad);
             grid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
             grid.constraintCount = Mathf.Min(IconsPerLine, group.Enemies.Count);
             int lines = Mathf.CeilToInt(group.Enemies.Count / (float)IconsPerLine);
             var iconsLayout = icons.AddComponent<LayoutElement>();
             iconsLayout.preferredWidth = grid.constraintCount * IconSize + (grid.constraintCount - 1) * IconSpacing;
-            iconsLayout.preferredHeight = lines * cellHeight + (lines - 1) * LineSpacing;
+            iconsLayout.preferredHeight = lines * cellHeight + (lines - 1) * grid.spacing.y;
 
             var navigation = new List<List<ThronefallUIElement>>();
             for (int i = 0; i < group.Enemies.Count; i++)
@@ -369,8 +383,10 @@ namespace PalaceMod
 
             var button = Object.Instantiate(helper.enemyButtonPrefab, cell.transform, false);
             var buttonRect = (RectTransform)button.transform;
-            buttonRect.anchorMin = buttonRect.anchorMax = buttonRect.pivot = new Vector2(0.5f, 1f);
-            buttonRect.anchoredPosition = Vector2.zero;
+            // Pivot in the middle, as in the game's grid, so the hover scale grows the token evenly instead of downward.
+            buttonRect.anchorMin = buttonRect.anchorMax = new Vector2(0.5f, 1f);
+            buttonRect.pivot = new Vector2(0.5f, 0.5f);
+            buttonRect.anchoredPosition = new Vector2(0f, -IconSize / 2f);
             buttonRect.sizeDelta = new Vector2(IconSize, IconSize);
             button.SetDataSimple(enemy.Info);
             if (!live) return button;
