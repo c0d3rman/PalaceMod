@@ -56,19 +56,82 @@ namespace PalaceMod
             if (slot == null)
             {
                 HidePanel();
+                if (NearBuilding.Value) WarmUp();
                 return;
             }
             if (!EnsurePanel()) return;
+            EndWarmUp();
             showDetails = DetailsKey.Held || forceDetails;
             string key = PanelKey(slot);
             if (key != panelKey)
             {
                 panelKey = key;
+                var watch = System.Diagnostics.Stopwatch.StartNew();
                 Rebuild(slot);
+                Log.Debug($"Built the panel for {slot.name} in {watch.Elapsed.TotalMilliseconds:0.0} ms");
             }
             if (!panel.gameObject.activeSelf) panel.gameObject.SetActive(true);
             Place();
         }
+
+        // ---------- Warm-up ----------
+        // The first build of the panel in a session costs a frame spike (JIT of the build code, the first tile
+        // instantiations, the first TMP mesh generation), which used to land the moment the king first reached a
+        // building. Instead the panel is built once, invisibly, right as a level loads (hidden in the load hitch),
+        // and shown at alpha 0 for a frame so the canvas work happens too.
+
+        private RectTransform warmedPanel; // the panel instance that has been warmed (a new level makes a new panel)
+        private CanvasGroup warmGroup;     // set while the warm-up frame is showing the invisible panel
+
+        private void WarmUp()
+        {
+            if (warmGroup != null)
+            {
+                EndWarmUp();
+                return;
+            }
+            if (panel != null && warmedPanel == panel) return;
+            if (PlayerInteraction.instance == null || !EnsurePanel()) return;
+            warmedPanel = panel;
+            var slot = WarmUpSlot();
+            if (slot == null) return;
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                warmGroup = panel.gameObject.AddComponent<CanvasGroup>();
+                warmGroup.alpha = 0f;
+                warmGroup.blocksRaycasts = false;
+                showDetails = false;
+                Rebuild(slot);
+                panel.gameObject.SetActive(true);
+                Place();
+            }
+            catch (Exception e)
+            {
+                EndWarmUp();
+                Log.Warn($"Couldn't warm up the building panel: {e.Message}");
+            }
+            panelKey = null; // the real show rebuilds for its own building
+            Log.Debug($"Warmed up the building panel with {slot.name} in {watch.Elapsed.TotalMilliseconds:0.0} ms");
+        }
+
+        /// <summary>Hides the invisible warm-up panel and makes the panel visible again for real shows.</summary>
+        private void EndWarmUp()
+        {
+            if (warmGroup == null) return;
+            if (panel != null && panel.gameObject.activeSelf) panel.gameObject.SetActive(false);
+            warmGroup.alpha = 1f;
+            Object.Destroy(warmGroup);
+            warmGroup = null;
+            panelKey = null;
+        }
+
+        /// <summary>A building with upgrade choices to build the warm-up panel for (the castle, normally).</summary>
+        private static BuildSlot WarmUpSlot() =>
+            Object.FindObjectsOfType<BuildSlot>()
+                .Where(s => s != null && !s.ActivatorUpgradesThis && s.OwnUpgrades.Count > 0)
+                .OrderByDescending(s => s.OwnUpgrades.Count(u => u != null && u.upgradeBranches.Count > 1))
+                .FirstOrDefault();
 
         private void HidePanel()
         {
@@ -78,6 +141,7 @@ namespace PalaceMod
 
         private void DestroyPanel()
         {
+            warmGroup = null;
             if (panel != null) Object.Destroy(panel.gameObject);
             panel = null;
             content = null;
@@ -412,10 +476,19 @@ namespace PalaceMod
 
         private static TFUIUpgradeChoice tilePrefab;
 
+        private static readonly AccessTools.FieldRef<UIFrameManager, UIFrame> ChoiceFrame =
+            AccessTools.FieldRefAccess<UIFrameManager, UIFrame>("choiceFrame");
+
         private static TFUIUpgradeChoice TilePrefab
         {
             get
             {
+                if (tilePrefab != null) return tilePrefab;
+                // The choice popup's frame holds the tile prefab; scanning every loaded object is the slow fallback.
+                var frame = UIFrameManager.instance != null ? ChoiceFrame(UIFrameManager.instance) : null;
+                var helper = frame != null ? frame.GetComponentInChildren<ChoiceUIFrameHelper>(true) : null;
+                if (helper == null && frame != null) helper = frame.GetComponentInParent<ChoiceUIFrameHelper>(true);
+                tilePrefab = helper != null ? helper.upgradeChoiceButtonPrefab : null;
                 if (tilePrefab == null)
                     tilePrefab = Resources.FindObjectsOfTypeAll<ChoiceUIFrameHelper>().Select(h => h.upgradeChoiceButtonPrefab).FirstOrDefault(p => p != null);
                 return tilePrefab;
