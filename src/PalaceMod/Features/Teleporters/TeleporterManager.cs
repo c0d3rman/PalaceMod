@@ -264,7 +264,7 @@ namespace PalaceMod
             arrivedPad = pad; // don't fire under the king's feet straight away
             GameplayImpact.Mark("Teleporters");
             // The undo key takes it back like a build (undo refunds what was paid); picking it up instead already refunds.
-            UndoUpgradeManager.RecordCustom("Place teleporter", cost.Value, at, () => pads.Contains(pad), () => Remove(pad, refund: false));
+            UndoUpgradeManager.RecordCustom("Place teleporter", "teleporter", cost.Value, at, () => pads.Contains(pad), () => Remove(pad, refund: false));
             string costText = cost.Value > 0 ? $" for {cost.Value} gold" : "";
             Notify.Show(pads.Count == 1
                 ? $"Teleporter placed{costText}. Place another to link them."

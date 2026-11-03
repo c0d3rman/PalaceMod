@@ -29,8 +29,18 @@ using UnityEngine;
     from their captured state on undo, so re-upgrading applies them again. Destroyed objects inside newly activated
     parts are fine: they destroyed themselves on first activation, as they would again.
 
-    Undo is LIFO and limited to the current day (the stack is cleared when night starts or the level changes). It
-    refunds exactly the coins paid (counted from the coin slots), without counting them as new income (networth).
+    Castle upgrades (Royal Training, Builder's Guild, Magic Armor, Assassin's Training, Royal Mastery, Commander,
+    Castle-Up, Godly Curse, the Empire tier) reach outside the castle. When the next level can switch one on, the king's
+    Hp and weapon, PlayerUpgradeManager, BlacksmithUpgrades and (Empire) every tower join the scope as globals, diffed
+    in each window like the building. Their daytime registrations and static instances are rolled back, their own
+    fields reset to the pre-activation state, Castle-Up's wall and tower discounts are recorded and put back, and the
+    commander's per-unit hold and speed bonuses are reversed by hand. The free builds of the Builder's Guild (a house)
+    and the Outpost perk (two towers), which come a few frames later, are recorded into the same action. Units the
+    Commander made the king drop stay where they were dropped.
+
+    Undo is LIFO and limited to the current day (the stack is cleared when night starts, the level changes or a
+    savestate loads). It refunds exactly the coins paid (counted from the coin slots), without counting them as new
+    income (networth). Other features can push their own paid actions (teleporter placement) with RecordCustom.
 */
 namespace PalaceMod
 {
@@ -723,7 +733,7 @@ namespace PalaceMod
         private static string UndoCustom(UndoAction action, PlayerInteraction player, bool requireNear)
         {
             if (requireNear && Vector3.Distance(Flat(player.transform.position), Flat(action.At)) > NearDistance)
-                return Say($"Walk back to undo {Lower(action.Label)}.", NotifyKind.Info);
+                return Say($"Walk back to the {action.Name} to undo {Lower(action.Label)}.", NotifyKind.Info);
             stack.RemoveAt(stack.Count - 1);
             try { action.CustomUndo(); }
             catch (Exception e)
@@ -749,15 +759,15 @@ namespace PalaceMod
         private static void DropBuilds() => stack.RemoveAll(a => !a.IsCustom);
 
         /// <summary>Records another feature's paid action so the undo key takes it back too, newest first along with
-        /// builds and upgrades today. <paramref name="undo"/> removes it (without refunding: undo refunds
+        /// builds and upgrades today. <paramref name="name"/> names the thing to walk back to; <paramref name="undo"/> removes it (without refunding: undo refunds
         /// <paramref name="cost"/>); <paramref name="alive"/> says whether there is still something to undo (a teleporter
         /// picked up since was already refunded). Does nothing while Undo upgrade is off or outside the day.</summary>
-        public static void RecordCustom(string label, int cost, Vector3 at, Func<bool> alive, Action undo)
+        public static void RecordCustom(string label, string name, int cost, Vector3 at, Func<bool> alive, Action undo)
         {
             if (!Recording || undo == null) return;
             stack.Add(new UndoAction
             {
-                Label = label, Name = label, Cost = Math.Max(0, cost), At = at, CustomAlive = alive, CustomUndo = undo,
+                Label = label, Name = name, Cost = Math.Max(0, cost), At = at, CustomAlive = alive, CustomUndo = undo,
                 Committed = true, Settled = true,
             });
         }
