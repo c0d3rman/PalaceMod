@@ -433,6 +433,8 @@ namespace PalaceMod
                     string description = manager?.FeatureDescription
                         ?? (SettingsPane.SectionDescriptions.TryGetValue(name, out var d) ? d : null)
                         ?? (FallbackDescriptions.TryGetValue(name, out var f) ? f : "");
+                    if (name == GameplayFeatures.Section)
+                        description += $" \"{GameplayFeatures.Key}\" covers everything that can make a run unranked: {GameplayFeatures.FeatureList()}.";
                     result.Add(new Section
                     {
                         Name = name,
@@ -641,9 +643,8 @@ namespace PalaceMod
             }
             else if (entry.Definition.Section == GameplayFeatures.Section && entry.Definition.Key == GameplayFeatures.Key)
             {
-                text = $"On: every PalaceMod feature is available as you set it up. Off: the features that can make a run " +
-                    $"unranked are turned off, so every run stays ranked ({GameplayFeatures.FeatureList()}). Each keeps its own " +
-                    "setting for when you turn this back on.";
+                text = "Off keeps every run ranked: the features listed above are turned off. Each keeps its own setting, " +
+                    "so turning this back on restores them as they were.";
             }
             if (tags?.AffectsRanking == true && !GameplayFeatures.Allowed && !section.HeldOff)
                 text += " Off for now: \"Gameplay-changing features\" is turned off in General.";
