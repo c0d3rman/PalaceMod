@@ -47,7 +47,9 @@ namespace PalaceMod
         }
 
         /// <param name="backup">Capture an undo state of the current moment first.</param>
-        public static void Begin(SaveStateInfo state, bool backup = true)
+        /// <param name="asLoadoutChange">A debug-menu loadout swap of the current moment, not a player's load: the run
+        /// isn't treated as a practice run (the debug menu marks it itself) and it isn't remembered as the last state.</param>
+        public static void Begin(SaveStateInfo state, bool backup = true, bool asLoadoutChange = false)
         {
             if (backup && state.Kind != SaveStateKind.BeforeLoad && StateCapture.CanCapture(out _))
             {
@@ -55,16 +57,19 @@ namespace PalaceMod
                 catch (Exception e) { Log.For<SaveStatesManager>().Warn($"Undo state failed: {e.Message}"); }
             }
             Busy = true;
-            Plugin.Instance.StartCoroutine(Run(state));
+            Plugin.Instance.StartCoroutine(Run(state, asLoadoutChange));
         }
 
-        private static IEnumerator Run(SaveStateInfo state)
+        private static IEnumerator Run(SaveStateInfo state, bool asLoadoutChange)
         {
             var data = state.Data;
             Log.For<SaveStatesManager>().Info($"Loading {state}");
-            SaveStates.Last = state;
-            GameplayImpact.Mark("Savestate loaded");
-            Feature<SaveStatesManager>.Instance?.MarkPracticeRun();
+            if (!asLoadoutChange)
+            {
+                SaveStates.Last = state;
+                GameplayImpact.Mark("Savestate loaded");
+                Feature<SaveStatesManager>.Instance?.MarkPracticeRun();
+            }
             SaveStates.RaiseRestoring(state);
 
             var transitions = SceneTransitionManager.instance;
@@ -122,6 +127,7 @@ namespace PalaceMod
             try
             {
                 foreach (var action in deferred) action();
+                SaveStates.RestoreMods(data);
                 RestoreRandom(data);
             }
             catch (Exception e)
@@ -130,9 +136,10 @@ namespace PalaceMod
                 yield break;
             }
             Busy = false;
-            SaveStates.Last = state;
+            if (!asLoadoutChange) SaveStates.Last = state;
             Log.For<SaveStatesManager>().Info($"Loaded {state}; {Summary()}");
-            Notify.Show($"Loaded \"{state.Name}\"", NotifyKind.Success, key: "savestates");
+            if (asLoadoutChange) Notify.Show("Loadout applied", NotifyKind.Success, key: "savestates");
+            else Notify.Show($"Loaded \"{state.Name}\"", NotifyKind.Success, key: "savestates");
             SaveStates.RaiseRestored(state);
         }
 
@@ -273,7 +280,9 @@ namespace PalaceMod
             hp.invulnerable = invulnerable;
         }
 
-        private static void SetHp(Hp hp, float value, float max)
+        /// <param name="rescale">Keep the reloaded maximum (a new loadout may have changed it) and the captured
+        /// health as a fraction of it.</param>
+        private static void SetHp(Hp hp, float value, float max, bool rescale = false)
         {
             if (value <= 0f)
             {
@@ -281,7 +290,8 @@ namespace PalaceMod
                 return;
             }
             if (hp.HpValue <= 0f) hp.Revive(callReviveEvent: false);
-            if (max > 0f) hp.maxHp = max;
+            if (rescale && max > 0f) value = value / max * hp.maxHp;
+            else if (max > 0f) hp.maxHp = max;
             hp.SetHpTo(Mathf.Min(value, hp.maxHp));
         }
 
@@ -293,7 +303,7 @@ namespace PalaceMod
             {
                 if (!hps.TryGetValue(saved.path, out var hp) || !hp.gameObject.activeInHierarchy) { missing++; continue; }
                 if (Mathf.Approximately(hp.HpValue, saved.hp) && Mathf.Approximately(hp.maxHp, saved.maxHp)) continue;
-                SetHp(hp, saved.hp, saved.maxHp);
+                SetHp(hp, saved.hp, saved.maxHp, data.loadoutChanged);
             }
             var interactors = paths.Index(Object.FindObjectsOfType<BuildingInteractor>(true));
             foreach (var flag in data.knockedOutTonight)
@@ -315,7 +325,7 @@ namespace PalaceMod
                 if (!units.TryGetValue(saved.path, out var unit) || !unit.gameObject.activeInHierarchy) { missing++; continue; }
                 var hp = unit.GetComponent<Hp>();
                 // Health first: reviving a unit re-enables it, and OnEnable clears its hold order.
-                if (hp != null) SetHp(hp, saved.hp, saved.maxHp);
+                if (hp != null) SetHp(hp, saved.hp, saved.maxHp, data.loadoutChanged);
                 unit.HomePosition = saved.home;
                 unit.HoldPosition = saved.hold;
                 unit.transform.SetPositionAndRotation(saved.position, saved.rotation);
@@ -323,8 +333,12 @@ namespace PalaceMod
                 if (hp != null && saved.hp > 0f && saved.maxHp > 0f)
                 {
                     // The hold order may have rescaled health (Commander); put the captured values back.
-                    hp.maxHp = saved.maxHp;
-                    hp.SetHpTo(Mathf.Min(saved.hp, saved.maxHp));
+                    if (data.loadoutChanged) hp.SetHpTo(Mathf.Min(saved.hp / saved.maxHp * hp.maxHp, hp.maxHp));
+                    else
+                    {
+                        hp.maxHp = saved.maxHp;
+                        hp.SetHpTo(Mathf.Min(saved.hp, saved.maxHp));
+                    }
                 }
                 var tagged = unit.GetComponent<TaggedObject>();
                 if (tagged != null)
@@ -445,13 +459,15 @@ namespace PalaceMod
             if (king.meshParent != null) king.meshParent.rotation = saved.meshRotation;
             Priv.Set(king, "desiredMeshRotation", (Quaternion)saved.meshRotation);
             var hp = king.GetComponent<Hp>();
-            if (hp != null) SetHp(hp, saved.hp, saved.maxHp);
+            if (hp != null) SetHp(hp, saved.hp, saved.maxHp, data.loadoutChanged);
             var revive = king.GetComponent<AutoRevive>();
             if (revive != null)
             {
                 Priv.Set(revive, "hasBeenKnockedOutFor", saved.hp <= 0f ? saved.knockedOutFor : 0f);
                 Priv.Set(revive, "quickReviveAvailable", saved.quickReviveAvailable);
             }
+            // A swapped weapon starts with fresh cooldowns.
+            if (data.loadoutChanged) return;
             var interaction = PlayerInteraction.instance;
             if (interaction.ManualAttack != null) interaction.ManualAttack.Cooldown = saved.manualCooldown;
             if (interaction.AutoAttack != null) interaction.AutoAttack.Cooldown = saved.autoCooldown;

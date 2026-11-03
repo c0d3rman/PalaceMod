@@ -63,6 +63,68 @@ namespace PalaceMod
             // The game loads its controls file a frame after its settings wake up, and our postfix applies then; this
             // covers the case where that never runs.
             if (!applied && categoryId >= 0 && ReInput.isReady && Plugin.Input != null) ApplyAll();
+            if (!Ready) return;
+            PatchGlyphs();
+            UpdateClaims();
+        }
+
+        // ---- Exclusive contexts -----------------------------------------------------------------------------------
+
+        // Other actions' element maps switched off while a claimed context's keys use the same input.
+        private static readonly List<ActionElementMap> blocked = [];
+        private static readonly List<int> claimingActions = [], lastClaimingActions = [];
+        private static int mapsVersion, blockedVersion = -1;
+
+        private static void UpdateClaims()
+        {
+            var contexts = Keybinds.ClaimedContexts();
+            claimingActions.Clear();
+            if (contexts.Count > 0)
+            {
+                foreach (var pair in byAction)
+                {
+                    var k = pair.Value;
+                    if (k.Context != null && contexts.Contains(k.Context) && Keybinds.FeatureEnabled(k.Section)) claimingActions.Add(pair.Key);
+                }
+            }
+            if (blockedVersion == mapsVersion && claimingActions.SequenceEqual(lastClaimingActions)) return;
+            ReleaseBlocked();
+            lastClaimingActions.Clear();
+            lastClaimingActions.AddRange(claimingActions);
+            blockedVersion = mapsVersion;
+            if (claimingActions.Count == 0) return;
+
+            var maps = Plugin.Input.controllers.maps.GetAllMaps().ToList();
+            foreach (var map in maps)
+            {
+                foreach (var element in map.AllMaps)
+                {
+                    if (!claimingActions.Contains(element.actionId)) continue;
+                    foreach (var otherMap in maps)
+                    {
+                        if (otherMap.controllerType != map.controllerType || otherMap.controllerId != map.controllerId) continue;
+                        foreach (var other in otherMap.AllMaps)
+                        {
+                            if (!other.enabled || claimingActions.Contains(other.actionId)) continue;
+                            if (other.elementType != element.elementType || other.elementIdentifierId != element.elementIdentifierId) continue;
+                            if (map.controllerType == ControllerType.Keyboard && other.modifierKeyFlags != element.modifierKeyFlags) continue;
+                            if (element.axisRange != AxisRange.Full && other.axisRange != AxisRange.Full && element.axisRange != other.axisRange) continue;
+                            other.enabled = false;
+                            blocked.Add(other);
+                        }
+                    }
+                }
+            }
+            if (blocked.Count > 0)
+                Log.For<KeybindsManager>().Debug($"Blocked {string.Join(", ", blocked.Select(b => ReInput.mapping.GetAction(b.actionId)?.name).Distinct())} for claimed keys");
+        }
+
+        private static void ReleaseBlocked()
+        {
+            foreach (var element in blocked) element.enabled = true;
+            blocked.Clear();
+            lastClaimingActions.Clear();
+            blockedVersion = -1;
         }
 
         // ---- Injection --------------------------------------------------------------------------------------------
@@ -108,7 +170,8 @@ namespace PalaceMod
                 if (manager.EnabledEntry != null && sections.Contains(manager.FeatureSection))
                 {
                     string section = manager.FeatureSection;
-                    manager.EnabledEntry.SettingChanged += (_, _) => OnFeatureToggled(section);
+                    // EnabledChanged also covers the "Gameplay-changing features" master switch.
+                    manager.EnabledChanged += () => OnFeatureToggled(section);
                 }
             }
             Log.For<KeybindsManager>().Debug($"Added {byAction.Count} Rewired actions in category {CategoryName} ({categoryId})");
@@ -229,6 +292,7 @@ namespace PalaceMod
         {
             int id = keybind.ActionId;
             if (id < 0 || Plugin.Input == null) return;
+            mapsVersion++;
             foreach (var map in Plugin.Input.controllers.maps.GetAllMaps()) map.DeleteElementMapsWithAction(id);
             // A disabled feature's keys are kept in the config but not mapped, so they can't shadow or clash with anything.
             if (!Keybinds.FeatureEnabled(keybind.Section)) return;
@@ -397,8 +461,15 @@ namespace PalaceMod
         {
             private static void Prefix()
             {
+                ReleaseBlocked(); // never save a blocked binding as switched off; it's re-blocked next frame
                 if (!Ready || resetting) return;
                 foreach (var keybind in byAction.Values) Sync(keybind);
+            }
+
+            // The listener refreshes its rows before saving, so the per-row "Default" buttons follow the synced config here.
+            private static void Postfix()
+            {
+                if (Ready) UpdateResetButtons();
             }
         }
 

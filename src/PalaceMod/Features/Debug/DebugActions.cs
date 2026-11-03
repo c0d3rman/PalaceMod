@@ -12,8 +12,9 @@ using Object = UnityEngine.Object;
     player-facing reason when it can't run right now.
 
     Each action goes through the game's own code paths where one exists: AddCoin, SwitchToNight, Hp.Revive,
-    BuildSlot.TryToBuildOrUpgradeAndPay (with the native choice popup), and for loadout changes the game's own
-    "retry day" reload, so perks and weapons are applied exactly as at level start.
+    BuildSlot.TryToBuildOrUpgradeAndPay (with the native choice popup), and for loadout changes the savestate
+    reload (the game's "retry day" restart fed a capture of this moment), so perks and weapons are applied exactly as
+    at level start.
 */
 namespace PalaceMod
 {
@@ -612,19 +613,32 @@ namespace PalaceMod
 
         public static bool LoadoutAvailable => InLevel && LocalGamestate.SelectedGameMode != LocalGamestate.GameMode.EternalTrial;
 
-        /// <summary>Whether applying a loadout reloads today from the dawn save (true) or restarts the level.</summary>
+        /// <summary>Whether applying a loadout keeps the current moment: a savestate of now is loaded back with the new
+        /// loadout. Not in the tutorial or a Builder level, where savestates don't work.</summary>
+        public static bool LoadoutKeepsMoment =>
+            LocalGamestate.SelectedGameMode == LocalGamestate.GameMode.Classic && !StateUtil.CustomSession &&
+            UnityEngine.SceneManagement.SceneManager.GetActiveScene().name != StateUtil.TutorialScene;
+
+        /// <summary>Without LoadoutKeepsMoment: whether applying reloads today from the dawn save (true) or restarts the level.</summary>
         public static bool LoadoutKeepsProgress =>
             !MatchSaveLoadHandler.SaveLoadForbidden && MatchSaveLoadHandler.IsLoadingPermitted && EnemySpawner.instance.Wavenumber >= 0;
 
         private static bool remarkAfterRestart;
 
-        /// <summary>Equips <paramref name="loadout"/> and reloads today from its dawn save (or restarts the level on
-        /// day 1), so every perk and the weapon are applied the way the game applies them at level start.</summary>
+        /// <summary>Equips <paramref name="loadout"/> and reloads the level so every perk and the weapon are applied
+        /// the way the game applies them at level start: normally from a savestate of this moment (buildings, units,
+        /// gold and mod state kept); where savestates don't work, from today's dawn save, or a restart on day 1.</summary>
         public static string ApplyLoadout(ICollection<Equippable> loadout)
         {
             RequireLevel();
             if (!LoadoutAvailable) throw new InvalidOperationException("Not available in Eternal Trials");
             if (loadout.Count(e => e is EquippableWeapon) != 1) throw new InvalidOperationException("Pick exactly one weapon");
+            if (LoadoutKeepsMoment)
+            {
+                SaveStates.RestoreWithLoadout(loadout);
+                Mark("change loadout");
+                return "loadout applied, reloading this moment";
+            }
             bool keep = LoadoutKeepsProgress;
             PerkManager.ClearAllEquipped();
             foreach (var e in loadout) PerkManager.SetEquipped(e, true);

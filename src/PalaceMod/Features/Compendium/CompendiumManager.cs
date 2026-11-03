@@ -103,37 +103,42 @@ namespace PalaceMod
                 page.Header($"{CompendiumStats.Translate("Menu/Night")} {w + 1}/{spawner.waves.Count}{state}");
                 if (wave.difficultyMulti != 1f)
                     page.Text($"{CompendiumStats.Translate("Menu/DifficultyBoost")}: {CompendiumStats.Percent(wave.difficultyMulti)} health, {CompendiumStats.Percent(Mathf.Lerp(1f, wave.difficultyMulti, 0.5f))} damage");
-                // Group like the pause menu (same enemy and elite), keeping the spawn locations.
-                var groups = new List<(GameObject Prefab, bool Elite, int Count, List<string> Lines)>();
+                // A subheading per spawn location (named like the pause menu's spawn panel); under it, enemies grouped
+                // like the pause menu (same enemy and elite).
+                var places = new List<(string Name, List<(GameObject Prefab, bool Elite, int Count)> Enemies)>();
                 int gold = 0;
                 foreach (var spawn in wave.spawns)
                 {
                     gold += spawn.goldCoins;
                     if (spawn.enemyPrefab == null || spawn.enemyPrefab.GetComponent<ScreenMarkerIcon>() == null) continue;
-                    int i = groups.FindIndex(g => g.Prefab == spawn.enemyPrefab && g.Elite == spawn.eliteEnemies);
-                    string line = spawn.spawnLine != null ? spawn.spawnLine.name : null;
-                    if (i < 0) groups.Add((spawn.enemyPrefab, spawn.eliteEnemies, spawn.count, line != null ? [line] : []));
-                    else
-                    {
-                        var g = groups[i];
-                        if (line != null && !g.Lines.Contains(line)) g.Lines.Add(line);
-                        groups[i] = (g.Prefab, g.Elite, g.Count + spawn.count, g.Lines);
-                    }
+                    string name = spawn.spawnLine != null ? SpawnLocations.Name(spawn.spawnLine) : "Elsewhere";
+                    int p = places.FindIndex(x => x.Name == name);
+                    if (p < 0) { places.Add((name, [])); p = places.Count - 1; }
+                    var enemies = places[p].Enemies;
+                    int i = enemies.FindIndex(g => g.Prefab == spawn.enemyPrefab && g.Elite == spawn.eliteEnemies);
+                    if (i < 0) enemies.Add((spawn.enemyPrefab, spawn.eliteEnemies, spawn.count));
+                    else enemies[i] = (enemies[i].Prefab, enemies[i].Elite, enemies[i].Count + spawn.count);
                 }
                 int waveIndex = w;
-                foreach (var g in groups)
+                foreach (var (place, enemies) in places)
                 {
-                    var stats = CompendiumStats.Enemy(g.Prefab, g.Elite, waveIndex);
-                    var lines = g.Lines;
-                    page.Row($"{g.Count}× {EliteName(stats.Name, g.Elite)}", $"{CompendiumStats.Format(stats.Actual.Hp)}<sprite name=\"heart\">", () =>
+                    Subheading(page, place);
+                    foreach (var g in enemies)
                     {
-                        var body = StatBlock(CompendiumStats.Enemy(g.Prefab, g.Elite, waveIndex), true);
-                        if (lines.Count > 0) body += "\n\nFrom: " + string.Join(", ", lines);
-                        return body;
-                    }, icon: stats.Icon);
+                        var stats = CompendiumStats.Enemy(g.Prefab, g.Elite, waveIndex);
+                        page.Row($"{g.Count}× {EliteName(stats.Name, g.Elite)}", $"{CompendiumStats.Format(stats.Actual.Hp)}<sprite name=\"heart\">",
+                            () => StatBlock(CompendiumStats.Enemy(g.Prefab, g.Elite, waveIndex), true), icon: stats.Icon);
+                    }
                 }
                 if (gold > 0) page.Row("Gold dropped", Coin(gold), "Gold this night's enemies drop when killed.");
             }
+        }
+
+        // A spawn location under a night's header: smaller than the header, in the game's bold body font.
+        private static void Subheading(ModPage page, string text)
+        {
+            var tmp = GameWidgets.Text(page.Content, "Subheading", text, ModStyle.BoldFont, 28f, ModStyle.Gold, TMPro.TextAlignmentOptions.BottomLeft);
+            tmp.margin = new Vector4(0f, 10f, 0f, 0f);
         }
 
         private void BuildEnemies(ModPage page)
@@ -226,33 +231,44 @@ namespace PalaceMod
                     if (upgrade.disableInThisMode) continue;
                     int lvl = level;
                     var label = level == 0 ? CompendiumStats.Translate("Tooltip/Build") : $"{CompendiumStats.Translate("Menu/Level")} {level + 1}";
-                    page.Row(label, Coin(upgrade.cost), () => UpgradeText(slot, lvl));
+                    var branches = Branches(upgrade);
+                    bool choice = branches.Count > 1;
+                    page.Row(label, Coin(upgrade.cost), () => LevelText(slot, lvl, withChanges: !choice));
+                    // A choice gets one row per option (its icon, its own short tooltip), so no tooltip lists them all.
+                    if (!choice) continue;
+                    foreach (var branch in branches)
+                    {
+                        var details = branch.choiceDetails;
+                        bool locked = details.requiresUnlocked != null && !details.requiresUnlocked.IsUnlocked;
+                        string name = CompendiumStats.Translate(slot.GET_LOCIDENTIFIER_CHOICENAME(details));
+                        page.Row(locked ? $"{name} ({CompendiumStats.Translate("Menu/Locked")})" : name, Changes(branch), () =>
+                        {
+                            var description = CompendiumStats.Translate(slot.GET_LOCIDENTIFIER_CHOICEDESCRIPTION(details));
+                            return locked ? $"{description}\n\n{details.requiresUnlocked.GetLockedTooltip()}".Trim() : description;
+                        }, icon: details.icon);
+                    }
                 }
             }
         }
 
-        private static string UpgradeText(BuildSlot slot, int level)
+        private static List<BuildSlot.UpgradeBranch> Branches(BuildSlot.Upgrade upgrade) =>
+            upgrade.upgradeBranches.Where(b => b.choiceDetails == null || !b.choiceDetails.disabledInThisMode).ToList();
+
+        // The game's text for a level, plus its health and income changes when it has no choice.
+        private static string LevelText(BuildSlot slot, int level, bool withChanges)
         {
-            var upgrade = slot.OwnUpgrades[level];
-            var sb = new StringBuilder(CompendiumStats.Translate(slot.GET_LOCIDENTIFIER_UPGRADE(level)));
-            var branches = upgrade.upgradeBranches.Where(b => b.choiceDetails == null || !b.choiceDetails.disabledInThisMode).ToList();
-            foreach (var branch in branches)
-            {
-                sb.Append("\n\n");
-                if (branches.Count > 1 && branch.choiceDetails != null)
-                {
-                    sb.Append("<b>").Append(CompendiumStats.Translate(slot.GET_LOCIDENTIFIER_CHOICENAME(branch.choiceDetails))).Append("</b>");
-                    var description = CompendiumStats.Translate(slot.GET_LOCIDENTIFIER_CHOICEDESCRIPTION(branch.choiceDetails));
-                    if (!string.IsNullOrEmpty(description)) sb.Append('\n').Append(description);
-                    if (branch.choiceDetails.requiresUnlocked != null && !branch.choiceDetails.requiresUnlocked.IsUnlocked) sb.Append("\n(").Append(CompendiumStats.Translate("Menu/Locked")).Append(')');
-                    sb.Append('\n');
-                }
-                var changes = new List<string>();
-                if (branch.hpChange != 0) changes.Add($"{(branch.hpChange > 0 ? "+" : "")}{branch.hpChange}<sprite name=\"heart\">");
-                if (branch.goldIncomeChange != 0) changes.Add($"{(branch.goldIncomeChange > 0 ? "+" : "")}{branch.goldIncomeChange}<sprite name=\"coin\"> per day");
-                if (changes.Count > 0) sb.Append(string.Join("   ", changes));
-            }
-            return sb.ToString().TrimEnd();
+            var text = CompendiumStats.Translate(slot.GET_LOCIDENTIFIER_UPGRADE(level));
+            if (!withChanges) return text;
+            var changes = string.Join("   ", Branches(slot.OwnUpgrades[level]).Select(Changes).Where(c => c.Length > 0));
+            return changes.Length > 0 ? (text + "\n\n" + changes).Trim() : text;
+        }
+
+        private static string Changes(BuildSlot.UpgradeBranch branch)
+        {
+            var changes = new List<string>();
+            if (branch.hpChange != 0) changes.Add($"{(branch.hpChange > 0 ? "+" : "")}{branch.hpChange}<sprite name=\"heart\">");
+            if (branch.goldIncomeChange != 0) changes.Add($"{(branch.goldIncomeChange > 0 ? "+" : "")}{branch.goldIncomeChange}<sprite name=\"coin\">/day");
+            return string.Join("  ", changes);
         }
 
         private void BuildPerks(ModPage page)

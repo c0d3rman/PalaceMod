@@ -20,6 +20,7 @@ namespace PalaceMod
     public class DebugMenuManager : BaseManager
     {
         public override string FeatureSection => "Debug menu";
+        public override bool AffectsRanking => true; // off while "Gameplay-changing features" is off
         public override string FeatureDescription =>
             "Cheat menu for practice: gold, nights, waves, free buildings, god mode and loadout swaps. Open it from the pause menu. Using it makes the run unranked.";
         protected override bool EnabledByDefault => false;
@@ -263,12 +264,16 @@ namespace PalaceMod
             pendingLoadout ??= [.. PerkManager.instance.CurrentlyEquipped.Where(e => DebugActions.CategoryOf(e) != null)];
             var current = new HashSet<Equippable>(PerkManager.instance.CurrentlyEquipped.Where(e => DebugActions.CategoryOf(e) != null));
             int changes = pendingLoadout.Count(e => !current.Contains(e)) + current.Count(e => !pendingLoadout.Contains(e));
-            bool keep = DebugActions.LoadoutKeepsProgress;
+            string how = DebugActions.LoadoutKeepsMoment
+                ? "Equips the loadout below and reloads this exact moment with it, so perks apply like at level start. " +
+                  "Buildings, units, gold and positions stay; health keeps its share of any new maximum. Enemies already out keep their stats; units following you are left where they stand."
+                : DebugActions.LoadoutKeepsProgress
+                    ? "Equips the loadout below and reloads today from dawn (savestates don't work here), so everything since dawn is lost."
+                    : "Equips the loadout below and restarts the level (savestates don't work here and there's no dawn save yet).";
 
             page.Header("Apply");
             page.Row("Apply loadout", changes == 0 ? "no changes" : $"{changes} change{(changes == 1 ? "" : "s")}",
-                keep ? "Equips the loadout below and reloads today from dawn, so everything applies like at level start."
-                     : "Equips the loadout below and restarts the level (there's no dawn save yet).",
+                how,
                 () => Run(() => changes == 0 ? throw new InvalidOperationException("Nothing changed") : DebugActions.ApplyLoadout(pendingLoadout)));
             // Always shown, so toggling items never shifts the rows below it.
             page.Button("Undo changes", () => Run(() =>

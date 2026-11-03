@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using BepInEx.Configuration;
 using HarmonyLib;
@@ -22,6 +23,7 @@ namespace PalaceMod
     public class SaveStatesManager : BaseManager
     {
         public override string FeatureSection => "Savestates";
+        public override bool AffectsRanking => true; // off while "Gameplay-changing features" is off
         public override string FeatureDescription =>
             "Save and load the whole game mid-level, for practice. Pause > Savestates lists them. Loading a state makes the run unranked.";
 
@@ -83,6 +85,11 @@ namespace PalaceMod
                 if (practiceRun) Log.Info("New run; the game saves normally again");
                 practiceRun = savesSkippedLogged = false;
             };
+
+            // Loading a state never makes a run look cleaner than the one it came from.
+            SaveStates.RegisterState<List<string>>("gameplay-impact",
+                () => GameplayImpact.Reasons.Count > 0 ? [.. GameplayImpact.Reasons] : null,
+                reasons => { foreach (string reason in reasons) GameplayImpact.Mark(reason); });
 
             RegisterDevCommands();
         }
