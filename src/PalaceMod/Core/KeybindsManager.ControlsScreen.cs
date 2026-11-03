@@ -20,6 +20,8 @@ namespace PalaceMod
     internal sealed partial class KeybindsManager
     {
         private const string HeaderName = "PalaceMod Keybinds Header";
+        private const string DividerName = "PalaceMod Keybinds Divider";
+        private const string ResetName = "PalaceMod Reset Key";
         private const string ConflictColor = "#E0604A";
 
         private static readonly AccessTools.FieldRef<ControlMapButton, InputAction> rowAction =
@@ -80,14 +82,15 @@ namespace PalaceMod
                 var rows = __instance.buttons.Where(IsModRow).ToList();
                 if (rows.Count == 0) return;
 
-                bool perFeature = rows.Select(r => byAction[rowAction(r).id].Section).Distinct().Count() > 1;
+                                AddDivider(__instance, rows[0]);
                 AddHeader(rows[0], "Mods", major: true);
                 string section = null;
                 foreach (var row in rows)
                 {
                     var keybind = byAction[rowAction(row).id];
-                    if (perFeature && keybind.Section != section) AddHeader(row, keybind.Section, major: false);
+                    if (PerFeatureHeadings && keybind.Section != section) AddHeader(row, keybind.Section, major: false);
                     section = keybind.Section;
+                    AddResetButton(row, keybind);
                 }
 
                 // ScrollArea maps a selection's ScrollElementID onto the child count, so keep ids equal to positions
@@ -98,6 +101,9 @@ namespace PalaceMod
                     if (__state.Contains(child) || !child.gameObject.activeSelf) continue;
                     var id = child.GetComponent<ScrollElementID>();
                     if (id != null) id.id = position;
+                    // A selected row's "Default" button scrolls like its row (no id would scroll to the top).
+                    var reset = child.Find(ResetName);
+                    if (reset != null) (reset.GetComponent<ScrollElementID>() ?? reset.gameObject.AddComponent<ScrollElementID>()).id = position;
                     position++;
                 }
                 __instance.GetComponentInParent<UIFrame>()?.RefetchManagedElements();
@@ -126,7 +132,23 @@ namespace PalaceMod
             rebinder.GetComponentInParent<UIFrame>()?.RefetchManagedElements();
         }
 
-        // A heading made from a copy of the row, so it has the native font, size and indent, minus everything interactive.
+        // Whether the mod rows are grouped under one subheading per feature (only when more than one feature has keys).
+        private static bool PerFeatureHeadings =>
+            byAction.Values.Where(k => Keybinds.FeatureEnabled(k.Section)).Select(k => k.Section).Distinct().Skip(1).Any();
+
+        // The rule and device icons the game puts above its own rows, repeated above the mod rows.
+        private static void AddDivider(KeyRebinder rebinder, ControlMapButton firstRow)
+        {
+            if (rebinder.controlDevicesIconsPrefab == null) return;
+            var divider = UnityEngine.Object.Instantiate(rebinder.controlDevicesIconsPrefab, rebinder.buttonParent);
+            divider.name = DividerName;
+            divider.transform.SetSiblingIndex(firstRow.transform.GetSiblingIndex());
+            foreach (var id in divider.GetComponentsInChildren<ScrollElementID>(true)) UnityEngine.Object.DestroyImmediate(id);
+        }
+
+        // A heading made from a copy of the row, so it has the native indent and layout, minus everything interactive.
+        // Headings use the game's section-label style (Cormorant Bold, capitals, wide tracking, like "NIGHT:"), which
+        // reads as a heading against the light italic row labels; "Mods" is larger, bright and carries the mod's gem.
         private static void AddHeader(ControlMapButton row, string text, bool major)
         {
             var header = UnityEngine.Object.Instantiate(row.gameObject, row.transform.parent);
@@ -136,33 +158,123 @@ namespace PalaceMod
             var label = copy.target.GetComponent<TextMeshProUGUI>();
             foreach (var display in new[] { copy.displayKeyboard, copy.displayMouse, copy.displayController })
             {
-                if (display != null) display.text = "";
+                if (display != null) UnityEngine.Object.DestroyImmediate(display.gameObject);
             }
             if (copy.selectionIndicator != null) UnityEngine.Object.DestroyImmediate(copy.selectionIndicator);
+            var reset = header.transform.Find(ResetName);
+            if (reset != null) UnityEngine.Object.DestroyImmediate(reset.gameObject);
             UnityEngine.Object.DestroyImmediate(copy.GetComponent<ScrollElementID>());
             UnityEngine.Object.DestroyImmediate(copy);
             // Dependents first: TFUIAudioHelper requires the button.
             foreach (var helper in header.GetComponentsInChildren<TFUIAudioHelper>(true)) UnityEngine.Object.DestroyImmediate(helper);
             foreach (var element in header.GetComponentsInChildren<ThronefallUIElement>(true)) UnityEngine.Object.DestroyImmediate(element);
+            foreach (var localize in header.GetComponentsInChildren<Localize>(true)) UnityEngine.Object.DestroyImmediate(localize);
 
-            label.text = text;
+            label.text = text.ToUpperInvariant();
+            if (ModStyle.BoldFont != null) label.font = ModStyle.BoldFont;
+            label.fontStyle = FontStyles.Normal;
+            label.enableWordWrapping = false;
+            label.overflowMode = TextOverflowModes.Overflow;
+            label.alignment = TextAlignmentOptions.BottomLeft;
+            label.raycastTarget = false;
+            var rect = (RectTransform)header.transform;
+            float rowHeight = Mathf.Max(rect.sizeDelta.y, 40f);
+            var layout = header.GetComponent<LayoutElement>() ?? header.AddComponent<LayoutElement>();
             if (major)
             {
-                // Like the settings tabs: spaced small caps in the bright text colour, with room above it.
-                label.fontStyle = FontStyles.SmallCaps;
-                label.characterSpacing = 12f;
-                label.color = new Color(1f, 0.906f, 0.769f); // the game's FFE7C4
-                label.alignment = TextAlignmentOptions.BottomLeft;
-                var rect = (RectTransform)header.transform;
-                float height = Mathf.Max(rect.sizeDelta.y, LayoutUtility.GetPreferredHeight(rect));
-                var layout = header.GetComponent<LayoutElement>() ?? header.AddComponent<LayoutElement>();
-                layout.minHeight = layout.preferredHeight = height * 2f;
+                label.fontSize = 30f;
+                label.characterSpacing = 30f;
+                label.color = ModStyle.Bright;
+                layout.minHeight = layout.preferredHeight = rowHeight * 1.25f;
+                var emblem = ModStyle.AddEmblem(header.transform, 16f);
+                var follower = emblem.gameObject.AddComponent<EmblemFollower>();
+                follower.Text = label;
             }
             else
             {
-                label.color = new Color(0.784f, 0.651f, 0.455f); // C8A674
-                label.fontSize *= 0.85f;
+                label.fontSize = 21f;
+                label.characterSpacing = 25f;
+                label.color = ModStyle.Gold;
+                layout.minHeight = layout.preferredHeight = rowHeight * 1.5f;
             }
+        }
+
+        // ---- Per-row restore default ------------------------------------------------------------------------------
+
+        // Each mod row gets a small "Default" button just left of its key columns, shown only while the binding
+        // differs from the default. Click it, or press right on the row and apply.
+        private static void AddResetButton(ControlMapButton row, Keybind keybind)
+        {
+            var button = GameWidgets.Button(row.target, row.transform, ResetName, "Default", () => ResetKeybind(keybind, row));
+            foreach (Transform child in button.transform.Cast<Transform>().ToList()) UnityEngine.Object.DestroyImmediate(child.gameObject);
+            foreach (var c in button.GetComponents<Component>())
+            {
+                if (c is ContentSizeFitter || c is LayoutElement || c is Localize) UnityEngine.Object.DestroyImmediate(c);
+            }
+            var rect = (RectTransform)button.transform;
+            rect.anchorMin = rect.anchorMax = new Vector2(0f, 0.5f);
+            rect.pivot = new Vector2(1f, 0.5f);
+            rect.anchoredPosition = new Vector2(ResetRightEdge, 0f);
+            rect.sizeDelta = new Vector2(160f, 40f);
+            var text = button.GetComponent<TextMeshProUGUI>();
+            text.alignment = TextAlignmentOptions.Right;
+            text.fontSize = 22f;
+            text.color = ModStyle.Dim;
+            text.enableWordWrapping = false;
+            button.leftNav = row.target;
+            button.topNav = row.target.topNav;
+            button.botNav = row.target.botNav;
+            UpdateResetButton(row);
+        }
+
+        // The selection indicator dots sit at ~818 from the row's left edge; the keyboard column starts at 844.
+        private const float ResetRightEdge = 790f;
+
+        private static bool IsCustomized(Keybind keybind) =>
+            !keybind.Shortcut.Equals(keybind.DefaultShortcut) || (moreEntries.TryGetValue(keybind, out var more) && more.Value != "");
+
+        private static void UpdateResetButton(ControlMapButton row)
+        {
+            var action = rowAction(row);
+            if (action == null || !byAction.TryGetValue(action.id, out var keybind)) return;
+            var button = row.transform.Find(ResetName)?.GetComponent<TFUITextButton>();
+            if (button == null) return;
+            bool show = IsCustomized(keybind);
+            row.target.rightNav = show ? button : null;
+            if (button.gameObject.activeSelf == show) return;
+            var frame = row.GetComponentInParent<UIFrame>();
+            if (!show && frame != null && frame.CurrentSelection == button) frame.Select(row.target);
+            button.gameObject.SetActive(show);
+        }
+
+        private static void UpdateResetButtons()
+        {
+            foreach (var rebinder in UnityEngine.Object.FindObjectsOfType<KeyRebinder>())
+            {
+                if (!rebinder.isActiveAndEnabled) continue;
+                foreach (var row in rebinder.buttons) UpdateResetButton(row);
+            }
+        }
+
+        /// <summary>Puts one keybind back to its default (keyboard and any extra mouse or controller bindings).</summary>
+        private static void ResetKeybind(Keybind keybind, ControlMapButton row = null)
+        {
+            if (!Ready) return;
+            writingConfig = true;
+            try
+            {
+                keybind.Shortcut = keybind.DefaultShortcut;
+                if (moreEntries.TryGetValue(keybind, out var more)) more.Value = "";
+            }
+            finally
+            {
+                writingConfig = false;
+            }
+            Apply(keybind);
+            RefreshControlsScreen();
+            UpdateResetButtons();
+            if (row != null) row.GetComponentInParent<UIFrame>()?.Select(row.target);
+            Log.For<KeybindsManager>().Info($"Restored the default binding of {Keybinds.ConfigKey(keybind)}: {keybind.Shortcut}");
         }
 
         [HarmonyPatch(typeof(ControlMapButton), nameof(ControlMapButton.SetData))]
@@ -209,7 +321,8 @@ namespace PalaceMod
                     row.target.SetOriginalString(NativeLabel(row));
                 return;
             }
-            string label = mine ? keybind.DisplayName : NativeLabel(row);
+            if (mine) UpdateResetButton(row);
+            string label = mine ? RowLabel(keybind) : NativeLabel(row);
             if (conflicts.Count > 0) label += $" <color={ConflictColor}><size=70%>(also {string.Join(", ", conflicts)})</size></color>";
             row.target.SetOriginalString(label);
 
@@ -223,23 +336,26 @@ namespace PalaceMod
         private static readonly Func<string, string> putIntoVoffset =
             AccessTools.MethodDelegate<Func<string, string>>(AccessTools.Method(typeof(InputActionGlyph), "PutIntoVoffset"));
 
-        private static string KeyGlyph(string name)
+        // Under its feature's subheading, a key named "Builder: undo" is just "Undo".
+        private static string RowLabel(Keybind keybind)
         {
-            var sprites = Resources.Load<TMP_SpriteAsset>("Sprite Assets/keyboard_glyphs");
-            if (sprites == null || sprites.GetSpriteIndexFromName(name) < 0) return $"<color=#C8A674>{name}</color>";
-            return putIntoVoffset($"<sprite=\"keyboard_glyphs\" name=\"{name}\" color=#C8A674>");
+            string name = keybind.DisplayName;
+            string prefix = keybind.Section + ": ";
+            if (!PerFeatureHeadings || !name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) || name.Length == prefix.Length) return name;
+            name = name.Substring(prefix.Length);
+            return char.ToUpperInvariant(name[0]) + name.Substring(1);
         }
 
         private static string ComboGlyphs(ActionElementMap keyMap)
         {
             var parts = new List<string>();
             var flags = keyMap.modifierKeyFlags;
-            if ((flags & (ModifierKeyFlags.LeftControl | ModifierKeyFlags.RightControl)) != 0) parts.Add(KeyGlyph("Left Control"));
-            if ((flags & (ModifierKeyFlags.LeftAlt | ModifierKeyFlags.RightAlt)) != 0) parts.Add(KeyGlyph("Left Alt"));
-            if ((flags & (ModifierKeyFlags.LeftShift | ModifierKeyFlags.RightShift)) != 0) parts.Add(KeyGlyph("Left Shift"));
-            if ((flags & (ModifierKeyFlags.LeftCommand | ModifierKeyFlags.RightCommand)) != 0) parts.Add(KeyGlyph("Left Command"));
+            if ((flags & (ModifierKeyFlags.LeftControl | ModifierKeyFlags.RightControl)) != 0) parts.Add(ElementGlyph("Left Control"));
+            if ((flags & (ModifierKeyFlags.LeftAlt | ModifierKeyFlags.RightAlt)) != 0) parts.Add(ElementGlyph("Left Alt"));
+            if ((flags & (ModifierKeyFlags.LeftShift | ModifierKeyFlags.RightShift)) != 0) parts.Add(ElementGlyph("Left Shift"));
+            if ((flags & (ModifierKeyFlags.LeftCommand | ModifierKeyFlags.RightCommand)) != 0) parts.Add(ElementGlyph("Left Command"));
             string key = ReInput.controllers.Keyboard.GetElementIdentifierById(keyMap.elementIdentifierId)?.name ?? keyMap.keyCode.ToString();
-            parts.Add(KeyGlyph(key));
+            parts.Add(ElementGlyph(key));
             return string.Join("<color=#C8A674> + </color>", parts);
         }
 
@@ -340,7 +456,7 @@ namespace PalaceMod
 
         private static void RegisterCommands()
         {
-            DevCommands.Register("keybinds", "keybinds [list|open|select <Section:id>|bind <Section:id> <Key> [Mod...]|reset]   " +
+            DevCommands.Register("keybinds", "keybinds [list|open|select <Section:id>|bind <Section:id> <Key> [Mod...]|default <Section:id>|reset|claims|camera|glyphs [sheet [dump]|elements]]   " +
                 "mod keybinds in Controls; bind/reset go through the game's own save path", args =>
             {
                 string sub = args.Length > 0 ? args[0].ToLowerInvariant() : "list";
@@ -386,6 +502,59 @@ namespace PalaceMod
                                 $"map cat {m.categoryId} layout {m.layoutId} enabled {m.enabled}: {ReInput.mapping.GetAction(e.actionId)?.name} " +
                                 $"({e.actionId}, {e.elementType}, id {e.elementIdentifierId}, {e.axisContribution}, range {e.axisRange}, mods {e.modifierKeyFlags}, enabled {e.enabled})")));
                     }
+                    case "default":
+                    {
+                        // What the row's "Default" button does: keybinds default <Section:id>
+                        if (args.Length < 2) throw new ArgumentException("usage: keybinds default <Section:id>");
+                        var keybind = Find(args[1]);
+                        ResetKeybind(keybind);
+                        return Describe(keybind);
+                    }
+                    case "claims":
+                    {
+                        var contexts = Keybinds.ClaimedContexts();
+                        return $"claimed=[{string.Join(", ", contexts)}] blocked=[{string.Join(", ", blocked.Select(b => $"{ReInput.mapping.GetAction(b.actionId)?.name}:{b.elementIdentifierName}"))}]";
+                    }
+                    case "press":
+                    {
+                        // Fake a physical key press through Unity's Input (which Rewired reads): keybinds press <KeyCode>
+                        if (args.Length < 2) throw new ArgumentException("usage: keybinds press <KeyCode>");
+                        FakeKey.Press((KeyCode)Enum.Parse(typeof(KeyCode), args[1], true));
+                        return $"pressing {args[1]} for {FakeKey.Frames} frames";
+                    }
+                    case "camera":
+                    {
+                        // The camera's zoom, to check a claimed key didn't also zoom: keybinds camera
+                        var rig = UnityEngine.Object.FindObjectOfType<CameraRig>() ?? throw new InvalidOperationException("no camera rig");
+                        int level = Traverse.Create(rig).Field("zoomLevel").GetValue<int>();
+                        float target = Traverse.Create(rig).Field("targetOrthSize").GetValue<float>();
+                        return $"zoomLevel={level} targetOrthSize={target} orthographicSize={Camera.main?.orthographicSize}";
+                    }
+                    case "glyphs":
+                    {
+                        // Sprite names in the game's glyph assets: keybinds glyphs [keyboard_glyphs|mouse_glyphs|...]
+                        string asset = args.Length > 1 ? args[1] : "keyboard_glyphs";
+                        if (asset == "elements")
+                            return string.Join(" | ", ReInput.controllers.Keyboard.ElementIdentifiers.Select(e => e.name)) + "\nMOUSE: " +
+                                string.Join(" | ", ReInput.controllers.Mouse.ElementIdentifiers.Select(e => $"{e.id}={e.name}"));
+                        var sprites = Resources.Load<TMP_SpriteAsset>("Sprite Assets/" + asset) ?? throw new ArgumentException($"no sprite asset {asset}");
+                        if (args.Length > 2 && args[2] == "dump")
+                        {
+                            var source = (Texture2D)sprites.spriteSheet;
+                            var rt = RenderTexture.GetTemporary(source.width, source.height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+                            Graphics.Blit(source, rt);
+                            var prev = RenderTexture.active;
+                            RenderTexture.active = rt;
+                            var copy = new Texture2D(source.width, source.height, TextureFormat.RGBA32, false);
+                            copy.ReadPixels(new Rect(0, 0, source.width, source.height), 0, 0);
+                            RenderTexture.active = prev;
+                            RenderTexture.ReleaseTemporary(rt);
+                            string path = System.IO.Path.Combine(BepInEx.Paths.BepInExRootPath, asset + ".png");
+                            System.IO.File.WriteAllBytes(path, copy.EncodeToPNG());
+                            return path + "  " + string.Join("; ", sprites.spriteGlyphTable.Select((g, i) => $"{sprites.spriteCharacterTable.FirstOrDefault(c => c.glyphIndex == g.index)?.name}: {g.glyphRect.x},{g.glyphRect.y} {g.glyphRect.width}x{g.glyphRect.height} bx{g.metrics.horizontalBearingX} by{g.metrics.horizontalBearingY} adv{g.metrics.horizontalAdvance} s{g.scale}"));
+                        }
+                        return $"{sprites.spriteCharacterTable.Count} sprites: " + string.Join(", ", sprites.spriteCharacterTable.Select(c => c.name));
+                    }
                     case "reset":
                         ActiveRebinder().TriggerControlsReset();
                         return "\n" + string.Join("\n", Keybinds.All.Select(Describe));
@@ -393,6 +562,38 @@ namespace PalaceMod
                         throw new ArgumentException("usage: keybinds [list|open|select|bind|reset]");
                 }
             });
+        }
+
+        // Dev only: makes Input.GetKey/GetKeyDown/GetKeyUp report one key as pressed (down on the first frame, held, then
+        // up), patched in on first use. Rewired polls the keyboard through these, so game actions see it too.
+        private static class FakeKey
+        {
+            internal const int Frames = 4;
+            private static KeyCode key = KeyCode.None;
+            private static int start = -1;
+            private static bool patched;
+
+            internal static void Press(KeyCode pressed)
+            {
+                if (!patched)
+                {
+                    var harmony = new Harmony($"{MyPluginInfo.PLUGIN_GUID}.FakeKey");
+                    foreach (var name in new[] { nameof(Input.GetKey), nameof(Input.GetKeyDown), nameof(Input.GetKeyUp) })
+                        harmony.Patch(AccessTools.Method(typeof(Input), name, [typeof(KeyCode)]),
+                            postfix: new HarmonyMethod(typeof(FakeKey), name == nameof(Input.GetKey) ? nameof(Held) : name == nameof(Input.GetKeyDown) ? nameof(Down) : nameof(Up)));
+                    // Rewired only polls the keys while anyKey is true.
+                    harmony.Patch(AccessTools.PropertyGetter(typeof(Input), nameof(Input.anyKey)), postfix: new HarmonyMethod(typeof(FakeKey), nameof(Any)));
+                    patched = true;
+                }
+                key = pressed;
+                start = Time.frameCount + 1;
+            }
+
+            private static int Frame(KeyCode k) => k == key && start >= 0 ? Time.frameCount - start : -1;
+            private static void Held(KeyCode key, ref bool __result) { int f = Frame(key); if (f >= 0 && f < Frames) __result = true; }
+            private static void Down(KeyCode key, ref bool __result) { if (Frame(key) == 0) __result = true; }
+            private static void Up(KeyCode key, ref bool __result) { if (Frame(key) == Frames) __result = true; }
+            private static void Any(ref bool __result) { int f = Frame(key); if (f >= 0 && f <= Frames) __result = true; }
         }
 
         private static string Describe(Keybind k)
