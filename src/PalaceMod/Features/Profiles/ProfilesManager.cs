@@ -14,7 +14,9 @@ using UnityEngine.SceneManagement;
 
     Changes only happen on the main menu with no scene transition running: there the game has saved everything (it
     saves at the end of each match) and nothing is mid-run, so after swapping the files the progression singletons
-    are reset and re-read from disk and the menu scene is reloaded.
+    are reset and re-read from disk in place. The menu scene isn't reloaded: the title screen shows no progression
+    and Play reads it live, the same reason the game's own "reset progress" doesn't reload it either. A switch then
+    returns to the title screen at once, with no scene transition.
 */
 namespace PalaceMod.Profiles
 {
@@ -96,6 +98,7 @@ namespace PalaceMod.Profiles
             RequireChangeable();
             Guarded(() => Store.Switch(profile.id));
             ReloadGameState();
+            menu.Close();
         }
 
         public void ResetActive()
@@ -103,6 +106,7 @@ namespace PalaceMod.Profiles
             RequireChangeable();
             Guarded(() => Store.ResetActive());
             ReloadGameState();
+            menu.RefreshIfOpen();
         }
 
         // A failed change was rolled back or, past its commit point, finished by the store; either way re-read the files
@@ -115,6 +119,7 @@ namespace PalaceMod.Profiles
                 Log.Error(e.Message, e.InnerException);
                 if (Store.Pending) Broken = e.Message;
                 ReloadGameState();
+                menu.RefreshIfOpen();
                 throw new InvalidOperationException(e.Message);
             }
         }
@@ -156,7 +161,7 @@ namespace PalaceMod.Profiles
             Store.Delete(profile.id);
         }
 
-        /// <summary>Resets the progression singletons the save file feeds, re-reads it, and reloads the main menu.</summary>
+        /// <summary>Resets the progression singletons the save file feeds and re-reads it, in place.</summary>
         private void ReloadGameState()
         {
             var levels = LevelProgressManager.instance;
@@ -177,8 +182,6 @@ namespace PalaceMod.Profiles
             AccessTools.Field(typeof(EternalTrialsRunManager), "freshRunSeed").SetValue(null, 0);
             AccessTools.Method(typeof(SaveLoadManager), "LoadGame").Invoke(SaveLoadManager.instance, [false]);
             Log.Info($"Loaded \"{Store.Active.name}\": perk level {PerkManager.instance?.level}, {levels.SceneNameToLevelData.Count} levels with progress");
-            menu.Close();
-            SceneTransitionManager.instance.TransitionToMainMenu();
         }
 
         // While a profile name is being typed, the game's menus mustn't read the keys (WASD navigates, Esc closes).
@@ -271,6 +274,7 @@ namespace PalaceMod.Profiles
                         finally { Store.CrashAt = null; }
                         string recovered = Store.RecoverIfNeeded() ?? "nothing to recover";
                         ReloadGameState();
+                        menu.RefreshIfOpen();
                         return $"{recovered}; active: \"{Store.Active.name}\"";
                     default:
                         throw new ArgumentException($"unknown profiles command \"{op}\"");
