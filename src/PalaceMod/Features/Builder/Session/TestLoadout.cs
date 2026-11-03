@@ -66,7 +66,7 @@ namespace PalaceMod.Builder
             var all = All;
             if (host != null && remembered.TryGetValue(host, out var names))
                 return names.Select(n => all.FirstOrDefault(e => e.name == n)).Where(e => e != null).ToList();
-            var beatenWith = LevelProgressManager.instance?.GetLevelDataForScene(host)?.levelHasBeenBeatenWith;
+            var beatenWith = host == null ? null : LevelProgressManager.instance?.GetLevelDataForScene(host)?.levelHasBeenBeatenWith;
             if (beatenWith != null && beatenWith.Count > 0 && beatenWith[beatenWith.Count - 1] is { Count: > 0 } last) return last.ToList();
             return PerkManager.instance?.CurrentlyEquipped?.ToList() ?? [];
         }

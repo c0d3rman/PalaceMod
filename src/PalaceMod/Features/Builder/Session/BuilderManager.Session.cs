@@ -201,6 +201,7 @@ namespace PalaceMod
             [HarmonyPriority(Priority.Last)]
             private static void Prefix(string _levelname)
             {
+                if (!Feature<BuilderManager>.On) return;
                 try { TestLoadout.Remember(_levelname); }
                 catch (Exception e) { Log.For<BuilderManager>().Warn($"Couldn't remember the loadout: {e.Message}"); }
             }
