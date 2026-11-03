@@ -167,7 +167,8 @@ namespace PalaceMod.Builder.Level
             lines.Clear();
             routes = [];
             selectedKey = hoverKey = null;
-            LayoutMenus.CloseAll();
+            // While a scene transition runs, the menus stay up under the clouds; the transition closes them.
+            if (!TransitionRunning) LayoutMenus.CloseAll();
         }
 
         // ---- Per frame ------------------------------------------------------------------------------------------
@@ -915,14 +916,14 @@ namespace PalaceMod.Builder.Level
             string id = levelId;
             if (d == null) return;
             if (!d.ReadOnly && d.Dirty && d.ErrorCount == 0 && !d.Save(out string saveError)) Notify.Show(saveError, NotifyKind.Warning, key: "builder-layout");
-            LayoutMenus.CloseAll();
-            Stop();
+            // Launch first, so the menu stays up under the clouds like the game's own Restart (Stop leaves the menus
+            // open once the transition runs, and the transition closes them). If it can't start, the editor stays.
             if (!BuilderServices.Sessions.Launch(new SessionRequest { Pack = d.Pack, LevelId = id }, out string error))
             {
                 Notify.Show("Can't play: " + error, NotifyKind.Error, 6f, "builder-layout");
                 return;
             }
-            UIFrameManager.instance?.CloseAllFrames();
+            Stop();
         }
 
         public static void Save()
@@ -936,11 +937,13 @@ namespace PalaceMod.Builder.Level
         /// <summary>Leaves the editor and the map (unsaved changes stay in the draft).</summary>
         public static void Leave()
         {
-            LayoutMenus.CloseAll();
-            Stop();
+            // End first: menus stay up under the clouds of the trip to the map select, like the game's Back to Map.
             BuilderServices.Sessions.End();
-            UIFrameManager.instance?.CloseAllFrames();
+            Stop();
+            if (!TransitionRunning) UIFrameManager.instance?.CloseAllFrames();
         }
+
+        private static bool TransitionRunning => SceneTransitionManager.instance != null && SceneTransitionManager.instance.SceneTransitionIsRunning;
 
         // ---- HUD ------------------------------------------------------------------------------------------------
 

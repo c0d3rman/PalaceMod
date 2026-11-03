@@ -81,7 +81,7 @@ namespace PalaceMod
                 Priv.SetStatic(typeof(MatchSaveLoadHandler), "currentSave", injected);
                 MatchSaveLoadHandler.OverwriteCurrentSave = false;
                 injected.ApplyLoadout();
-                UIFrameManager.instance?.CloseAllFrames();
+                // Like the game's retry day, menus stay up (frozen) under the clouds and the transition closes them.
                 transitions.RestartCurrentLevel();
             }
             catch (Exception e)
