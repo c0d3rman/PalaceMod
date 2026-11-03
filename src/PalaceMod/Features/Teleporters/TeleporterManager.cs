@@ -78,6 +78,38 @@ namespace PalaceMod
                 "During the day, places a teleporter where the king stands, or picks up the one he stands on.");
 
             RegisterDevCommands();
+            SaveStates.RegisterState("teleporters", CaptureState, RestoreState);
+        }
+
+        // ---- Savestates -------------------------------------------------------------------------------------------
+
+        internal sealed class SavedNetwork
+        {
+            public string network;
+            public float cooldown;
+        }
+
+        private SavedNetwork CaptureState() => PlayerMovement.instance == null ? null : new SavedNetwork
+        {
+            network = CurrentNetwork(),
+            cooldown = cooldownLeft,
+        };
+
+        // Replaces the network the reload brought back (the dawn one from the match save) with the captured one.
+        private void RestoreState(SavedNetwork saved)
+        {
+            var king = PlayerMovement.instance;
+            if (king == null) return;
+            Clear();
+            pendingLoad = null;
+            padScene = king.gameObject.scene;
+            hintPending = false;
+            var list = Parse(saved.network);
+            foreach (var (at, g) in list) Add(at, g);
+            cooldownLeft = saved.cooldown;
+            armAfterAppear = true;
+            if (list.Count > 0) GameplayImpact.Mark("Teleporters");
+            Log.For<TeleporterManager>().Debug($"Restored {list.Count} from a savestate");
         }
 
         protected override void OnFeatureDisabled()

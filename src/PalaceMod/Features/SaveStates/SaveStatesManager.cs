@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using BepInEx.Configuration;
 using HarmonyLib;
@@ -84,6 +85,11 @@ namespace PalaceMod
                 if (practiceRun) Log.Info("New run; the game saves normally again");
                 practiceRun = savesSkippedLogged = false;
             };
+
+            // Loading a state never makes a run look cleaner than the one it came from.
+            SaveStates.RegisterState<List<string>>("gameplay-impact",
+                () => GameplayImpact.Reasons.Count > 0 ? [.. GameplayImpact.Reasons] : null,
+                reasons => { foreach (string reason in reasons) GameplayImpact.Mark(reason); });
 
             RegisterDevCommands();
         }
