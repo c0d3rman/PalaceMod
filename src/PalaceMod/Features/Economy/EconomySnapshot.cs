@@ -85,7 +85,8 @@ namespace PalaceMod.Economy
             w.FirstDay = spawner.Wavenumber + 2;
             w.DawnPending = night || !cycle.AfterSunrise;
             if (night) w.TonightGold = TonightGold(snap);
-            w.WaveGold = Enumerable.Range(0, w.LastNight).Select(k => EnemySpawner.GetWaveInfoByNumber(k)?.goldReward ?? 0).ToArray();
+            // Every spawn's coins (WaveInfo.goldReward leaves out spawns without a marker icon, whose enemies still carry coins).
+            w.WaveGold = Enumerable.Range(0, w.LastNight).Select(k => k < spawner.waves.Count ? spawner.waves[k].spawns.Sum(sp => sp.goldCoins) : 0).ToArray();
 
             if (InterestPerk.instance != null)
             {
@@ -104,6 +105,12 @@ namespace PalaceMod.Economy
             }
             w.Outpost = perks != null && perks.OutpostEquipped;
             w.SpawnGold = PerkCapture.SpawnGold(spawner);
+            // Waves made in Start (endless, trials) aren't the ones recorded before it.
+            if (w.SpawnGold != null && (w.SpawnGold.Length != spawner.waves.Count || w.SpawnGold.Where((x, i) => x.Length != spawner.waves[i].spawns.Count).Any()))
+                w.SpawnGold = null;
+            w.DestructionGod = perks != null && perks.DestructionGodActive;
+            foreach (var e in w.Slots) e.DownToday = !w.DawnPending && e.KnockedOut;
+            TempleTonight(snap, night);
             ReadPerks(snap, index);
 
             var guild = UpgradeBuildersGuild.Instance;
@@ -157,6 +164,7 @@ namespace PalaceMod.Economy
             }
             if (AddPerk(w, pm.ratGodPerk, EconPerkKind.RatGod) is { } rat) rat.Factor = pm.ratGod_GoldModifyer;
             if (w.Slots.Any(s => s.OutpostTowers > 0)) AddPerk(w, pm.outpost, EconPerkKind.Outpost);
+            AddPerk(w, pm.destructionGod, EconPerkKind.DestructionGod);
             if (w.SpawnGold == null) snap.Notes.Add("The waves' gold before perks wasn't recorded at level load, so Rat God and Loan can't be tried");
 
             foreach (var c in PerkCapture.SlotMods(snap.Scene))
@@ -171,6 +179,34 @@ namespace PalaceMod.Economy
                     RootDifference = c.RootDifference, Applied = c.Applied,
                 });
                 AddPerk(w, c.Perk, EconPerkKind.Building);
+            }
+        }
+
+        // A temple upgrade bought today (or in effect tonight) that the plan won't see as a step of its own.
+        private static void TempleTonight(EconSnapshot snap, bool night)
+        {
+            var w = snap.World;
+            foreach (var t in Object.FindObjectsOfType<TempleUpgrade>(true))
+            {
+                if (t == null || t.gameObject.scene != snap.Scene) continue;
+                var tr = Traverse.Create(t);
+                bool bought = tr.Field("state").GetValue<TempleUpgrade.State>() == TempleUpgrade.State.EnabledTonight;
+                bool running = tr.Field("effectCurrentlyEnabled").GetValue<bool>();
+                if (night ? !running : !bought) continue;
+                w.TempleNight = night ? w.FirstDay - 1 : w.FirstDay;
+                if (t is TemplePrayers)
+                {
+                    // At night it's already in the live knock-outs; by day shrines read 0 until dusk puts their income back.
+                    if (night) continue;
+                    w.TemplePrayers = true;
+                    foreach (var shrine in Object.FindObjectsOfType<Shrine>(true))
+                    {
+                        var slot = shrine != null ? shrine.GetComponentInParent<BuildSlot>(true) : null;
+                        var e = slot != null && snap.Objects.ContainsValue(slot) ? w.Slots[snap.Objects.First(kv => kv.Value == slot).Key] : null;
+                        if (e != null) e.Income = shrine.ShrineHasBeenActivated ? shrine.IncomeOnceUnlocked : 0;
+                    }
+                }
+                else if (t is TempleWisdom wisdom) w.TempleWisdom = Traverse.Create(wisdom).Field("goldForDestroyedBuilding").GetValue<int>();
             }
         }
 
@@ -207,10 +243,15 @@ namespace PalaceMod.Economy
             e.IsCastle = slot.GetComponentInChildren<CastleCenter>(true) != null;
             e.IsHouse = Owned<TaggedObject>(slot).Any(o => o.Tags.Contains(TagManager.ETag.House));
             // UpgradeCastleUp finds walls and towers through the tag manager (TaggedObject -> its parent BuildSlot).
+            // Only tags that are on once it's built count (the tag manager only holds active ones).
             e.CastleUpTags = slot.GetComponentsInChildren<TaggedObject>(true)
-                .Count(o => o != null && o.Tags.Contains(TagManager.ETag.WallOrTower) && o.GetComponentInParent<BuildSlot>(true) == slot);
+                .Count(o => o != null && o.Tags.Contains(TagManager.ETag.WallOrTower) && o.GetComponentInParent<BuildSlot>(true) == slot && OnWhenBuilt(o, slot));
             e.CastleUpReceivers = Owned<CaslteUpReciever>(slot, c => Traverse.Create(c).Field("buildSlot").GetValue<BuildSlot>()).Count();
             e.ObjectName = slot.gameObject.name;
+            e.NeverDenied = interactor != null && Traverse.Create(interactor).Field("neverDenyHarvest").GetValue<bool>();
+            var tagged = Owned<TaggedObject>(slot).Where(o => o.Tags.Contains(TagManager.ETag.Building)).ToList();
+            e.Indestructible = e.Level >= 1 && tagged.Count > 0 && tagged.All(o => !o.Tags.Contains(TagManager.ETag.PlayerOwned));
+            e.StillDown = tagged.Any(o => o.Tags.Contains(TagManager.ETag.AUTO_NoReviveNextMorning) && o.Tags.Contains(TagManager.ETag.AUTO_KnockedOutAndHealOnDawn));
             e.IsShrine = Owned<Shrine>(slot).Any();
             e.IsBuilding = Owned<TaggedObject>(slot).Any(o => o.Tags.Contains(TagManager.ETag.Building));
             e.OutpostTowers = Owned<OutpostPerk>(slot, c => Traverse.Create(c).Field("buildSlot").GetValue<BuildSlot>())
@@ -240,15 +281,29 @@ namespace PalaceMod.Economy
                         DoublesHarbour = Activates<FishingHarbourUpgrade>(branch),
                         BusyUntilDawn = Activates<TempleUpgrade>(branch),
                         Prayers = Activates<TemplePrayers>(branch),
-                        WisdomGold = ActivatedComponent<TempleWisdom>(branch) is { } wisdom
-                            ? Mathf.Max(1, Traverse.Create(wisdom).Field("goldForDestroyedBuilding").GetValue<int>()) : 0,
                     });
+                    var added = step.Branches[step.Branches.Count - 1];
+                    if (ActivatedComponent<TempleWisdom>(branch) is { } wisdom)
+                    {
+                        added.IsWisdom = true;
+                        added.WisdomGold = Traverse.Create(wisdom).Field("goldForDestroyedBuilding").GetValue<int>();
+                        added.WisdomDrain = Traverse.Create(wisdom).Field("healthPercentageLossPerSec").GetValue<float>();
+                    }
+                    if (ActivatedComponent<Mill_ImprovedPlow>(branch) is { } plow
+                        && Traverse.Create(plow).Field("buildSlot").GetValue<BuildSlot>() is { } plowSlot && index.TryGetValue(plowSlot, out int plowIndex))
+                    {
+                        // It works on Upgrades: a follower's are its owner's.
+                        added.PlowTree = plowSlot.ActivatorUpgradesThis && plowSlot.ActivatorBuilding != null && index.TryGetValue(plowSlot.ActivatorBuilding, out int o) ? o : plowIndex;
+                    }
                     var castleUp = ActivatedComponent<UpgradeCastleUp>(branch);
                     if (castleUp != null) CastleUpDiscounts(castleUp, snap.World);
                 }
                 e.Steps.Add(step);
             }
             ReadModifiers(slot, e, snap.World);
+            // A harbour that took its doubling upgrade counts the perk's boats twice.
+            bool doubled = e.Applied.Where((b, i) => i < e.Steps.Count && b >= 0 && b < e.Steps[i].Branches.Count && e.Steps[i].Branches[b].DoublesHarbour).Any() && e.Level >= 1;
+            foreach (var m in e.Modifiers) if (m.Kind == EconModifierKind.Harbour) m.Doubled = doubled;
             if (e.Modifiers.Any(m => m.Kind == EconModifierKind.Harbour) && upgrades.Count > 1 && upgrades[1].upgradeBranches.Count > 0)
                 e.HarbourField = upgrades[1].upgradeBranches[0].goldIncomeChange;
         }
@@ -329,6 +384,15 @@ namespace PalaceMod.Economy
                     foreach (var b in tree.Steps[i].Branches) b.IncomeChange++;
                 snap.Notes.Add($"{e.TypeName} #{e.Index}: Improved Plow still to apply (to #{tree.Index})");
             }
+        }
+
+        // On once the slot is built: active itself and up to the slot, except the building's own parent (on when built).
+        private static bool OnWhenBuilt(Component c, BuildSlot slot)
+        {
+            var building = slot.BuildingParent != null ? slot.BuildingParent.transform : null;
+            for (var t = c.transform; t != null && t != slot.transform; t = t.parent)
+                if (!t.gameObject.activeSelf && t != building) return false;
+            return true;
         }
 
         // Active itself and on every parent up to the slot, so it runs when the slot is activated.

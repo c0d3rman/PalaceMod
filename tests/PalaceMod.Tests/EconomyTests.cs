@@ -331,7 +331,7 @@ namespace PalaceMod.Tests
             w.WaveGold = new int[5];
             var temple = Slot(w, "Temple", 1, 0, Step(0), new EconStep
             {
-                Cost = 5, Branches = [new EconBranch { Key = "wisdom", Name = "Wisdom", WisdomGold = 4, BusyUntilDawn = true }, new EconBranch { Key = "prayers", Name = "Prayers", Prayers = true, BusyUntilDawn = true }],
+                Cost = 5, Branches = [new EconBranch { Key = "wisdom", Name = "Wisdom", IsWisdom = true, WisdomGold = 4, BusyUntilDawn = true }, new EconBranch { Key = "prayers", Name = "Prayers", Prayers = true, BusyUntilDawn = true }],
             });
             var h1 = Slot(w, "House", 1, 2);
             var h2 = Slot(w, "House", 1, 2);
@@ -350,6 +350,75 @@ namespace PalaceMod.Tests
             var prayed = EconSim.Run(w, [Do(2, temple, 2, "prayers")]);
             Assert.Equal(1 + 2 + 2, prayed.Days[1].Buildings, "shrines pay nothing the night of the prayers");
             Assert.Equal(1 + 2 + 2 + 3, prayed.Days[2].Buildings, "and pay again after");
+        }
+
+        public static void DestructionGodKeepsBuildingsDownTwoNights()
+        {
+            var w = World(gold: 0);
+            w.WaveGold = new int[5];
+            var house = Slot(w, "House", 1, 3);
+            house.IsBuilding = true;
+            w.DestructionGod = true;
+            var r = EconSim.Run(w, [Lose(2, house)]);
+            Assert.Equal("4,1,1,4,4", string.Join(",", r.Days.Select(d => d.Buildings)), "misses dawns 2 and 3");
+            var still = World(gold: 0);
+            still.WaveGold = new int[5];
+            still.DestructionGod = true;
+            var down = Slot(still, "House", 1, 3);
+            down.StillDown = true;
+            Assert.Equal("1,4,4,4,4", string.Join(",", EconSim.Run(still, []).Days.Select(d => d.Buildings)), "left down at dawn: out tonight too");
+        }
+
+        public static void PerksThatKeepBuildingsPaying()
+        {
+            var w = World(gold: 0);
+            var house = Slot(w, "House", 1, 3);
+            house.NeverDenied = true;
+            var stone = Slot(w, "Wall", 1, 0);
+            stone.Indestructible = true;
+            var r = EconSim.Run(w, [Lose(2, house), Lose(2, stone)]);
+            Assert.Equal(4, r.Days[1].Buildings, "still pays");
+            Assert.Equal(ActionStatus.Blocked, r.Actions[1].Status, "can't be destroyed");
+        }
+
+        public static void ImprovedPlowAddsToTheMillsLaterSteps()
+        {
+            var w = World(gold: 100);
+            var mill = Slot(w, "Mill", 0, 0, new EconStep { Cost = 5, Branches = [new EconBranch { Key = "plain", Name = "Plain", IncomeChange = 1 }, new EconBranch { Key = "plow", Name = "Plow", IncomeChange = 1 }] }, Step(5, 1), Step(5, 1));
+            mill.Steps[0].Branches[1].PlowTree = mill.Index;
+            var r = EconSim.Run(w, [Do(1, mill, 1, "plow"), Do(2, mill, 2), Do(3, mill, 3)]);
+            Assert.Equal(2, r.Actions[1].IncomeDelta, "level 2: +1 +1");
+            Assert.Equal(2, r.Actions[2].IncomeDelta, "level 3: +1 +1");
+            Assert.Equal(1, EconSim.Run(w, [Do(1, mill, 1, "plain"), Do(2, mill, 2)]).Actions[1].IncomeDelta, "without it");
+        }
+
+        public static void TempleBoughtTodayStillCounts()
+        {
+            var w = World(gold: 0);
+            w.WaveGold = new int[5];
+            var shrine = Slot(w, "Shrine", 1, 2);
+            shrine.IsShrine = true;
+            w.TempleNight = 1;
+            w.TemplePrayers = true;
+            Assert.Equal("1,3,3,3,3", string.Join(",", EconSim.Run(w, []).Days.Select(d => d.Buildings)), "shrines out on night 1");
+            var w2 = World(gold: 0);
+            var house = Slot(w2, "House", 1, 2);
+            house.IsBuilding = true;
+            w2.TempleNight = 1;
+            w2.TempleWisdom = 5;
+            Assert.Equal(5, EconSim.Run(w2, [Lose(1, house)]).Days[0].Extra, "wisdom bought today");
+        }
+
+        public static void KnockedOutFieldsWaitForDusk()
+        {
+            var w = World(gold: 10);
+            var mill = Slot(w, "Mill", 1, 0, Step(0), Step(4, 0));
+            var field = Slot(w, "Field", 1, 0, Step(0), Step(0, 2));
+            field.Owner = mill.Index;
+            field.DownToday = true; // knocked out last night: no pay until dusk
+            var r = EconSim.Run(w, [Do(1, mill, 2)]);
+            Assert.Equal(0, r.Days[0].Harvest, "not harvested by day");
+            Assert.Equal(1 + 2, r.Days[0].Buildings, "pays at dawn");
         }
 
         public static void GoldFoundIsAdded()

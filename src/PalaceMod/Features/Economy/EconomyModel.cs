@@ -67,6 +67,8 @@ namespace PalaceMod.Economy
         /// <summary>Harbour: extra boats from the perk, and whether they're in Max.</summary>
         public int PerkBoats;
         public bool PerkOn;
+        /// <summary>Harbour: its upgrade doubled the cap, so the perk's boats count twice.</summary>
+        public bool Doubled;
 
         internal EconModifier Copy() => (EconModifier)MemberwiseClone();
     }
@@ -87,8 +89,13 @@ namespace PalaceMod.Economy
         public bool BusyUntilDawn;
         /// <summary>Temple prayers: shrines are knocked out that night.</summary>
         public bool Prayers;
-        /// <summary>Temple wisdom: gold per building destroyed that night (0: not wisdom).</summary>
+        /// <summary>Temple wisdom: gold per building destroyed that night, and the health it drains from every
+        /// building per second (a share of max health).</summary>
+        public bool IsWisdom;
         public int WisdomGold;
+        public float WisdomDrain;
+        /// <summary>Improved Plow: +1 income on steps 2 and 3 of this slot's tree (-1: not the plow).</summary>
+        public int PlowTree = -1;
 
         internal EconBranch Copy() => (EconBranch)MemberwiseClone();
     }
@@ -170,6 +177,14 @@ namespace PalaceMod.Economy
         public bool HarvestedToday;
         /// <summary>Can't take another step until the next dawn (a temple upgrade in effect).</summary>
         public bool Busy;
+        /// <summary>Knocked out last night: not harvestable until dusk, even if it starts earning by day.</summary>
+        public bool DownToday;
+        /// <summary>God of Destruction: destroyed and not revived this dawn, so it's knocked out next night too.</summary>
+        public bool StillDown;
+        /// <summary>A knock-out doesn't stop its pay (PerkRemoveDestroyedAtNightTag).</summary>
+        public bool NeverDenied;
+        /// <summary>Can't be knocked out (PerkIndestructible).</summary>
+        public bool Indestructible;
         /// <summary>Harbour: the level-2 upgrade's current income change.</summary>
         public int HarbourField;
         /// <summary>Branches taken so far, per step.</summary>
@@ -189,7 +204,7 @@ namespace PalaceMod.Economy
         }
     }
 
-    public enum EconPerkKind { Interest, TreasureHunter, RoyalMint, Loan, RatGod, Outpost, Building }
+    public enum EconPerkKind { Interest, TreasureHunter, RoyalMint, Loan, RatGod, Outpost, DestructionGod, Building }
 
     /// <summary>A perk that moves gold, for loadout what-ifs.</summary>
     public sealed class EconPerk
@@ -236,6 +251,13 @@ namespace PalaceMod.Economy
         public bool CastleUpActive;
         public int CastleUpDiscount2 = 2, CastleUpDiscount3 = 4;
         public bool Outpost;
+        /// <summary>God of Destruction: destroyed buildings stay down a second night.</summary>
+        public bool DestructionGod;
+        /// <summary>A temple upgrade bought before the plan starts and still to take effect: the night it applies to
+        /// (0: none), Prayers, and Wisdom's gold per building lost (-1: not wisdom).</summary>
+        public int TempleNight;
+        public bool TemplePrayers;
+        public int TempleWisdom = -1;
         public List<EconPerk> Perks = [];
         /// <summary>Before anything's happened: start-gold perks still count.</summary>
         public bool StartOfRun => FirstDay <= 1 && !DawnPending;
@@ -492,6 +514,8 @@ namespace PalaceMod.Economy
             int dawns = Math.Max(0, w.LastNight - (w.FirstDay - 1) + 1);
             result.Pay = w.Slots.Select(_ => new int[dawns]).ToArray();
             var s = new State(w, guild) { Result = result, IgnoreRequirements = ignoreRequirements };
+            // By day, buildings God of Destruction left down at dawn are knocked out again tonight.
+            if (!w.DawnPending) s.Carry = new HashSet<int>(w.Slots.Where(x => x.StillDown).Select(x => x.Index));
             var ordered = Ordered(actions);
             int firstNight = w.DawnPending ? w.FirstDay - 1 : w.FirstDay;
 
@@ -511,6 +535,7 @@ namespace PalaceMod.Economy
                 int n = w.FirstDay - 1;
                 w.Gold += w.TonightGold;
                 result.PendingDrops = w.TonightGold;
+                s.Wisdom = w.TempleWisdom >= 0 && w.TempleNight == n ? (null, w.TempleWisdom) : null;
                 result.PendingExtra = Night(s, n, ordered, nightResults, out var knocked);
                 Dawn(s, n, result, knocked, out int buildings, out int treasure);
                 result.PendingBuildings = buildings;
@@ -523,8 +548,8 @@ namespace PalaceMod.Economy
                 var d = new DayResult { Day = day, Start = w.Gold };
                 s.Today = d;
                 s.TodayPay = day - result.FirstDawn;
-                s.Prayers = false;
-                s.Wisdom = null;
+                s.Prayers = w.TemplePrayers && w.TempleNight == day;
+                s.Wisdom = w.TempleWisdom >= 0 && w.TempleNight == day ? (null, w.TempleWisdom) : null;
                 foreach (var a in ordered.Where(a => a.IsStep && a.Day == day))
                 {
                     var r = Apply(s, a);
@@ -532,7 +557,8 @@ namespace PalaceMod.Economy
                     if (r.Counts) { d.Spent += r.Cost; d.Actions++; }
                 }
                 if (day == stopAfterDay) break;
-                // Dusk: every coin has been picked up, so interest counts all the gold.
+                // Dusk: every coin has been picked up, so interest counts all the gold; last night's knock-outs end.
+                foreach (var slot in w.Slots) slot.DownToday = false;
                 s.Today = null;
                 if (guild && w.GuildActive) s.GuildUpgrade();
                 if (w.Interest)
@@ -584,6 +610,7 @@ namespace PalaceMod.Economy
             if (w.DawnPending && night == w.FirstDay - 1)
                 foreach (var slot in w.Slots) if (slot.KnockedOut) knocked.Add(slot.Index);
             int lostByPlan = 0;
+            var destroyed = new HashSet<int>();
             int extra = 0;
             foreach (var a in ordered.Where(a => !a.IsStep && a.Day == night))
             {
@@ -598,17 +625,32 @@ namespace PalaceMod.Economy
                 var slot = w.Find(a.Slot);
                 if (slot == null) { Block(r, "Not on this map"); continue; }
                 if (slot.Level < 1) { Block(r, "Not built by then"); continue; }
-                if (!knocked.Add(slot.Index)) { r.Status = ActionStatus.AlreadyDone; r.Reason = "Already knocked out that night"; continue; }
+                if (slot.Indestructible) { Block(r, "It can't be destroyed"); continue; }
+                if (knocked.Contains(slot.Index) || destroyed.Contains(slot.Index)) { r.Status = ActionStatus.AlreadyDone; r.Reason = "Already knocked out that night"; continue; }
                 r.Status = ActionStatus.Planned;
+                destroyed.Add(slot.Index);
+                if (slot.IsBuilding) lostByPlan++;
+                // A building whose perk keeps it paying is destroyed all the same, but its pay isn't denied.
+                if (slot.NeverDenied) { r.Reason = "Still pays (its perk)"; continue; }
+                knocked.Add(slot.Index);
                 r.IncomeDelta = slot.Pays ? -Math.Max(0, slot.Income) : 0;
-                if (slot.IsBuilding && !slot.IsShrine) lostByPlan++;
             }
             if (s.Prayers)
                 foreach (var slot in w.Slots) if (slot.IsShrine && slot.Level >= 1) knocked.Add(slot.Index);
-            if (s.Wisdom is (ActionResult wr, int each))
+            if (s.Wisdom is (var wr, var each))
             {
-                wr.Wisdom = wr.Action.Amount ?? each * lostByPlan;
-                extra += wr.Wisdom;
+                int gold = wr?.Action.Amount ?? each * lostByPlan;
+                if (wr != null) wr.Wisdom = gold;
+                extra += gold;
+            }
+            // God of Destruction: what's destroyed tonight isn't revived at dawn and is knocked out again next night.
+            if (w.DestructionGod)
+            {
+                foreach (int i in s.Carry) if (!w.Slots[i].NeverDenied) knocked.Add(i);
+                // Tonight's live knock-outs (the night in progress) carry over too.
+                if (w.DawnPending && night == w.FirstDay - 1)
+                    foreach (var slot in w.Slots) if (slot.KnockedOut && slot.IsBuilding) destroyed.Add(slot.Index);
+                s.Carry = destroyed;
             }
             w.Gold += extra;
             return extra;
@@ -622,6 +664,7 @@ namespace PalaceMod.Economy
             {
                 // OnDawn_BeforeSunrise clears harvestedToday and temple locks; the harvest sets it again.
                 slot.HarvestedToday = false;
+                slot.DownToday = knocked.Contains(slot.Index);
                 slot.Busy = false;
                 if (slot.Level < 1 || !slot.Pays || slot.Income <= 0 || knocked.Contains(slot.Index)) continue;
                 buildings += slot.Income;
@@ -711,7 +754,7 @@ namespace PalaceMod.Economy
             s.StepUp(slot, branchIndex, byPlayer: true);
             r.IncomeDelta = s.FamilyIncome(slot) - before;
             if (branch != null && branch.Prayers) s.Prayers = true;
-            if (branch != null && branch.WisdomGold > 0) s.Wisdom = (r, branch.WisdomGold);
+            if (branch != null && branch.IsWisdom) s.Wisdom = (r, branch.WisdomGold);
             return r;
         }
 
@@ -764,6 +807,8 @@ namespace PalaceMod.Economy
             /// <summary>Temple prayers / wisdom bought today.</summary>
             public bool Prayers;
             public (ActionResult, int)? Wisdom;
+            /// <summary>God of Destruction: buildings destroyed last night, knocked out again tonight.</summary>
+            public HashSet<int> Carry = [];
 
             public bool CanUpgrade(EconSlot slot)
             {
@@ -795,7 +840,7 @@ namespace PalaceMod.Economy
                     dep.Active = true;
                     // Their own BuildComplete never runs, so one that didn't pay at dawn (nothing to pay then) can be
                     // harvested now, and the night horn makes sure it is before dusk.
-                    if (Today != null && dep.Pays && !dep.HarvestedToday && dep.Income > 0)
+                    if (Today != null && dep.Pays && !dep.HarvestedToday && !dep.DownToday && dep.Income > 0)
                     {
                         dep.HarvestedToday = true;
                         World.Gold += dep.Income;
@@ -814,6 +859,7 @@ namespace PalaceMod.Economy
                     {
                         m.Max *= 2;
                         m.Step *= 2;
+                        m.Doubled = true;
                     }
                 }
                 bool built = slot.Level == 0;
@@ -847,6 +893,13 @@ namespace PalaceMod.Economy
                     }
                 }
                 if (built && slot.OutpostTowers > 0 && World.Outpost) OutpostTowers(slot);
+                // Improved Plow (Mill_ImprovedPlow.OnEnable): +1 on the tree's steps 2 and 3, after this step's own change.
+                if (branch != null && branch.PlowTree >= 0 && branch.PlowTree < World.Slots.Count)
+                {
+                    var tree = World.Slots[branch.PlowTree];
+                    for (int i = 1; i <= 2 && i < tree.Steps.Count; i++)
+                        foreach (var b in tree.Steps[i].Branches) b.IncomeChange++;
+                }
             }
 
             // OutpostPerk.BuildFreeTowers: the farthest of the slot's tower children, built for free if not built.
@@ -931,6 +984,9 @@ namespace PalaceMod.Economy
                     case EconPerkKind.RatGod:
                         waves = true;
                         break;
+                    case EconPerkKind.DestructionGod:
+                        w.DestructionGod = on;
+                        break;
                     case EconPerkKind.Outpost:
                         w.Outpost = on;
                         break;
@@ -953,10 +1009,16 @@ namespace PalaceMod.Economy
                 foreach (var m in slot.Modifiers)
                 {
                     if (m.PerkKey == null || !changes.TryGetValue(m.PerkKey, out bool on)) continue;
-                    if (m.Kind == EconModifierKind.Mine) m.Sustainable = on;
+                    if (m.Kind == EconModifierKind.Mine)
+                    {
+                        m.Sustainable = on;
+                        // As if it had been on from the start: the mine wouldn't have run below the higher floor.
+                        if (on && slot.Level >= 1) slot.Income = Math.Max(slot.Income, m.SustainableMin);
+                    }
                     else if (m.Kind == EconModifierKind.Harbour && on != m.PerkOn)
                     {
-                        m.Max += on ? m.PerkBoats : -m.PerkBoats;
+                        int boats = m.PerkBoats * (m.Doubled ? 2 : 1);
+                        m.Max += on ? boats : -boats;
                         m.PerkOn = on;
                     }
                 }

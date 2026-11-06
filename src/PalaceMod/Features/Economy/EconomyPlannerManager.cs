@@ -651,7 +651,7 @@ namespace PalaceMod
             foreach (var e in w.Slots)
             {
                 if (only >= 0 && e.Index != only) continue;
-                string steps = string.Join(" | ", e.Steps.Select((st, i) => $"{i + 1}:{st.Cost}{(st.Disabled ? "x" : "")}[{string.Join(",", st.Branches.Select(b => $"{b.Key}{(b.IncomeChange != 0 ? Signed(b.IncomeChange) : "")}{(b.Locked ? " L" : "")}{(b.StartsGuild ? " G" : "")}{(b.StartsCastleUp ? " C" : "")}{(b.Prayers ? " P" : "")}{(b.WisdomGold > 0 ? $" W{b.WisdomGold}" : "")}{(b.BusyUntilDawn ? " T" : "")}"))}]"));
+                string steps = string.Join(" | ", e.Steps.Select((st, i) => $"{i + 1}:{st.Cost}{(st.Disabled ? "x" : "")}[{string.Join(",", st.Branches.Select(b => $"{b.Key}{(b.IncomeChange != 0 ? Signed(b.IncomeChange) : "")}{(b.Locked ? " L" : "")}{(b.StartsGuild ? " G" : "")}{(b.StartsCastleUp ? " C" : "")}{(b.Prayers ? " P" : "")}{(b.IsWisdom ? $" W{b.WisdomGold}/{b.WisdomDrain:0.###}" : "")}{(b.BusyUntilDawn ? " T" : "")}{(b.PlowTree >= 0 ? $" plow#{b.PlowTree}" : "")}"))}]"));
                 lines.Add($"  #{e.Index} {e.Label} ({e.ObjectName}) id={e.Id} lv {e.Level} inc {e.Income} active {e.Active} pays {e.Pays} ko {e.KnockedOut} " +
                     $"owner {e.Owner} act {e.Activator}>{e.ActivatorLevel} root {e.Root}{e.RootLevelDifference:+#;-#;0} " +
                     $"{(e.IsHouse ? "house " : "")}{(e.IsWallOrTower ? $"wall/tower {e.CastleUpTags}t{e.CastleUpReceivers}r " : "")}{(e.HarvestedToday ? "harvested " : "")}{(e.Busy ? "busy " : "")}" +

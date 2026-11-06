@@ -261,7 +261,7 @@ namespace PalaceMod
             {
                 r.Status == ActionStatus.Short ? $"{Coin(r.Cost)}, short by {r.Shortfall}" : Coin(r.Cost),
                 r.IncomeDelta != 0 ? $"{Signed(r.IncomeDelta)} per dawn" : null,
-                r.Branch?.WisdomGold > 0 ? $"wisdom {Signed(r.Wisdom)} that night{(r.Action.Amount == null ? $" ({r.Branch.WisdomGold} per building lost)" : "")}" : null,
+                r.Branch?.IsWisdom == true ? $"wisdom {Signed(r.Wisdom)} that night{(r.Action.Amount == null ? $" ({r.Branch.WisdomGold} per building lost)" : "")}" : null,
                 r.Branch?.Prayers == true ? "shrines pay nothing that dawn" : null,
                 Payback(r),
             }.Where(x => x != null));
@@ -590,7 +590,7 @@ namespace PalaceMod
                 if (b.StartsGuild) parts.Add("a free house upgrade each dusk");
                 if (b.StartsCastleUp) parts.Add("cheaper walls and towers");
                 if (b.Prayers) parts.Add("shrines pay nothing that dawn");
-                if (b.WisdomGold > 0) parts.Add($"{b.WisdomGold} per building lost that night");
+                if (b.IsWisdom) parts.Add($"{b.WisdomGold} per building lost that night, but drains them");
                 page.Row(b.Name, string.Join(" · ", parts), b.Description, () =>
                 {
                     if (b.Locked)
@@ -731,7 +731,7 @@ namespace PalaceMod
                     }, null, step.Branches[current].Description);
                 }
                 var branch = step != null && step.Branches.Count > 0 ? step.Branches[EconSim.BranchIndex(step, a.Choice)] : null;
-                if (branch != null && branch.WisdomGold > 0)
+                if (branch != null && branch.IsWisdom)
                 {
                     Num(page, "Wisdom gold", () => a.Amount ?? r.Wisdom, v => { a.Amount = v; ChangedOnTop(editorFrame); }, 0, 99999,
                         () => $"Gold from buildings destroyed that night: {branch.WisdomGold} each. By default it's worked out from the buildings the plan marks lost that night; type the amount you expect instead.",
@@ -739,6 +739,18 @@ namespace PalaceMod
                     if (a.Amount != null)
                         page.Button("Work it out from the buildings lost", () => { a.Amount = null; ChangedOnTop(editorFrame); },
                             "Use the buildings the plan marks as lost that night instead of the typed amount.");
+                    if (branch.WisdomDrain > 0f)
+                        page.Text($"<color=#{DimHex}>Wisdom also drains every building (not shrines) by {branch.WisdomDrain * 100f:0.#}% of its health a second: " +
+                            $"unrepaired, one dies after about {1f / branch.WisdomDrain:0} seconds of night. Mark the ones you expect to lose.</color>");
+                    var night = EconSim.StateOn(w, p.Actions, a.Day);
+                    var standing = night.Slots.Where(x => x.Level >= 1 && x.IsBuilding && !x.IsShrine && !x.Indestructible
+                        && !p.Actions.Any(k => k.Kind == EconActionKind.KnockOut && k.Day == a.Day && k.Slot == x.Id)).ToList();
+                    if (standing.Count > 0)
+                        page.Button($"Lose every building that night ({standing.Count})", () =>
+                        {
+                            foreach (var x in standing) holder.Actions.Add(new EconAction { Kind = EconActionKind.KnockOut, Day = a.Day, Slot = x.Id });
+                            ChangedOnTop(editorFrame);
+                        }, "Marks every building standing that night as lost: none pays at dawn, and each drops Wisdom's gold. Remove the ones you'd save.");
                 }
                 page.Row("Cost", r.Counts ? Coin(r.Cost) : "-", "Gold this step costs on its day (Castle Up and perks included).");
                 page.Row("Buildings pay", r.Counts ? $"{Signed(r.IncomeDelta)} per dawn" : "-", "How much more the building pays at each dawn after this step.");
@@ -928,6 +940,7 @@ namespace PalaceMod
             EconPerkKind.Loan => $"{p.Amount} gold at the start, paid back with {p.Amount2} of the first nights' enemy gold.",
             EconPerkKind.RatGod => $"Enemies drop {p.Factor * 100f:0}% of their gold.",
             EconPerkKind.Outpost => "Building an outpost builds some of its towers for free.",
+            EconPerkKind.DestructionGod => "Destroyed buildings stay down a second night (and pay nothing at either dawn).",
             _ => "Changes some buildings' costs or income on this map.",
         };
 
@@ -993,7 +1006,7 @@ namespace PalaceMod
                     .OrderByDescending(c => (c.MapX - o.MapX) * (c.MapX - o.MapX) + (c.MapY - o.MapY) * (c.MapY - o.MapY)).Take(o.OutpostTowers).Sum(c => c.Steps[0].Cost));
                 lines.Add($"Outposts{(w.Outpost ? "" : " (with the Outpost perk)")}: build {outposts.Sum(o => o.OutpostTowers)} towers for free, worth {value}.");
             }
-            if (w.Slots.Any(s => s.Steps.Any(st => st.Branches.Any(b => b.WisdomGold > 0))))
+            if (w.Slots.Any(s => s.Steps.Any(st => st.Branches.Any(b => b.IsWisdom))))
                 lines.Add("Temple wisdom: gold for each building lost that night; plan the losses (Add to plan) to see it.");
             V.Text(aside, string.Join("\n", lines), 0f, width, 23f);
         }
