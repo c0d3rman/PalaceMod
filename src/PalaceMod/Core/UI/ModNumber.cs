@@ -64,7 +64,7 @@ namespace PalaceMod
             }
             double clamped = NumberMath.Clamp(parsed, min, max, integer);
             if (parsed < min || parsed > max)
-                message = $"Kept to {SafeDisplay(display, (float)clamped)} (from {ModFields.FormatNumber(min)} to {ModFields.FormatNumber(max)})";
+                message = $"Kept to {SafeDisplay(display, (float)clamped)} (from {Grouped(min)} to {Grouped(max)})";
             value = (float)clamped;
             return true;
         }
@@ -75,9 +75,12 @@ namespace PalaceMod
             catch { return ModFields.FormatNumber(v); }
         }
 
+        // 1000000 -> "1,000,000" (what the player may type back, too).
+        private static string Grouped(float v) => v.ToString("#,0.##", System.Globalization.CultureInfo.InvariantCulture);
+
         /// <summary>The typing notice for a field from <paramref name="min"/> to <paramref name="max"/>.</summary>
         internal static string TypingHint(float min, float max) =>
-            $"Type a number from {ModFields.FormatNumber(min)} to {ModFields.FormatNumber(max)}, then Enter (Esc cancels)";
+            $"Type a number from {Grouped(min)} to {Grouped(max)}, then Enter (Esc cancels)";
 
         internal static string ControllerHint(bool shoulders) =>
             "Left/right to change it (hold to speed up)" + (shoulders ? "; the shoulder buttons step x10" : "");
