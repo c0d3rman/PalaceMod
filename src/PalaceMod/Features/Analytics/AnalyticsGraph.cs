@@ -211,7 +211,7 @@ namespace PalaceMod
 
         // ---- Primitives -------------------------------------------------------------------------------------------
 
-        private static RectTransform Rect(Transform parent, string name, Color color)
+        internal static RectTransform Rect(Transform parent, string name, Color color)
         {
             var obj = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
             obj.transform.SetParent(parent, false);
@@ -223,7 +223,7 @@ namespace PalaceMod
             return rect;
         }
 
-        private static void Segment(RectTransform plot, Vector2 a, Vector2 b, float thickness, Color color)
+        internal static void Segment(RectTransform plot, Vector2 a, Vector2 b, float thickness, Color color)
         {
             var rect = Rect(plot, "Line", color);
             rect.pivot = new Vector2(0.5f, 0.5f);
@@ -232,7 +232,7 @@ namespace PalaceMod
             rect.localRotation = Quaternion.Euler(0f, 0f, Vector2.SignedAngle(Vector2.right, b - a));
         }
 
-        private static void Dot(RectTransform plot, Vector2 at, float size, Color color)
+        internal static void Dot(RectTransform plot, Vector2 at, float size, Color color)
         {
             var rect = Rect(plot, "Point", color);
             rect.pivot = new Vector2(0.5f, 0.5f);
@@ -240,7 +240,7 @@ namespace PalaceMod
             rect.sizeDelta = new Vector2(size, size);
         }
 
-        private static TextMeshProUGUI Label(Transform parent, string text, float size, Color color, TextAlignmentOptions alignment,
+        internal static TextMeshProUGUI Label(Transform parent, string text, float size, Color color, TextAlignmentOptions alignment,
             TMP_FontAsset font = null)
         {
             var tmp = GameWidgets.Text(parent, "Label", text, font ?? ModStyle.BoldFont, size, color, alignment);
@@ -251,9 +251,9 @@ namespace PalaceMod
             return tmp;
         }
 
-        private static Color Fade(Color c, float alpha) => new(c.r, c.g, c.b, c.a * alpha);
+        internal static Color Fade(Color c, float alpha) => new(c.r, c.g, c.b, c.a * alpha);
 
-        private static float NiceStep(float raw)
+        internal static float NiceStep(float raw)
         {
             float magnitude = Mathf.Pow(10f, Mathf.Floor(Mathf.Log10(raw)));
             float f = raw / magnitude;

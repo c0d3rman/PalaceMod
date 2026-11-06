@@ -111,6 +111,21 @@ namespace PalaceMod
             if (IsOpen) UIFrameManager.instance.CloseActiveFrame();
         }
 
+        /// <summary>Switches to the tab labelled <paramref name="label"/>: right away if the menu is open, else the
+        /// next Open shows it.</summary>
+        public void SelectTab(string label)
+        {
+            int index = tabs.FindIndex(t => t.Label == label);
+            if (index < 0) return;
+            if (!IsOpen)
+            {
+                currentTab = index;
+                return;
+            }
+            ShowTab(index, select: false);
+            if (index < tabButtons.Count) frame.Select(tabButtons[index]);
+        }
+
         /// <summary>Rebuilds the current tab's page, keeping the selection where it was if it still exists.</summary>
         public void Refresh()
         {

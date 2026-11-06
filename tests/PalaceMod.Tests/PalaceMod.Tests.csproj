@@ -38,6 +38,8 @@
     <Compile Include="../../src/PalaceMod/Features/Builder/Sharing/PackArchive.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Assets/GltfCheck.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Assets/Loaders.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Economy/EconomyModel.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Economy/PlannerStore.cs" />
     <EmbeddedResource Include="../../src/PalaceMod/Assets/builder-sample.json" LogicalName="builder-sample.json" />
   </ItemGroup>
 
