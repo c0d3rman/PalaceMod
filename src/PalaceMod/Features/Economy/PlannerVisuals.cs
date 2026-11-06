@@ -159,7 +159,10 @@ namespace PalaceMod.Economy
                 $"<color=#{ModStyle.Hex(G.Bronze)}>◆</color> in the plan   <color=#{ModStyle.Hex(ModStyle.Gold)}>■</color> built   " +
                 $"<color=#{ModStyle.Hex(G.Dim)}>■</color> not built", ModStyle.BodyFont, 19f, ModStyle.Gold, TextAlignmentOptions.TopLeft);
             text.enableWordWrapping = true;
-            text.rectTransform.sizeDelta = new Vector2(width, 30f);
+            var rect = text.rectTransform;
+            rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0f, 1f);
+            rect.anchoredPosition = Vector2.zero;
+            rect.sizeDelta = new Vector2(width, 30f);
         }
 
         private static void Square(RectTransform parent, Vector2 at, float size, Color color)

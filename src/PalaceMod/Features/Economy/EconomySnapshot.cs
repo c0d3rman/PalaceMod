@@ -54,6 +54,9 @@ namespace PalaceMod.Economy
                 .ThenBy(s => Flat(s.transform.position - castle).sqrMagnitude).ThenBy(s => s.transform.position.x).ToList();
             var index = new Dictionary<BuildSlot, int>();
             for (int i = 0; i < slots.Count; i++) index[slots[i]] = i;
+            // What pays at dawn is what IncomeCalculator (and the game) walk: the registered interactors' buildings.
+            var registered = new HashSet<BuildSlot>(TagManager.instance.playerBuildingInteractors
+                .Where(i => i != null && i.targetBuilding != null).Select(i => i.targetBuilding));
 
             foreach (var slot in slots)
             {
@@ -62,7 +65,7 @@ namespace PalaceMod.Economy
                 var offset = Flat(slot.transform.position - castle);
                 e.MapX = Vector3.Dot(offset, right);
                 e.MapY = Vector3.Dot(offset, up);
-                ReadSlot(slot, e, index, snap);
+                ReadSlot(slot, e, index, registered, snap);
                 w.Slots.Add(e);
             }
             // Ids must be unique for saved plans to find their slot.
@@ -108,7 +111,7 @@ namespace PalaceMod.Economy
 
         // ---- One slot ---------------------------------------------------------------------------------------------
 
-        private static void ReadSlot(BuildSlot slot, EconSlot e, Dictionary<BuildSlot, int> index, EconSnapshot snap)
+        private static void ReadSlot(BuildSlot slot, EconSlot e, Dictionary<BuildSlot, int> index, HashSet<BuildSlot> registered, EconSnapshot snap)
         {
             var save = slot.GetComponent<SaveLoadEntity>();
             e.Id = save != null && !string.IsNullOrEmpty(save.GUID)
@@ -131,7 +134,8 @@ namespace PalaceMod.Economy
             e.RootLevelDifference = slot.RequiredRootLevelDifference;
 
             var interactor = slot.Interactor != null ? slot.Interactor : slot.buildingInteractor;
-            e.Pays = interactor != null;
+            // A slot that isn't unlocked yet registers its interactor when it is.
+            e.Pays = registered.Contains(slot) || (!slot.gameObject.activeInHierarchy && interactor != null && interactor.targetBuilding == slot);
             e.KnockedOut = interactor != null && interactor.KnockedOutTonight;
             e.IsCastle = slot.GetComponentInChildren<CastleCenter>(true) != null;
             e.IsHouse = Owned<TaggedObject>(slot).Any(o => o.Tags.Contains(TagManager.ETag.House));

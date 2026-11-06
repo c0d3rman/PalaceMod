@@ -276,6 +276,8 @@ namespace PalaceMod.Economy
                 foreach (var r in result.Actions)
                 {
                     if (!r.Counts || r.Slot == null) continue;
+                    // Only income buildings (or ones whose followers earn) have a payback.
+                    if (!r.Slot.EverPays && !world.Slots.Any(s => s.Owner == r.Slot.Index && s.EverPays)) continue;
                     Payback(world, ordered, r, guild);
                 }
             }

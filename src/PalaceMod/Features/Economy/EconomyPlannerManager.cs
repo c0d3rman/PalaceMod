@@ -143,14 +143,10 @@ namespace PalaceMod
                 int game = IncomeCalculator.Total(k);
                 if (game != dawns[k]) problems.Add($"dawn +{k} pays {dawns[k]}, IncomeCalculator says {game}");
             }
-            var registered = new HashSet<BuildSlot>(TagManager.instance.playerBuildingInteractors.Where(i => i != null).Select(i => i.targetBuilding));
             foreach (var e in w.Slots)
             {
                 var slot = s.Objects[e.Index];
-                if (slot == null) continue;
-                if (e.Level >= 1 && e.Pays != registered.Contains(slot) && slot.gameObject.activeInHierarchy)
-                    problems.Add($"{e.Label} #{e.Index}: pays={e.Pays} but registered={registered.Contains(slot)}");
-                if (e.IsDependent || !e.Active) continue;
+                if (slot == null || e.IsDependent || !e.Active) continue;
                 bool live = slot.CanBeUpgraded, mine = EconSim.CanUpgrade(w, e);
                 if (live != mine) problems.Add($"{e.Label} #{e.Index}: can upgrade {mine}, game says {live}");
                 else if (live && e.Steps[e.Level].Cost != slot.NextUpgradeOrBuildCost)

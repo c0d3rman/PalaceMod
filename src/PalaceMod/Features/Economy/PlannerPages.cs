@@ -33,6 +33,7 @@ namespace PalaceMod
 
         // Editor and plans state.
         private string editId;
+        private bool editorDirty;
         private string confirm;
 
         private static readonly string DimHex = ModStyle.Hex(ModStyle.Dim);
@@ -42,6 +43,12 @@ namespace PalaceMod
         {
             pickerFrame = new ModFrame("Add to plan").SetContent(BuildPicker);
             editorFrame = new ModFrame("Plan step").SetContent(BuildEditor);
+            editorFrame.Activated += () =>
+            {
+                if (!editorDirty) return;
+                editorDirty = false;
+                editorFrame.Refresh();
+            };
             plansFrame = new ModFrame("Plans").SetContent(BuildPlans);
             plansFrame.Activated += () => confirm = null;
         }
@@ -243,17 +250,17 @@ namespace PalaceMod
             foreach (var d in p.Result.Days)
             {
                 var c = p.Compare.Days.FirstOrDefault(x => x.Day == d.Day);
-                string spent = d.Spent == 0 ? "-" : d.Shortfall > 0 ? $"<color=#{RedHex}>{N(d.Spent)}!</color>" : N(d.Spent);
+                string spent = d.Spent == 0 ? "-" : d.Shortfall > 0 ? $"<color=#{RedHex}>{N(d.Spent)} ({N(d.Shortfall)} short)</color>" : N(d.Spent);
                 string vs = c == null || p.Compare == p.Result ? "" : Signed(d.AtDawn - c.AtDawn);
                 rows.Add([$"Day {d.Day}", Gold(d.Start), spent, N(d.Income), N(d.Buildings), Gold(d.AtDawn), vs]);
             }
             string vsHeader = p.Compare == p.Result ? "" : "vs " + Short(p.OtherName, 9);
             AnalyticsGraph.Table(page.Custom("Days table", AnalyticsGraph.TableHeight(rows.Count)),
-                ["", "Sunrise", "Spent", "Income", "Buildings", "At dawn", vsHeader], rows, [1.05f, 1f, 0.9f, 0.9f, 1.05f, 1f, 1.1f], rows.Count);
+                ["", "Sunrise", "Spent", "Income", "Buildings", "At dawn", vsHeader], rows, [1f, 0.95f, 1.4f, 0.9f, 1f, 0.95f, 1f], rows.Count);
         }
 
         private static string About(EconWorld w) =>
-            "Sunrise: gold when the day starts. Spent: what the plan builds that day (! when there isn't enough). Income: interest at dusk" +
+            "Sunrise: gold when the day starts. Spent: what the plan builds that day (in red, with what's missing, when there isn't enough). Income: interest at dusk" +
             (w.Interest ? "" : " (with the Interest perk)") + ", the night's enemy gold, and what buildings pay at dawn (Buildings)" +
             (w.TreasureHunter ? " plus Treasure Hunter" : "") + ". At dawn: gold the next day starts with.\n" +
             "Worked out from this map's buildings, costs and your perks as they are now: mines run dry, harbours grow, Builder's Guild upgrades a house each dusk. " +
@@ -348,7 +355,7 @@ namespace PalaceMod
             if (slots.Count == 0)
             {
                 page.Text(pickFilter == 0 ? "Nothing can be built or upgraded that day. Try another day, or show every slot." : "No buildings.");
-                ShowSlot(aside, p, state, null, planned);
+                ShowSlot(aside, p, state, null, planned, pickDay);
                 return;
             }
             // Income buildings first, then the rest, each by name.
@@ -366,11 +373,11 @@ namespace PalaceMod
                     row.Button.gameObject.name = "Slot " + slot.Index;
                     row.Button.onSelectionStateChange.AddListener(() =>
                     {
-                        if (IsSelected(row.Button)) ShowSlot(aside, p, state, slot, planned);
+                        if (IsSelected(row.Button)) ShowSlot(aside, p, state, slot, planned, pickDay);
                     });
                 }
             }
-            ShowSlot(aside, p, state, null, planned);
+            ShowSlot(aside, p, state, null, planned, pickDay);
         }
 
         private static bool IsSelected(TFUITextButton b) =>
@@ -437,7 +444,7 @@ namespace PalaceMod
                 pickSlot = -1;
                 pickerFrame.Refresh();
             });
-            ShowSlot(page.Aside, p, state, slot, planned);
+            ShowSlot(page.Aside, p, state, slot, planned, pickDay);
         }
 
         private void Commit(Projection p, EconSlot slot, int level, string choice)
@@ -449,19 +456,19 @@ namespace PalaceMod
                 existing.Level = level;
                 existing.Choice = choice;
                 existing.Day = pickDay;
-                if (editorFrame != null) editId = existing.Id;
+                editId = existing.Id;
+                editorDirty = true;
             }
             else p.Plan.Actions.Add(new EconAction { Day = pickDay, Slot = slot.Id, Level = level, Choice = choice });
             lastDay = pickDay;
             Save();
             hostDirty = true;
+            // Back to the editor (when changing a step's building) or the tab: both rebuild when they're active again.
             pickerFrame.Close();
-            // Back in the editor (when changing a step's building) or on the tab: both rebuild on activation.
-            if (editorFrame.IsOpen) editorFrame.Refresh();
         }
 
         /// <summary>The map with <paramref name="slot"/> lit, and what it is and does on the picked day.</summary>
-        private void ShowSlot(RectTransform aside, Projection p, EconWorld state, EconSlot slot, HashSet<int> planned)
+        private void ShowSlot(RectTransform aside, Projection p, EconWorld state, EconSlot slot, HashSet<int> planned, int day)
         {
             if (aside == null) return;
             foreach (Transform child in aside.Cast<Transform>().ToList()) Object.DestroyImmediate(child.gameObject);
@@ -480,7 +487,7 @@ namespace PalaceMod
             var now = p.World.Slots[slot.Index];
             var lines = new List<string> { $"<size=120%><b>{slot.Label}</b></size>" };
             lines.Add(now.Level == 0 ? "Not built yet." : $"Level {now.Level} of {now.MaxLevel} now, paying {now.Income} per dawn.");
-            if (slot.Level != now.Level) lines.Add($"Level {slot.Level} by day {state.FirstDay} with the plan's earlier steps.");
+            if (slot.Level != now.Level) lines.Add($"Level {slot.Level} on day {day} with the plan's earlier steps.");
             if (slot.Level < slot.Steps.Count && slot.Level < slot.MaxLevel)
             {
                 var step = slot.Steps[slot.Level];
@@ -571,7 +578,7 @@ namespace PalaceMod
 
             var planned = new HashSet<int>(p.Plan.Actions.Select(x => w.Find(x.Slot)?.Index ?? -1));
             var state = EconSim.StateOn(w, p.Plan.Actions.Where(x => x != a).ToList(), Mathf.Max(a.Day, w.FirstDay));
-            ShowSlot(page.Aside, p, state, slot == null ? null : state.Slots[slot.Index], planned);
+            ShowSlot(page.Aside, p, state, slot == null ? null : state.Slots[slot.Index], planned, a.Day);
         }
 
         // ---- Plans ------------------------------------------------------------------------------------------------
