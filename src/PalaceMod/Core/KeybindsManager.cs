@@ -167,7 +167,7 @@ namespace PalaceMod
             }
             foreach (var manager in Plugin.Instance.Managers)
             {
-                if (manager.EnabledEntry != null && sections.Contains(manager.FeatureSection))
+                if (manager.FeatureSection != null && sections.Contains(manager.FeatureSection))
                 {
                     string section = manager.FeatureSection;
                     // EnabledChanged also covers the "Gameplay-changing features" master switch.

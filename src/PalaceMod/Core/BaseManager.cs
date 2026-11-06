@@ -19,6 +19,11 @@ using HarmonyLib;
     Patches that stay applied can early-out with `if (!Feature<MyManager>.On) return;`.
     Managers that leave FeatureSection null are infrastructure and are always on.
 
+    A feature that is only a menu the player opens on purpose (a pause-menu or title-menu screen with no passive
+    effect) overrides HasEnabledSwitch => false: it keeps its section for settings, keys and logging but gets no
+    Enabled switch, because not opening the menu is how you don't use it. If it has passive parts, those get their
+    own settings, named for what they do.
+
     A feature that can make a run unranked overrides AffectsRanking => true: it then also counts as disabled while the
     master switch Settings > Mods > General > "Gameplay-changing features" is off (see GameplayFeatures), with the same
     hooks firing, and its own Enabled value is left as it was.
@@ -34,6 +39,14 @@ namespace PalaceMod
 
         /// <summary>One or two sentences shown beside the Enabled row in Settings > Mods.</summary>
         public virtual string FeatureDescription => null;
+
+        /// <summary>False for a feature that is just a menu: no Enabled switch is bound and it's always on (except that
+        /// an AffectsRanking one is still held off by the master switch).</summary>
+        protected virtual bool HasEnabledSwitch => true;
+
+        /// <summary>Label of the Enabled row in Settings > Mods when "Enabled" or the feature's name would mislead, e.g.
+        /// "Record runs" for a feature whose switch only covers its passive part.</summary>
+        public virtual string EnabledLabel => null;
 
         /// <summary>Whether the feature starts enabled for players who haven't changed the setting.</summary>
         protected virtual bool EnabledByDefault => true;
@@ -51,10 +64,10 @@ namespace PalaceMod
 
         /// <summary>Whether the feature runs: its Enabled setting is on and, for AffectsRanking features, the master
         /// switch allows it.</summary>
-        public bool IsEnabled => EnabledEntry == null || (EnabledEntry.Value && (!AffectsRanking || GameplayFeatures.Allowed));
+        public bool IsEnabled => (EnabledEntry == null || EnabledEntry.Value) && (FeatureSection == null || !AffectsRanking || GameplayFeatures.Allowed);
 
-        /// <summary>Enabled by its own setting but held off by the "Gameplay-changing features" master switch.</summary>
-        public bool HeldOffByMasterSwitch => EnabledEntry != null && EnabledEntry.Value && AffectsRanking && !GameplayFeatures.Allowed;
+        /// <summary>Enabled by its own setting (or switchless) but held off by the "Gameplay-changing features" master switch.</summary>
+        public bool HeldOffByMasterSwitch => FeatureSection != null && (EnabledEntry == null || EnabledEntry.Value) && AffectsRanking && !GameplayFeatures.Allowed;
 
         /// <summary>Raised after IsEnabled changes at runtime (the Enabled setting or the master switch).</summary>
         public event Action EnabledChanged;
@@ -83,9 +96,12 @@ namespace PalaceMod
             harmony = new Harmony($"{MyPluginInfo.PLUGIN_GUID}.{GetType().Name}");
             if (FeatureSection != null)
             {
-                EnabledEntry = plugin.Config.Bind(FeatureSection, "Enabled", EnabledByDefault, new ConfigDescription(
-                    FeatureDescription ?? $"Turns {FeatureSection} on or off."));
-                EnabledEntry.SettingChanged += OnEnabledChanged;
+                if (HasEnabledSwitch)
+                {
+                    EnabledEntry = plugin.Config.Bind(FeatureSection, "Enabled", EnabledByDefault, new ConfigDescription(
+                        FeatureDescription ?? $"Turns {FeatureSection} on or off."));
+                    EnabledEntry.SettingChanged += OnEnabledChanged;
+                }
                 _ = GameplayFeatures.Entry; // bind the master switch before anything reads IsEnabled
                 if (AffectsRanking) GameplayFeatures.Changed += ApplyEnabled;
             }

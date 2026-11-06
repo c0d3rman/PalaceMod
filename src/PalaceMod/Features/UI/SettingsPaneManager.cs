@@ -64,11 +64,11 @@ namespace PalaceMod
             ]),
             ("Pause menu & info", [
                 ("Pause menu", ["Pause menu score", "Enemy previews", "Run analytics"]),
-                ("Compendium & stats", ["Compendium", "Stat details"]),
+                ("Stat details", ["Stat details"]),
             ]),
             ("Runs & saves", [
-                ("Practice", ["Savestates", "Retry earlier day", "Debug menu"]),
-                ("Scores & profiles", ["Unranked runs", "Bonus-safe saves", "Profiles"]),
+                ("Practice", ["Savestates", "Retry earlier day"]),
+                ("Scores", ["Unranked runs", "Bonus-safe saves"]),
                 ("Loadout randomizer", ["Loadout randomizer"]),
             ]),
             ("Builder", [("Builder", ["Builder"])]),
@@ -101,10 +101,9 @@ namespace PalaceMod
             ["Patrols & control groups"] = "Send units on patrol routes, and keep the game's control groups when you continue a run.",
             ["Build previews & income"] = "What the build previews show, and gold income above buildings and in the pause menu.",
             ["Upgrades"] = "See, undo and extend building and unit upgrades.",
-            ["Pause menu"] = "Extra panels in the pause menu: the run's score, the night's enemies, and run analytics.",
-            ["Compendium & stats"] = "Look up the level's waves, enemies, units and perks, with the actual numbers.",
-            ["Practice"] = "Tools for practising a level: save and load any moment, go back to an earlier day, and a cheat menu. They make the run unranked.",
-            ["Scores & profiles"] = "How mod features affect high scores, keeping the no-restart bonus, and separate save profiles.",
+            ["Pause menu"] = "Extra panels in the pause menu: the run's score and the night's enemies, and recording each night for Run Analytics.",
+            ["Practice"] = "Tools for practising a level: automatic savestates and their keys, and going back to an earlier day. Pause > Savestates and Pause > Debug are always there. They make the run unranked.",
+            ["Scores"] = "How mod features affect high scores, and keeping the no-restart bonus.",
             ["About & logs"] = "PalaceMod's version badge, its log, and a bundle of logs and settings to attach to bug reports.",
             ["Fixes"] = "Fixes for small bugs in the base game. Turn one off to restore vanilla behavior.",
             ["Performance"] = "Smoother frame pacing, battery saving and the optimizations on the next pages. Off hands frame limiting back to the game.",
@@ -142,6 +141,7 @@ namespace PalaceMod
             public List<SettingsPane.ActionButton> Buttons;
             public bool Off => Owner != null && !Owner.IsEnabled;
             public bool HeldOff => Owner != null && Owner.HeldOffByMasterSwitch;
+            public bool HasSwitch => Manager?.EnabledEntry != null; // a menu-only feature has none
         }
 
         private sealed class Page
@@ -777,10 +777,10 @@ namespace PalaceMod
             foreach (var part in page.Parts)
             {
                 // On a shared page a feature is introduced by its Enabled row (labelled with its name) and its settings
-                // are indented under it; a section without a switch gets a small heading, unless it follows the
-                // feature that switches it (Frame rate under Performance).
-                bool indent = page.Multi && (part.Manager != null || previous?.Manager == part.Owner);
-                if (page.Multi && part.Manager == null && (part.Owner == null || previous?.Manager != part.Owner))
+                // are indented under it; a section without a switch (no feature, or a menu-only feature) gets a small
+                // heading, unless it follows the feature that switches it (Frame rate under Performance).
+                bool indent = page.Multi && (part.HasSwitch || (part.Manager == null && previous?.Manager == part.Owner));
+                if (page.Multi && !part.HasSwitch && (part.Owner == null || part.Owner == part.Manager || previous?.Manager != part.Owner))
                 {
                     SubHeader(part.Section);
                     indent = false;
@@ -788,7 +788,7 @@ namespace PalaceMod
                 foreach (var entry in part.Entries)
                 {
                     bool isEnabled = IsEnabledEntry(part, entry);
-                    string label = isEnabled && page.Multi ? part.Section : entry.Definition.Key;
+                    string label = !isEnabled ? entry.Definition.Key : part.Manager.EnabledLabel ?? (page.Multi ? part.Section : entry.Definition.Key);
                     var row = entry.SettingType == typeof(bool) ? BuildToggle(entry, label)
                         : entry.Description.AcceptableValues is AcceptableValueRange<int> or AcceptableValueRange<float> ? BuildSlider(entry, label)
                         : BuildSelector(entry, label);

@@ -88,7 +88,7 @@ namespace PalaceMod.Builder.Editor
         private static bool CheckAvailable()
         {
             if (IsAvailable) return true;
-            Notify.Show(Feature<BuilderManager>.On ? "The Builder can't open right now" : "The Builder is turned off in Settings > Mods", NotifyKind.Warning, key: "builder-editor");
+            Notify.Show(Feature<BuilderManager>.On ? "The Builder can't open right now" : "The Builder isn't available (see the log)", NotifyKind.Warning, key: "builder-editor");
             return false;
         }
 

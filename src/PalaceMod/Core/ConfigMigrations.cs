@@ -15,6 +15,9 @@ using HarmonyLib;
 
     A changed default: players whose saved value is still the old default get the new one, once (a hidden marker in
     the "Migrations" section records it, so a player who sets the old value again keeps it).
+
+    A removed setting is dropped from the file (Removed), so a stale line doesn't linger. When its meaning moves to
+    another setting, Carry maps one old value to the new setting's value first (only if the new one isn't saved yet).
 */
 namespace PalaceMod
 {
@@ -42,6 +45,24 @@ namespace PalaceMod
         private static readonly (string section, string key, string oldDefault, string id)[] Defaults =
         [
             ("Savestates", "Automatic history", "10", "Savestates.Automatic history 40"),
+        ];
+
+        // Menus aren't features: these lost their Enabled switch (and Upgrade info its "Pause overview" one).
+        private static readonly (string section, string key)[] Removed =
+        [
+            ("Debug menu", "Enabled"),
+            ("Compendium", "Enabled"),
+            ("Profiles", "Enabled"),
+            ("Savestates", "Enabled"),
+            ("Builder", "Enabled"),
+            ("Upgrade info", "Pause overview"),
+        ];
+
+        // (old section, old key, old value) -> (section, key, value), applied before Removed.
+        private static readonly (string section, string key, string value, string toSection, string toKey, string toValue)[] Carry =
+        [
+            // Savestates turned off kept it from saving automatically; that's now "Automatic states".
+            ("Savestates", "Enabled", "false", "Savestates", "Automatic states", "Off"),
         ];
 
         private const string MarkerSection = "Migrations";
@@ -74,6 +95,19 @@ namespace PalaceMod
                     string.Join(", ", moves.Select(m => $"{m.from.Section}.{m.from.Key} -> {m.to.Section}.{m.to.Key}")));
 
             bool changed = moves.Count > 0;
+            foreach (var (section, key, value, toSection, toKey, toValue) in Carry)
+            {
+                var from = new ConfigDefinition(section, key);
+                var to = new ConfigDefinition(toSection, toKey);
+                if (!orphaned.TryGetValue(from, out var old) || !string.Equals(old.Trim(), value, StringComparison.OrdinalIgnoreCase)) continue;
+                if (orphaned.ContainsKey(to) || config.ContainsKey(to)) continue;
+                orphaned[to] = toValue;
+                Log.Core.Info($"Config migrations: {section}.{key} = {value} -> {toSection}.{toKey} = {toValue}");
+            }
+            foreach (var (section, key) in Removed)
+            {
+                if (orphaned.Remove(new ConfigDefinition(section, key))) changed = true;
+            }
             foreach (var (section, key, oldDefault, id) in Defaults)
             {
                 var marker = new ConfigDefinition(MarkerSection, id);

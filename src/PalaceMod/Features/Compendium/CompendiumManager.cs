@@ -13,7 +13,8 @@ namespace PalaceMod
     public class CompendiumManager : BaseManager
     {
         public override string FeatureSection => "Compendium";
-        public override string FeatureDescription => "Adds a Compendium to the pause menu: this level's waves, enemies, your units, buildings and upgrades, and all perks, with actual values.";
+        public override string FeatureDescription => "A Compendium in the pause menu: this level's waves, enemies, your units, buildings and upgrades, and all perks, with actual values.";
+        protected override bool HasEnabledSwitch => false; // just a menu
 
         private ModFrame frame;
         private bool showEarlierNights;
@@ -27,7 +28,7 @@ namespace PalaceMod
                 .AddTab("Units", BuildUnits)
                 .AddTab("Buildings", BuildBuildings)
                 .AddTab("Perks", BuildPerks);
-            PauseMenu.AddButton("compendium", "Compendium", Open, order: 10, visible: () => IsEnabled);
+            PauseMenu.AddButton("compendium", "Compendium", Open, order: 10);
             DevCommands.Register("compendium", "compendium [close]     open (or close) the Compendium", args =>
             {
                 if (args.Length > 0 && args[0] == "close") frame.Close();
@@ -41,14 +42,6 @@ namespace PalaceMod
             showEarlierNights = false;
             frame.Open();
         }
-
-        protected override void OnFeatureDisabled()
-        {
-            if (frame.IsOpen) frame.Close();
-            PauseMenu.Refresh();
-        }
-
-        protected override void OnFeatureEnabled() => PauseMenu.Refresh();
 
         private static string Coin(int amount) => $"{amount}<sprite name=\"coin\">";
 

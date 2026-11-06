@@ -93,7 +93,7 @@ namespace PalaceMod.Builder
         {
             if (!Available)
             {
-                page.Text("The Builder is turned off. Turn it on in Settings > Mods to play custom runs.");
+                page.Text("The Builder isn't available right now (see the log).");
                 return;
             }
             var designs = Designs();
@@ -187,7 +187,7 @@ namespace PalaceMod.Builder
         {
             if (!Available)
             {
-                Notify.Show("The Builder is turned off in Settings > Mods.", NotifyKind.Warning, 5f, "builder-menu");
+                Notify.Show("The Builder isn't available right now.", NotifyKind.Warning, 5f, "builder-menu");
                 frame.Close();
                 return;
             }

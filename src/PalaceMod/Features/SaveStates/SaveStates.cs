@@ -132,7 +132,7 @@ namespace PalaceMod
         /// <param name="name">Display name; null picks one ("State 3", "Quick save", "Dawn 4"...).</param>
         public static SaveStateInfo Capture(string name = null, SaveStateKind kind = SaveStateKind.Manual)
         {
-            if (!Feature<SaveStatesManager>.On) throw new InvalidOperationException("Savestates are turned off");
+            if (!Feature<SaveStatesManager>.On) throw new InvalidOperationException("Gameplay-changing features are turned off (Settings > Mods > General)");
             if (!CanCapture(out string reason)) throw new InvalidOperationException(reason);
             string level = CurrentLevel;
             var data = StateCapture.Capture();
@@ -155,7 +155,7 @@ namespace PalaceMod
         /// GameplayImpact. Throws InvalidOperationException with a player-facing reason when it can't.</summary>
         public static void Restore(SaveStateInfo state)
         {
-            if (!Feature<SaveStatesManager>.On) throw new InvalidOperationException("Savestates are turned off");
+            if (!Feature<SaveStatesManager>.On) throw new InvalidOperationException("Gameplay-changing features are turned off (Settings > Mods > General)");
             if (!CanRestore(state, out string reason)) throw new InvalidOperationException(reason);
             StateRestorer.Begin(state);
         }

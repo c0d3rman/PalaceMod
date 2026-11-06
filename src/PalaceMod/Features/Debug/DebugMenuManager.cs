@@ -8,9 +8,13 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 
 /*
-    Debug menu: an in-level sandbox for practice and theorycrafting, off by default because it's a cheat tool.
-    Opened from the pause menu ("Debug") or its key (` by default). Tabs: Run (gold, nights, game speed), Wave (edit
-    the next night), Build (free upgrades), Combat (god mode, healing), Loadout (swap weapon, perks and mutators).
+    Debug menu: a cheat menu for practice and theorycrafting. It's just a menu (no Enabled switch): pause > "Debug" or
+    its key (` by default); the "Gameplay-changing features" master switch hides it.
+    - In a level: Run (gold, nights, game speed), Wave (edit the next night), Build (free upgrades), Combat (god mode,
+      healing), Loadout (swap weapon, perks and mutators).
+    - On the level-select map: Progress (player level, XP, unlock everything, reset), Stages (locked/open/beaten),
+      Unlocks (weapons, perks, mutators). These change the player's real progression (ProgressionActions), so the
+      page suggests a scratch profile first.
 
     Steppers change their value with left/right and act on apply. The actions themselves live in DebugActions and
     are also dev commands (dbg.*), which double as test hooks. Every action marks the run via GameplayImpact.
@@ -22,12 +26,15 @@ namespace PalaceMod
         public override string FeatureSection => "Debug menu";
         public override bool AffectsRanking => true; // off while "Gameplay-changing features" is off
         public override string FeatureDescription =>
-            "Cheat menu for practice: gold, nights, waves, free buildings, god mode and loadout swaps. Open it from the pause menu. Using it makes the run unranked.";
-        protected override bool EnabledByDefault => false;
+            "Cheat menu in the pause menu: in a level, gold, nights, waves, free buildings, god mode and loadout swaps (the run becomes unranked); on the map, your level, stages and unlocks.";
+        protected override bool HasEnabledSwitch => false; // just a menu
+        // The achievement guard must hold even while the master switch hides the menu; the damage patch checks cheats itself.
+        protected override bool UnpatchWhenDisabled => false;
 
         private Keybind openKey;
-        private ModFrame frame;
-        private bool hintShown;
+        private ModFrame frame, mapFrame;
+        private bool hintShown, mapHintShown;
+        private string confirming; // the map's bulk action waiting for Yes/No, or null
 
         // Menu state.
         private static readonly int[] GoldAmounts = [1, 5, 10, 25, 50, 100, 250, 500, 1000];
@@ -40,8 +47,12 @@ namespace PalaceMod
         {
             base.Awake(plugin);
             openKey = Keybinds.Register(FeatureSection, "open", "Debug menu", new KeyboardShortcut(KeyCode.BackQuote),
-                "Opens or closes the debug menu during a level.", KeybindFlags.AllowInMenus);
-            PauseMenu.AddButton("debug-menu", "Debug", Open, order: 90, visible: () => IsEnabled && DebugActions.InLevel);
+                "Opens or closes the debug menu in a level or on the map.", KeybindFlags.AllowInMenus);
+            PauseMenu.AddButton("debug-menu", "Debug", Open, order: 90, visible: () => IsEnabled && (DebugActions.InLevel || ProgressionActions.OnMap));
+            AchievementGuard.Stages = plugin.Config.Bind(FeatureSection, "Achievement guard stages", "", new ConfigDescription(
+                "Stages the debug menu marked beaten; they don't grant their Steam achievement until won for real.", null, new SettingTags { Hidden = true }));
+            AchievementGuard.Level = plugin.Config.Bind(FeatureSection, "Achievement guard level", false, new ConfigDescription(
+                "The debug menu raised the player level; the map doesn't grant the max-level achievement.", null, new SettingTags { Hidden = true }));
             GameplayImpact.Reset += OnImpactReset;
             SceneManager.sceneLoaded += (_, _) =>
             {
@@ -56,12 +67,14 @@ namespace PalaceMod
         {
             if (!openKey.Down) return;
             if (frame != null && frame.IsOpen) frame.Close();
-            else if (UIFrameManager.instance != null && UIFrameManager.instance.ActiveFrame == null && DebugActions.InLevel) Open();
+            else if (mapFrame != null && mapFrame.IsOpen) mapFrame.Close();
+            else if (UIFrameManager.instance != null && UIFrameManager.instance.ActiveFrame == null && (DebugActions.InLevel || ProgressionActions.OnMap)) Open();
         }
 
         protected override void OnFeatureDisabled()
         {
             if (frame != null && frame.IsOpen) frame.Close();
+            if (mapFrame != null && mapFrame.IsOpen) mapFrame.Close();
             DebugActions.SetGodMode(false);
             DebugActions.SetInvulnerableKingdom(false);
             if (!DebugActions.IsVanillaSpeed(DebugActions.Speed))
@@ -87,7 +100,13 @@ namespace PalaceMod
 
         private void Open()
         {
-            if (!IsEnabled || !DebugActions.InLevel) return;
+            if (!IsEnabled) return;
+            if (ProgressionActions.OnMap && ProgressionActions.Ready)
+            {
+                OpenMap();
+                return;
+            }
+            if (!DebugActions.InLevel) return;
             frame ??= new ModFrame("Debug")
                 .AddTab("Run", BuildRunTab)
                 .AddTab("Wave", BuildWaveTab)
@@ -117,6 +136,7 @@ namespace PalaceMod
                 Notify.Show(e.Message, NotifyKind.Warning, 3f, "debug-menu");
             }
             if (frame != null && frame.IsOpen) frame.Refresh();
+            if (mapFrame != null && mapFrame.IsOpen) mapFrame.Refresh();
         }
 
         private static string Capitalize(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s.Substring(1);
@@ -311,6 +331,135 @@ namespace PalaceMod
             }
         }
 
+        // ---- Map: progression ------------------------------------------------------------------------------------
+
+        private const string ProfileNote = "These change your real progression and are saved at once. To keep yours, switch to a scratch profile first (title screen > Profiles).";
+
+        private void OpenMap()
+        {
+            mapFrame ??= new ModFrame("Debug")
+                .AddTab("Progress", BuildProgressTab)
+                .AddTab("Stages", BuildStagesTab)
+                .AddTab("Unlocks", BuildUnlocksTab);
+            confirming = null;
+            mapFrame.Open();
+            if (!mapHintShown && mapFrame.IsOpen)
+            {
+                mapHintShown = true;
+                Notify.Show("The map shows changes after you re-enter it (Progress > Reload map).", NotifyKind.Info, 5f, "debug-menu-hint");
+            }
+        }
+
+        private static string LevelText()
+        {
+            int level = ProgressionActions.Level, max = ProgressionActions.MaxRewardLevel;
+            return level >= max ? $"{level}  (all rewards)" : $"{level} of {max}";
+        }
+
+        private void BuildProgressTab(ModPage page)
+        {
+            page.Text(ProfileNote);
+            page.Header("Level");
+            Stepper(page, "Player level", LevelText, d => Run(() => ProgressionActions.SetLevel(ProgressionActions.Level + d), quiet: true), null,
+                "Left/right change your level by one (XP goes to 0). Each level up to the last reward unlocks the next weapon, perk or mutator.");
+            Stepper(page, "XP", () => $"{ProgressionActions.Xp} / {ProgressionActions.XpNeeded}",
+                d => Run(() => ProgressionActions.SetXp(ProgressionActions.Xp + d * Mathf.Max(1, ProgressionActions.XpNeeded / 10)), quiet: true), null,
+                "XP towards the next level. Left/right change it by a tenth of a level.");
+
+            page.Header("Everything");
+            if (confirming == null)
+            {
+                page.Button("Unlock everything", () => Confirm("unlock"),
+                    "Every stage beaten and your level raised to the last reward, so every weapon, perk and mutator is unlocked. Asks first.");
+                page.Button("Reset progression", () => Confirm("reset"),
+                    "Back to level 1 with no stage beaten. Scores and runs in progress are kept; Profiles > Reset progress is the full wipe. Asks first.");
+            }
+            else
+            {
+                string question = confirming == "unlock" ? "Unlock every stage, weapon, perk and mutator?" : "Reset to level 1 with no stage beaten?";
+                page.Text(question);
+                page.Button(confirming == "unlock" ? "Yes, unlock everything" : "Yes, reset progression", () =>
+                {
+                    string action = confirming;
+                    confirming = null;
+                    Run(action == "unlock" ? ProgressionActions.UnlockEverything : ProgressionActions.ResetProgression);
+                }, question);
+                page.Button("No", () => Confirm(null), question);
+            }
+
+            page.Header("Map");
+            page.Button("Reload map", () =>
+            {
+                mapFrame?.Close();
+                Run(ProgressionActions.ReloadMap, quiet: true);
+            }, "Re-enters the map so it shows what you changed here.");
+        }
+
+        private void Confirm(string action)
+        {
+            confirming = action;
+            mapFrame?.Refresh();
+        }
+
+        private static string StageText(ProgressionActions.StageState state) => state switch
+        {
+            ProgressionActions.StageState.Beaten => "Beaten",
+            ProgressionActions.StageState.Open => "Open",
+            _ => "Locked",
+        };
+
+        private void BuildStagesTab(ModPage page)
+        {
+            page.Text("Left/right: locked, open (playable) or beaten. Beating a stage opens the next ones and the items it unlocks.");
+            foreach (var s in ProgressionActions.Stages)
+            {
+                var stage = s;
+                Stepper(page, ProgressionActions.StageName(stage), () => StageText(ProgressionActions.StateOf(stage)), d =>
+                {
+                    int next = Mathf.Clamp((int)ProgressionActions.StateOf(stage) + d, 0, 2);
+                    if (next != (int)ProgressionActions.StateOf(stage))
+                        Run(() => ProgressionActions.SetStage(stage, (ProgressionActions.StageState)next), quiet: true);
+                }, null, stage.unlockRequirement == null
+                    ? "Always open. Left/right mark it beaten or not."
+                    : $"Opens when {ProgressionActions.StageName(stage.unlockRequirement)} is beaten. Locking it un-beats that stage too.");
+            }
+        }
+
+        private void BuildUnlocksTab(ModPage page)
+        {
+            page.Text("Apply toggles an item. Items unlock by level or by beating a stage, so toggling one changes that.");
+            foreach (var category in new[] { DebugActions.Category.Weapon, DebugActions.Category.Perk, DebugActions.Category.Mutator })
+            {
+                var items = DebugActions.AllOf(category).ToList();
+                string title = category switch { DebugActions.Category.Weapon => "Weapons", DebugActions.Category.Perk => "Perks", _ => "Mutators" };
+                page.Header($"{title}  {items.Count(e => e.IsUnlocked)}/{items.Count}");
+                foreach (var e in items)
+                {
+                    var item = e;
+                    bool always = ProgressionActions.AlwaysUnlocked(item);
+                    int reward = ProgressionActions.RewardLevel(item);
+                    string value = always ? "Always" : item.IsUnlocked ? "Unlocked" : reward > 0 ? $"Locked (level {reward + 1})" : "Locked";
+                    page.Row(DebugActions.DisplayName(item), value, () => ProgressionActions.HowUnlocked(item),
+                        always ? null : () => Run(() => ProgressionActions.SetUnlocked(item, !item.IsUnlocked), quiet: true), item.icon);
+                }
+            }
+        }
+
+        // ---- Achievements ---------------------------------------------------------------------------------------
+
+        [HarmonyPatch(typeof(AchievementManager), nameof(AchievementManager.LevelBeaten))]
+        private class AchievementManager_LevelBeaten_Patch
+        {
+            private static bool Prefix(string _scene) => AchievementGuard.AllowLevelBeaten(_scene);
+        }
+
+        [HarmonyPatch(typeof(AchievementManager), nameof(AchievementManager.UnlockAchievement))]
+        private class AchievementManager_UnlockAchievement_Patch
+        {
+            private static bool Prefix(AchievementManager.Achievements _achievement) =>
+                _achievement != AchievementManager.Achievements.MAXLEVEL_REACHED || AchievementGuard.AllowMaxLevel();
+        }
+
         // ---- Damage block -----------------------------------------------------------------------------------------
 
         [HarmonyPatch(typeof(Hp), nameof(Hp.TakeDamage))]
@@ -363,9 +512,10 @@ namespace PalaceMod
         {
             DevCommands.Register("dbg.menu", "dbg.menu [close]       open (or close) the debug menu", args =>
             {
-                if (args.FirstOrDefault() == "close") frame?.Close();
+                if (args.FirstOrDefault() == "close") { frame?.Close(); mapFrame?.Close(); }
                 else Open();
-                return frame != null && frame.IsOpen ? "open" : IsEnabled ? "closed" : "closed (Debug menu is disabled)";
+                return frame != null && frame.IsOpen ? "open (level)" : mapFrame != null && mapFrame.IsOpen ? "open (map)"
+                    : IsEnabled ? "closed" : "closed (gameplay-changing features are off)";
             });
             // Dev launches load levels without the level select, which is what points the match save at the level;
             // without it nothing is saved and "reload today" can't be tested.
@@ -381,6 +531,30 @@ namespace PalaceMod
                 }
                 SceneTransitionManager.instance.TransitionFromNullToLevel(args[0]);
                 return MatchSaveLoadHandler.OverwriteCurrentSave ? "fresh run" : "continuing";
+            });
+            DevCommands.Register("dbg.prog",
+                "dbg.prog [level <n>|xp <n>|unlock|lock <item>|stage <name> locked|open|beaten|all|reset|reload|guard]   show or change progression (real save!)", args =>
+            {
+                if (args.Length == 0) return ProgressionActions.Describe();
+                string rest = string.Join(" ", args.Skip(1));
+                switch (args[0])
+                {
+                    case "level": return ProgressionActions.SetLevel(int.Parse(args[1], CultureInfo.InvariantCulture));
+                    case "xp": return ProgressionActions.SetXp(int.Parse(args[1], CultureInfo.InvariantCulture));
+                    case "unlock": return ProgressionActions.SetUnlocked(FindEquippable(rest), true);
+                    case "lock": return ProgressionActions.SetUnlocked(FindEquippable(rest), false);
+                    case "stage":
+                    {
+                        if (args.Length < 3 || !Enum.TryParse(args[args.Length - 1], true, out ProgressionActions.StageState state))
+                            throw new ArgumentException("usage: dbg.prog stage <name> locked|open|beaten");
+                        return ProgressionActions.SetStage(ProgressionActions.FindStage(string.Join(" ", args.Skip(1).Take(args.Length - 2))), state);
+                    }
+                    case "all": return ProgressionActions.UnlockEverything();
+                    case "reset": return ProgressionActions.ResetProgression();
+                    case "reload": return ProgressionActions.ReloadMap();
+                    case "guard": return AchievementGuard.Describe();
+                    default: throw new ArgumentException("unknown progression command");
+                }
             });
             DevCommands.Register("dbg.state", "dbg.state              gold, night, speed and cheats", _ =>
             {
@@ -455,8 +629,8 @@ namespace PalaceMod
             DevCommands.Register("dbg.heal", "dbg.heal               revive and heal the king, units and buildings", _ => DebugActions.HealAll());
             DevCommands.Register("dbg.revive", "dbg.revive             revive the king", _ => DebugActions.ReviveKing());
             DevCommands.Register("dbg.kill", "dbg.kill               kill every enemy", _ => DebugActions.KillEnemies());
-            DevCommands.Register("dbg.god", "dbg.god [on|off]       king takes no damage (needs the debug menu enabled)", args => DebugActions.SetGodMode(ParseOnOff(args, DebugActions.GodMode)));
-            DevCommands.Register("dbg.invuln", "dbg.invuln [on|off]    units and buildings take no damage (needs the debug menu enabled)",
+            DevCommands.Register("dbg.god", "dbg.god [on|off]       king takes no damage", args => DebugActions.SetGodMode(ParseOnOff(args, DebugActions.GodMode)));
+            DevCommands.Register("dbg.invuln", "dbg.invuln [on|off]    units and buildings take no damage",
                 args => DebugActions.SetInvulnerableKingdom(ParseOnOff(args, DebugActions.InvulnerableKingdom)));
             DevCommands.Register("dbg.speed", "dbg.speed <x>          game speed", args => DebugActions.SetSpeed(ParseFloat(args.FirstOrDefault() ?? "1")));
             DevCommands.Register("dbg.loadout", "dbg.loadout [+name|-name ...]   list, or change and apply the loadout (a weapon replaces the current one)", args =>

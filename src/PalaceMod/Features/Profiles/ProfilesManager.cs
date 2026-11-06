@@ -24,7 +24,8 @@ namespace PalaceMod.Profiles
     {
         public override string FeatureSection => "Profiles";
         public override string FeatureDescription =>
-            "Adds a Profiles button to the main menu: keep separate progressions, start fresh, and switch between them. Every change is backed up first.";
+            "A Profiles button on the main menu: keep separate progressions, start fresh, and switch between them. Every change is backed up first.";
+        protected override bool HasEnabledSwitch => false; // just a menu
 
         public ProfileStore Store { get; private set; }
 
@@ -54,7 +55,7 @@ namespace PalaceMod.Profiles
                 Log.Error($"Unavailable, the save folder was left alone", e);
             }
             menu = new ProfilesMenu(this);
-            TitleMenu.AddButton("profiles", "Profiles", menu.OpenFromTitle, visible: () => IsEnabled, order: 10);
+            TitleMenu.AddButton("profiles", "Profiles", menu.OpenFromTitle, order: 10);
             RegisterDevCommands();
         }
 
@@ -73,8 +74,6 @@ namespace PalaceMod.Profiles
             }
             menu.Update();
         }
-
-        protected override void OnFeatureDisabled() => menu.Remove();
 
         /// <summary>True on the idle main menu, the only place profiles can change.</summary>
         public static bool OnMainMenu =>

@@ -76,8 +76,8 @@ namespace PalaceMod.Profiles
             if (built && frame != null && frame.gameObject.activeSelf) Refresh(manager.Store.Active.id);
         }
 
-        /// <summary>Takes everything out of the game's UI (feature turned off).</summary>
-        public void Remove()
+        /// <summary>Takes everything out of the game's UI, to build again for a reloaded menu scene.</summary>
+        private void Remove()
         {
             Close();
             foreach (var obj in new Object[] { frame?.gameObject, confirmFrame?.gameObject })

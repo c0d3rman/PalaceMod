@@ -22,11 +22,10 @@ namespace PalaceMod
     public partial class UpgradesViewManager : BaseManager
     {
         public override string FeatureSection => "Upgrade info";
-        public override string FeatureDescription => "Shows which upgrades buildings and units have, and which are still available.";
+        public override string FeatureDescription => "Shows which upgrades buildings and units have, and which are still available, next to buildings and on unit icons. Pause > Upgrades lists them all either way.";
 
         internal ConfigEntry<bool> NearBuilding;
         internal ConfigEntry<bool> ShowFuture;
-        internal ConfigEntry<bool> PauseOverview;
         internal ConfigEntry<bool> MarkUnits;
         internal Keybind DetailsKey;
 
@@ -38,8 +37,6 @@ namespace PalaceMod
                 "Standing next to a building shows the upgrades it has and the options for its next one, even when you can't afford it yet."));
             ShowFuture = cfg.Bind(FeatureSection, "Show later levels", true, new ConfigDescription(
                 "The building panel also lists the options of the levels after the next one."));
-            PauseOverview = cfg.Bind(FeatureSection, "Pause overview", true, new ConfigDescription(
-                "Adds an Upgrades button to the pause menu that lists every building's upgrades."));
             MarkUnits = cfg.Bind(FeatureSection, "Mark upgraded units", true, new ConfigDescription(
                 "Stars on unit icons show how many times their building was upgraded; the pause menu lists differently upgraded units separately and names their upgrades."));
 
@@ -51,11 +48,6 @@ namespace PalaceMod
             {
                 if (!MarkUnits.Value) ClearUnitMarks();
                 RefreshOpenPauseUnits();
-            };
-            PauseOverview.SettingChanged += (_, _) =>
-            {
-                if (!PauseOverview.Value) CloseOverview();
-                RefreshPauseButton();
             };
 
             RegisterDevCommands();
@@ -73,16 +65,10 @@ namespace PalaceMod
         {
             HidePanel();
             ClearUnitMarks();
-            CloseOverview();
-            RefreshPauseButton();
             RefreshOpenPauseUnits();
         }
 
-        protected override void OnFeatureEnabled()
-        {
-            RefreshPauseButton();
-            RefreshOpenPauseUnits();
-        }
+        protected override void OnFeatureEnabled() => RefreshOpenPauseUnits();
 
         public override void OnDestroy()
         {
