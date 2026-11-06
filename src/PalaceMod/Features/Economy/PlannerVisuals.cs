@@ -113,6 +113,61 @@ namespace PalaceMod.Economy
             }
         }
 
+        // ---- Income sources ---------------------------------------------------------------------------------
+
+        internal sealed class SourceBar
+        {
+            public string Label, Note;
+            public int Cost, Earned;
+            /// <summary>First level of its building (a thin rule above it separates buildings).</summary>
+            public bool First;
+        }
+
+        private const float BarRow = 46f, BarLabel = 250f, BarNet = 70f;
+
+        public static float SourceBarsHeight(int rows) => rows * BarRow + 10f;
+
+        /// <summary>One line per building and level: a gold bar for what it pays by the end over a copper bar for what it
+        /// costs, on one scale, with what's left over and a note (payback, pay per night) under the bars.</summary>
+        public static void SourceBars(RectTransform parent, float width, IList<SourceBar> rows)
+        {
+            var panel = Panel(parent, "Sources", width, SourceBarsHeight(rows.Count), 0.45f);
+            float max = Mathf.Max(1f, rows.Max(r => Mathf.Max(r.Cost, r.Earned)));
+            float barArea = width - BarLabel - BarNet - 24f;
+            var copper = AnalyticsGraph.Copper;
+            for (int i = 0; i < rows.Count; i++)
+            {
+                var r = rows[i];
+                float top = -6f - i * BarRow;
+                if (r.First && i > 0)
+                {
+                    var rule = G.Rect(panel, "Rule", G.Fade(G.Dim, 0.5f));
+                    rule.anchorMin = rule.anchorMax = rule.pivot = new Vector2(0f, 1f);
+                    rule.anchoredPosition = new Vector2(10f, top + 2f);
+                    rule.sizeDelta = new Vector2(width - 20f, 1f);
+                }
+                var label = G.Label(panel, r.Label, 21f, r.First ? ModStyle.Gold : G.Fade(ModStyle.Gold, 0.8f), TextAlignmentOptions.MidlineLeft, r.First ? ModStyle.BoldFont : ModStyle.BodyFont);
+                Place(label.rectTransform, 12f, top, BarLabel - 16f, 26f);
+                float x0 = BarLabel;
+                var earned = G.Rect(panel, "Earned", ModStyle.Gold);
+                Place(earned, x0, top - 4f, Mathf.Max(2f, barArea * r.Earned / max), 10f);
+                var cost = G.Rect(panel, "Cost", copper);
+                Place(cost, x0, top - 16f, Mathf.Max(2f, barArea * r.Cost / max), 6f);
+                int net = r.Earned - r.Cost;
+                var value = G.Label(panel, (net > 0 ? "+" : "") + net.ToString("N0"), 21f, net >= 0 ? ModStyle.Bright : Red, TextAlignmentOptions.MidlineRight, ModStyle.BoldFont);
+                Place(value.rectTransform, width - BarNet - 12f, top, BarNet, 26f);
+                var note = G.Label(panel, r.Note, 17f, G.Dim, TextAlignmentOptions.MidlineLeft, ModStyle.ButtonFont);
+                Place(note.rectTransform, x0, top - 22f, barArea + BarNet, 20f);
+            }
+        }
+
+        private static void Place(RectTransform rect, float x, float y, float w, float h)
+        {
+            rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0f, 1f);
+            rect.anchoredPosition = new Vector2(x, y);
+            rect.sizeDelta = new Vector2(w, h);
+        }
+
         // ---- Map ----------------------------------------------------------------------------------------------
 
         /// <summary>The map of every slot, <paramref name="selected"/> highlighted (and its type lit), slots in

@@ -102,6 +102,9 @@ namespace PalaceMod.Economy
                 w.Treasure2 = perks.treasureHunterGoldAmountWave2;
                 w.Treasure3 = perks.treasureHunterGoldAmountWave3;
             }
+            w.Outpost = perks != null && perks.OutpostEquipped;
+            w.SpawnGold = PerkCapture.SpawnGold(spawner);
+            ReadPerks(snap, index);
 
             var guild = UpgradeBuildersGuild.Instance;
             w.GuildActive = w.GuildUsed = guild != null && guild.isActiveAndEnabled && guild.gameObject.scene == snap.Scene;
@@ -110,6 +113,65 @@ namespace PalaceMod.Economy
             w.CastleUpActive = castleUp != null && castleUp.isActiveAndEnabled && castleUp.gameObject.scene == snap.Scene;
             if (castleUp != null) CastleUpDiscounts(castleUp, w);
             return snap;
+        }
+
+        // ---- Perks ------------------------------------------------------------------------------------------------
+
+        /// <summary>The perk behind <paramref name="perk"/> in the world's list (added the first time).</summary>
+        private static EconPerk AddPerk(EconWorld w, Equippable perk, EconPerkKind kind)
+        {
+            if (perk == null) return null;
+            var p = w.Perks.FirstOrDefault(x => x.Key == perk.name);
+            if (p != null) return p;
+            p = new EconPerk { Key = perk.name, Name = Translate(perk.LOCIDENTIFIER_NAME, perk.displayName), Kind = kind, Equipped = PerkManager.IsEquipped(perk) };
+            w.Perks.Add(p);
+            return p;
+        }
+
+        // Every perk that moves gold on this map, with the level's own numbers (PerkManager's fields as serialized in the
+        // level, and the components PerkCapture recorded before they destroyed themselves).
+        private static void ReadPerks(EconSnapshot snap, Dictionary<BuildSlot, int> index)
+        {
+            var w = snap.World;
+            var pm = PerkManager.instance;
+            if (pm == null) return;
+            var interest = PerkCapture.InterestFor(snap.Scene);
+            var interestPerk = interest?.Perk ?? (InterestPerk.instance != null ? Traverse.Create(InterestPerk.instance).Field("requiredEquippable").GetValue<Equippable>() : null);
+            if (AddPerk(w, interestPerk, EconPerkKind.Interest) is { } ip)
+            {
+                ip.Each = interest?.Each ?? w.InterestEach;
+                ip.Max = interest?.Max ?? w.InterestMax;
+            }
+            else snap.Notes.Add("Interest's numbers weren't recorded at level load, so it can't be tried");
+            if (AddPerk(w, pm.treasureHunter, EconPerkKind.TreasureHunter) is { } th)
+            {
+                th.T1 = pm.treasureHunterGoldAmountWave1;
+                th.T2 = pm.treasureHunterGoldAmountWave2;
+                th.T3 = pm.treasureHunterGoldAmountWave3;
+            }
+            if (AddPerk(w, pm.royalMint, EconPerkKind.RoyalMint) is { } mint) mint.Amount = pm.royalMint_startGoldBonus;
+            if (AddPerk(w, pm.loan, EconPerkKind.Loan) is { } loan)
+            {
+                loan.Amount = pm.loanBonusMoney;
+                loan.Amount2 = pm.loanInterestMoney;
+            }
+            if (AddPerk(w, pm.ratGodPerk, EconPerkKind.RatGod) is { } rat) rat.Factor = pm.ratGod_GoldModifyer;
+            if (w.Slots.Any(s => s.OutpostTowers > 0)) AddPerk(w, pm.outpost, EconPerkKind.Outpost);
+            if (w.SpawnGold == null) snap.Notes.Add("The waves' gold before perks wasn't recorded at level load, so Rat God and Loan can't be tried");
+
+            foreach (var c in PerkCapture.SlotMods(snap.Scene))
+            {
+                if (!index.TryGetValue(c.Slot, out int i)) continue;
+                var e = w.Slots[i];
+                // Cost and income changes work on BuildSlot.Upgrades: a follower's are its owner's.
+                int tree = c.RootDifference == null && e.Owner >= 0 ? e.Owner : i;
+                e.PerkMods.Add(new EconPerkMod
+                {
+                    Key = c.Perk != null ? c.Perk.name : "?", Tree = tree, Cost = c.Cost, Income = c.Income, CostSkip = c.CostSkip,
+                    RootDifference = c.RootDifference, Applied = c.Applied,
+                });
+                AddPerk(w, c.Perk, EconPerkKind.Building);
+            }
         }
 
         // ---- One slot ---------------------------------------------------------------------------------------------
@@ -148,6 +210,11 @@ namespace PalaceMod.Economy
             e.CastleUpTags = slot.GetComponentsInChildren<TaggedObject>(true)
                 .Count(o => o != null && o.Tags.Contains(TagManager.ETag.WallOrTower) && o.GetComponentInParent<BuildSlot>(true) == slot);
             e.CastleUpReceivers = Owned<CaslteUpReciever>(slot, c => Traverse.Create(c).Field("buildSlot").GetValue<BuildSlot>()).Count();
+            e.ObjectName = slot.gameObject.name;
+            e.IsShrine = Owned<Shrine>(slot).Any();
+            e.IsBuilding = Owned<TaggedObject>(slot).Any(o => o.Tags.Contains(TagManager.ETag.Building));
+            e.OutpostTowers = Owned<OutpostPerk>(slot, c => Traverse.Create(c).Field("buildSlot").GetValue<BuildSlot>())
+                .Sum(c => Traverse.Create(c).Field("numberOfTowersToActivate").GetValue<int>());
 
             var upgrades = slot.OwnUpgrades;
             for (int i = 0; i < upgrades.Count; i++)
@@ -172,18 +239,21 @@ namespace PalaceMod.Economy
                         StartsCastleUp = Activates<UpgradeCastleUp>(branch),
                         DoublesHarbour = Activates<FishingHarbourUpgrade>(branch),
                         BusyUntilDawn = Activates<TempleUpgrade>(branch),
+                        Prayers = Activates<TemplePrayers>(branch),
+                        WisdomGold = ActivatedComponent<TempleWisdom>(branch) is { } wisdom
+                            ? Mathf.Max(1, Traverse.Create(wisdom).Field("goldForDestroyedBuilding").GetValue<int>()) : 0,
                     });
                     var castleUp = ActivatedComponent<UpgradeCastleUp>(branch);
                     if (castleUp != null) CastleUpDiscounts(castleUp, snap.World);
                 }
                 e.Steps.Add(step);
             }
-            ReadModifiers(slot, e);
+            ReadModifiers(slot, e, snap.World);
             if (e.Modifiers.Any(m => m.Kind == EconModifierKind.Harbour) && upgrades.Count > 1 && upgrades[1].upgradeBranches.Count > 0)
                 e.HarbourField = upgrades[1].upgradeBranches[0].goldIncomeChange;
         }
 
-        private static void ReadModifiers(BuildSlot slot, EconSlot e)
+        private static void ReadModifiers(BuildSlot slot, EconSlot e, EconWorld w)
         {
             var mine = slot.GetComponent<MineShaft>();
             if (mine != null)
@@ -193,21 +263,26 @@ namespace PalaceMod.Economy
                     Kind = EconModifierKind.Mine, Step = mine.incomeReductionPerTurn, Min = mine.minimumIncome,
                     SustainableMin = mine.minimumIncomeWithSustainableMining, SustainableReset = mine.resetIncomeSustainableMining,
                     Sustainable = mine.sustainableMiningPerk != null && PerkManager.IsEquipped(mine.sustainableMiningPerk),
+                    PerkKey = mine.sustainableMiningPerk != null ? mine.sustainableMiningPerk.name : null,
                 });
+                AddPerk(w, mine.sustainableMiningPerk, EconPerkKind.Building);
             }
             foreach (var harbour in slot.GetComponentsInChildren<FishingHarbour>(true))
             {
                 if (harbour.buildSlot != slot) continue;
                 var t = Traverse.Create(harbour);
                 int max = harbour.maximumIncome;
+                var perk = t.Field("perk").GetValue<Equippable>();
+                bool on = perk != null && PerkManager.instance != null && PerkManager.instance.CurrentlyEquipped.Contains(perk);
+                int boats = t.Field("additionalBoatCapacity").GetValue<int>();
                 // Start adds the perk's boats; a harbour that hasn't started yet (maximumBoats still 0) will.
-                if (t.Field("maximumBoats").GetValue<int>() == 0)
+                if (t.Field("maximumBoats").GetValue<int>() == 0 && on) max += boats;
+                e.Modifiers.Add(new EconModifier
                 {
-                    var perk = t.Field("perk").GetValue<Equippable>();
-                    if (perk != null && PerkManager.instance != null && PerkManager.instance.CurrentlyEquipped.Contains(perk))
-                        max += t.Field("additionalBoatCapacity").GetValue<int>();
-                }
-                e.Modifiers.Add(new EconModifier { Kind = EconModifierKind.Harbour, Step = harbour.incomeIncreasePerTurn, Max = max });
+                    Kind = EconModifierKind.Harbour, Step = harbour.incomeIncreasePerTurn, Max = max,
+                    PerkKey = perk != null ? perk.name : null, PerkBoats = boats, PerkOn = on,
+                });
+                AddPerk(w, perk, EconPerkKind.Building);
             }
             if (slot.GetComponent<IncreaseIncomeDaily>() != null) e.Modifiers.Add(new EconModifier { Kind = EconModifierKind.Daily });
         }
@@ -220,22 +295,33 @@ namespace PalaceMod.Economy
             var upgrades = slot.Upgrades;
             foreach (var c in Owned<PerkCostModifyer>(slot).Where(c => WillRun(c, slot)))
             {
-                if (!PerkManager.IsEquipped(c.requiredPerk)) continue;
+                bool on = PerkManager.IsEquipped(c.requiredPerk);
+                var skip = upgrades.Select(u => slot.UpgradesWithCostsLoadedFromSave.Contains(u)).ToArray();
+                e.PerkMods.Add(new EconPerkMod { Key = c.requiredPerk != null ? c.requiredPerk.name : "?", Tree = tree.Index, Cost = (int[])c.upgradeCostChange.Clone(), CostSkip = skip, Applied = on, Pending = true });
+                AddPerk(w, c.requiredPerk, EconPerkKind.Building);
+                if (!on) continue;
                 // Steps already taken don't matter any more.
                 for (int i = tree.Level; i < upgrades.Count && i < tree.Steps.Count && i < c.upgradeCostChange.Length; i++)
-                    if (!slot.UpgradesWithCostsLoadedFromSave.Contains(upgrades[i])) tree.Steps[i].Cost += c.upgradeCostChange[i];
+                    if (!skip[i]) tree.Steps[i].Cost += c.upgradeCostChange[i];
                 snap.Notes.Add($"{e.TypeName} #{e.Index}: perk cost change still to apply (to #{tree.Index})");
             }
             foreach (var c in slot.GetComponents<PerkIncomeModifyer>().Where(c => WillRun(c, slot)))
             {
-                if (!PerkManager.IsEquipped(c.requiredPerk)) continue;
+                bool on = PerkManager.IsEquipped(c.requiredPerk);
+                e.PerkMods.Add(new EconPerkMod { Key = c.requiredPerk != null ? c.requiredPerk.name : "?", Tree = tree.Index, Income = (int[])c.upgradeIncomeChange.Clone(), Applied = on, Pending = true });
+                AddPerk(w, c.requiredPerk, EconPerkKind.Building);
+                if (!on) continue;
                 for (int i = tree.Level; i < tree.Steps.Count && i < c.upgradeIncomeChange.Length; i++)
                     foreach (var b in tree.Steps[i].Branches) b.IncomeChange += c.upgradeIncomeChange[i];
                 snap.Notes.Add($"{e.TypeName} #{e.Index}: perk income change still to apply (to #{tree.Index})");
             }
             foreach (var c in Owned<PerkUnrestrictedUpgrading>(slot, c => Traverse.Create(c).Field("buildSlot").GetValue<BuildSlot>()).Where(c => WillRun(c, slot)))
             {
-                if (PerkManager.IsEquipped(Traverse.Create(c).Field("requiredEquippable").GetValue<Equippable>())) e.RootLevelDifference = -100;
+                var perk = Traverse.Create(c).Field("requiredEquippable").GetValue<Equippable>();
+                bool on = PerkManager.IsEquipped(perk);
+                e.PerkMods.Add(new EconPerkMod { Key = perk != null ? perk.name : "?", Tree = e.Index, RootDifference = e.RootLevelDifference, Applied = on, Pending = true });
+                AddPerk(w, perk, EconPerkKind.Building);
+                if (on) e.RootLevelDifference = -100;
             }
             foreach (var plow in Owned<Mill_ImprovedPlow>(slot, c => Traverse.Create(c).Field("buildSlot").GetValue<BuildSlot>()).Where(c => WillRun(c, slot)))
             {
