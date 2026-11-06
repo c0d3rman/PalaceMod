@@ -132,7 +132,7 @@ namespace PalaceMod.Economy
             foreach (var s in Scenarios)
             {
                 s.Actions ??= [];
-                s.Actions.RemoveAll(a => a == null || string.IsNullOrEmpty(a.Slot));
+                s.Actions.RemoveAll(a => a == null || (a.Kind != EconActionKind.Gold && string.IsNullOrEmpty(a.Slot)));
                 s.Name = string.IsNullOrWhiteSpace(s.Name) ? FreeName("Plan") : s.Name;
                 if (string.IsNullOrEmpty(s.Id)) s.Id = Guid.NewGuid().ToString("N").Substring(0, 8);
                 s.Perks ??= [];

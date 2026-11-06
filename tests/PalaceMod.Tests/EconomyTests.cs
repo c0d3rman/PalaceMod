@@ -537,6 +537,7 @@ namespace PalaceMod.Tests
             Assert.Null(error, "fresh load");
             Assert.Equal(1, file.Scenarios.Count, "one empty plan");
             file.CurrentScenario.Actions.Add(new EconAction { Day = 3, Slot = "abc", Level = 2, Choice = "knights" });
+            file.CurrentScenario.Actions.Add(new EconAction { Kind = EconActionKind.Gold, Day = 4, Amount = 12 });
             var copy = file.CurrentScenario.CopyAs(file.FreeName("Plan 1"));
             file.Scenarios.Add(copy);
             file.Compare = copy.Id;
@@ -546,6 +547,7 @@ namespace PalaceMod.Tests
             Assert.Equal(2, back.Scenarios.Count, "plans");
             Assert.Equal("Plan 1 2", back.Scenarios[1].Name, "free name");
             Assert.Equal("knights", back.CurrentScenario.Actions[0].Choice, "choice kept");
+            Assert.Equal(12, back.CurrentScenario.Actions[1].Amount ?? 0, "gold items kept");
             Assert.Equal(copy.Id, back.CompareScenario?.Id, "compare kept");
 
             System.IO.File.WriteAllText(PlannerStore.FileFor(dir.Path, "Broken"), "{ not json");

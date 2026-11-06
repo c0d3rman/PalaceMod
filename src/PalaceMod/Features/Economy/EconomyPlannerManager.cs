@@ -595,6 +595,8 @@ namespace PalaceMod
                 else if (w.Slots.Any(d => d.Owner == src.Slot.Index && d.EverPays)) src.Note = "with its fields";
                 else if (src.Slot.IsShrine) src.Note = "only once unlocked by deaths nearby";
                 if (pick.Level > 0) src.Note = (src.Note != null ? src.Note + "; " : "") + $"next {group.Key} is already level {pick.Level}";
+                // Levels that never earn anything (towers, a castle's fighting choices) aren't income sources.
+                src.Levels.RemoveAll(e => e.Earned <= 0);
                 if (src.Levels.Count > 0) list.Add(src);
             }
             return list.OrderByDescending(s => s.Levels.Max(e => e.Net)).ToList();

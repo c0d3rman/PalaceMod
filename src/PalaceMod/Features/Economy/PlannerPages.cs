@@ -319,6 +319,7 @@ namespace PalaceMod
         private void BuildAside(RectTransform aside, Projection p)
         {
             if (aside == null) return;
+            V.AsideBackdrop(aside);
             var w = p.World;
             float width = V.AsideWidth(aside), y = 0f;
             var r = p.Result;
@@ -468,7 +469,7 @@ namespace PalaceMod
                     string name = slot.Label.StartsWith(slot.TypeName) && slot.Label.Length > slot.TypeName.Length
                         ? slot.Label.Substring(slot.TypeName.Length).TrimStart(' ', '·').Trim() : slot.Level == 0 ? "Build" : $"Level {slot.Level}";
                     if (name.Length > 0 && char.IsDigit(name[0])) name = "No. " + name;
-                    if (pickMulti && pickSelected.Contains(slot.Index)) name = $"<color=#{ModStyle.Hex(ModStyle.Accent)}>✓</color> {name}";
+                    if (pickMulti && pickSelected.Contains(slot.Index)) name = $"<color=#{ModStyle.Hex(ModStyle.Accent)}>{name}  (ticked)</color>";
                     string value = lose ? (slot.Pays && slot.Income > 0 ? $"pays {slot.Income} that dawn" : $"<color=#{DimHex}>no income</color>") : NextStep(state, slot);
                     var row = page.Row(name, value, (string)null, () =>
                     {
@@ -500,7 +501,7 @@ namespace PalaceMod
             if (!e.Active)
             {
                 var act = e.Activator >= 0 ? state.Slots[e.Activator] : null;
-                return $"<color=#{DimHex}>unlocks with {act?.TypeName ?? "?"} level {e.ActivatorLevel + 1}</color>";
+                return $"<color=#{DimHex}>unlocks with {act?.Label ?? act?.TypeName ?? "?"} level {e.ActivatorLevel + 1}</color>";
             }
             if (!EconSim.CanUpgrade(state, e))
                 return $"<color=#{DimHex}>needs {state.Slots[e.Root].TypeName} level {e.Level + e.RootLevelDifference + 1}</color>";
@@ -620,6 +621,7 @@ namespace PalaceMod
         {
             if (aside == null) return;
             foreach (Transform child in aside.Cast<Transform>().ToList()) Object.DestroyImmediate(child.gameObject);
+            V.AsideBackdrop(aside);
             float width = V.AsideWidth(aside), y = 0f;
             float mapHeight = Mathf.Min(width * 0.62f, 360f);
             var marked = new HashSet<int>(planned);
@@ -813,21 +815,21 @@ namespace PalaceMod
                 var shortDay = r.FirstShortDay;
                 return new[]
                 {
-                    new string(' ', f.Ancestors(s).Count * 2) + (f.Ancestors(s).Count > 0 ? "› " : "") + s.Name + (s == p.Plan ? " ◆" : ""),
+                    new string(' ', f.Ancestors(s).Count * 2) + (f.Ancestors(s).Count > 0 ? "› " : "") + s.Name + (s == p.Plan ? " (shown)" : ""),
                     f.Effective(s).Count.ToString(), N(r.TotalSpent), N(r.LastDawnBuildings), N(r.EndGold),
                     shortDay != null ? $"<color=#{RedHex}>day {shortDay.Day}</color>" : "-",
                 };
             }).ToList();
             AnalyticsGraph.Table(page.Custom("Plans table", AnalyticsGraph.TableHeight(rows.Count)),
-                ["Plan", "Items", "Spent", "Last dawn", "End gold", "Short"], rows, [2.2f, 0.7f, 0.9f, 1f, 1f, 0.9f], rows.Count);
+                ["Plan", "Items", "Spent", "Last pay", "End gold", "Short"], rows, [2.4f, 0.8f, 0.9f, 1.1f, 1.2f, 1f], rows.Count);
 
             page.Header("Show");
             foreach (var s in order)
             {
                 var scenario = s;
-                string mark = scenario == p.Plan ? $"<color=#{ModStyle.Hex(ModStyle.Accent)}>◆</color> " : "";
+                string mark = "";
                 string fork = scenario.Parent == null ? "" : scenario.ForkDay == int.MaxValue ? " · same steps" : $" · from day {scenario.ForkDay}";
-                var row = page.Row(mark + f.FullName(scenario), $"ends with {Coin(results[scenario].EndGold)}{fork}",
+                var row = page.Row(mark + f.FullName(scenario) + (scenario == p.Plan ? $" <color=#{ModStyle.Hex(ModStyle.Accent)}>(shown)</color>" : ""), $"ends with {Coin(results[scenario].EndGold)}{fork}",
                     "Select to show this plan.", () =>
                     {
                         f.Current = scenario.Id;
@@ -955,7 +957,7 @@ namespace PalaceMod
                     {
                         Label = $"{src.Name}{(e.Level > 1 ? $" lv {e.Level}" : "")}{(e.Choice != null ? $": {e.Choice}" : "")}",
                         Cost = e.Cost, Earned = e.Earned,
-                        Note = (e.PaybackDawn is int d ? $"back by dawn {d}" : "never pays back") + $" · {e.FirstDawn}→{e.LastDawn}/night" + (e.Blocked != null ? " · " + e.Blocked.ToLowerInvariant() : ""),
+                        Note = (e.PaybackDawn is int d ? $"back by dawn {d}" : "never pays back") + (e.FirstDawn == e.LastDawn ? $" · {e.FirstDawn}/night" : $" · {e.FirstDawn}→{e.LastDawn}/night") + (e.Blocked != null ? " · " + e.Blocked.ToLowerInvariant() : ""),
                         First = e == src.Levels[0],
                     });
             V.SourceBars(page.Custom("Sources chart", V.SourceBarsHeight(bars.Count)), 820f, bars);
@@ -969,6 +971,7 @@ namespace PalaceMod
             if (aside == null) return;
             var w = p.World;
             var r = p.Result;
+            V.AsideBackdrop(aside);
             float width = V.AsideWidth(aside);
             var lines = new List<string> { "<size=120%><b>Other gold</b></size>" };
             lines.Add($"Enemies: {r.Days.Sum(d => d.Drops) + r.PendingDrops} more by the end ({string.Join(", ", r.Days.Select(d => d.Drops))}).");

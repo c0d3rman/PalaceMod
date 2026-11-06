@@ -34,7 +34,7 @@ namespace PalaceMod.Economy
         public static void Gold(RectTransform parent, float width, float height, string[] labels, IList<GraphSeries> series,
             ISet<int> shortCols, ISet<int> actionCols)
         {
-            var panel = Panel(parent, "Gold graph", width, height);
+            var panel = Panel(parent, "Gold graph", width, height, 0.85f);
             float min = 0f, max = 1f;
             foreach (var s in series)
                 foreach (var v in s.Values)
@@ -95,7 +95,7 @@ namespace PalaceMod.Economy
                     label.rectTransform.anchoredPosition = new Vector2(cx - 30f, -28f);
                     label.rectTransform.sizeDelta = new Vector2(60f, 26f);
                 }
-                if (actionCols != null && actionCols.Contains(i)) Diamond(plot, new Vector2(cx, h + 8f), 9f, ModStyle.Accent);
+                if (actionCols != null && actionCols.Contains(i)) Diamond(plot, new Vector2(cx, -9f), 8f, ModStyle.Accent);
             }
             foreach (var s in series)
             {
@@ -123,7 +123,7 @@ namespace PalaceMod.Economy
             public bool First;
         }
 
-        private const float BarRow = 46f, BarLabel = 250f, BarNet = 70f;
+        private const float BarRow = 46f, BarLabel = 340f, BarNet = 70f;
 
         public static float SourceBarsHeight(int rows) => rows * BarRow + 10f;
 
@@ -131,7 +131,7 @@ namespace PalaceMod.Economy
         /// costs, on one scale, with what's left over and a note (payback, pay per night) under the bars.</summary>
         public static void SourceBars(RectTransform parent, float width, IList<SourceBar> rows)
         {
-            var panel = Panel(parent, "Sources", width, SourceBarsHeight(rows.Count), 0.45f);
+            var panel = Panel(parent, "Sources", width, SourceBarsHeight(rows.Count), 0.85f);
             float max = Mathf.Max(1f, rows.Max(r => Mathf.Max(r.Cost, r.Earned)));
             float barArea = width - BarLabel - BarNet - 24f;
             var copper = AnalyticsGraph.Copper;
@@ -146,8 +146,9 @@ namespace PalaceMod.Economy
                     rule.anchoredPosition = new Vector2(10f, top + 2f);
                     rule.sizeDelta = new Vector2(width - 20f, 1f);
                 }
-                var label = G.Label(panel, r.Label, 21f, r.First ? ModStyle.Gold : G.Fade(ModStyle.Gold, 0.8f), TextAlignmentOptions.MidlineLeft, r.First ? ModStyle.BoldFont : ModStyle.BodyFont);
-                Place(label.rectTransform, 12f, top, BarLabel - 16f, 26f);
+                var label = G.Label(panel, r.Label, 20f, r.First ? ModStyle.Gold : G.Fade(ModStyle.Gold, 0.8f), TextAlignmentOptions.MidlineLeft, r.First ? ModStyle.BoldFont : ModStyle.BodyFont);
+                label.overflowMode = TextOverflowModes.Ellipsis;
+                Place(label.rectTransform, 12f, top, BarLabel - 24f, 26f);
                 float x0 = BarLabel;
                 var earned = G.Rect(panel, "Earned", ModStyle.Gold);
                 Place(earned, x0, top - 4f, Mathf.Max(2f, barArea * r.Earned / max), 10f);
@@ -157,7 +158,8 @@ namespace PalaceMod.Economy
                 var value = G.Label(panel, (net > 0 ? "+" : "") + net.ToString("N0"), 21f, net >= 0 ? ModStyle.Bright : Red, TextAlignmentOptions.MidlineRight, ModStyle.BoldFont);
                 Place(value.rectTransform, width - BarNet - 12f, top, BarNet, 26f);
                 var note = G.Label(panel, r.Note, 17f, G.Dim, TextAlignmentOptions.MidlineLeft, ModStyle.ButtonFont);
-                Place(note.rectTransform, x0, top - 22f, barArea + BarNet, 20f);
+                note.overflowMode = TextOverflowModes.Ellipsis;
+                Place(note.rectTransform, x0, top - 22f, width - x0 - 12f, 20f);
             }
         }
 
@@ -174,7 +176,7 @@ namespace PalaceMod.Economy
         /// <paramref name="planned"/> marked.</summary>
         public static void Map(RectTransform parent, float width, float height, EconWorld world, int selected, ISet<int> planned)
         {
-            var panel = Panel(parent, "Map", width, height, 0.6f);
+            var panel = Panel(parent, "Map", width, height, 0.85f);
             var slots = world.Slots.Where(s => s.Steps.Count > 0 || s.IsCastle).ToList();
             if (slots.Count == 0) return;
             float minX = slots.Min(s => s.MapX), maxX = slots.Max(s => s.MapX);
@@ -253,6 +255,14 @@ namespace PalaceMod.Economy
             float side = size / Mathf.Sqrt(2f);
             r.sizeDelta = new Vector2(side, side);
             r.localRotation = Quaternion.Euler(0f, 0f, 45f);
+        }
+
+        /// <summary>A dark panel behind everything in the aside, so the level behind the menu doesn't show through.</summary>
+        public static void AsideBackdrop(RectTransform aside)
+        {
+            var rect = Panel(aside, "Backdrop", AsideWidth(aside) + 24f, AsideHeight(aside) + 24f, 0.94f);
+            rect.anchoredPosition = new Vector2(-12f, 12f);
+            rect.SetAsFirstSibling();
         }
 
         /// <summary>A text block in the aside, wrapped to <paramref name="width"/>; returns its height.</summary>

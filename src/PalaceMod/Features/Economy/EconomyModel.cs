@@ -727,7 +727,7 @@ namespace PalaceMod.Economy
             if (!slot.Active && !s.IgnoreRequirements)
             {
                 var act = slot.Activator >= 0 ? w.Slots[slot.Activator] : null;
-                return Block(r, act != null ? $"Unlocks when {act.TypeName} reaches level {slot.ActivatorLevel + 1}" : "Not unlocked");
+                return Block(r, act != null ? $"Unlocks when {act.Label ?? act.TypeName} reaches level {slot.ActivatorLevel + 1}" : "Not unlocked");
             }
             var step = slot.Level < slot.Steps.Count ? slot.Steps[slot.Level] : null;
             if (step == null) return Block(r, "Already at its highest level");
