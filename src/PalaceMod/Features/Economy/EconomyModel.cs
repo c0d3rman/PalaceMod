@@ -16,7 +16,8 @@ using System.Linq;
                    mine     -incomeReductionPerTurn, floored (higher floor with Sustainable Mining); knocked out with
                             Sustainable Mining: reset instead
                    harbour  +incomeIncreasePerTurn up to maximumIncome unless knocked out, and the level-2 upgrade's
-                            income change becomes the new income (FishingHarbour writes Upgrades[1].branches[0])
+                            income change becomes the new income (FishingHarbour writes Upgrades[1].branches[0]);
+                            that upgrade doubles the cap and growth (FishingHarbourUpgrade)
                    daily    +1 (IncreaseIncomeDaily, on every registered interactor, built or not)
                  Treasure Hunter pays at dawns N-3, N-2 and N-1 of an N-night level (EnemySpawner.OnStartOfTheDay).
     The final dawn's income counts: the game declares victory after it.
