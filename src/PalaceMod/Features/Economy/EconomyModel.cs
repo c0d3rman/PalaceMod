@@ -7,7 +7,10 @@ using System.Linq;
     tests/PalaceMod.Tests; EconomySnapshot fills an EconWorld from the live level.
 
     Timeline. "Day N" is the day before night N; "dawn N" ends night N. The game's order, which the simulation follows:
-      day N      the player builds and upgrades (EconAction, in the plan's order). Gold can't be earned by day.
+      day N      the player builds and upgrades (EconAction, in the plan's order). The only gold earned by day is from
+                 slots that follow their owner's tree (a mill's fields) and start earning: they didn't pay at dawn and
+                 their own BuildComplete never runs, so they're harvestable, and the night horn harvests everything
+                 before dusk. A temple upgrade keeps its building from another step until the next dawn.
       dusk N     OnDuskEarly: Builder's Guild upgrades the first level-1 house for free.
                  OnDusk: Interest pays min(max, ceil(gold / each)) (InterestPerk.InterestAmount, on Balance).
       night N    enemies drop the wave's gold (WaveInfo.goldReward; Loan and Rat God are already folded into it).
@@ -29,12 +32,13 @@ using System.Linq;
       - slots that follow their activator's tree (ActivatorUpgradesThis, e.g. a mill's fields) step up with it, taking
         their own next step's first branch (the game picks one at random; they have one);
       - the branch's income change is added; the slot's children unlock once it passes their activatorLevel;
-      - Castle Up (UpgradeCastleUp) cuts walls' and towers' next upgrade costs when chosen, and again whenever one of
-        them reaches level 1 or 2 afterwards (CaslteUpReciever);
+      - Castle Up (UpgradeCastleUp) cuts walls' and towers' next upgrade costs when chosen (once per WallOrTower-tagged
+        object), and again whenever one reaches level 1 or 2 afterwards (once per CaslteUpReciever);
       - Builder's Guild (UpgradeBuildersGuild) upgrades a house when chosen and at every dusk after.
 
     Not modelled: future knock-outs (a knocked-out building pays nothing that dawn), coins left uncollected (interest
-    counts only gold in hand), shrines unlocking from nearby deaths and Temple prayers, God of Choice locks on slots
+    counts only gold in hand), shrines unlocking from nearby deaths, Temple prayers (shrines pay nothing that night)
+    and Temple wisdom (gold from buildings destroyed that night), God of Choice locks on slots
     that aren't unlocked yet, and which house Builder's Guild picks among houses built in the plan (the game uses its
     tag list order; planned houses are assumed to join the end).
 */
@@ -70,6 +74,8 @@ namespace PalaceMod.Economy
         public bool StartsGuild, StartsCastleUp;
         /// <summary>Doubles the harbour's cap and growth (FishingHarbourUpgrade).</summary>
         public bool DoublesHarbour;
+        /// <summary>Keeps the building from another step until the next dawn (TempleUpgrade).</summary>
+        public bool BusyUntilDawn;
     }
 
     public sealed class EconStep
@@ -103,7 +109,11 @@ namespace PalaceMod.Economy
         public int RootLevelDifference = -100;
         /// <summary>Has an interactor, so it's harvested at dawn.</summary>
         public bool Pays;
-        public bool IsHouse, IsWallOrTower, IsCastle;
+        public bool IsHouse, IsCastle;
+        /// <summary>Castle Up: WallOrTower-tagged objects (each discounted when it's chosen) and CaslteUpRecievers
+        /// (each discounting when the slot reaches level 1 or 2 afterwards).</summary>
+        public int CastleUpTags, CastleUpReceivers;
+        public bool IsWallOrTower => CastleUpTags > 0 || CastleUpReceivers > 0;
         public List<EconModifier> Modifiers = [];
 
         // State now.
@@ -111,6 +121,11 @@ namespace PalaceMod.Economy
         public int Income;
         public bool Active;
         public bool KnockedOut;
+        /// <summary>Already paid today (BuildingInteractor.harvestedToday): a slot that hasn't, and gets income by
+        /// day, pays it that day (the night horn collects it).</summary>
+        public bool HarvestedToday;
+        /// <summary>Can't take another step until the next dawn (a temple upgrade in effect).</summary>
+        public bool Busy;
         /// <summary>Harbour: the level-2 upgrade's current income change.</summary>
         public int HarbourField;
         /// <summary>Branches taken so far, per step.</summary>
@@ -229,13 +244,15 @@ namespace PalaceMod.Economy
         public int Start;
         public int Spent;
         /// <summary>Gold after the day's building, before dusk.</summary>
-        public int AfterSpend => Start - Spent;
+        public int AfterSpend => Start - Spent + Harvest;
+        /// <summary>Paid by day by slots that start earning that day without having paid at dawn (a mill's fields).</summary>
+        public int Harvest;
         public int Interest;
         public int Drops;
         /// <summary>What buildings pay at dawn (the night's knock-outs aside).</summary>
         public int Buildings;
         public int Treasure;
-        public int Income => Interest + Drops + Buildings + Treasure;
+        public int Income => Harvest + Interest + Drops + Buildings + Treasure;
         /// <summary>Gold after dawn (the next day's Start).</summary>
         public int AtDawn;
         public int Shortfall => Math.Max(0, -AfterSpend);
@@ -315,10 +332,10 @@ namespace PalaceMod.Economy
         {
             var w = start.Clone();
             if (!guild) w.GuildActive = false;
-            var s = new State(w, guild);
             var result = new EconResult { FirstDawn = w.FirstDay - 1 };
             int dawns = Math.Max(0, w.LastNight - (w.FirstDay - 1) + 1);
             result.Pay = w.Slots.Select(_ => new int[dawns]).ToArray();
+            var s = new State(w, guild) { Result = result };
             var ordered = Ordered(actions);
 
             foreach (var a in ordered.Where(a => a.Day < w.FirstDay))
@@ -338,6 +355,8 @@ namespace PalaceMod.Economy
             for (int day = w.FirstDay; day <= w.LastNight && day <= stopAfterDay; day++)
             {
                 var d = new DayResult { Day = day, Start = w.Gold };
+                s.Today = d;
+                s.TodayPay = day - result.FirstDawn;
                 foreach (var a in ordered.Where(a => a.Day == day))
                 {
                     var r = Apply(s, a);
@@ -345,7 +364,8 @@ namespace PalaceMod.Economy
                     if (r.Counts) { d.Spent += r.Cost; d.Actions++; }
                 }
                 if (day == stopAfterDay) break;
-                // Dusk.
+                // Dusk: the night horn has collected everything by now, so nothing more is harvested by day.
+                s.Today = null;
                 if (guild && w.GuildActive) s.GuildUpgrade();
                 if (w.Interest)
                 {
@@ -391,10 +411,14 @@ namespace PalaceMod.Economy
             buildings = 0;
             foreach (var slot in w.Slots)
             {
+                // OnDawn_BeforeSunrise clears harvestedToday and temple locks; the harvest sets it again.
+                slot.HarvestedToday = false;
+                slot.Busy = false;
                 if (slot.Level < 1 || !slot.Pays || slot.Income <= 0 || (knockouts && slot.KnockedOut)) continue;
                 buildings += slot.Income;
+                slot.HarvestedToday = true;
                 int i = night - result.FirstDawn;
-                if (i >= 0 && i < result.Pay[slot.Index].Length) result.Pay[slot.Index][i] = slot.Income;
+                if (i >= 0 && i < result.Pay[slot.Index].Length) result.Pay[slot.Index][i] += slot.Income;
             }
             w.Gold += buildings;
             foreach (var slot in w.Slots)
@@ -456,6 +480,7 @@ namespace PalaceMod.Economy
             var step = slot.Level < slot.Steps.Count ? slot.Steps[slot.Level] : null;
             if (step == null) return Block(r, "Already at its highest level");
             if (step.Disabled) return Block(r, "Not available in this mode");
+            if (slot.Busy) return Block(r, "Busy until the next dawn (its last upgrade is in effect)");
             if (!s.CanUpgrade(slot))
             {
                 var root = w.Slots[slot.Root];
@@ -474,7 +499,7 @@ namespace PalaceMod.Economy
             }
             w.Gold -= r.Cost;
             int before = s.FamilyIncome(slot);
-            s.StepUp(slot, branchIndex);
+            s.StepUp(slot, branchIndex, byPlayer: true);
             r.IncomeDelta = s.FamilyIncome(slot) - before;
             return r;
         }
@@ -539,7 +564,12 @@ namespace PalaceMod.Economy
                 return total;
             }
 
-            public void StepUp(EconSlot slot, int branchIndex)
+            /// <summary>The day being played (null from dusk on), for gold harvested by day.</summary>
+            public DayResult Today;
+            public int TodayPay;
+            public EconResult Result;
+
+            public void StepUp(EconSlot slot, int branchIndex, bool byPlayer)
             {
                 // Slots following this one's tree step up first, on their own tree (TryToBuildOrUpgradeAndPay).
                 foreach (var dep in World.Slots)
@@ -550,6 +580,15 @@ namespace PalaceMod.Economy
                     dep.Applied.Add(0);
                     dep.Level++;
                     dep.Active = true;
+                    // Their own BuildComplete never runs, so one that didn't pay at dawn (nothing to pay then) can be
+                    // harvested now, and the night horn makes sure it is before dusk.
+                    if (Today != null && dep.Pays && !dep.HarvestedToday && dep.Income > 0)
+                    {
+                        dep.HarvestedToday = true;
+                        World.Gold += dep.Income;
+                        Today.Harvest += dep.Income;
+                        if (TodayPay >= 0 && TodayPay < Result.Pay[dep.Index].Length) Result.Pay[dep.Index][TodayPay] += dep.Income;
+                    }
                 }
                 var step = slot.Steps[slot.Level];
                 var branch = step.Branches.Count > 0 ? step.Branches[Math.Min(branchIndex, step.Branches.Count - 1)] : null;
@@ -568,16 +607,22 @@ namespace PalaceMod.Economy
                 slot.Level++;
                 slot.Applied.Add(branchIndex);
                 slot.Income += change;
+                // The player's own build marks the building harvested for the day (BuildingInteractor.BuildComplete).
+                if (byPlayer) slot.HarvestedToday = true;
+                if (branch != null && branch.BusyUntilDawn) slot.Busy = true;
                 if (built && slot.IsHouse && !World.HouseOrder.Contains(slot.Index)) World.HouseOrder.Add(slot.Index);
 
                 foreach (var child in World.Slots)
                     if (child.Activator == slot.Index && !child.Active && slot.Level > child.ActivatorLevel) child.Active = true;
 
-                if (World.CastleUpActive && slot.IsWallOrTower) Discount(slot);
+                // Each CaslteUpReciever discounts on its own; choosing Castle Up discounts once per tagged object.
+                if (World.CastleUpActive)
+                    for (int i = 0; i < slot.CastleUpReceivers; i++) Discount(slot);
                 if (branch != null && branch.StartsCastleUp && !World.CastleUpActive)
                 {
                     World.CastleUpActive = true;
-                    foreach (var s in World.Slots) if (s.IsWallOrTower) Discount(s);
+                    foreach (var s in World.Slots)
+                        for (int i = 0; i < s.CastleUpTags; i++) Discount(s);
                 }
                 if (branch != null && branch.StartsGuild && guild && !World.GuildActive)
                 {
@@ -605,7 +650,7 @@ namespace PalaceMod.Economy
                 {
                     var house = World.Slots[i];
                     if (house.Level != 1) continue;
-                    if (CanUpgrade(house) && house.Active) StepUp(house, 0);
+                    if (CanUpgrade(house) && house.Active) StepUp(house, 0, byPlayer: false);
                     return;
                 }
             }

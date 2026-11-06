@@ -68,6 +68,9 @@ namespace PalaceMod.Economy
                 ReadSlot(slot, e, index, registered, snap);
                 w.Slots.Add(e);
             }
+            // After every slot is read: a follower's pending perk changes land on its owner's tree.
+            foreach (var slot in slots)
+                if (!slot.gameObject.activeInHierarchy) ApplyPending(slot, w.Slots[index[slot]], w, snap);
             // Ids must be unique for saved plans to find their slot.
             foreach (var group in w.Slots.GroupBy(s => s.Id).Where(g => g.Count() > 1))
                 foreach (var s in group.Skip(1)) s.Id += $"#{s.Index}";
@@ -137,10 +140,14 @@ namespace PalaceMod.Economy
             // A slot that isn't unlocked yet registers its interactor when it is.
             e.Pays = registered.Contains(slot) || (!slot.gameObject.activeInHierarchy && interactor != null && interactor.targetBuilding == slot);
             e.KnockedOut = interactor != null && interactor.KnockedOutTonight;
+            e.HarvestedToday = interactor != null && Traverse.Create(interactor).Field("harvestedToday").GetValue<bool>();
+            e.Busy = interactor != null && interactor.buildingIsCurrentlyBusyAndCantBeUpgraded;
             e.IsCastle = slot.GetComponentInChildren<CastleCenter>(true) != null;
             e.IsHouse = Owned<TaggedObject>(slot).Any(o => o.Tags.Contains(TagManager.ETag.House));
-            e.IsWallOrTower = Owned<CaslteUpReciever>(slot, c => Traverse.Create(c).Field("buildSlot").GetValue<BuildSlot>()).Any()
-                || Owned<TaggedObject>(slot).Any(o => o.Tags.Contains(TagManager.ETag.WallOrTower));
+            // UpgradeCastleUp finds walls and towers through the tag manager (TaggedObject -> its parent BuildSlot).
+            e.CastleUpTags = slot.GetComponentsInChildren<TaggedObject>(true)
+                .Count(o => o != null && o.Tags.Contains(TagManager.ETag.WallOrTower) && o.GetComponentInParent<BuildSlot>(true) == slot);
+            e.CastleUpReceivers = Owned<CaslteUpReciever>(slot, c => Traverse.Create(c).Field("buildSlot").GetValue<BuildSlot>()).Count();
 
             var upgrades = slot.OwnUpgrades;
             for (int i = 0; i < upgrades.Count; i++)
@@ -164,13 +171,13 @@ namespace PalaceMod.Economy
                         StartsGuild = Activates<UpgradeBuildersGuild>(branch),
                         StartsCastleUp = Activates<UpgradeCastleUp>(branch),
                         DoublesHarbour = Activates<FishingHarbourUpgrade>(branch),
+                        BusyUntilDawn = Activates<TempleUpgrade>(branch),
                     });
                     var castleUp = ActivatedComponent<UpgradeCastleUp>(branch);
                     if (castleUp != null) CastleUpDiscounts(castleUp, snap.World);
                 }
                 e.Steps.Add(step);
             }
-            if (!slot.gameObject.activeInHierarchy) ApplyPending(slot, e, snap);
             ReadModifiers(slot, e);
             if (e.Modifiers.Any(m => m.Kind == EconModifierKind.Harbour) && upgrades.Count > 1 && upgrades[1].upgradeBranches.Count > 0)
                 e.HarbourField = upgrades[1].upgradeBranches[0].goldIncomeChange;
@@ -205,23 +212,26 @@ namespace PalaceMod.Economy
             if (slot.GetComponent<IncreaseIncomeDaily>() != null) e.Modifiers.Add(new EconModifier { Kind = EconModifierKind.Daily });
         }
 
-        // Components on a slot that's not unlocked yet that will change its data when it is.
-        private static void ApplyPending(BuildSlot slot, EconSlot e, EconSnapshot snap)
+        // Components on a slot that's not unlocked yet that will change its data when it is. They work on
+        // BuildSlot.Upgrades, which for a slot following its owner's tree is the owner's: that's where they land.
+        private static void ApplyPending(BuildSlot slot, EconSlot e, EconWorld w, EconSnapshot snap)
         {
-            var upgrades = slot.OwnUpgrades;
+            var tree = e.Owner >= 0 ? w.Slots[e.Owner] : e;
+            var upgrades = slot.Upgrades;
             foreach (var c in Owned<PerkCostModifyer>(slot).Where(c => WillRun(c, slot)))
             {
-                if (!PerkManager.IsEquipped(c.requiredPerk) || slot.ActivatorUpgradesThis) continue;
-                for (int i = 0; i < upgrades.Count && i < e.Steps.Count && i < c.upgradeCostChange.Length; i++)
-                    if (!slot.UpgradesWithCostsLoadedFromSave.Contains(upgrades[i])) e.Steps[i].Cost += c.upgradeCostChange[i];
-                snap.Notes.Add($"{e.TypeName} #{e.Index}: perk cost change still to apply");
+                if (!PerkManager.IsEquipped(c.requiredPerk)) continue;
+                // Steps already taken don't matter any more.
+                for (int i = tree.Level; i < upgrades.Count && i < tree.Steps.Count && i < c.upgradeCostChange.Length; i++)
+                    if (!slot.UpgradesWithCostsLoadedFromSave.Contains(upgrades[i])) tree.Steps[i].Cost += c.upgradeCostChange[i];
+                snap.Notes.Add($"{e.TypeName} #{e.Index}: perk cost change still to apply (to #{tree.Index})");
             }
             foreach (var c in slot.GetComponents<PerkIncomeModifyer>().Where(c => WillRun(c, slot)))
             {
-                if (!PerkManager.IsEquipped(c.requiredPerk) || slot.ActivatorUpgradesThis) continue;
-                for (int i = 0; i < e.Steps.Count && i < c.upgradeIncomeChange.Length; i++)
-                    foreach (var b in e.Steps[i].Branches) b.IncomeChange += c.upgradeIncomeChange[i];
-                snap.Notes.Add($"{e.TypeName} #{e.Index}: perk income change still to apply");
+                if (!PerkManager.IsEquipped(c.requiredPerk)) continue;
+                for (int i = tree.Level; i < tree.Steps.Count && i < c.upgradeIncomeChange.Length; i++)
+                    foreach (var b in tree.Steps[i].Branches) b.IncomeChange += c.upgradeIncomeChange[i];
+                snap.Notes.Add($"{e.TypeName} #{e.Index}: perk income change still to apply (to #{tree.Index})");
             }
             foreach (var c in Owned<PerkUnrestrictedUpgrading>(slot, c => Traverse.Create(c).Field("buildSlot").GetValue<BuildSlot>()).Where(c => WillRun(c, slot)))
             {
@@ -229,9 +239,9 @@ namespace PalaceMod.Economy
             }
             foreach (var plow in Owned<Mill_ImprovedPlow>(slot, c => Traverse.Create(c).Field("buildSlot").GetValue<BuildSlot>()).Where(c => WillRun(c, slot)))
             {
-                for (int i = 1; i <= 2 && i < e.Steps.Count; i++)
-                    foreach (var b in e.Steps[i].Branches) b.IncomeChange++;
-                snap.Notes.Add($"{e.TypeName} #{e.Index}: Improved Plow still to apply");
+                for (int i = Math.Max(1, tree.Level); i <= 2 && i < tree.Steps.Count; i++)
+                    foreach (var b in tree.Steps[i].Branches) b.IncomeChange++;
+                snap.Notes.Add($"{e.TypeName} #{e.Index}: Improved Plow still to apply (to #{tree.Index})");
             }
         }
 

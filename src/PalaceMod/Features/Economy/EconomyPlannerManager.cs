@@ -146,7 +146,11 @@ namespace PalaceMod
             foreach (var e in w.Slots)
             {
                 var slot = s.Objects[e.Index];
-                if (slot == null || e.IsDependent || !e.Active) continue;
+                if (slot == null) continue;
+                // The game indexes a follower's own tree with its own level; a shorter tree throws mid-upgrade.
+                if (e.IsDependent && e.Steps.Count < w.Slots[e.Owner].MaxLevel)
+                    problems.Add($"{e.Label} #{e.Index} follows #{e.Owner} but has {e.Steps.Count} steps for its {w.Slots[e.Owner].MaxLevel} levels");
+                if (e.IsDependent || !e.Active) continue;
                 bool live = slot.CanBeUpgraded, mine = EconSim.CanUpgrade(w, e);
                 if (live != mine) problems.Add($"{e.Label} #{e.Index}: can upgrade {mine}, game says {live}");
                 else if (live && e.Steps[e.Level].Cost != slot.NextUpgradeOrBuildCost)
@@ -429,7 +433,7 @@ namespace PalaceMod
                 string steps = string.Join(" | ", e.Steps.Select((st, i) => $"{i + 1}:{st.Cost}{(st.Disabled ? "x" : "")}[{string.Join(",", st.Branches.Select(b => $"{b.Key}{(b.IncomeChange != 0 ? Signed(b.IncomeChange) : "")}{(b.Locked ? " L" : "")}{(b.StartsGuild ? " G" : "")}{(b.StartsCastleUp ? " C" : "")}"))}]"));
                 lines.Add($"  #{e.Index} {e.Label} id={e.Id} lv {e.Level} inc {e.Income} active {e.Active} pays {e.Pays} ko {e.KnockedOut} " +
                     $"owner {e.Owner} act {e.Activator}>{e.ActivatorLevel} root {e.Root}{e.RootLevelDifference:+#;-#;0} " +
-                    $"{(e.IsHouse ? "house " : "")}{(e.IsWallOrTower ? "wall/tower " : "")}{(e.IsCastle ? "castle " : "")}" +
+                    $"{(e.IsHouse ? "house " : "")}{(e.IsWallOrTower ? $"wall/tower {e.CastleUpTags}t{e.CastleUpReceivers}r " : "")}{(e.HarvestedToday ? "harvested " : "")}{(e.Busy ? "busy " : "")}{(e.IsCastle ? "castle " : "")}" +
                     $"mods [{string.Join(",", e.Modifiers.Select(m => $"{m.Kind}:{m.Step}/{m.Min}/{m.Max}{(m.Sustainable ? "S" : "")}"))}] harbourField {e.HarbourField}" +
                     $"\n      at ({e.MapX:0},{e.MapY:0}) steps {steps}");
             }

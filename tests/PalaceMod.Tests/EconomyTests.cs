@@ -191,6 +191,34 @@ namespace PalaceMod.Tests
             Assert.Equal(2, r.Final.Slots[field.Index].Level, "field level");
         }
 
+        public static void FollowersThatStartEarningPayThatDay()
+        {
+            var w = World(gold: 10);
+            var mill = Slot(w, "Mill", 0, 0, Step(6, 0), Step(8, 0));
+            var field = Slot(w, "Field", 0, 0, Step(0, 2), Step(0, 1));
+            field.Owner = mill.Index;
+            var r = EconSim.Run(w, [Do(1, mill, 1), Do(2, mill, 2)]);
+            // Day 1: the field starts earning without having paid at dawn, so it's harvested that day.
+            Assert.Equal(2, r.Days[0].Harvest, "harvested on the build day");
+            Assert.Equal(10 - 6 + 2, r.Days[0].AfterSpend, "gold after building");
+            // Day 2: it paid at dawn 1, so its extra +1 waits for dawn 2.
+            Assert.Equal(0, r.Days[1].Harvest, "already paid that day");
+            Assert.Equal(1 + 3, r.Days[1].Buildings, "dawn 2");
+            // The build alone: 2 by day 1, 2 at dawn 1, 2 at dawn 2 = its 6 gold.
+            Assert.Equal(2, r.Actions[0].PaybackDawn ?? -1, "payback counts the day's harvest");
+        }
+
+        public static void TempleUpgradesWaitForDawn()
+        {
+            var w = World(gold: 100);
+            var temple = Slot(w, "Temple", 1, 0, Step(0), Step(5), Step(5));
+            temple.Steps[1].Branches[0].BusyUntilDawn = true;
+            var r = EconSim.Run(w, [Do(1, temple, 2), Do(1, temple, 3), Do(2, temple, 3)]);
+            Assert.Equal(ActionStatus.Planned, r.Actions[0].Status, "first upgrade");
+            Assert.Equal(ActionStatus.Blocked, r.Actions[1].Status, "busy the same day");
+            Assert.Equal(ActionStatus.Planned, r.Actions[2].Status, "free the next day");
+        }
+
         public static void CastleUpCutsWallAndTowerCosts()
         {
             var w = World(gold: 100);
@@ -199,9 +227,9 @@ namespace PalaceMod.Tests
             w.CastleUpDiscount2 = 2;
             w.CastleUpDiscount3 = 4;
             var built = Slot(w, "Tower", 1, 0, Step(3), Step(5), Step(9));
-            built.IsWallOrTower = true;
+            built.CastleUpTags = built.CastleUpReceivers = 1;
             var later = Slot(w, "Tower", 0, 0, Step(3), Step(5), Step(9));
-            later.IsWallOrTower = true;
+            later.CastleUpTags = later.CastleUpReceivers = 1;
             var r = EconSim.Run(w, [Do(1, castle, 2, "up"), Do(1, built, 2), Do(2, later, 1), Do(2, later, 2), Do(3, later, 3)]);
             Assert.Equal(3, r.Actions[1].Cost, "existing tower: 5 - 2");
             Assert.Equal(3, r.Actions[3].Cost, "tower built after: 5 - 2");

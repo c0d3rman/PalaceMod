@@ -252,7 +252,7 @@ namespace PalaceMod
                 var c = p.Compare.Days.FirstOrDefault(x => x.Day == d.Day);
                 string spent = d.Spent == 0 ? "-" : d.Shortfall > 0 ? $"<color=#{RedHex}>{N(d.Spent)} ({N(d.Shortfall)} short)</color>" : N(d.Spent);
                 string vs = c == null || p.Compare == p.Result ? "" : Signed(d.AtDawn - c.AtDawn);
-                rows.Add([$"Day {d.Day}", Gold(d.Start), spent, N(d.Income), N(d.Buildings), Gold(d.AtDawn), vs]);
+                rows.Add([$"Day {d.Day}", Gold(d.Start), spent, N(d.Income), N(d.Buildings + d.Harvest), Gold(d.AtDawn), vs]);
             }
             string vsHeader = p.Compare == p.Result ? "" : "vs " + Short(p.OtherName, 9);
             AnalyticsGraph.Table(page.Custom("Days table", AnalyticsGraph.TableHeight(rows.Count)),
