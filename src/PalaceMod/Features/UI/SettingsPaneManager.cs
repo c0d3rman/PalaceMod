@@ -903,6 +903,8 @@ namespace PalaceMod
             }
             if (row.Tags?.AffectsRanking == true && !GameplayFeatures.Allowed && !row.Part.HeldOff)
                 text += " Off for now: \"Gameplay-changing features\" is turned off in General.";
+            if (entry.Description.AcceptableValues is AcceptableValueRange<int> or AcceptableValueRange<float> && !ModNumber.UsingController)
+                text += $" <color=#{ModStyle.Hex(ModStyle.Dim)}>Enter or click to type a value; Shift steps x10.</color>";
             return text;
         }
 
@@ -986,7 +988,76 @@ namespace PalaceMod
                 entry.BoxedValue = isInt ? Mathf.RoundToInt(snapped) : (object)(float)Math.Round(snapped, 3);
             });
             Bind(row, entry, () => slider.SetValue(Convert.ToSingle(entry.BoxedValue)));
+
+            // Big ranges: holding left/right speeds up and Shift steps x10 (TFUISlider_Navigate_Patch); Enter or a
+            // click on the row types a value (any value in range, not just the step grid); Home/End go to the ends.
+            ModSliders.AddOrUpdate(slider, new SliderInfo { Key = $"setting:{entry.Definition}", Min = min, Max = max, Step = step, Integer = isInt });
+            void Set(float v) => entry.BoxedValue = isInt ? Mathf.RoundToInt(v) : (object)(float)Math.Round(v, 3);
+            string Show(float v) => FormatNumber(v, tags, slider.displayFPPrecision);
+            var target = slider.target;
+            if (target != null)
+            {
+                target.onApply.AddListener(() =>
+                {
+                    if (ModNumber.UsingController)
+                    {
+                        Notify.Show(ModNumber.ControllerHint(shoulders: false), NotifyKind.Info, 3f, key: "modnumber");
+                        return;
+                    }
+                    ModTextInput.Begin(label, () => slider != null && slider.gameObject.activeInHierarchy && slider.display != null,
+                        shown =>
+                        {
+                            if (shown != null) slider.display.text = shown;
+                            else slider.SetValue(Convert.ToSingle(entry.BoxedValue));
+                        },
+                        ModFields.FormatNumber(Convert.ToSingle(entry.BoxedValue)), text =>
+                        {
+                            if (string.IsNullOrWhiteSpace(text)) return;
+                            // The name shown for 0 ("Off", "Display") types as 0.
+                            if (!string.IsNullOrEmpty(tags?.ZeroLabel) && string.Equals(text.Trim(), tags.ZeroLabel, StringComparison.OrdinalIgnoreCase) && min <= 0f && max >= 0f)
+                            {
+                                Set(0f);
+                                return;
+                            }
+                            bool ok = ModNumber.TryRead(text, min, max, isInt, Show, out float value, out string message);
+                            if (message != null) Notify.Show(message, NotifyKind.Warning, 3f, key: "modnumber");
+                            if (ok) Set(value);
+                        }, 24, hint: ModNumber.TypingHint(min, max));
+                });
+                var keys = target.gameObject.AddComponent<NumberKeys>();
+                keys.Selected = () => target.CurrentState is ThronefallUIElement.SelectionState.Selected or ThronefallUIElement.SelectionState.FocussedAndSelected;
+                keys.Jump = toMax => Set(toMax ? max : min);
+            }
             return row;
+        }
+
+        private sealed class SliderInfo
+        {
+            public string Key;
+            public float Min, Max, Step;
+            public bool Integer;
+        }
+
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<TFUISlider, SliderInfo> ModSliders = new();
+
+        // A held direction on a mod slider moves further each repeat, and Shift moves x10 (as ModNumber fields do).
+        [HarmonyPatch(typeof(TFUISlider), nameof(TFUISlider.Navigate))]
+        private class TFUISlider_Navigate_Patch
+        {
+            private static void Prefix(TFUISlider __instance, ThronefallUIElement.NavigationDirection direction, out float __state)
+            {
+                __state = __instance.increments;
+                if (!ModSliders.TryGetValue(__instance, out var info)) return;
+                int sign = direction == __instance.increase ? 1 : direction == __instance.decrease ? -1 : 0;
+                if (sign == 0) return;
+                int speed = NumberMath.Acceleration(NumberRepeat.Next(info.Key, sign), info.Min, info.Max, info.Step);
+                // Navigate adds or subtracts increments: aim it at the grid point that many steps away (a typed 144
+                // with step 5 goes to 145, not 150).
+                float target = (float)NumberMath.Step(__instance.value, info.Step, sign * speed * (ModNumber.ShiftHeld ? 10 : 1), info.Min, info.Max, info.Integer);
+                __instance.increments = Mathf.Abs(target - __instance.value);
+            }
+
+            private static void Postfix(TFUISlider __instance, float __state) => __instance.increments = __state;
         }
 
         private Row BuildButton(string label, Func<string> description, Action onClick, Part part, Color? color = null)

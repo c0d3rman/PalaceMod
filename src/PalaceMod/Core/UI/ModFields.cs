@@ -11,6 +11,7 @@ using Object = UnityEngine.Object;
 /*
     Editable fields for ModFrame pages, built on ModPage.Row so they look and navigate like every other row:
 
+        page.Number("Max HP", () => hp, v => hp = v, 1, 9999);                                     // numbers: ModNumber.cs
         page.Stepper("Max HP", () => hp.ToString(), delta => hp += delta, onApply: () => ...);   // left/right steps
         page.Choice("Side", ["Enemy", "Player"], () => side, i => side = i);                       // left/right cycles
         page.Toggle("Elite", () => elite, v => elite = v);
@@ -291,7 +292,15 @@ namespace PalaceMod
     /// <summary>Keyboard text entry into a ModField (see ModFields).</summary>
     public static class ModTextInput
     {
-        private static ModField editing;
+        // What's being typed into: a ModField, or any text a widget shows (a settings slider's number).
+        private sealed class Target
+        {
+            public string Label;
+            public Func<bool> Alive;
+            public Action<string> Show; // the text to show while typing; null puts the widget's own value back
+        }
+
+        private static Target editing;
         private static Action<string> commit;
         private static readonly StringBuilder text = new();
         private static bool replaceAll, multiline;
@@ -316,12 +325,27 @@ namespace PalaceMod
 
         /// <summary>Starts typing into <paramref name="target"/>, starting from <paramref name="initial"/> (selected, so the
         /// first key replaces it). <paramref name="onCommit"/> gets the text when the player presses Enter.
-        /// <paramref name="allowNewlines"/> lets Shift+Enter (and paste) add line breaks.</summary>
-        public static void Begin(ModField target, string initial, Action<string> onCommit, int maxLength = 64, bool allowNewlines = false)
+        /// <paramref name="allowNewlines"/> lets Shift+Enter (and paste) add line breaks. <paramref name="hint"/> replaces
+        /// the "Type, then Enter..." notice.</summary>
+        public static void Begin(ModField target, string initial, Action<string> onCommit, int maxLength = 64, bool allowNewlines = false, string hint = null)
         {
             if (target == null) return;
+            Begin(target.Label, () => target.Button != null && target.Button.gameObject.activeInHierarchy, shown =>
+            {
+                target.Override = shown;
+                target.Refresh();
+            }, initial, onCommit, maxLength, allowNewlines, hint);
+        }
+
+        /// <summary>Starts typing into any text: <paramref name="show"/> gets the text to display while typing (with the
+        /// caret), then null when typing ends, to put the widget's own value back. Typing is dropped once
+        /// <paramref name="alive"/> turns false (the widget was hidden or destroyed).</summary>
+        public static void Begin(string label, Func<bool> alive, Action<string> show, string initial, Action<string> onCommit,
+            int maxLength = 64, bool allowNewlines = false, string hint = null)
+        {
+            if (alive == null || show == null) return;
             if (Active) End(confirm: true);
-            editing = target;
+            editing = new Target { Label = label, Alive = alive, Show = show };
             commit = onCommit;
             multiline = allowNewlines;
             ModTextInput.maxLength = Math.Max(1, maxLength);
@@ -331,7 +355,7 @@ namespace PalaceMod
             replaceAll = text.Length > 0;
             heldKey = KeyCode.None;
             startFrame = Time.frameCount;
-            Notify.Show(multiline ? "Type, Shift+Enter for a new line, Enter to confirm, Esc to cancel" : "Type, then Enter to confirm or Esc to cancel",
+            Notify.Show(hint ?? (multiline ? "Type, Shift+Enter for a new line, Enter to confirm, Esc to cancel" : "Type, then Enter to confirm or Esc to cancel"),
                 NotifyKind.Info, 3f, key: "modtextinput");
             Redraw();
         }
@@ -347,13 +371,15 @@ namespace PalaceMod
             commit = null;
             heldKey = KeyCode.None;
             endFrame = Time.frameCount;
-            target.Override = null;
+            // Back to the widget's own value before committing, so the commit's own refresh shows the new value.
+            bool alive = target.Alive();
+            if (alive) target.Show(null);
             if (confirm)
             {
                 try { action?.Invoke(result); }
                 catch (Exception e) { Log.Core.Caught($"Field \"{target.Label}\": commit failed", e); }
             }
-            target.Refresh();
+            if (alive && target.Alive()) target.Show(null);
         }
 
         /// <summary>Dev-command hook: types <paramref name="s"/> into the active editing and confirms.</summary>
@@ -407,7 +433,7 @@ namespace PalaceMod
         {
             if (!Active) return;
             // The editing's row was destroyed (page rebuilt, menu closed): drop the edit.
-            if (editing.Button == null || !editing.Button.gameObject.activeInHierarchy) { editing = null; commit = null; endFrame = Time.frameCount; return; }
+            if (!editing.Alive()) { editing = null; commit = null; endFrame = Time.frameCount; return; }
             if (Time.frameCount == startFrame) return; // the key that started typing
             if (Input.GetKeyDown(KeyCode.Escape)) { End(confirm: false); return; }
             if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1)) { End(confirm: true); return; }
@@ -591,10 +617,9 @@ namespace PalaceMod
             string all = text.ToString();
             // A thin bar that takes almost no room, so moving or blinking it barely reflows the text.
             string bar = $"<color=#{accent}>{(on ? "" : "<alpha=#00>")}<space=-0.1em>|<space=-0.1em></color><alpha=#FF>";
-            editing.Override = replaceAll
+            editing.Show(replaceAll
                 ? $"<mark=#{accent}55>{ModFields.TMPEscape(all)}</mark>{bar}"
-                : ModFields.TMPEscape(all.Substring(0, caret)) + bar + ModFields.TMPEscape(all.Substring(caret));
-            editing.Refresh();
+                : ModFields.TMPEscape(all.Substring(0, caret)) + bar + ModFields.TMPEscape(all.Substring(caret)));
         }
     }
 
@@ -612,6 +637,13 @@ namespace PalaceMod
 
         [HarmonyPatch(typeof(UIFrameManager), "Update")]
         private class UIFrameManager_Update_Patch
+        {
+            private static bool Prefix() => !ModTextInput.BlocksInput;
+        }
+
+        // Settings switches tabs on its own keys (NextTab/PrevTab), which would hide a field being typed into.
+        [HarmonyPatch(typeof(SettingsUIHelper), "Update")]
+        private class SettingsUIHelper_Update_Patch
         {
             private static bool Prefix() => !ModTextInput.BlocksInput;
         }
