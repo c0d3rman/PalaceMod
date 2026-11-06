@@ -125,38 +125,17 @@ namespace PalaceMod.Builder.Editor
             Func<float?> baseValue = null, bool nullable = true, string label = null)
         {
             label ??= spec.Label;
-            string Display()
+            string Display(float shown)
             {
-                var v = get();
-                if (v is float f) return spec.Format(f);
-                var b = baseValue?.Invoke();
-                return b is float bf ? Dim(spec.Format(bf) + "  (base)") : Dim("base");
+                if (get() is float) return spec.Format(shown);
+                return baseValue?.Invoke() is float ? Dim(spec.Format(shown) + "  (base)") : Dim("base");
             }
-            ModField field = null;
-            field = page.Stepper(label, Display,
-                delta =>
-                {
-                    float current = get() ?? baseValue?.Invoke() ?? spec.Min;
-                    float next = spec.Stepped(current, delta);
-                    Draft.Edit($"Set {label.ToLowerInvariant()}", p => set(p, next), coalesce: path);
-                },
-                () => ModTextInput.Begin(field, get() is float f ? ModFields.FormatNumber(f) : "", text =>
-                {
-                    if (string.IsNullOrWhiteSpace(text))
-                    {
-                        if (nullable) Draft.Edit($"Reset {label.ToLowerInvariant()}", p => set(p, null));
-                        return;
-                    }
-                    if (!ModFields.TryParseNumber(text.Replace("×", "").Replace("x", "").Replace("s", ""), out float value))
-                    {
-                        Notify.Show($"\"{text}\" isn't a number", NotifyKind.Warning, key: "builder-edit");
-                        return;
-                    }
-                    float clamped = spec.Clamp(value);
-                    if (clamped != value) Notify.Show($"{label}: kept to {spec.Format(clamped)} (allowed {spec.Format(spec.Min)} to {spec.Format(spec.Max)})", NotifyKind.Warning, key: "builder-edit");
-                    Draft.Edit($"Set {label.ToLowerInvariant()}", p => set(p, clamped));
-                }, 16),
-                Tip(spec.Help + (nullable ? "\nLeft/right to change, apply to type a value (empty resets to the base unit's)." : "\nLeft/right to change, apply to type a value."), path));
+            // The kit's number field: typing, clamping, held-key speed-up, Shift x10, Home/End (Core/UI/ModNumber.cs).
+            var field = page.Number(label, () => get() ?? baseValue?.Invoke() ?? spec.Min,
+                v => Draft.Edit($"Set {label.ToLowerInvariant()}", p => set(p, spec.Clamp(v)), coalesce: path),
+                spec.Min, spec.Max, spec.Step, Display,
+                Tip(spec.Help + (nullable ? "\nLeft/right to change, apply to type a value (empty resets to the base unit's)." : "\nLeft/right to change, apply to type a value."), path),
+                nullable ? () => Draft.Edit($"Reset {label.ToLowerInvariant()}", p => set(p, null)) : null);
             return Bind(field, path);
         }
 

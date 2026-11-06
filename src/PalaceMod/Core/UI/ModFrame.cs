@@ -118,6 +118,16 @@ namespace PalaceMod
             ShowTab(currentTab, select: true, keepScroll: true);
         }
 
+        /// <summary>Switches to the tab with this label (selecting its tab button while open), or shows it first on
+        /// the next Open.</summary>
+        public void ShowTab(string label)
+        {
+            int index = tabs.FindIndex(t => t.Label == label);
+            if (index < 0) throw new ArgumentException($"no tab \"{label}\"");
+            if (IsOpen && index < tabButtons.Count) frame.Select(tabButtons[index]); // onNewSelection shows the tab
+            else currentTab = index;
+        }
+
         // ---- Build ----------------------------------------------------------------------------------------------
 
         private bool EnsureBuilt()
@@ -470,22 +480,6 @@ namespace PalaceMod
             var text = button.GetComponent<TextMeshProUGUI>();
             text.alignment = TextAlignmentOptions.MidlineLeft;
             button.gameObject.AddComponent<LayoutElement>().preferredHeight = 46f;
-            if (icon != null)
-            {
-                const float size = 36f;
-                var iconObj = new GameObject("Icon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
-                iconObj.transform.SetParent(button.transform, false);
-                var image = iconObj.GetComponent<Image>();
-                image.sprite = icon;
-                image.color = ModStyle.Gold; // the game's icons are white and tinted gold in its menus
-                image.preserveAspect = true;
-                image.raycastTarget = false;
-                var iconRect = (RectTransform)iconObj.transform;
-                iconRect.anchorMin = iconRect.anchorMax = new Vector2(0f, 0.5f);
-                iconRect.pivot = new Vector2(0f, 0.5f);
-                iconRect.sizeDelta = new Vector2(size, size);
-                text.margin = new Vector4(size + 12f, 0f, 0f, 0f);
-            }
             TextMeshProUGUI valueText = null;
             if (value != null)
             {
@@ -498,7 +492,9 @@ namespace PalaceMod
             if (tooltip != null) ModTooltip.Attach(button, label, tooltip);
             button.gameObject.SetActive(true);
             Elements.Add(button);
-            return new ModRow(button, valueText);
+            var row = new ModRow(button, valueText);
+            row.SetIcon(icon);
+            return row;
         }
 
         /// <summary>A selectable action, styled like the game's menu entries.</summary>
@@ -608,6 +604,33 @@ namespace PalaceMod
         }
 
         public void SetLabel(string label) => Button.SetOriginalString(label);
+
+        /// <summary>Shows an icon left of the label (null: none). For rows made by helpers that take no icon.</summary>
+        public void SetIcon(Sprite icon)
+        {
+            const float size = 36f;
+            var existing = Button.transform.Find("Row Icon");
+            var text = Button.GetComponent<TextMeshProUGUI>();
+            if (icon == null)
+            {
+                if (existing == null) return;
+                Object.Destroy(existing.gameObject);
+                text.margin = new Vector4(0f, text.margin.y, text.margin.z, text.margin.w);
+                return;
+            }
+            var iconObj = existing != null ? existing.gameObject : new GameObject("Row Icon", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            iconObj.transform.SetParent(Button.transform, false);
+            var image = iconObj.GetComponent<Image>();
+            image.sprite = icon;
+            image.color = ModStyle.Gold; // the game's icons are white and tinted gold in its menus
+            image.preserveAspect = true;
+            image.raycastTarget = false;
+            var iconRect = (RectTransform)iconObj.transform;
+            iconRect.anchorMin = iconRect.anchorMax = new Vector2(0f, 0.5f);
+            iconRect.pivot = new Vector2(0f, 0.5f);
+            iconRect.sizeDelta = new Vector2(size, size);
+            text.margin = new Vector4(size + 12f, text.margin.y, text.margin.z, text.margin.w);
+        }
 
         public void SetValue(string text)
         {

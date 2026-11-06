@@ -17,6 +17,15 @@ using System.Linq;
                              add delta to the scroll wheel on each of the next frames (default 1: one wheel notch;
                              many small deltas over many frames is a trackpad swipe)
         uikit shown          which tooltip is showing
+        uikit numbers        open the demo frame on its Numbers tab (ModNumber fields: int, float, a huge range, clearable)
+        uikit step <left|right> [n] [shift]
+                             n left/right presses on the selected field in one go (a held key: the speed-up shows), with
+                             Shift held if given; prints the selected row's value
+        uikit numkey <min|max|next|prev>
+                             Home / End / controller shoulder on the selected number field or settings slider
+        uikit type <key|text> [...]
+                             drive the field being typed into: text is typed; keys enter, esc, backspace, left, right,
+                             home, end, selectall ('_' for a space in text); prints the typing state
 */
 namespace PalaceMod
 {
@@ -26,6 +35,9 @@ namespace PalaceMod
         private int demoButtons;
         private int clicks;
         private int stepValue = 5;
+        private int demoInt = 50, demoBig = 1;
+        private float demoFloat = 1.5f;
+        private int? demoCost;
 
         public override void Awake(Plugin plugin)
         {
@@ -75,10 +87,55 @@ namespace PalaceMod
                         return $"scrolling {args[1]} x {frames} frames";
                     case "shown":
                         return ModTooltip.Describe() ?? "hidden";
+                    case "numbers":
+                        (demo ??= BuildDemo()).Open();
+                        demo.ShowTab("Numbers");
+                        return demo.IsOpen ? "opened on Numbers" : throw new InvalidOperationException("didn't open; see the log");
+                    case "step":
+                    {
+                        var frame = UIFrameManager.instance?.ActiveFrame ?? throw new InvalidOperationException("no menu open");
+                        if (frame.CurrentSelection == null) throw new InvalidOperationException("nothing selected");
+                        if (args.Length < 2) throw new ArgumentException("usage: uikit step <left|right> [n] [shift]");
+                        var direction = args[1] == "left" ? ThronefallUIElement.NavigationDirection.Left
+                            : args[1] == "right" ? ThronefallUIElement.NavigationDirection.Right : throw new ArgumentException("left or right");
+                        int count = args.Length > 2 && int.TryParse(args[2], out int c) ? c : 1;
+                        ModNumber.DebugShift = args.Contains("shift");
+                        try
+                        {
+                            // A step may rebuild the page; the frame re-selects the row by name.
+                            for (int i = 0; i < count && frame.CurrentSelection != null; i++) frame.CurrentSelection.onEmptyNavigate.Invoke(direction);
+                        }
+                        finally { ModNumber.DebugShift = false; }
+                        return SelectedValue(frame);
+                    }
+                    case "numkey":
+                    {
+                        var frame = UIFrameManager.instance?.ActiveFrame ?? throw new InvalidOperationException("no menu open");
+                        var keys = frame.CurrentSelection?.GetComponent<NumberKeys>() ?? throw new InvalidOperationException("the selection isn't a number field");
+                        keys.DebugKey(args.ElementAtOrDefault(1) ?? "");
+                        return SelectedValue(frame);
+                    }
+                    case "type":
+                        foreach (var k in args.Skip(1))
+                        {
+                            if (!ModTextInput.Active) break;
+                            ModTextInput.DebugKey(k.Replace('_', ' '));
+                        }
+                        return ModTextInput.DebugState;
                     default:
                         throw new ArgumentException("usage: uikit <frame|notify|buttons <n>|tooltip [off]|mouse ...|shown>");
                 }
             });
+        }
+
+        // The selected row's texts (rich text stripped), for checking steps from the command line.
+        private static string SelectedValue(UIFrame frame)
+        {
+            var selected = frame.CurrentSelection;
+            if (selected == null) return "nothing selected";
+            var texts = selected.GetComponentsInChildren<TMPro.TextMeshProUGUI>()
+                .Select(t => NumberMath.StripTags(t.text ?? "").Trim()).Where(t => t.Length > 0);
+            return $"{selected.name}: {string.Join(" | ", texts)}";
         }
 
         private static string SimulateMouse(string[] args)
@@ -141,6 +198,19 @@ namespace PalaceMod
                     clicks++;
                     demo.Refresh();
                 });
+            })
+            .AddTab("Numbers", page =>
+            {
+                page.Header("Number fields");
+                page.Text("Left/right step (hold to speed up, Shift or the shoulders x10), apply types a value, Home/End go to the ends.");
+                page.Number("Whole number", () => demoInt, v => demoInt = v, 0, 100, tooltip: () => "0 to 100, step 1.");
+                page.Number("Decimal", () => demoFloat, v => demoFloat = v, 0.5f, 5f, 0.1f, v => $"x{v:0.0}", () => "0.5 to 5, step 0.1, shown as x1.5.");
+                page.Number("Huge range", () => demoBig, v => demoBig = v, 1, 1000000, format: v => $"{v:N0} gold", tooltip: () => "1 to 1,000,000; try 10k.");
+                page.Number("Clearable", () => demoCost ?? 25, v => demoCost = v, 0, 999,
+                    format: v => demoCost is int ? $"{v}" : $"<color=#{ModStyle.Hex(ModStyle.Dim)}>{v}  (default)</color>",
+                    tooltip: () => "Type nothing to go back to the default.", onClear: () => demoCost = null);
+                page.Number("Rebuilds the page", () => demoInt, v => { demoInt = v; demo.Refresh(); }, 0, 100,
+                    tooltip: () => "Its setter refreshes the page, like the debug menu's: holding a key still speeds up.");
             });
     }
 }

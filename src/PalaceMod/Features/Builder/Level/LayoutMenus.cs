@@ -138,15 +138,12 @@ namespace PalaceMod.Builder.Level
                     {
                         int level = i;
                         string label = i == 0 ? "Build cost" : $"Upgrade {i} cost";
-                        page.Stepper(label, () =>
-                        {
-                            int? o = LayoutEditor.CostOverride(item, level);
-                            return o is int c ? $"{c}" : Dim($"{item.BaseCosts[level]}  (map's)");
-                        }, delta =>
-                        {
-                            int current = LayoutEditor.CostOverride(item, level) ?? item.BaseCosts[level];
-                            LayoutEditor.SetCost(item, level, UnityEngine.Mathf.Clamp(current + delta, 0, 999));
-                        }, () => LayoutEditor.SetCost(item, level, null), "Gold to " + (level == 0 ? "build it" : $"buy upgrade {level}") + ". Left/right to change, apply to go back to the map's value.");
+                        string what = level == 0 ? "build it" : $"buy upgrade {level}";
+                        page.Number(label, () => LayoutEditor.CostOverride(item, level) ?? item.BaseCosts[level],
+                            v => LayoutEditor.SetCost(item, level, v), 0, 999,
+                            format: v => LayoutEditor.CostOverride(item, level) is int ? $"{v}" : Dim($"{v}  (map's)"),
+                            tooltip: () => $"Gold to {what}. Left/right to change (hold to speed up, Shift x10), apply to type a value; an empty value goes back to the map's.",
+                            onClear: () => LayoutEditor.SetCost(item, level, null));
                     }
                     if (item.Kind == LayoutEditor.ItemKind.Slot && !item.Locked)
                     {
@@ -159,8 +156,9 @@ namespace PalaceMod.Builder.Level
                 case LayoutEditor.ItemKind.Prop:
                     var def = LayoutEditor.PropDef(item);
                     if (def == null) break;
-                    page.Stepper("Size", () => $"{(LayoutEditor.PropDef(item)?.Scale ?? 1f):0.##}×", delta => LayoutEditor.SetProp(item, "Set size", d => d.Scale = UnityEngine.Mathf.Clamp(UnityEngine.Mathf.Round((d.Scale + 0.1f * delta) * 10f) / 10f, 0.3f, 4f), "size:" + item.Key),
-                        null, "How big it is compared with the map's own.");
+                    page.Number("Size", () => LayoutEditor.PropDef(item)?.Scale ?? 1f,
+                        v => LayoutEditor.SetProp(item, "Set size", d => d.Scale = v, "size:" + item.Key), 0.3f, 4f, 0.1f, v => $"{v:0.##}×",
+                        () => "How big it is compared with the map's own. Left/right to change, apply to type a value.");
                     page.Row("Solid", def.Solid ? "yes" : "no", "Solid props block units, who walk around them. Walk-through props are decoration only.",
                         () => { LayoutEditor.SetProp(item, def.Solid ? "Make walk-through" : "Make solid", d => d.Solid = !d.Solid); selected.Refresh(); });
                     page.Row("Delete", "", "Removes this prop.", () => { LayoutEditor.RemoveOrRestore(item); selected.Close(); });
