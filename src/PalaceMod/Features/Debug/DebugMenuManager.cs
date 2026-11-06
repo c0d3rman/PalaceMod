@@ -16,7 +16,8 @@ using UnityEngine.SceneManagement;
       Unlocks (weapons, perks, mutators). These change the player's real progression (ProgressionActions), so the
       page suggests a scratch profile first.
 
-    Steppers change their value with left/right and act on apply. The actions themselves live in DebugActions and
+    Number fields (ModNumber) change with left/right (hold to speed up, Shift x10) or take a typed value on apply;
+    other steppers change with left/right and act on apply. The actions themselves live in DebugActions and
     are also dev commands (dbg.*), which double as test hooks. Every action marks the run via GameplayImpact.
 */
 namespace PalaceMod
@@ -37,9 +38,6 @@ namespace PalaceMod
         private string confirming; // the map's bulk action waiting for Yes/No, or null
 
         // Menu state.
-        private static readonly int[] GoldAmounts = [1, 5, 10, 25, 50, 100, 250, 500, 1000];
-        private int goldIndex = 5;
-        private int jumpTarget = -1;
         private static readonly float[] EnemyScales = [0.5f, 1f, 1.5f, 2f, 3f];
         private HashSet<Equippable> pendingLoadout;
 
@@ -58,7 +56,6 @@ namespace PalaceMod
             {
                 DebugActions.ForgetWaves();
                 pendingLoadout = null;
-                jumpTarget = -1;
             };
             RegisterDevCommands();
         }
@@ -114,12 +111,11 @@ namespace PalaceMod
                 .AddTab("Combat", BuildCombatTab)
                 .AddTab("Loadout", BuildLoadoutTab);
             pendingLoadout = null;
-            jumpTarget = -1;
             frame.Open();
             if (!hintShown && frame.IsOpen)
             {
                 hintShown = true;
-                Notify.Show("Debug menu: left/right change values. Using it makes the run unranked.", NotifyKind.Info, 5f, "debug-menu-hint");
+                Notify.Show("Debug menu: left/right change values, or apply to type one. Using it makes the run unranked.", NotifyKind.Info, 5f, "debug-menu-hint");
             }
         }
 
@@ -147,6 +143,13 @@ namespace PalaceMod
 
         private static string OnOff(bool on) => on ? "On" : "Off";
 
+        private const string TypeHint = " Apply to type a value; hold left/right to speed up, Shift for x10.";
+
+        // Number fields: set runs through Run (reported quietly, page refreshed).
+        private ModField Number(ModPage page, string label, Func<int> get, Func<int, string> set, int min, int max, string tooltip,
+            int step = 1, Func<int, string> format = null) =>
+            page.Number(label, get, v => Run(() => set(v), quiet: true), min, max, step, format, () => tooltip + TypeHint);
+
         private void BuildRunTab(ModPage page)
         {
             if (!DebugActions.InLevel)
@@ -154,11 +157,9 @@ namespace PalaceMod
                 page.Text("Only available during a level.");
                 return;
             }
-            page.Header($"Gold  {DebugActions.Gold}");
-            Stepper(page, "Add gold", () => $"+{GoldAmounts[goldIndex]}", d => goldIndex = Mathf.Clamp(goldIndex + d, 0, GoldAmounts.Length - 1),
-                () => Run(() => DebugActions.AddGold(GoldAmounts[goldIndex])), "Gives you gold. Left/right change the amount.");
-            Stepper(page, "Remove gold", () => $"-{GoldAmounts[goldIndex]}", d => goldIndex = Mathf.Clamp(goldIndex + d, 0, GoldAmounts.Length - 1),
-                () => Run(() => DebugActions.AddGold(-GoldAmounts[goldIndex])), "Takes gold away. Left/right change the amount.");
+            page.Header("Gold");
+            Number(page, "Your gold", () => DebugActions.Gold, DebugActions.SetGold, 0, 9999999,
+                "Your gold. Left/right add or take 10.", step: 10);
 
             int night = DebugActions.CurrentNight, count = DebugActions.NightCount;
             page.Header(DebugActions.IsNight ? $"Night {night} of {count}" : $"Day {night} of {count}");
@@ -171,10 +172,8 @@ namespace PalaceMod
                 page.Button("Start night now", () => Run(DebugActions.StartNight), "Starts the next night right away.");
                 if (DebugActions.IsPlanningTime)
                 {
-                    if (jumpTarget < 1) jumpTarget = night;
-                    Stepper(page, "Jump to night", () => $"{jumpTarget} of {count}", d => jumpTarget = Mathf.Clamp(jumpTarget + d, 1, count),
-                        () => Run(() => DebugActions.JumpToNight(jumpTarget)),
-                        "Makes the chosen night the next one. Buildings and gold stay as they are.");
+                    Number(page, "Next night", () => DebugActions.CurrentNight, DebugActions.JumpToNight, 1, count,
+                        "Which night comes next. Buildings and gold stay as they are.", format: v => $"{v} of {count}");
                 }
             }
 
@@ -199,9 +198,8 @@ namespace PalaceMod
             }
             bool modified = DebugActions.IsModified(wave);
             page.Header($"Night {DebugActions.CurrentNight}{(modified ? "  (changed)" : "")}");
-            Stepper(page, "Difficulty", () => $"x{wave.difficultyMulti:0.0}",
-                d => Run(() => DebugActions.SetDifficulty(wave.difficultyMulti + d * 0.1f), quiet: true), null,
-                "Night difficulty: scales enemy health, and enemy damage by half as much.");
+            page.Number("Difficulty", () => wave.difficultyMulti, v => Run(() => DebugActions.SetDifficulty(v), quiet: true), 0.5f, 5f, 0.1f,
+                v => $"x{v:0.0}", () => "Night difficulty: scales enemy health, and enemy damage by half as much." + TypeHint);
             page.Row("All elite", OnOff(DebugActions.AllElite(wave)), "Makes every enemy of the night elite (much tougher).",
                 () => Run(() => DebugActions.SetAllElite(!DebugActions.AllElite(wave)), quiet: true));
             Stepper(page, "Enemy count", () => $"x{DebugActions.EnemyScale(wave):0.##}", d =>
@@ -217,10 +215,11 @@ namespace PalaceMod
             foreach (var group in groups)
             {
                 var prefab = group.Prefab;
-                Stepper(page, group.AnyElite ? $"{group.Name} (elite)" : group.Name,
-                    () => DebugActions.WaveGroups(wave).FirstOrDefault(g => g.Prefab == prefab).Count.ToString(),
-                    d => Run(() => DebugActions.ChangeEnemyCount(prefab, d), quiet: true), null,
-                    "Left/right add or remove one of this enemy.", group.Icon);
+                int Count() => DebugActions.WaveGroups(wave).FirstOrDefault(g => g.Prefab == prefab).Count;
+                var field = Number(page, group.AnyElite ? $"{group.Name} (elite)" : group.Name, Count,
+                    n => DebugActions.ChangeEnemyCount(prefab, n - Count()), 0, 999,
+                    "How many of this enemy the night sends. At 0 the type is taken out of the night (at least one enemy stays).");
+                field.Row.SetIcon(group.Icon);
             }
             if (modified)
             {
@@ -350,9 +349,12 @@ namespace PalaceMod
             }
         }
 
-        private static string LevelText()
+        // The game allows levels far past the last reward; the field stops at a number that still fits.
+        private const int MaxPlayerLevel = 9999;
+
+        private static string LevelText(int level)
         {
-            int level = ProgressionActions.Level, max = ProgressionActions.MaxRewardLevel;
+            int max = ProgressionActions.MaxRewardLevel;
             return level >= max ? $"{level}  (all rewards)" : $"{level} of {max}";
         }
 
@@ -360,11 +362,11 @@ namespace PalaceMod
         {
             page.Text(ProfileNote);
             page.Header("Level");
-            Stepper(page, "Player level", LevelText, d => Run(() => ProgressionActions.SetLevel(ProgressionActions.Level + d), quiet: true), null,
-                "Left/right change your level by one (XP goes to 0). Each level up to the last reward unlocks the next weapon, perk or mutator.");
-            Stepper(page, "XP", () => $"{ProgressionActions.Xp} / {ProgressionActions.XpNeeded}",
-                d => Run(() => ProgressionActions.SetXp(ProgressionActions.Xp + d * Mathf.Max(1, ProgressionActions.XpNeeded / 10)), quiet: true), null,
-                "XP towards the next level. Left/right change it by a tenth of a level.");
+            Number(page, "Player level", () => ProgressionActions.Level, ProgressionActions.SetLevel, 1, MaxPlayerLevel,
+                "Your level (XP goes to 0). Each level up to the last reward unlocks the next weapon, perk or mutator.", format: LevelText);
+            int needed = ProgressionActions.XpNeeded;
+            Number(page, "XP", () => ProgressionActions.Xp, ProgressionActions.SetXp, 0, Mathf.Max(0, needed - 1),
+                "XP towards the next level. Left/right change it by a tenth of a level.", step: Mathf.Max(1, needed / 10), format: v => $"{v} / {needed}");
 
             page.Header("Everything");
             if (confirming == null)

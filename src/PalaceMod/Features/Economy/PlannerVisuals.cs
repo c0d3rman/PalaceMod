@@ -209,15 +209,32 @@ namespace PalaceMod.Economy
 
         public static void MapLegend(Transform parent, float width)
         {
-            var text = GameWidgets.Text(parent, "Map legend",
-                $"<color=#{ModStyle.Hex(ModStyle.Accent)}>◆</color> this slot   <color=#{ModStyle.Hex(ModStyle.Bright)}>■</color> same building   " +
-                $"<color=#{ModStyle.Hex(G.Bronze)}>◆</color> in the plan   <color=#{ModStyle.Hex(ModStyle.Gold)}>■</color> built   " +
-                $"<color=#{ModStyle.Hex(G.Dim)}>■</color> not built", ModStyle.BodyFont, 19f, ModStyle.Gold, TextAlignmentOptions.TopLeft);
-            text.enableWordWrapping = true;
-            var rect = text.rectTransform;
-            rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0f, 1f);
-            rect.anchoredPosition = Vector2.zero;
-            rect.sizeDelta = new Vector2(width, 30f);
+            // Drawn marks (the game's fonts have no shape glyphs).
+            var items = new (string Label, Color Color, bool Diamond)[]
+            {
+                ("this slot", ModStyle.Accent, true), ("same building", ModStyle.Bright, false), ("in the plan", G.Bronze, true),
+                ("built", ModStyle.Gold, false), ("not built", G.Dim, false),
+            };
+            float x = 4f;
+            var area = G.Rect(parent, "Legend", Color.clear);
+            area.anchorMin = area.anchorMax = area.pivot = new Vector2(0f, 1f);
+            area.anchoredPosition = Vector2.zero;
+            area.sizeDelta = new Vector2(width, 30f);
+            foreach (var (label, color, diamond) in items)
+            {
+                var mark = G.Rect(area, "Mark", color);
+                mark.anchorMin = mark.anchorMax = new Vector2(0f, 1f);
+                mark.pivot = new Vector2(0.5f, 0.5f);
+                mark.anchoredPosition = new Vector2(x + 6f, -14f);
+                mark.sizeDelta = new Vector2(10f, 10f);
+                if (diamond) mark.localRotation = Quaternion.Euler(0f, 0f, 45f);
+                var text = G.Label(area, label, 19f, ModStyle.Gold, TextAlignmentOptions.MidlineLeft, ModStyle.BodyFont);
+                var rect = text.rectTransform;
+                rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0f, 1f);
+                rect.anchoredPosition = new Vector2(x + 16f, -1f);
+                rect.sizeDelta = new Vector2(200f, 26f);
+                x += 16f + text.GetPreferredValues(label).x + 22f;
+            }
         }
 
         private static void Square(RectTransform parent, Vector2 at, float size, Color color)

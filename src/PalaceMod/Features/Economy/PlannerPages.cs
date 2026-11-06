@@ -97,28 +97,9 @@ namespace PalaceMod
             if (frame.IsOpen) frame.Refresh();
         }
 
-        /// <summary>A number field: left/right step it (held: faster; Shift: by 10), apply types a value. Stands in for
-        /// the shared numeric field the UI kit is getting.</summary>
-        private static ModField Num(ModPage page, string label, Func<int> get, Action<int> set, int min, int max, Func<string> tooltip, Func<int, string> show = null)
-        {
-            ModField field = null;
-            field = ModFields.Stepper(page, label, () => (show ?? (v => v.ToString()))(get()), d =>
-            {
-                bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
-                int v = Mathf.Clamp(get() + d * (shift ? 10 : 1), min, Math.Max(min, max));
-                if (v != get()) set(v);
-            }, () => ModTextInput.Begin(field, get().ToString(), text =>
-            {
-                if (!ModFields.TryParseNumber(text, out float f))
-                {
-                    Notify.Show("Type a number", NotifyKind.Warning, 2f, key: "econ-number");
-                    return;
-                }
-                int v = Mathf.Clamp(Mathf.RoundToInt(f), min, Math.Max(min, max));
-                if (v != get()) set(v);
-            }, maxLength: 6), () => (tooltip?.Invoke() is { Length: > 0 } t ? t + "\n" : "") + "Left/right to change (Shift: by 10), select to type it.");
-            return field;
-        }
+        /// <summary>A whole-number field (the UI kit's: stepping that speeds up, Shift x10, typing).</summary>
+        private static ModField Num(ModPage page, string label, Func<int> get, Action<int> set, int min, int max, Func<string> tooltip, Func<int, string> show = null) =>
+            page.Number(label, get, set, min, Math.Max(min, max), format: show, tooltip: tooltip);
 
         // ---- Economy tab ------------------------------------------------------------------------------------------
 
@@ -170,11 +151,13 @@ namespace PalaceMod
             if (w.FirstDay <= w.LastNight)
             {
                 branchDay = Mathf.Clamp(branchDay == 0 ? w.FirstDay : branchDay, w.FirstDay, w.LastNight);
-                page.Stepper("Branch from day", () => $"Day {branchDay}", d => branchDay = Mathf.Clamp(branchDay + Math.Sign(d), w.FirstDay, w.LastNight), () =>
+                Num(page, "Branch from day", () => branchDay, v => { branchDay = v; host?.Refresh(); }, w.FirstDay, w.LastNight,
+                    () => "A branch shares this plan's items before that day and has its own after: try something else from then on and compare the two.", v => $"Day {v}");
+                page.Button($"Make a branch from day {branchDay}", () =>
                 {
                     Branch(p.File, p.Plan, branchDay);
                     ChangedHere();
-                }, "A branch shares this plan's items before that day and has its own after: try something else from then on and compare the two. Left/right picks the day, select to make it.");
+                }, "It's shown at once, compared with this plan.");
             }
             page.Button("Compare income sources", OpenSources, "Every kind of income building on this map: what it costs, what it pays per night and when it pays for itself.");
 
@@ -469,17 +452,15 @@ namespace PalaceMod
                 int buildable = group.Count(e => e.Level == 0 && e.Active && EconSim.CanUpgrade(state, e));
                 if (!lose && replaceId == null && buildable >= 2)
                 {
-                    pickCounts.TryGetValue(type, out int n);
-                    n = Mathf.Clamp(n == 0 ? 2 : n, 1, buildable);
-                    var several = page.Stepper($"Build several {type}", () => $"{Mathf.Clamp(pickCounts.TryGetValue(type, out int c) ? c : n, 1, buildable)}",
-                        d => pickCounts[type] = Mathf.Clamp((pickCounts.TryGetValue(type, out int c) ? c : n) + d, 1, buildable),
-                        () =>
-                        {
-                            int count = Mathf.Clamp(pickCounts.TryGetValue(type, out int c) ? c : n, 1, buildable);
-                            AddSeveral(p, type, pickDay, count);
-                            Committed();
-                        }, $"Left/right sets how many, select to add them: the {type} slots that can be built on day {pickDay}, nearest the castle first ({buildable} can).");
-                    several.Button.gameObject.name = "Several " + type;
+                    int Count() => Mathf.Clamp(pickCounts.TryGetValue(type, out int c) ? c : 2, 1, buildable);
+                    Num(page, $"How many {type}", Count, v => { pickCounts[type] = v; pickerFrame.Refresh(); }, 1, buildable,
+                        () => $"How many to build at once: the {type} slots that can be built on day {pickDay}, nearest the castle first ({buildable} can).");
+                    var several = page.Button($"Build {Count()} {type}", () =>
+                    {
+                        AddSeveral(p, type, pickDay, Count());
+                        Committed();
+                    });
+                    several.gameObject.name = "Several " + type;
                 }
                 foreach (var e in group)
                 {
