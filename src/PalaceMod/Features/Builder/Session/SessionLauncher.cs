@@ -180,7 +180,7 @@ namespace PalaceMod.Builder
             waveSet = null;
             level = null;
             error = null;
-            if (!Feature<BuilderManager>.On) { error = "the Builder is turned off in Settings > Mods"; return false; }
+            if (!Feature<BuilderManager>.On) { error = "the Builder isn't available"; return false; }
             if (!GameplayFeatures.Allowed) { error = "custom runs are off while Settings > Mods > General > Gameplay-changing features is off"; return false; }
             var pack = request?.Pack;
             if (pack == null) { error = "no pack"; return false; }

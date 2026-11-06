@@ -24,6 +24,8 @@ namespace PalaceMod
         public override string FeatureDescription =>
             "Custom units and wave sets from design packs in BepInEx/PalaceBuilder. Custom runs never touch your scores or saves.";
 
+        protected override bool HasEnabledSwitch => false; // a menu: custom runs only start from it
+
         // Session guards must outlive a mid-run switch-off, so patches stay applied and check Feature<BuilderManager>.On.
         protected override bool UnpatchWhenDisabled => false;
 

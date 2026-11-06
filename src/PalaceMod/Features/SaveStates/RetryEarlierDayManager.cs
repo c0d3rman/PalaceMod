@@ -22,7 +22,7 @@ namespace PalaceMod
         public override string FeatureSection => "Retry earlier day";
         public override bool AffectsRanking => true; // off while "Gameplay-changing features" is off
         public override string FeatureDescription =>
-            "Adds \"Earlier Day\" to the game's retry popup (pause > Restart, and Try Again after a defeat): go back to the dawn of any earlier day this run. Uses the savestates' automatic dawn states, so Savestates must be on.";
+            "Adds \"Earlier Day\" to the game's retry popup (pause > Restart, and Try Again after a defeat): go back to the dawn of any earlier day this run. Uses the automatic dawn states (Savestates > \"Automatic states\" must include dawn).";
 
         private const string ButtonName = "PalaceMod Retry Earlier Day";
 
@@ -85,9 +85,10 @@ namespace PalaceMod
             var dawns = EarlierDawns();
             if (dawns.Count == 0)
             {
-                page.Text(Feature<SaveStatesManager>.On
-                    ? "No earlier dawns saved for this run yet."
-                    : "Turn on Savestates (Settings > Mods) to retry earlier days.");
+                var savestates = Feature<SaveStatesManager>.Instance;
+                page.Text(savestates != null && savestates.AutoMode is AutoStateMode.Off or AutoStateMode.Dusk
+                    ? "Set Savestates > \"Automatic states\" (Settings > Mods > Practice) to include dawn to retry earlier days."
+                    : "No earlier dawns saved for this run yet.");
                 return;
             }
             bool defeated = LocalGamestate.Instance != null && LocalGamestate.Instance.CurrentState == LocalGamestate.State.AfterMatchDefeat;

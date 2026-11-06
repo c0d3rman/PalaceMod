@@ -27,7 +27,9 @@ namespace PalaceMod
     {
         public override string FeatureSection => "Run analytics";
         public override string FeatureDescription =>
-            "Records score and gold for every night of a run. Pause and pick \"Run Analytics\" for graphs, the rest of the run projected, and what-if scenarios.";
+            "Records score and gold for every night of a run, for the pause menu's \"Run Analytics\": graphs, the rest of the run projected, and what-if scenarios.";
+        // The switch covers the recording (the passive part); the menu is always in the pause menu.
+        public override string EnabledLabel => "Record runs";
 
         private static readonly IScoreRules Rules = GameScoreRules.Instance;
 
@@ -36,7 +38,7 @@ namespace PalaceMod
         private PlayerInteraction trackedPlayer;
         private bool wasNight;
         private readonly Scenario scenario = new();
-        private ModFrame frame;
+        private ModFrame frame, offFrame;
 
         // Handed over from the load patch (which runs in the scene's Awake, before Update sees the new level).
         private static RunHistory loaded;
@@ -47,7 +49,7 @@ namespace PalaceMod
         public override void Awake(Plugin plugin)
         {
             base.Awake(plugin);
-            PauseMenu.AddButton("analytics", "Run Analytics", Open, order: 20, visible: () => IsEnabled && Rules.Available);
+            PauseMenu.AddButton("analytics", "Run Analytics", Open, order: 20, visible: () => Rules.Available);
             DevCommands.Register("analytics", "analytics [open|kill|build <n>|reload [disk|fresh]|dump|scenario <income> <fromNight> <faster> <spend%|avg>]   run analytics: summary, open the frame, end the night, scenario", Command);
             // The match save only holds the history as of the last dawn; a savestate keeps it as of the moment.
             SaveStates.RegisterState("analytics",
@@ -289,7 +291,15 @@ namespace PalaceMod
 
         private void Open()
         {
-            if (!Rules.Available || history == null) return;
+            if (!Rules.Available) return;
+            if (!IsEnabled || history == null)
+            {
+                offFrame ??= new ModFrame("Run Analytics").SetContent(page => page.Text(IsEnabled
+                    ? "Nothing recorded yet for this run."
+                    : "Run recording is off. Turn on \"Record runs\" in Settings > Mods > Pause menu; nights from then on are recorded."));
+                offFrame.Open();
+                return;
+            }
             scenario.ExtraFromNight = Mathf.Clamp(scenario.ExtraFromNight, RunProjection.NextNight, Mathf.Max(RunProjection.NextNight, RunProjection.NightCount));
             frame ??= new ModFrame("Run Analytics")
                 .AddTab("Score", page => AnalyticsPages.Score(page, history, Rules, scenario))

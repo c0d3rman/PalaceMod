@@ -26,9 +26,11 @@ namespace PalaceMod
         public override bool AffectsRanking => true; // off while "Gameplay-changing features" is off
         public override string FeatureDescription =>
             "Save and load the whole game mid-level, for practice. Pause > Savestates lists them. Loading a state makes the run unranked.";
+        // The menu and keys are there to use or not; the passive part (automatic states) has its own setting.
+        protected override bool HasEnabledSwitch => false;
 
-        // The real-save guard must outlive the Enabled switch: turning savestates off after a load mustn't let the
-        // practice run be saved. The other patches check IsEnabled themselves.
+        // The real-save guard must outlive the master switch: turning gameplay-changing features off after a load
+        // mustn't let the practice run be saved. The other patches check IsEnabled themselves.
         protected override bool UnpatchWhenDisabled => false;
 
         private ConfigEntry<AutoStateMode> autoMode;
@@ -57,7 +59,7 @@ namespace PalaceMod
             base.Awake(plugin);
             var config = plugin.Config;
             autoMode = config.Bind(FeatureSection, "Automatic states", AutoStateMode.Both, new ConfigDescription(
-                "When to save a state automatically: shortly after sunrise, right before the night starts, or both."));
+                "When to save a state automatically: shortly after sunrise, right before the night starts, or both. Off saves only when you ask. Retry earlier day needs the dawn states."));
             autoHistory = config.Bind(FeatureSection, "Automatic history", 40, new ConfigDescription(
                 "How many automatic states (dawn and pre-night together) to keep per level; older ones are deleted. About 0.1 MB each.", new AcceptableValueRange<int>(1, 80)));
             confirmLoad = config.Bind(FeatureSection, "Confirm loads", true, new ConfigDescription(

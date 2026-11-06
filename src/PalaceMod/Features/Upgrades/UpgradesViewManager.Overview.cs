@@ -48,20 +48,8 @@ namespace PalaceMod
                 }
                 return $"open, {cards.Count} cards" + (shownCard != null ? $", showing {shownCard.Group.Name}" : "");
             });
-            RefreshPauseButton();
-        }
-
-        private void CloseOverview()
-        {
-            if (overview != null && overview.IsOpen) overview.Close();
-        }
-
-        private void RefreshPauseButton()
-        {
-            if (overview == null) return;
-            PauseMenu.AddButton(PauseButtonId, "Upgrades", overview.Open, order: 20,
-                visible: () => IsEnabled && PauseOverview.Value && PlayerInteraction.instance != null);
-            PauseMenu.Refresh();
+            // A menu, not part of the feature's switch: always there in a level.
+            PauseMenu.AddButton(PauseButtonId, "Upgrades", overview.Open, order: 20, visible: () => PlayerInteraction.instance != null);
         }
 
         // ---------- Grid ----------
