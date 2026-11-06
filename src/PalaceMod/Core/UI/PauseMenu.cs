@@ -20,6 +20,10 @@ using Object = UnityEngine.Object;
     registry here, so they survive the UI being rebuilt and can't end up duplicated or half-made: a button that
     fails to build is dropped for that session and the menu is left as the game made it. The game's menu column is
     tightened so it still ends above the "Night" row; past MaxInline buttons, the rest move into a "More" frame.
+
+    The level-select map has its own pause bar (Continue / Settings / Main Menu, side by side). A button passed
+    onMap: true is shown there too, after Settings, whenever its `visible` says so; the others never are, so a
+    button written for levels doesn't turn up on the map.
 */
 namespace PalaceMod
 {
@@ -33,6 +37,8 @@ namespace PalaceMod
             internal Action OnClick;
             internal Func<bool> Visible;
             internal TFUITextButton Widget;
+            internal bool OnMap;
+            internal TFUITextButton MapWidget;
         }
 
         internal static readonly Dictionary<string, Button> Buttons = [];
@@ -44,7 +50,8 @@ namespace PalaceMod
         /// <param name="order">Lower comes first among mod buttons.</param>
         /// <param name="visible">Checked each time the menu opens; null means always shown. Use it to hide the
         /// button while your feature is disabled.</param>
-        public static Button AddButton(string id, string label, Action onClick, int order = 0, Func<bool> visible = null)
+        /// <param name="onMap">Also offer it in the level-select map's pause bar (subject to <paramref name="visible"/>).</param>
+        public static Button AddButton(string id, string label, Action onClick, int order = 0, Func<bool> visible = null, bool onMap = false)
         {
             if (string.IsNullOrEmpty(id)) throw new ArgumentException("pause button needs an id");
             if (!Buttons.TryGetValue(id, out var button)) Buttons[id] = button = new Button { Id = id };
@@ -52,7 +59,9 @@ namespace PalaceMod
             button.OnClick = onClick;
             button.Order = order;
             button.Visible = visible;
+            button.OnMap = onMap;
             if (button.Widget != null) button.Widget.SetOriginalString(label);
+            if (button.MapWidget != null) button.MapWidget.SetOriginalString(label);
             Feature<PauseMenuManager>.Instance?.SyncIfOpen();
             return button;
         }
@@ -66,7 +75,8 @@ namespace PalaceMod
                 Feature<PauseMenuManager>.Instance?.Hide(button.Widget);
                 Object.Destroy(button.Widget.gameObject);
             }
-            button.Widget = null;
+            if (button.MapWidget != null) Object.Destroy(button.MapWidget.gameObject);
+            button.Widget = button.MapWidget = null;
             Feature<PauseMenuManager>.Instance?.SyncIfOpen();
         }
 
@@ -92,8 +102,17 @@ namespace PalaceMod
         private Vector2 savedPivot, savedPosition;
         private float savedSpacing, savedHeight;
 
+        private UIFrame hookedMapFrame;
+
         public override void Update()
         {
+            var mapFrame = UIFrameManager.instance == null ? null : Traverse.Create(UIFrameManager.instance).Field("overworldPauseMenuFrame").GetValue<UIFrame>();
+            if (mapFrame != hookedMapFrame)
+            {
+                hookedMapFrame = mapFrame;
+                foreach (var b in PauseMenu.Buttons.Values) b.MapWidget = null;
+                if (mapFrame != null) mapFrame.onActivate.AddListener(SyncMap);
+            }
             var frame = GameWidgets.PauseFrame;
             if (frame == hookedFrame) return;
             hookedFrame = frame;
@@ -233,6 +252,55 @@ namespace PalaceMod
 
         private List<PauseMenu.Button> moreItems = [];
 
+        // The map's pause bar: the game's buttons side by side under one layout group; ours go after Settings (the
+        // second entry) with left/right navigation threaded through, wrapping like the game's.
+        private void SyncMap()
+        {
+            try
+            {
+                var frame = hookedMapFrame;
+                var native = frame.GetComponentsInChildren<TFUITextButton>(false).Where(b => !b.name.StartsWith("PalaceMod ")).ToList();
+                if (native.Count < 2) return;
+                var settings = native[1];
+                var bar = settings.transform.parent;
+                var shown = new List<TFUITextButton>();
+                foreach (var b in PauseMenu.Buttons.Values.Where(b => b.OnMap).OrderBy(b => b.Order).ThenBy(b => b.Id, StringComparer.Ordinal))
+                {
+                    bool visible;
+                    try { visible = b.Visible?.Invoke() ?? true; }
+                    catch (Exception e)
+                    {
+                        Log.For<PauseMenuManager>().Caught($"Visibility check for \"{b.Id}\" failed", e);
+                        visible = false;
+                    }
+                    if (!visible)
+                    {
+                        if (b.MapWidget != null) b.MapWidget.gameObject.SetActive(false);
+                        continue;
+                    }
+                    if (b.MapWidget == null)
+                    {
+                        var button = b;
+                        b.MapWidget = Build(settings, bar, $"PalaceMod Pause {b.Id}", b.Label, () => button.OnClick?.Invoke());
+                    }
+                    b.MapWidget.gameObject.SetActive(true);
+                    shown.Add(b.MapWidget);
+                }
+                int index = settings.transform.GetSiblingIndex();
+                foreach (var w in shown) w.transform.SetSiblingIndex(++index);
+                var row = bar.Cast<Transform>().Where(t => t.gameObject.activeSelf).Select(t => t.GetComponent<TFUITextButton>()).Where(b => b != null).ToList();
+                for (int i = 0; i < row.Count; i++)
+                {
+                    row[i].leftNav = row[(i + row.Count - 1) % row.Count];
+                    row[i].rightNav = row[(i + 1) % row.Count];
+                }
+            }
+            catch (Exception e)
+            {
+                Log.For<PauseMenuManager>().Error("Couldn't update the map's pause bar", e);
+            }
+        }
+
         private void OpenMore()
         {
             moreFrame ??= new ModFrame("Mods").SetContent(page =>
@@ -242,9 +310,12 @@ namespace PalaceMod
             moreFrame.Open();
         }
 
-        private TFUITextButton Build(TFUITextButton settings, string name, string label, Action onClick)
+        private TFUITextButton Build(TFUITextButton settings, string name, string label, Action onClick) =>
+            Build(settings, menu, name, label, onClick);
+
+        private TFUITextButton Build(TFUITextButton settings, Transform parent, string name, string label, Action onClick)
         {
-            var button = GameWidgets.Button(settings, menu, name, label, onClick);
+            var button = GameWidgets.Button(settings, parent, name, label, onClick);
             var text = button.GetComponent<TextMeshProUGUI>();
             var emblem = ModStyle.AddEmblem(button.transform, 9f);
             var follower = emblem.gameObject.AddComponent<EmblemFollower>();

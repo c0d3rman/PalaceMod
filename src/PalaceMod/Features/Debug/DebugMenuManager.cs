@@ -48,7 +48,7 @@ namespace PalaceMod
             base.Awake(plugin);
             openKey = Keybinds.Register(FeatureSection, "open", "Debug menu", new KeyboardShortcut(KeyCode.BackQuote),
                 "Opens or closes the debug menu in a level or on the map.", KeybindFlags.AllowInMenus);
-            PauseMenu.AddButton("debug-menu", "Debug", Open, order: 90, visible: () => IsEnabled && (DebugActions.InLevel || ProgressionActions.OnMap));
+            PauseMenu.AddButton("debug-menu", "Debug", Open, order: 90, visible: () => IsEnabled && (DebugActions.InLevel || ProgressionActions.OnMap), onMap: true);
             AchievementGuard.Stages = plugin.Config.Bind(FeatureSection, "Achievement guard stages", "", new ConfigDescription(
                 "Stages the debug menu marked beaten; they don't grant their Steam achievement until won for real.", null, new SettingTags { Hidden = true }));
             AchievementGuard.Level = plugin.Config.Bind(FeatureSection, "Achievement guard level", false, new ConfigDescription(
@@ -438,7 +438,9 @@ namespace PalaceMod
                     var item = e;
                     bool always = ProgressionActions.AlwaysUnlocked(item);
                     int reward = ProgressionActions.RewardLevel(item);
-                    string value = always ? "Always" : item.IsUnlocked ? "Unlocked" : reward > 0 ? $"Locked (level {reward + 1})" : "Locked";
+                    var stage = ProgressionActions.UnlockStage(item);
+                    string value = always ? "Always" : item.IsUnlocked ? "Unlocked"
+                        : reward > 0 ? $"Locked (level {reward + 1})" : stage != null ? $"Locked (beat {ProgressionActions.StageName(stage)})" : "Locked";
                     page.Row(DebugActions.DisplayName(item), value, () => ProgressionActions.HowUnlocked(item),
                         always ? null : () => Run(() => ProgressionActions.SetUnlocked(item, !item.IsUnlocked), quiet: true), item.icon);
                 }

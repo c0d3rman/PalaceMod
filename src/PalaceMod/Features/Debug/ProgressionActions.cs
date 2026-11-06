@@ -21,9 +21,13 @@ namespace PalaceMod
     {
         /// <summary>On a level-select map (the overworld), outside any level.</summary>
         public static bool OnMap =>
-            LevelSelectManager.instance != null && SceneTransitionManager.instance != null &&
+            MapLoaded && SceneTransitionManager.instance != null &&
             SceneTransitionManager.instance.CurrentSceneState != SceneTransitionManager.SceneState.MainMenu &&
             !SceneTransitionManager.instance.SceneTransitionIsRunning && !DebugActions.InLevel;
+
+        // A map scene is one with stage markers (_LevelSelect and the DLC maps; the game's static
+        // LevelSelectManager.instance isn't reliable). Only checked when a menu opens or a key is pressed.
+        internal static bool MapLoaded => UnityEngine.Object.FindObjectOfType<LevelInteractor>() != null;
 
         public static bool Ready => PerkManager.instance != null && LevelProgressManager.instance != null && SaveLoadManager.instance != null;
 
@@ -82,7 +86,11 @@ namespace PalaceMod
         public static string StageName(LevelInfo stage)
         {
             string name = stage.LocalizedDisplayName;
-            return string.IsNullOrEmpty(name) || name.StartsWith("Map Name/") ? stage.displayName : name;
+            if (string.IsNullOrEmpty(name) || name.StartsWith("Map Name/")) name = stage.displayName;
+            // Challenges share their map's name; the game tells them apart by subtitle.
+            string subtitle = stage.displaySubtitle;
+            if (!string.IsNullOrEmpty(subtitle) && !subtitle.StartsWith("Map/")) return $"{name}: {subtitle}";
+            return stage.sceneName != stage.displayName && stage.sceneName.StartsWith(stage.displayName) ? stage.sceneName : name;
         }
 
         public static LevelInfo FindStage(string name)
@@ -218,7 +226,8 @@ namespace PalaceMod
         {
             Require();
             var items = new[] { DebugActions.Category.Weapon, DebugActions.Category.Perk, DebugActions.Category.Mutator }.SelectMany(DebugActions.AllOf).ToList();
-            return $"level {Level} (rewards to {MaxRewardLevel}), xp {Xp}/{XpNeeded}, unlocked {items.Count(i => i.IsUnlocked)}/{items.Count}; stages: " +
+            return $"on map {OnMap} (map {MapLoaded}, scene state {SceneTransitionManager.instance?.CurrentSceneState}, in level {DebugActions.InLevel}); " +
+                   $"level {Level} (rewards to {MaxRewardLevel}), xp {Xp}/{XpNeeded}, unlocked {items.Count(i => i.IsUnlocked)}/{items.Count}; stages: " +
                    string.Join(", ", Stages.Select(s => $"{s.sceneName}={StateOf(s)}")) + "; locked: " +
                    string.Join(", ", items.Where(i => !i.IsUnlocked).Select(i => i.name)) + "; equipped: " +
                    string.Join(", ", Perks.CurrentlyEquipped.Select(e => e.name));
@@ -275,7 +284,7 @@ namespace PalaceMod
             return true;
         }
 
-        internal static bool AllowMaxLevel() => Level == null || !Level.Value || LevelSelectManager.instance == null; // not from the map
+        internal static bool AllowMaxLevel() => Level == null || !Level.Value || !ProgressionActions.MapLoaded; // not from the map
 
         internal static string Describe() => $"guarded stages [{Stages?.Value}], level raised {Level?.Value}";
     }
