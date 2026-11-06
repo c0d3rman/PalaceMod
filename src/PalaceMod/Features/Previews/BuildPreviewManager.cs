@@ -35,7 +35,7 @@ namespace PalaceMod
         {
             base.Awake(plugin);
             showAtDawn = plugin.Config.Bind(FeatureSection, "Show at dawn", true,
-                "Turns build previews on every morning. Tap the preview button to hide them again.");
+                "Turns build previews on every morning, including when a level starts. Tap the preview button to hide them again.");
             DevCommands.Register("previews", "previews [on|off]   show or set the build preview latch", args =>
             {
                 if (args.Length > 0) SetLatched(args[0] == "on");
@@ -44,7 +44,12 @@ namespace PalaceMod
             // The latch resets with each level, so a savestate load would drop it; keep it in the state.
             SaveStates.RegisterState("build-preview-latch",
                 () => IsEnabled ? new LatchState { latched = latched } : null,
-                saved => { if (IsEnabled) SetLatched(saved.latched); });
+                saved =>
+                {
+                    if (!IsEnabled) return;
+                    Follow(DayNightCycle.Instance); // so Update doesn't treat the restored level as new and reset the latch
+                    SetLatched(saved.latched);
+                });
         }
 
         internal sealed class LatchState { public bool latched; }
@@ -55,10 +60,9 @@ namespace PalaceMod
             var cycle = DayNightCycle.Instance;
             if (cycle != registeredWith)
             {
-                if (registeredWith != null) registeredWith.UnregisterDaytimeSensitiveObject(this);
-                if (cycle != null) cycle.RegisterDaytimeSensitiveObject(this);
-                registeredWith = cycle;
-                latched = false;
+                Follow(cycle);
+                // A new level starts in daytime, so "Show at dawn" counts its first morning too.
+                latched = cycle != null && ShowsByDefault(cycle);
                 pressedAt = -1f;
             }
             if (cycle == null) return;
@@ -72,6 +76,17 @@ namespace PalaceMod
                 pressedAt = -1f;
             }
         }
+
+        private void Follow(DayNightCycle cycle)
+        {
+            if (cycle == registeredWith) return;
+            if (registeredWith != null) registeredWith.UnregisterDaytimeSensitiveObject(this);
+            if (cycle != null) cycle.RegisterDaytimeSensitiveObject(this);
+            registeredWith = cycle;
+        }
+
+        private bool ShowsByDefault(DayNightCycle cycle) =>
+            showAtDawn.Value && cycle.CurrentTimestate != DayNightCycle.Timestate.Night;
 
         private void SetLatched(bool on)
         {
