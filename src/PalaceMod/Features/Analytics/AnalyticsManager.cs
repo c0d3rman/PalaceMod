@@ -20,6 +20,9 @@ using UnityEngine.SceneManagement;
 
     The game's end screen already graphs score and net worth per day after a match; this adds the in-run view, the
     per-night breakdown, spending, and projections.
+
+    The frame's Economy tab is the economy planner (Features/Economy), which needs no recording: without a history
+    the frame opens on it and the other tabs say why they're empty.
 */
 namespace PalaceMod
 {
@@ -38,7 +41,7 @@ namespace PalaceMod
         private PlayerInteraction trackedPlayer;
         private bool wasNight;
         private readonly Scenario scenario = new();
-        private ModFrame frame, offFrame;
+        private ModFrame frame;
 
         // Handed over from the load patch (which runs in the scene's Awake, before Update sees the new level).
         private static RunHistory loaded;
@@ -289,23 +292,50 @@ namespace PalaceMod
 
         // ---- Frame ------------------------------------------------------------------------------------------------
 
-        private void Open()
+        internal const string EconomyTab = "Economy";
+
+        /// <summary>Whether the Run Analytics frame is on screen.</summary>
+        internal bool FrameOpen => frame != null && frame.IsOpen;
+
+        // Without a recorded history only the Economy tab (the economy planner) has anything to show.
+        private void Open() => OpenTab(IsEnabled && history != null ? null : EconomyTab);
+
+        /// <summary>Opens Run Analytics, on <paramref name="tab"/> if given.</summary>
+        internal void OpenTab(string tab)
         {
             if (!Rules.Available) return;
-            if (!IsEnabled || history == null)
+            if (frame == null)
             {
-                offFrame ??= new ModFrame("Run Analytics").SetContent(page => page.Text(IsEnabled
-                    ? "Nothing recorded yet for this run."
-                    : "Run recording is off. Turn on \"Record runs\" in Settings > Mods > Pause menu; nights from then on are recorded."));
-                offFrame.Open();
-                return;
+                frame = new ModFrame("Run Analytics")
+                    .AddTab("Score", page =>
+                    {
+                        if (Recorded(page)) AnalyticsPages.Score(page, history, Rules, scenario);
+                    })
+                    .AddTab(EconomyTab, page =>
+                    {
+                        var planner = Feature<EconomyPlannerManager>.Instance;
+                        if (planner != null) planner.BuildPage(page);
+                        else page.Text("The economy planner isn't loaded; see the log.");
+                    })
+                    .AddTab("Projection", page =>
+                    {
+                        if (!Recorded(page)) return;
+                        scenario.ExtraFromNight = Mathf.Clamp(scenario.ExtraFromNight, RunProjection.NextNight, Mathf.Max(RunProjection.NextNight, RunProjection.NightCount));
+                        AnalyticsPages.Projection(page, history, Rules, scenario, () => frame.Refresh());
+                    });
+                Feature<EconomyPlannerManager>.Instance?.AttachHost(frame);
             }
-            scenario.ExtraFromNight = Mathf.Clamp(scenario.ExtraFromNight, RunProjection.NextNight, Mathf.Max(RunProjection.NextNight, RunProjection.NightCount));
-            frame ??= new ModFrame("Run Analytics")
-                .AddTab("Score", page => AnalyticsPages.Score(page, history, Rules, scenario))
-                .AddTab("Economy", page => AnalyticsPages.Economy(page, history, Rules, scenario))
-                .AddTab("Projection", page => AnalyticsPages.Projection(page, history, Rules, scenario, () => frame.Refresh()));
+            if (tab != null) frame.SelectTab(tab);
             frame.Open();
+        }
+
+        private bool Recorded(ModPage page)
+        {
+            if (IsEnabled && history != null) return true;
+            page.Text(IsEnabled
+                ? "Nothing recorded yet for this run. The Economy tab works without it."
+                : "Run recording is off. Turn on \"Record runs\" in Settings > Mods > Pause menu; nights from then on are recorded. The Economy tab works without it.");
+            return false;
         }
 
         // ---- Dev command ------------------------------------------------------------------------------------------

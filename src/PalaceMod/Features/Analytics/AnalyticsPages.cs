@@ -4,7 +4,8 @@ using System.Linq;
 using UnityEngine;
 
 /*
-    The three tabs of the Run Analytics frame. Each page is rebuilt from the recorded history and a fresh projection
+    The Score and Projection tabs of the Run Analytics frame, and the recorded-nights table the Economy tab (the
+    economy planner, Features/Economy) shows under its plan. Each page is rebuilt from the recorded history and a fresh projection
     every time it's shown, so it always matches the game.
 */
 namespace PalaceMod
@@ -69,34 +70,12 @@ namespace PalaceMod
                 : "This run had a restart or a reload (resuming a save counts), so it won't get the no-retry bonus.");
         }
 
-        // ---- Economy ----------------------------------------------------------------------------------------------
+        // ---- Economy: recorded nights (the Economy tab itself is the economy planner) ------------------------------
 
-        public static void Economy(ModPage page, RunHistory history, IScoreRules rules, Scenario scenario)
+        /// <summary>The run's recorded nights: income, spending, gold at dusk, buildings and units.</summary>
+        public static void PastNights(ModPage page, RunHistory history)
         {
-            var projection = RunProjection.Run(history, rules, scenario);
             var done = history.nights.Where(r => r.complete).ToList();
-            int count = Mathf.Max(RunProjection.NightCount, done.Count + projection.Nights.Count);
-            int now = PlayerInteraction.instance != null ? PlayerInteraction.instance.TrueBalance : 0;
-
-            page.Row("Gold now", N(now), "Gold you hold, counting coins on the ground and still to be collected.");
-            page.Row("Buildings pay at the next dawn", N(IncomeCalculator.Total()), "Income from the buildings you have now, minus any knocked out tonight.");
-
-            var labels = Enumerable.Range(1, count).Select(i => i.ToString()).ToArray();
-            float[] Series(Func<NightRecord, int> actual, Func<ProjectedNight, int> projected)
-            {
-                var values = Enumerable.Repeat(float.NaN, count).ToArray();
-                foreach (var r in done) if (r.night >= 1 && r.night <= count) values[r.night - 1] = actual(r);
-                foreach (var p in projection.Nights) if (p.Night >= 1 && p.Night <= count) values[p.Night - 1] = projected(p);
-                return values;
-            }
-            AnalyticsGraph.Lines(page.Custom("Economy graph", GraphHeight), labels, new[]
-            {
-                new GraphSeries("Income", AnalyticsGraph.Bright, Series(r => r.Earned, p => p.CycleEarned)),
-                new GraphSeries("Spent", AnalyticsGraph.Copper, Series(r => r.Spent, p => p.CycleSpent)),
-                new GraphSeries("Gold at dusk", AnalyticsGraph.Gold, Series(r => r.bankAtDusk, p => p.BankAtDusk)),
-            }, ProjectedFrom(projection, count));
-            page.Space(10f);
-
             var rows = new List<string[]>();
             foreach (var r in done)
                 rows.Add(new[] { $"Night {r.night}", N(r.Earned), N(r.Spent), N(r.bankAtDusk), r.buildings.ToString(), r.units.ToString(),
