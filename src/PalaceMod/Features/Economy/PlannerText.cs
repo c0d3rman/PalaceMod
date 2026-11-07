@@ -103,13 +103,7 @@ namespace PalaceMod
         internal static string NextStep(EconWorld state, EconSlot e)
         {
             if (e.Level >= e.MaxLevel) return $"<color=#{DimHex}>level {e.Level}, highest</color>";
-            if (!e.Active)
-            {
-                var act = e.Activator >= 0 ? state.Slots[e.Activator] : null;
-                return $"<color=#{DimHex}>unlocks with {act?.Label ?? act?.TypeName ?? "?"} level {e.ActivatorLevel + 1}</color>";
-            }
-            if (!EconSim.CanUpgrade(state, e))
-                return $"<color=#{DimHex}>needs {state.Slots[e.Root].TypeName} level {e.Level + e.RootLevelDifference + 1}</color>";
+            if (EconSim.Blocker(state, e) is { } why) return $"<color=#{DimHex}>{why}</color>";
             var step = e.Steps[e.Level];
             var incomes = step.Branches.Select((b, i) => EconSim.StepIncome(e, i)).Distinct().OrderBy(v => v).ToList();
             string income = incomes.All(v => v == 0) ? "" : " · " + string.Join("/", incomes.Select(Signed)) + " per dawn";

@@ -5,7 +5,7 @@ using UnityEngine;
 
 /*
     Perk numbers the planner needs for loadout what-ifs but the game throws away at level load: PerkCostModifyer,
-    PerkIncomeModifyer, PerkUnrestrictedUpgrading and InterestPerk destroy themselves once they've run (whether or not
+    PerkIncomeModifyer, PerkUnrestrictedUpgrading, ReduceChildrensBuildRequirementIfPerk and InterestPerk destroy themselves once they've run (whether or not
     their perk is equipped), and EnemySpawner bakes Rat God and Loan into the waves' coins. EconomyPlannerManager's
     patches record them here as they run, read-only; EconomySnapshot reads them back. Values are the ones serialized in
     the level (never the code's defaults).
@@ -21,6 +21,9 @@ namespace PalaceMod.Economy
             public int[] Cost = [], Income = [];
             public bool[] CostSkip = [];
             public int? RootDifference;
+            /// <summary>ReduceChildrensBuildRequirementIfPerk: the slots it unlocks a level sooner, and their levels before.</summary>
+            public BuildSlot[] Children;
+            public int[] ChildLevels;
             public bool Applied;
         }
 
@@ -77,6 +80,19 @@ namespace PalaceMod.Economy
             var perk = t.Field("requiredEquippable").GetValue<Equippable>();
             if (slot == null) return;
             slotMods.Add(new SlotMod { Slot = slot, Perk = perk, RootDifference = slot.RequiredRootLevelDifference, Applied = PerkManager.IsEquipped(perk) });
+        }
+
+        public static void ReduceChildren(ReduceChildrensBuildRequirementIfPerk c)
+        {
+            var slot = c.GetComponent<BuildSlot>();
+            if (slot == null || slotMods.Any(m => m.Slot == slot && m.Children != null)) return;
+            var perk = Traverse.Create(c).Field("perk").GetValue<Equippable>();
+            var children = slot.IsRootOf.Where(x => x != null && x.ActivatorBuilding == slot).ToArray();
+            slotMods.Add(new SlotMod
+            {
+                Slot = slot, Perk = perk, Children = children, ChildLevels = children.Select(x => x.ActivatorLevel).ToArray(),
+                Applied = perk != null && PerkManager.instance != null && PerkManager.instance.CurrentlyEquipped.Contains(perk),
+            });
         }
 
         public static void InterestPerk(InterestPerk c)

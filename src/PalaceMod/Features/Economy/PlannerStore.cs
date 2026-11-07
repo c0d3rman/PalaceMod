@@ -40,6 +40,12 @@ namespace PalaceMod.Economy
         public string Current, Compare;
         /// <summary>Just made (no file yet): the planner seeds its first plan.</summary>
         [JsonIgnore] public bool Fresh;
+        /// <summary>The castle's build on day 1, part of every plan (and of doing nothing) while the castle isn't built
+        /// yet: never stored, moved or removed.</summary>
+        [JsonIgnore] public EconAction Fixed;
+        /// <summary>The castle's slot: plans don't store its build (older files did).</summary>
+        [JsonIgnore] public string CastleId;
+        public bool IsFixed(EconAction a) => a != null && a == Fixed;
 
         [JsonIgnore] public PlannerScenario CurrentScenario => Scenarios.FirstOrDefault(s => s.Id == Current) ?? Scenarios.FirstOrDefault();
         [JsonIgnore] public PlannerScenario CompareScenario => Compare == null ? null : Scenarios.FirstOrDefault(s => s.Id == Compare && s.Id != CurrentScenario?.Id);
@@ -73,6 +79,7 @@ namespace PalaceMod.Economy
             for (int i = levels.Count - 1; i >= 0; i--)
                 result.AddRange(levels[i].plan.Actions.Where(a => a.Day < levels[i].before));
             result.AddRange(s.Actions);
+            if (Fixed != null) result.Insert(0, Fixed);
             return result;
         }
 
@@ -132,7 +139,8 @@ namespace PalaceMod.Economy
             foreach (var s in Scenarios)
             {
                 s.Actions ??= [];
-                s.Actions.RemoveAll(a => a == null || (a.Kind != EconActionKind.Gold && string.IsNullOrEmpty(a.Slot)));
+                s.Actions.RemoveAll(a => a == null || (a.Kind != EconActionKind.Gold && string.IsNullOrEmpty(a.Slot))
+                    || (CastleId != null && a.IsStep && a.Slot == CastleId && a.Level == 1));
                 s.Name = string.IsNullOrWhiteSpace(s.Name) ? FreeName("Plan") : s.Name;
                 if (string.IsNullOrEmpty(s.Id)) s.Id = Guid.NewGuid().ToString("N").Substring(0, 8);
                 s.Perks ??= [];

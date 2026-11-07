@@ -55,14 +55,31 @@ namespace PalaceMod
                     page.Number("How many", () => members.Count, v => SetCount(members, v), 1, members.Count + free,
                         tooltip: () => a.IsStep ? $"How many {slot.TypeName} to build that day ({free} more can be)." : $"How many {slot.TypeName} are lost that night.");
             }
+            if (a.IsStep && slot != null && members.Count == 1 && Fields(w, slot).Count > 0)
+            {
+                // A mill's fields: built that day with it, without going anywhere else.
+                var fields = Fields(w, slot);
+                string kind = fields[0].TypeName;
+                var ids = new HashSet<string>(fields.Select(e => e.Id));
+                int Planned() => Project().Actions.Count(x => x.IsStep && x.Day == a.Day && ids.Contains(x.Slot));
+                int free = FreeFields(p, slot, a.Day).Count;
+                page.Number($"{kind}s that day", Planned, v => SetFields(slot, a, v), 0, Planned() + free,
+                    tooltip: () => $"{kind}s of this {slot.TypeName} built on day {a.Day}, nearest it first ({FreeFields(Project(), slot, a.Day).Count} more can be). Each pays from that day on.");
+            }
             if (a.IsStep && slot != null && members.Count == 1)
             {
-                page.Number("Level", () => a.Level, v => Edit(() =>
+                page.Number("Level", () => a.Level, v =>
+                {
+                    var changed = a.Copy();
+                    changed.Level = v;
+                    if (!Affordable(Project(), [a], [changed], a.Day, out string why)) { Notify.Show(why, NotifyKind.Warning, 3f, key: "econ-move"); return; }
+                    Edit(() =>
                 {
                     a.Level = v;
                     var st = slot.Steps[Mathf.Clamp(v, 1, slot.Steps.Count) - 1];
                     a.Choice = st.IsChoice ? st.Branches[EconSim.BranchIndex(st, a.Choice)].Key : null;
-                }, a.Id), 1, Math.Max(1, slot.MaxLevel), format: v => v <= 1 ? "Build" : $"Level {v}",
+                }, a.Id);
+                }, 1, Math.Max(1, slot.MaxLevel), format: v => v <= 1 ? "Build" : $"Level {v}",
                     tooltip: () => "The level this step takes the building to (1 builds it). It needs the level before it by then.");
             }
             var step = a.IsStep && slot != null && a.Level >= 1 && a.Level <= slot.Steps.Count ? slot.Steps[a.Level - 1] : null;
@@ -154,6 +171,11 @@ namespace PalaceMod
             }
             var more = Candidates(p, a, members).Take(count - members.Count).ToList();
             if (more.Count == 0) return;
+            if (a.IsStep && !Affordable(p, null, more.Select(e => new EconAction { Kind = a.Kind, Day = a.Day, Slot = e.Id, Level = a.Level, Choice = a.Choice }), a.Day, out string why))
+            {
+                Notify.Show(why, NotifyKind.Warning, 3f, key: "econ-move");
+                return;
+            }
             Edit(() =>
             {
                 int at = holder.Actions.IndexOf(members[members.Count - 1]) + 1;
@@ -164,6 +186,106 @@ namespace PalaceMod
                     members.Add(x);
                 }
             }, a.Id);
+        }
+
+        // ---- Fields -------------------------------------------------------------------------------------------------
+
+        /// <summary>The slots a building unlocks that are its own little kind (a mill's fields): two or more of one
+        /// type among the slots it unlocks, for anything but the castle.</summary>
+        internal static List<EconSlot> Fields(EconWorld w, EconSlot e)
+        {
+            if (e == null || e.IsCastle) return [];
+            return w.Slots.Where(c => c.Activator == e.Index && !c.IsDependent && c.Steps.Count > 0 && c.TypeName != e.TypeName)
+                .GroupBy(c => c.TypeName).Where(g => g.Count() >= 2).OrderByDescending(g => g.Count()).FirstOrDefault()?.ToList() ?? [];
+        }
+
+        /// <summary>Its fields that can still be built on <paramref name="day"/> (with the plan's steps up to then),
+        /// nearest it first.</summary>
+        internal static List<EconSlot> FreeFields(Projection p, EconSlot owner, int day)
+        {
+            var state = EconSim.StateOn(p.World, p.Actions, Math.Max(day, p.World.FirstDay));
+            var planned = new HashSet<string>(p.Actions.Where(x => x.IsStep).Select(x => x.Slot));
+            return Fields(state, state.Slots[owner.Index]).Where(f => f.Level == 0 && !planned.Contains(f.Id) && EconSim.Blocker(state, f) == null)
+                .OrderBy(f => (f.MapX - owner.MapX) * (f.MapX - owner.MapX) + (f.MapY - owner.MapY) * (f.MapY - owner.MapY)).ToList();
+        }
+
+        /// <summary>Sets how many of <paramref name="owner"/>'s fields are built on <paramref name="after"/>'s day.</summary>
+        internal void SetFields(EconSlot owner, EconAction after, int count)
+        {
+            var p = Project();
+            var ids = new HashSet<string>(Fields(p.World, owner).Select(e => e.Id));
+            var now = p.Actions.Where(x => x.IsStep && x.Day == after.Day && ids.Contains(x.Slot)).ToList();
+            var holder = Holder(p, after);
+            if (count < now.Count)
+            {
+                Edit(() => { foreach (var x in now.Skip(count)) Holder(p, x).Actions.Remove(x); }, after.Id);
+                return;
+            }
+            var more = FreeFields(p, owner, after.Day).Take(count - now.Count)
+                .Select(e => new EconAction { Day = after.Day, Slot = e.Id, Level = 1 }).ToList();
+            if (more.Count == 0) return;
+            if (!Affordable(p, null, more, after.Day, out string why))
+            {
+                Notify.Show(why, NotifyKind.Warning, 3f, key: "econ-move");
+                return;
+            }
+            Edit(() =>
+            {
+                int at = holder.Actions.Contains(after) ? holder.Actions.IndexOf(after) + 1 : holder.Actions.Count;
+                foreach (var x in now) at = Math.Max(at, holder.Actions.IndexOf(x) + 1);
+                holder.Actions.InsertRange(Mathf.Clamp(at, 0, holder.Actions.Count), more);
+            }, after.Id);
+        }
+
+        // ---- Short of gold ----------------------------------------------------------------------------------------
+
+        internal void ShortPopup(PlannerBoard b, int day, ModTile near)
+        {
+            confirm = null;
+            ModPopup.Open($"Short on day {day}", BuildShort, near.Rect, width: 640f);
+        }
+
+        /// <summary>The first day whose builds can't all be paid for, if any.</summary>
+        internal static int? FirstShort(EconResult r) => r.Actions.Where(x => x.Status == ActionStatus.Short).Select(x => (int?)x.Action.Day).Min();
+
+        private void BuildShort(ModPage page)
+        {
+            var p = Project();
+            if (p == null) return;
+            if (FirstShort(p.Result) is not int day)
+            {
+                ModPopup.Current?.SetTitle("Every day can pay");
+                page.Text($"<color=#{DimHex}>Every day has the gold for its builds now.</color>");
+                return;
+            }
+            ModPopup.Current?.SetTitle($"Short on day {day}");
+            page.Text($"Day {day}'s builds cost {Coin(ShortOn(p.Result, day))} more than there'll be that day: an earlier change spent it. " +
+                $"<color=#{DimHex}>Move them to a day that can pay, take them out, or undo.</color>");
+            var groups = PlanGroup.Build(p).Where(g => g.First.IsStep && g.First.Day == day && g.R.Status == ActionStatus.Short && !p.IsFixed(g.First)).ToList();
+            foreach (var g in groups)
+            {
+                var members = g.Members.ToList();
+                string what = Title(g.R) + (members.Count > 1 ? $" ×{members.Count}" : "");
+                int? to = null;
+                for (int d = day + 1; d <= p.World.LastNight && to == null; d++)
+                {
+                    int target = d;
+                    var moved = members.Select(a => { var c = a.Copy(); c.Day = target; return c; }).ToList();
+                    if (Affordable(p, members, moved, d, out _)) to = d;
+                }
+                if (to is int t)
+                    page.Button($"Move {what} to day {t}", () =>
+                    {
+                        MoveGroup(Project(), members, t);
+                        ModPopup.Current?.Refresh();
+                    }, $"Day {t} is the first that can pay for it.");
+                page.Button($"Take out {what}", () =>
+                {
+                    RemoveGroup(Project(), members);
+                    ModPopup.Current?.Refresh();
+                });
+            }
+            if (CanUndo) page.Button("Undo the last change", Undo, "Puts the plan back as it was before your last change.");
         }
 
         // ---- Day ----------------------------------------------------------------------------------------------------

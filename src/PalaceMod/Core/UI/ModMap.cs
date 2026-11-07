@@ -96,6 +96,7 @@ namespace PalaceMod
             var tile = ModTile.Create(layer, $"Marker {key}", new Vector2(size, size), icon, text, size * 0.55f);
             tile.Key = key;
             tile.Place(Position(world) + new Vector2(-size / 2f, size / 2f));
+            tile.gameObject.AddComponent<NearestHit>().Map = this;
             Markers.Add(tile);
             return tile;
         }
@@ -123,6 +124,32 @@ namespace PalaceMod
         /// right, up, down).</summary>
         public void Wire(ThronefallUIElement[] edges = null) =>
             ModNav.Spatial(Markers, m => m.Rect.anchoredPosition, edges);
+
+        /// <summary>The marker whose centre is nearest a screen point, among those under it (null: none).</summary>
+        public ModTile MarkerAt(Vector2 screen, Camera cam = null)
+        {
+            ModTile best = null;
+            float bestDistance = float.MaxValue;
+            foreach (var m in Markers)
+            {
+                if (m == null || !m.isActiveAndEnabled || !RectTransformUtility.RectangleContainsScreenPoint(m.Rect, screen, cam)) continue;
+                var corners = new Vector3[4];
+                m.Rect.GetWorldCorners(corners);
+                Vector2 center = RectTransformUtility.WorldToScreenPoint(cam, (corners[0] + corners[2]) / 2f);
+                float d = (center - screen).sqrMagnitude;
+                if (d < bestDistance) { bestDistance = d; best = m; }
+            }
+            return best;
+        }
+
+        // Markers of slots close together overlap; the game's menus take the topmost one under the pointer, which isn't
+        // the one the player aimed at. Each marker only takes the pointer where it's the nearest.
+        private class NearestHit : MonoBehaviour, ICanvasRaycastFilter
+        {
+            public ModMap Map;
+
+            public bool IsRaycastLocationValid(Vector2 screen, Camera cam) => Map == null || Map.MarkerAt(screen, cam)?.gameObject == gameObject;
+        }
 
         private static void Stretch(RectTransform rect)
         {

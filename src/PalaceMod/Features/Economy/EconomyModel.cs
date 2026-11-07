@@ -124,12 +124,15 @@ namespace PalaceMod.Economy
         public bool[] CostSkip = [];
         /// <summary>PerkUnrestrictedUpgrading: the cap without the perk (null: not this kind).</summary>
         public int? RootDifference;
+        /// <summary>ReduceChildrensBuildRequirementIfPerk: the slots it unlocks a level sooner, and the level each needs
+        /// from this one without the perk (null: not this kind).</summary>
+        public int[] Children, ChildLevels;
         /// <summary>Whether it's applied in the slot's data.</summary>
         public bool Applied;
         /// <summary>Still to run (its slot isn't unlocked yet): it only ever touches the steps not taken.</summary>
         public bool Pending;
 
-        internal EconPerkMod Copy() => (EconPerkMod)MemberwiseClone();
+        internal EconPerkMod Copy() => (EconPerkMod)MemberwiseClone(); // arrays are never changed in place
     }
 
     /// <summary>One build slot: its upgrade tree and its state now.</summary>
@@ -150,6 +153,8 @@ namespace PalaceMod.Economy
         public int Owner = -1;
         /// <summary>Slot that unlocks this one, and the level it must pass, or -1.</summary>
         public int Activator = -1, ActivatorLevel;
+        /// <summary>Hidden until its activator passes ActivatorLevel (BuildSlot.startDeactivated).</summary>
+        public bool StartDeactivated = true;
         /// <summary>The slot whose level caps this one's (the top of its activator chain), or its own index.</summary>
         public int Root;
         public int RootLevelDifference = -100;
@@ -435,6 +440,13 @@ namespace PalaceMod.Economy
 
         /// <summary>Whether the slot's next step can be taken in this state (BuildSlot.CanBeUpgraded).</summary>
         public static bool CanUpgrade(EconWorld world, EconSlot slot) => new State(world, true).CanUpgrade(slot);
+
+        /// <summary>Why the slot's next step can't be taken in this state (the game's rules: unlocked, not at its
+        /// highest level, allowed in this mode, not busy, the castle high enough), or null if it can.</summary>
+        public static string Blocker(EconWorld world, EconSlot slot) => new State(world, true).Blocker(slot);
+
+        /// <summary>The slot's next step's cost, or null if it has none.</summary>
+        public static int? NextCost(EconSlot slot) => slot.Level < slot.Steps.Count ? slot.Steps[slot.Level].Cost : null;
 
         /// <summary>What the slot's next step would change its income by (with choices: per branch).</summary>
         public static int StepIncome(EconSlot slot, int branch)
@@ -724,20 +736,8 @@ namespace PalaceMod.Economy
                 return r;
             }
             if (slot.Level < a.Level - 1) return Block(r, a.Level - 1 <= 1 ? "Build it first" : $"Needs level {a.Level - 1} first");
-            if (!slot.Active && !s.IgnoreRequirements)
-            {
-                var act = slot.Activator >= 0 ? w.Slots[slot.Activator] : null;
-                return Block(r, act != null ? $"Unlocks when {act.Label ?? act.TypeName} reaches level {slot.ActivatorLevel + 1}" : "Not unlocked");
-            }
-            var step = slot.Level < slot.Steps.Count ? slot.Steps[slot.Level] : null;
-            if (step == null) return Block(r, "Already at its highest level");
-            if (step.Disabled) return Block(r, "Not available in this mode");
-            if (slot.Busy) return Block(r, "Busy until the next dawn (its last upgrade is in effect)");
-            if (!s.CanUpgrade(slot))
-            {
-                var root = w.Slots[slot.Root];
-                return Block(r, $"Needs {root.TypeName} level {slot.Level + slot.RootLevelDifference + 1}");
-            }
+            if (s.Blocker(slot) is { } why) return Block(r, why);
+            var step = slot.Steps[slot.Level];
             int branchIndex = BranchIndex(step, a.Choice);
             var branch = step.Branches.Count > 0 ? step.Branches[branchIndex] : null;
             r.Branch = branch;
@@ -818,6 +818,37 @@ namespace PalaceMod.Economy
                 var root = World.Slots[slot.Root];
                 if (root.Level <= slot.Level + slot.RootLevelDifference) return slot.Level == 0;
                 return true;
+            }
+
+            public string Blocker(EconSlot slot)
+            {
+                if (slot.Owner >= 0) return Blocker(World.Slots[slot.Owner]);
+                if (!slot.Active && !IgnoreRequirements) return Locked(slot);
+                var step = slot.Level < slot.Steps.Count ? slot.Steps[slot.Level] : null;
+                if (step == null) return "Already at its highest level";
+                if (step.Disabled) return "Not available in this mode";
+                if (slot.Busy) return "Busy until the next dawn (its last upgrade is in effect)";
+                if (!CanUpgrade(slot))
+                {
+                    var root = World.Slots[slot.Root];
+                    return $"Needs the {root.TypeName} at level {slot.Level + slot.RootLevelDifference + 1}";
+                }
+                return null;
+            }
+
+            // What unlocks a slot: its activator reaching a level (BuildSlot.Activate), along the chain.
+            private string Locked(EconSlot slot)
+            {
+                var act = slot.Activator >= 0 ? World.Slots[slot.Activator] : null;
+                if (act == null) return "Not unlocked on this map yet";
+                string name = act.Label ?? act.TypeName;
+                string what = slot.ActivatorLevel == 0 ? $"Unlocks once {name} is built" : $"Unlocks when {name} reaches level {slot.ActivatorLevel + 1}";
+                if (!act.Active && act.Activator >= 0)
+                {
+                    var next = World.Slots[act.Activator];
+                    what += $" (itself unlocked by {next.Label ?? next.TypeName})";
+                }
+                return what;
             }
 
             public int FamilyIncome(EconSlot slot)
@@ -1030,6 +1061,23 @@ namespace PalaceMod.Economy
                     if (pm.RootDifference is int without)
                     {
                         slot.RootLevelDifference = on ? -100 : without;
+                        continue;
+                    }
+                    if (pm.Children != null)
+                    {
+                        for (int c = 0; c < pm.Children.Length; c++)
+                        {
+                            int ci = pm.Children[c];
+                            if (ci < 0 || ci >= w.Slots.Count) continue;
+                            var child = w.Slots[ci];
+                            child.ActivatorLevel = on ? Math.Max(0, pm.ChildLevels[c] - 1) : pm.ChildLevels[c];
+                            // As if it had been that way from the start: unlocked once the activator passes the level.
+                            if (child.Level == 0 && child.StartDeactivated && child.Activator >= 0)
+                            {
+                                var act = w.Slots[child.Activator];
+                                child.Active = act.Active && act.Level > child.ActivatorLevel;
+                            }
+                        }
                         continue;
                     }
                     var tree = w.Slots[pm.Tree];

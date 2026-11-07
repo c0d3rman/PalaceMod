@@ -203,6 +203,48 @@ Reusable, in Core/UI (documented in CLAUDE.md):
 Feature-specific, in Features/Economy: the board (PlannerBoard), the gold strip aligned with its columns, the Add
 screen, the perk grid, the chip/day/plan popups, building icons (PlannerIcons), undo.
 
+## Feedback round 1 (as built)
+
+What changed after the first play test, and why.
+
+- **Clicks landing on the wrong thing.** Three causes, all fixed:
+  - The board scrolled to whatever was *selected*, and the game selects what the mouse hovers. Hovering a chip in a
+    half-hidden column slid the board under a still pointer, so the next frame hovered (and a click hit) whatever slid
+    there. The board now scrolls only for keyboard and controller selection, never for mouse hover.
+  - A popup closed on the mouse *press* outside it; the board became the active menu in that same frame and took the
+    press as its own click (a chip, a tab, or Back, which left Run Analytics: "took me back to the main menu"). Popups
+    now close when the button comes back up, which nothing below treats as a click.
+  - Map markers of slots close together (a mill's fields, houses) overlap, and the game's menus take the topmost one
+    under the pointer, not the one aimed at. Each marker now only takes the pointer where its centre is the nearest
+    (`ModMap` adds an `ICanvasRaycastFilter`; `ModMap.MarkerAt`).
+- **The castle's build** on day 1 is part of every plan and of "doing nothing" while the castle isn't built: a fixed
+  chip ("fixed" badge) that can't be moved or removed. Plans don't store it (`PlannerFile.Fixed`, prepended by
+  `Effective`; older plans' copies are dropped).
+- **Budget.** Each day's header says what the day has to spend and what's left after its builds ("28 · 5 left"; red
+  "short" if it goes below zero). The Add screen's top bar says the same with the picks ("28 to spend · picks 5 ·
+  23 left"). A marker or kind the gold left can't pay for is greyed with its cost in red and can't be picked; Add is
+  refused if the day would be short. Moving a chip, adding to its count, raising its level or adding fields are
+  refused (with a notice) if they'd leave *that* day short. A change that leaves a *later* day short (spending its gold
+  earlier) is allowed and flagged: a red "Short on day N · fix" button in the toolbar opens a popup that moves each
+  unpaid step to the first day that can pay for it, takes it out, or undoes the change. The graph no longer gives a
+  red band to gold below zero.
+- **The game's rules for what can be built** (`EconSim.Blocker`, also used by the simulation): unlocked (its activator
+  at the level it needs, along the chain), not at its highest level, allowed in this mode, not busy, the castle high
+  enough. Every slot has a marker; one that can't take a step that day is greyed and smaller, and hovering it says why
+  ("Unlocks once Wall 1 is built", "Unlocks when Castle Center reaches level 2", "Needs the Castle Center at level 3").
+  Availability is per day with the plan's earlier steps and the picks so far: plan Nordfels' Wall 1 on day 4 and House 7
+  behind it can be picked from day 4 on (or right after picking the wall). Perks that change these rules are read at
+  level load and can be tried in a plan: Timber Scaffolding (`PerkUnrestrictedUpgrading`) lifts the castle cap, and
+  Architect's Council (`ReduceChildrensBuildRequirementIfPerk`) unlocks everything the castle unlocks one castle
+  level sooner (both recorded by `PerkCapture`).
+- **Mill fields** are first-class: picking a mill shows its fields as pickable markers straight away (they unlock with
+  it), adds a "Field" kind tile (which picks fields of the picked mill first), and puts − / + field buttons on the mill's
+  picked row ("Fields 2 · 0 more now, 3 later"). Hovering a mill says how many fields it has built. On the board, a mill
+  chip's popup has a "Fields that day" number. Fields are the slots a building unlocks two or more of
+  (`EconomyPlannerManager.Fields`).
+- The toolbar's summary no longer runs off the edge (shorter buttons, the text shrinks to fit), and the board gives
+  its chips the room before the graph, so a night with two buildings lost isn't cut off.
+
 ## As built
 
 - Keys are registered through the Keybinds API under "Economy planner" (context "Economy planner", claimed while a
@@ -210,4 +252,6 @@ screen, the perk grid, the chip/day/plan popups, building icons (PlannerIcons), 
   NextTab/PrevTab) also move a chip, and change the day on the Add screen.
 - The map picture is rendered once per Add screen (LevelCapture) and copied into a texture straight away.
 - Dev commands drive every screen: `econ view|select|press|popup|drag|shift|remove-chip|undo|addview|addpick|addkind|
-  addday|addselect|addcommit|addmap|perksview|perktile|sourcesview` (`dev.py cmd help` lists them).
+  addday|addselect|addcommit|addmap|perksview|perktile|sourcesview` (`dev.py cmd help` lists them). `econ addday 0`
+  describes the Add screen (picks, gold left, greyed markers, the selection); with `uikit mouse "Marker marker:<n>" [fx fy]`
+  and `uikit click` it checks real clicks land on the marker aimed at.

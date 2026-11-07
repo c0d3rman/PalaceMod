@@ -171,6 +171,13 @@ namespace PalaceMod.Economy
             {
                 if (!index.TryGetValue(c.Slot, out int i)) continue;
                 var e = w.Slots[i];
+                if (c.Children != null)
+                {
+                    var kids = c.Children.Select(k => k != null && index.TryGetValue(k, out int ki) ? ki : -1).ToArray();
+                    e.PerkMods.Add(new EconPerkMod { Key = c.Perk != null ? c.Perk.name : "?", Tree = i, Children = kids, ChildLevels = c.ChildLevels, Applied = c.Applied });
+                    AddPerk(w, c.Perk, EconPerkKind.Building);
+                    continue;
+                }
                 // Cost and income changes work on BuildSlot.Upgrades: a follower's are its owner's.
                 int tree = c.RootDifference == null && e.Owner >= 0 ? e.Owner : i;
                 e.PerkMods.Add(new EconPerkMod
@@ -222,6 +229,7 @@ namespace PalaceMod.Economy
             e.Level = t.Field("level").GetValue<int>(); // own level: Level is the activator's for slots that follow it
             e.Income = slot.GoldIncome;
             e.Active = slot.gameObject.activeInHierarchy;
+            e.StartDeactivated = slot.StartDeactivated;
             e.Applied = [.. slot.AppliedUpgrades];
             if (slot.ActivatorBuilding != null && index.TryGetValue(slot.ActivatorBuilding, out int act))
             {
