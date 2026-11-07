@@ -503,7 +503,6 @@ namespace PalaceMod
                 {
                     // Unlocked, but the gold isn't there: full colour, its cost in red.
                     marker.SetBadge(cost.ToString(), V.Red);
-                    marker.SetWarning(true);
                 }
                 else if (e.Level > 0) marker.SetBadge(PlannerIcons.Roman(e.Level), ModStyle.Gold);
                 if (locked && !today)
@@ -598,7 +597,7 @@ namespace PalaceMod
                 Item(null, default, "→II", ModStyle.Bright, "planned that day");
                 Item(null, default, "8", V.Red, "not enough gold");
                 Item(PlannerIcons.Lock, ModStyle.Dim, null, default, "not unlocked yet");
-                Words(row, "click: one step · again at the top: none · right-click: one less", x, 0f, Mathf.Max(0f, width - x), LegendH, 16f, G.Fade(ModStyle.Dim, 0.8f), TextAlignmentOptions.MidlineRight);
+                Words(row, "click: +1 level · right-click: −1", x, 0f, Mathf.Max(0f, width - x), LegendH, 16f, G.Fade(ModStyle.Dim, 0.8f), TextAlignmentOptions.MidlineRight);
             }
             else
             {
@@ -711,7 +710,7 @@ namespace PalaceMod
             {
                 var k = kinds[i];
                 int free = k.Open.Count;
-                string sub = free > 0 ? $"×{free} · {EconomyPlannerManager.Coin(k.Cost)}" : k.Poor.Count > 0 ? $"<color=#{EconomyPlannerManager.RedHex}>{EconomyPlannerManager.Coin(k.Cost)}</color>" : "none left";
+                string sub = free > 0 ? $"×{free} · {EconomyPlannerManager.Coin(k.Cost)}" : k.Poor.Count > 0 ? $"<color=#{EconomyPlannerManager.RedHex}>{EconomyPlannerManager.Coin(k.Cost)}</color>" : k.Planned > 0 ? "" : "none left";
                 var t = Tile(kindsArea.Content, "kind:" + k.Key, i % perRow * (kindW + 8f), i / perRow * (KindH + 8f), new Vector2(kindW, KindH),
                     PlannerIcons.Kind(k.Type), $"{k.Name}\n<size=78%><color=#{Dim}>{sub}</color></size>", 19f);
                 t.Label.enableWordWrapping = true;

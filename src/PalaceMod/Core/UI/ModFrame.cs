@@ -104,10 +104,29 @@ namespace PalaceMod
             var manager = UIFrameManager.instance;
             if (manager == null) return;
             if (IsOpen) return;
+            // Already open under something (a menu opened from it): go back down to it rather than open a second
+            // copy on top, which Escape would later come back to.
+            if (frame != null && OnStack(frame))
+            {
+                for (int guard = 0; guard < 16 && manager.ActiveFrame != frame && OnStack(frame); guard++) manager.CloseActiveFrame();
+                if (IsOpen) return;
+            }
             if (!EnsureBuilt()) return;
             ShowTab(currentTab, select: false);
             frame.firstSelected = tabButtons.Count > 0 ? tabButtons[currentTab] : (ThronefallUIElement)page.Elements.FirstOrDefault() ?? back;
             manager.ChangeActiveFrame(frame);
+        }
+
+        /// <summary>Whether <paramref name="f"/> is on UIFrameManager's stack (open, under the active menu).</summary>
+        internal static bool OnStack(UIFrame f)
+        {
+            try
+            {
+                foreach (var element in HarmonyLib.Traverse.Create(UIFrameManager.instance).Field("frameStack").GetValue<System.Collections.IEnumerable>())
+                    if (HarmonyLib.Traverse.Create(element).Field("frame").GetValue<UIFrame>() == f) return true;
+            }
+            catch (Exception e) { Log.Core.Warn($"ModFrame: couldn't read the frame stack: {e.Message}"); }
+            return false;
         }
 
         /// <summary>Closes the menu, returning to whatever was open before it.</summary>

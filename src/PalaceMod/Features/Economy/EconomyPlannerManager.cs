@@ -543,7 +543,7 @@ namespace PalaceMod
                     return board != null ? "\n" + board.Describe() : "undone";
                 case "day":
                 {
-                    if (!IsOpen) Open();
+                    if (!IsOpen && !dayFrame.IsOpen) Open();
                     var layer = args.Length > 2 && args[2].StartsWith("l") ? PlannerDayLayer.Lost : PlannerDayLayer.Build;
                     OpenDay(args.Length > 1 ? int.Parse(args[1]) : w.FirstDay, layer);
                     return dayView != null && dayFrame.IsOpen ? dayView.Describe() : throw new InvalidOperationException("didn't open");
@@ -590,8 +590,9 @@ namespace PalaceMod
                 case "perktile":
                 {
                     if (perksView == null || !perksFrame.IsOpen) throw new InvalidOperationException("the perks screen isn't open");
-                    if (!perksView.Select("perk:" + args[1])) throw new ArgumentException($"no perk {args[1]}; perks: {string.Join(", ", perksView.Tiles.Keys)}");
-                    if (args.Length < 3 || args[2] != "look") perksView.Tiles["perk:" + args[1]].Press();
+                    string perkKey = string.Join(" ", args.Skip(1).Where(x => x != "look"));
+                    if (!perksView.Select("perk:" + perkKey)) throw new ArgumentException($"no perk {perkKey}; perks: {string.Join(", ", perksView.Tiles.Keys)}");
+                    if (!args.Contains("look")) perksView.Tiles["perk:" + perkKey].Press();
                     return perksView.Describe();
                 }
                 case "sourcesview":
@@ -615,7 +616,7 @@ namespace PalaceMod
         {
             var manager = UIFrameManager.instance;
             if (manager == null) return "no UI";
-            string Name(UIFrame f) => f == null ? "none" : ModFrame.Frames.TryGetValue(f, out var mf) ? $"\"{mf.Title}\"" : f.name;
+            string Name(UIFrame f) => f == null ? "none" : !ModFrame.Frames.ContainsKey(f) && f.name.StartsWith("PalaceMod Popup") ? "popup" : ModFrame.Frames.TryGetValue(f, out var mf) ? $"\"{mf.Title}\"" : f.name;
             var stack = new List<string>();
             try
             {
@@ -624,7 +625,8 @@ namespace PalaceMod
             }
             catch (Exception e) { stack.Add("? " + e.Message); }
             var popups = UnityEngine.Object.FindObjectsOfType<RectTransform>(true).Where(r => r.name.StartsWith("PalaceMod Popup") && r.gameObject.activeInHierarchy).Select(r => r.name).ToList();
-            return $"active {Name(manager.ActiveFrame)} (selected {manager.ActiveFrame?.CurrentSelection?.name ?? "-"}); stack [{string.Join(" < ", stack)}]; " +
+            var selected = manager.ActiveFrame != null ? manager.ActiveFrame.CurrentSelection : null;
+            return $"active {Name(manager.ActiveFrame)} (selected {(selected != null ? selected.name : "-")}); stack [{string.Join(" < ", stack)}]; " +
                 $"popup {(ModPopup.Current == null ? "none" : ModPopup.Current.IsOpen ? "open" : "current, not on top")}; visible popups {popups.Count} [{string.Join(", ", popups)}]; " +
                 $"tooltip {ModTooltip.Describe() ?? "hidden"}; typing {ModTextInput.Active}";
         }

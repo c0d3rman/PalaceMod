@@ -250,7 +250,7 @@ namespace PalaceMod
             var lines = new List<string> { $"<font=\"{ModStyle.TitleFont?.name}\"><size=150%>{name}</size></font>" };
             if (!string.IsNullOrEmpty(description)) lines.Add($"<color=#{Dim}>{description}</color>");
             lines.Add((on ? "On" : "Off") + (on != equipped ? $" <color=#{ModStyle.Hex(ModStyle.Accent)}>({(equipped ? "on" : "off")} in your run)</color>" : ""));
-            if (perk != null && perk.Kind != EconPerkKind.Building) lines.Add(EconomyPlannerManager.PerkText(perk, P.World));
+            if (perk != null && perk.Kind != EconPerkKind.Building && string.IsNullOrEmpty(description)) lines.Add(EconomyPlannerManager.PerkText(perk, P.World));
             if (change != 0) lines.Add($"{(on ? "Off" : "On")}: {EconomyPlannerManager.Signed(change)} at the end");
             else if (perk == null) lines.Add($"<color=#{Dim}>No effect on gold</color>");
             detail.text = string.Join("\n", lines);

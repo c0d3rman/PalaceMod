@@ -22,6 +22,7 @@ namespace PalaceMod
         {
             quickDay = day;
             quickScroll = 0f;
+            quickArea = null;
             ModPopup.Open($"Day {day}", BuildQuick, near, width: 620f);
         }
 
@@ -61,7 +62,7 @@ namespace PalaceMod
                 {
                     var k = kinds[i];
                     int free = k.Open.Count;
-                    string sub = free > 0 ? $"×{free} · {Coin(k.Cost)}" : k.Poor.Count > 0 ? $"<color=#{RedHex}>{Coin(k.Cost)}</color>" : "none left";
+                    string sub = free > 0 ? $"×{free} · {Coin(k.Cost)}" : k.Poor.Count > 0 ? $"<color=#{RedHex}>{Coin(k.Cost)}</color>" : k.Planned > 0 ? "" : "none left";
                     var t = ModTile.Create(quickArea.Content, "quick:" + k.Key, new Vector2(tileW, tileH), PlannerIcons.Kind(k.Type),
                         $"{k.Name}\n<size=78%><color=#{DimHex}>{sub}</color></size>", 19f).Place(new Vector2(i % perRow * (tileW + gap), -(i / perRow) * (tileH + gap)));
                     t.Key = "quick:" + k.Key;

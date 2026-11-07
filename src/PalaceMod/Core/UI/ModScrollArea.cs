@@ -61,6 +61,6 @@ namespace PalaceMod
         public void ScrollTo(float y) => scroll?.ResetTo(Mathf.Clamp(y, 0f, Mathf.Max(0f, Content.sizeDelta.y - Viewport.sizeDelta.y)));
 
         /// <summary>How far down it's scrolled.</summary>
-        public float ScrollY => Content.anchoredPosition.y;
+        public float ScrollY => Content != null ? Content.anchoredPosition.y : 0f;
     }
 }

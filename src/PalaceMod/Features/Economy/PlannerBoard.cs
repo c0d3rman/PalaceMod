@@ -150,7 +150,7 @@ namespace PalaceMod
         internal static (int First, int Last) DayRange(EconWorld w, EconActionKind kind) =>
             (kind == EconActionKind.Step || !w.DawnPending ? w.FirstDay : w.FirstDay - 1, w.LastNight);
 
-        internal const string FixedNote = "Every run starts by building the castle on day 1: it's part of every plan, and of doing nothing.";
+        internal const string FixedNote = "The castle is built on day 1 in every plan";
 
         /// <summary>Gold short on <paramref name="day"/>: what its steps cost beyond the gold there was when each was paid.</summary>
         internal static int ShortOn(EconResult r, int day) =>
@@ -268,7 +268,7 @@ namespace PalaceMod
     internal sealed class PlannerBoard
     {
         private const float Gutter = 70f, ToolbarH = 42f, HeaderH = 54f, RowH = 38f, ChipH = 34f, AddH = 28f, Divider = 18f,
-            InfoH = 56f, EndW = 92f, MinCol = 122f, MaxCol = 200f, Gap = 10f, Pad = 24f;
+            InfoH = 56f, EndW = 92f, MinCol = 104f, MaxCol = 200f, Gap = 10f, Pad = 24f;
 
         private enum Kind { Done, Tonight, Day }
 
