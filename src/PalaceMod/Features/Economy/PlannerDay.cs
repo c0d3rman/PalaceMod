@@ -244,7 +244,7 @@ namespace PalaceMod
 
     internal sealed class PlannerDayView
     {
-        private const float TopH = 44f, Gap = 12f, Pad = 24f, InfoH = 78f, KindH = 50f, RowH = 38f, ChoiceTile = 40f, LegendH = 26f;
+        private const float TopH = 44f, Gap = 12f, Pad = 24f, InfoH = 104f, KindH = 50f, RowH = 38f, ChoiceTile = 40f, LegendH = 26f;
 
         private readonly EconomyPlannerManager m;
         private readonly ModFrame frame;
@@ -752,11 +752,15 @@ namespace PalaceMod
             bool fixedOnly = steps.All(P.IsFixed);
             int to = steps.Max(a => a.Level), from = steps.Min(a => a.Level) - 1;
             int cost = steps.Sum(a => P.Result.Actions.FirstOrDefault(r => r.Action == a)?.Cost ?? 0);
-            bool skipped = steps.Any(a => P.Result.Actions.FirstOrDefault(r => r.Action == a) is { Counts: false });
+            var results = steps.Select(a => P.Result.Actions.FirstOrDefault(r => r.Action == a)).Where(r => r != null).ToList();
+            // Can't be done then, or not paid for: red. Already done by then (built in the run): faded.
+            bool wrong = results.Any(r => r.Status is ActionStatus.Blocked or ActionStatus.Short);
+            bool done = results.Count > 0 && results.All(r => r.Status is ActionStatus.AlreadyDone or ActionStatus.Past);
             string levels = from == 0 ? (to == 1 ? "build" : $"build → {PlannerIcons.Roman(to)}") : $"{PlannerIcons.Roman(from)} → {PlannerIcons.Roman(to)}";
             var row = Tile(parent, "row:" + e.Index, 0f, y, new Vector2(width - 2f * (RowH + 6f), RowH), PlannerIcons.Kind(e.TypeName),
                 $"{e.Label} <size=85%><color=#{Dim}>· {levels} · {EconomyPlannerManager.Coin(cost)}</color></size>", 18f);
-            if (skipped) row.SetWarning(true);
+            if (wrong) row.SetWarning(true);
+            else if (done) row.SetDim(true, 0.5f);
             var slot = e;
             row.Shown += _ => ShowSlot(slot);
             row.Applied += () => { focus = "row:" + slot.Index; m.Cycle(D, slot); };
