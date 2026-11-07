@@ -719,7 +719,8 @@ namespace PalaceMod
             add.Label.alignment = TextAlignmentOptions.Center;
             add.SetFill(Picks.Count > 0 ? Color.Lerp(ModStyle.Panel, ModStyle.Accent, 0.32f) : null);
             add.SetDim(Picks.Count == 0, 0.5f);
-            bool shortDay = Mode == PlannerAddMode.Build && Picks.Count > 0 && EconomyPlannerManager.ShortOn(preview, Day) > EconomyPlannerManager.ShortOn(P.Result, Day);
+            int shortNow = EconomyPlannerManager.ShortOn(preview, Day), shortBefore = EconomyPlannerManager.ShortOn(P.Result, Day);
+            bool shortDay = Mode == PlannerAddMode.Build && Picks.Count > 0 && shortNow > 0 && shortNow >= shortBefore;
             if (shortDay)
             {
                 add.SetText($"Not enough gold on day {Day}");

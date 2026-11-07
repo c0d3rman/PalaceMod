@@ -105,7 +105,7 @@ namespace PalaceMod.Tests
             Assert.Equal(ActionStatus.Blocked, r.Actions[0].Status, "level 2 before building");
             Assert.Equal(ActionStatus.Planned, r.Actions[1].Status, "build");
             Assert.Equal(ActionStatus.Blocked, r.Actions[2].Status, "castle too low");
-            Assert.True(r.Actions[2].Reason.Contains("Castle level 2"), r.Actions[2].Reason);
+            Assert.True(r.Actions[2].Reason.Contains("Castle at level 2"), r.Actions[2].Reason);
 
             // Upgrading the castle first, earlier the same day, unblocks it; the other order doesn't.
             var castle = w.Slots[0];
@@ -128,6 +128,23 @@ namespace PalaceMod.Tests
             var r = EconSim.Run(w, [Do(1, castle, 2), Do(1, far, 1)]);
             Assert.Equal(ActionStatus.Planned, r.Actions[1].Status, "unlocked by the castle");
             Assert.Equal(1 + 3, r.Days[0].Buildings, "pays at dawn 1");
+        }
+
+        public static void ArchitectUnlocksALevelSooner()
+        {
+            var w = World(gold: 100);
+            var castle = w.Slots[0];
+            var wall = Slot(w, "Wall", 0, 0, Step(4, 0));
+            wall.Active = false;
+            wall.Activator = castle.Index;
+            wall.ActivatorLevel = 1; // castle level 2 without the perk
+            castle.PerkMods.Add(new EconPerkMod { Key = "architect", Tree = castle.Index, Children = [wall.Index], ChildLevels = [1] });
+            Assert.True(EconSim.Blocker(w, wall).Contains("reaches level 2"), EconSim.Blocker(w, wall));
+            var with = EconPerks.Apply(w, new Dictionary<string, bool> { ["architect"] = true });
+            Assert.Equal(null, EconSim.Blocker(with, with.Slots[wall.Index]), "unlocked at castle level 1");
+            Assert.Equal(ActionStatus.Planned, EconSim.Run(with, [Do(1, wall, 1)]).Actions[0].Status, "buildable");
+            var back = EconPerks.Apply(with, new Dictionary<string, bool> { ["architect"] = false });
+            Assert.True(EconSim.Blocker(back, back.Slots[wall.Index]) != null, "locked again without it");
         }
 
         public static void AlreadyDoneCostsNothing()

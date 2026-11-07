@@ -167,7 +167,7 @@ namespace PalaceMod
         internal static int LeftOn(EconResult r, int day) => r.Days.FirstOrDefault(d => d.Day == day)?.AfterSpend ?? 0;
 
         /// <summary>Whether the plan with <paramref name="remove"/> taken out and <paramref name="add"/> put in can pay
-        /// for everything on <paramref name="day"/> (no worse than it already is). <paramref name="why"/> says what's missing.</summary>
+        /// for everything on <paramref name="day"/> (or is less short than it was). <paramref name="why"/> says what's missing.</summary>
         internal static bool Affordable(Projection p, IEnumerable<EconAction> remove, IEnumerable<EconAction> add, int day, out string why)
         {
             why = null;
@@ -175,8 +175,17 @@ namespace PalaceMod
             var gone = new HashSet<EconAction>(remove ?? []);
             var acts = p.Actions.Where(a => !gone.Contains(a)).Concat(add ?? []).ToList();
             var after = EconSim.Run(p.World, acts, paybacks: false);
+            // The game's rules first: a step can't go where it couldn't be done (before what unlocks it, say).
+            var added = new HashSet<EconAction>(add ?? []);
+            var blocked = after.Actions.FirstOrDefault(x => added.Contains(x.Action) && x.Status == ActionStatus.Blocked);
+            if (blocked != null && !p.Result.Actions.Any(x => gone.Contains(x.Action) && x.Status == ActionStatus.Blocked))
+            {
+                why = $"Not on day {day}: {blocked.Reason}.";
+                return false;
+            }
             int before = ShortOn(p.Result, day), now = ShortOn(after, day);
-            if (now <= before) return true;
+            // Paid in full, or at least better off than it was (a day already short can't take more on).
+            if (now == 0 || now < before) return true;
             int cost = after.Actions.Where(x => x.Action.IsStep && x.Action.Day == day && x.Counts && (add?.Contains(x.Action) ?? false)).Sum(x => x.Cost);
             int left = LeftOn(p.Result, day) + p.Result.Actions.Where(x => gone.Contains(x.Action) && x.Action.Day == day && x.Counts).Sum(x => x.Cost);
             why = $"Not enough gold on day {day}: that costs {Coin(cost)}, {Coin(Math.Max(0, left))} is left that day.";
@@ -508,7 +517,7 @@ namespace PalaceMod
             var parts = new List<string> { $"<size=120%><b>{EconomyPlannerManager.Coin(r.EndGold)}</b></size> at the end" };
             if (p.Compare != r) parts.Add($"{EconomyPlannerManager.Signed(r.EndGold - p.Compare.EndGold)} vs {EconomyPlannerManager.Short(p.OtherName, 18)}");
             else if (p.Baseline != r) parts.Add($"{EconomyPlannerManager.Signed(r.EndGold - p.Baseline.EndGold)} vs doing nothing");
-            var summary = Words(root, string.Join($"  <color=#{dim}>·</color>  ", parts), x + 4f, 0f, size.x - x - 4f, ToolbarH - 4f, 21f, ModStyle.Gold,
+            var summary = Words(root, string.Join($"  <color=#{dim}>·</color>  ", parts), x + 4f, 0f, size.x - x - 4f, ToolbarH - 12f, 21f, ModStyle.Gold,
                 TextAlignmentOptions.MidlineRight, ModStyle.BoldFont);
             summary.enableAutoSizing = true;
             summary.fontSizeMin = 15f;
@@ -600,7 +609,7 @@ namespace PalaceMod
         private void Arrows()
         {
             leftMore = Words(root, "", 0f, boardTop, Gutter - 8f, HeaderH, 18f, ModStyle.Gold, TextAlignmentOptions.MidlineRight, ModStyle.BoldFont);
-            rightMore = Words(root, "", size.x - 60f, boardTop - 22f, 60f, 22f, 17f, ModStyle.Gold, TextAlignmentOptions.MidlineRight, ModStyle.BoldFont);
+            rightMore = Words(root, "", size.x - 90f, boardTop - 20f, 90f, 20f, 16f, ModStyle.Gold, TextAlignmentOptions.MidlineRight, ModStyle.BoldFont);
         }
 
         private void Header(Column c, int i, float x)

@@ -265,7 +265,8 @@ namespace PalaceMod
             foreach (var g in groups)
             {
                 var members = g.Members.ToList();
-                string what = Title(g.R) + (members.Count > 1 ? $" ×{members.Count}" : "");
+                var a0 = g.First;
+                string what = PlannerIcons.Short(g.R.Slot?.TypeName) + (a0.Level > 1 ? " " + PlannerIcons.Roman(a0.Level) : "") + (members.Count > 1 ? $" ×{members.Count}" : "");
                 int? to = null;
                 for (int d = day + 1; d <= p.World.LastNight && to == null; d++)
                 {
