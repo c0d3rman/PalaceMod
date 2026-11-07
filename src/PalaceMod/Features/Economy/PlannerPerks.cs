@@ -9,10 +9,11 @@ using G = PalaceMod.AnalyticsGraph;
 using V = PalaceMod.Economy.PlannerVisuals;
 
 /*
-    The perks screen: every perk as the loadout screen shows it, as a grid of the game's icons. Perks that move gold
-    are bright and toggle (lit = on in this plan), each with what toggling it would do to the end gold; a gem marks one
-    that differs from the run's loadout. The rest are faint: they don't change the numbers. Beside the grid, the
-    selected perk in the game's words and what it does to gold; under it, this loadout's gold curve against the run's.
+    The perks screen: every perk as the loadout screen shows it, as a grid of the game's icons, each toggled on or off
+    for the plan (lit = on), to plan the whole loadout: "X/5" counts them and turns red past the level's limit (more are
+    allowed, to weigh what to give up). Perks that move gold show what toggling them would do to the end gold; the rest
+    just don't change the numbers. A gem marks a perk that differs from the run's loadout. Beside the grid, the selected
+    perk in the game's words; under it, this loadout's gold curve against the run's.
 */
 namespace PalaceMod
 {
@@ -42,16 +43,46 @@ namespace PalaceMod
         }
 
         /// <summary>Sets a perk on or off in the plan shown (dropping the change when it's the run's own state).</summary>
-        internal void SetPerk(Projection p, EconPerk perk, bool on) => Edit(() =>
+        internal void SetPerk(Projection p, string key, bool equipped, bool on) => Edit(() =>
         {
-            if (on == perk.Equipped && !p.File.Ancestors(p.Plan).Any(a => a.Perks.ContainsKey(perk.Key))) p.Plan.Perks.Remove(perk.Key);
-            else p.Plan.Perks[perk.Key] = on;
+            if (on == equipped && !p.File.Ancestors(p.Plan).Any(a => a.Perks.ContainsKey(key))) p.Plan.Perks.Remove(key);
+            else p.Plan.Perks[key] = on;
         });
+
+        /// <summary>The level's perk limit (LevelInfo.maxPerkCount).</summary>
+        internal static int MaxPerks
+        {
+            get
+            {
+                try { return LevelProgressManager.instance?.GetLevelInfoFromCurrentSceneName()?.maxPerkCount ?? 5; }
+                catch { return 5; }
+            }
+        }
+
+        /// <summary>Whether a perk is on in the plan (its change, else the run's loadout).</summary>
+        internal static bool PerkOn(Dictionary<string, bool> effective, Equippable e) =>
+            effective.TryGetValue(e.name, out bool v) ? v : PerkManager.instance != null && PerkManager.instance.CurrentlyEquipped.Contains(e);
+
+        /// <summary>Perks (the loadout's perk slots, not weapons or mutators) on in the plan.</summary>
+        internal int PerkCount(Projection p)
+        {
+            if (PerkManager.instance == null) return 0;
+            var effective = p.File.EffectivePerks(p.Plan);
+            return PerkManager.instance.allEquippables.Count(e => e is EquippablePerk && PerkOn(effective, e));
+        }
+
+        /// <summary>The plan's perks differ from the run's loadout.</summary>
+        internal bool PerksChanged(Projection p)
+        {
+            if (PerkManager.instance == null) return false;
+            return p.File.EffectivePerks(p.Plan).Any(kv => PlannerIcons.Perk(kv.Key) is { } e ? PerkManager.instance.CurrentlyEquipped.Contains(e) != kv.Value
+                : p.Snap.World.Perks.FirstOrDefault(x => x.Key == kv.Key) is { } k && k.Equipped != kv.Value);
+        }
     }
 
     internal sealed class PlannerPerksView
     {
-        private const float TileGap = 10f, Gap = 14f;
+        private const float TileGap = 10f, Gap = 14f, Pad = 24f;
 
         private readonly EconomyPlannerManager m;
         private readonly ModFrame frame;
@@ -107,11 +138,13 @@ namespace PalaceMod
             frame?.SetTitle("Perks");
 
             int delta = P.Result.EndGold - runLoadout.EndGold;
-            Words(root, $"<size=125%><b>{EconomyPlannerManager.Coin(P.Result.EndGold)}</b></size> at the end with {P.PlanName}'s perks" +
-                (delta != 0 ? $"  <color=#{Dim}>·</color>  {EconomyPlannerManager.Signed(delta)} vs your run's loadout ({runLoadout.EndGold})" : $"  <color=#{Dim}>· the same as your run's loadout</color>"),
-                0f, 0f, size.x, 34f, 22f, ModStyle.Gold, TextAlignmentOptions.MidlineLeft, ModStyle.BoldFont);
+            int count = m.PerkCount(P), max = EconomyPlannerManager.MaxPerks;
+            Words(root, $"<size=125%><color=#{(count > max ? EconomyPlannerManager.RedHex : ModStyle.Hex(ModStyle.Bright))}>{count}/{max}</color></size>  <color=#{Dim}>perks</color>" +
+                $"      <size=125%><b>{EconomyPlannerManager.Coin(P.Result.EndGold)}</b></size> <color=#{Dim}>at the end</color>" +
+                (delta != 0 ? $"  {EconomyPlannerManager.Signed(delta)} <color=#{Dim}>vs your run's loadout</color>" : ""),
+                0f, 0f, size.x - Pad, 34f, 22f, ModStyle.Gold, TextAlignmentOptions.MidlineLeft, ModStyle.BoldFont);
 
-            float gridW = Mathf.Round(size.x * 0.6f);
+            float gridW = Mathf.Round((size.x - Pad) * 0.6f);
             var perks = PerkManager.instance != null
                 ? PerkManager.instance.allEquippables.Where(e => e is EquippablePerk).ToList()
                 : [];
@@ -119,14 +152,14 @@ namespace PalaceMod
             var keys = new HashSet<string>(perks.Select(e => e.name));
             float graphH = size.y >= 620f ? 170f : 140f;
             float y = 44f;
-            int count = perks.Count + snapWorld.Perks.Count(k => !keys.Contains(k.Key));
+            int tiles = perks.Count + snapWorld.Perks.Count(k => !keys.Contains(k.Key));
             // The biggest tiles (up to the loadout screen's size) that fit above the graph.
             float Tile = 76f;
             int perRow;
             while (true)
             {
                 perRow = Mathf.Max(4, Mathf.FloorToInt((gridW + TileGap) / (Tile + TileGap)));
-                int lines = Mathf.CeilToInt(count / (float)perRow);
+                int lines = Mathf.CeilToInt(tiles / (float)perRow);
                 if (Tile <= 46f || y + lines * (Tile + TileGap) <= size.y - graphH - Gap) break;
                 Tile -= 2f;
             }
@@ -150,27 +183,23 @@ namespace PalaceMod
                 }
                 t.Key = "perk:" + key;
                 Tiles[t.Key] = t;
+                bool equipped = perk?.Equipped ?? (PerkManager.instance != null && eq != null && PerkManager.instance.CurrentlyEquipped.Contains(eq));
+                bool on = perk != null ? On(perk) : eq != null && EconomyPlannerManager.PerkOn(effective, eq);
+                t.SetOn(on);
+                t.SetMarker(on != equipped);
+                int change = 0;
                 if (perk != null)
                 {
-                    bool on = On(perk);
-                    t.SetOn(on);
-                    t.SetMarker(on != perk.Equipped);
                     var flipped = new Dictionary<string, bool>(effective) { [perk.Key] = !on };
-                    int change = EconSim.Run(EconPerks.Apply(snapWorld, flipped), P.Actions, paybacks: false).EndGold - P.Result.EndGold;
+                    change = EconSim.Run(EconPerks.Apply(snapWorld, flipped), P.Actions, paybacks: false).EndGold - P.Result.EndGold;
                     if (change != 0) t.SetBadge(EconomyPlannerManager.Signed(change), change > 0 ? ModStyle.Accent : V.Red);
                     t.Badge.fontSize = 15f;
-                    var k = perk;
-                    t.Applied += () => { focus = t.Key; m.SetPerk(m.Project(), k, !On(k)); };
-                    t.Shown += _ => Show(eq, k, on, change);
                 }
-                else
-                {
-                    t.SetDim(true, 0.3f);
-                    bool equipped = PerkManager.instance != null && eq != null && PerkManager.instance.CurrentlyEquipped.Contains(eq);
-                    t.SetOn(equipped);
-                    t.Applied += () => Notify.Show("That perk doesn't change gold, so the planner leaves it as it is.", NotifyKind.Info, 2.5f, key: "econ-perk");
-                    t.Shown += _ => Show(eq, null, equipped, 0);
-                }
+                // Not a perk slot (a mutator the snapshot knows): shown, but not counted.
+                if (eq != null && eq is not EquippablePerk) t.SetDim(true, 0.6f);
+                string tileKey = key;
+                t.Applied += () => { focus = t.Key; m.SetPerk(m.Project(), tileKey, equipped, !on); };
+                t.Shown += _ => Show(eq, perk, on, equipped, change);
                 line.Add(t);
                 if (line.Count == perRow) { rows.Add(line); line = []; }
                 i++;
@@ -180,7 +209,7 @@ namespace PalaceMod
 
             // Detail beside the grid.
             float dx = gridW + 30f;
-            detail = Words(root, "", dx, y, size.x - dx, size.y - y - graphH - 80f, 21f, ModStyle.Gold, TextAlignmentOptions.TopLeft, wrap: true);
+            detail = Words(root, "", dx, y, size.x - Pad - dx, size.y - y - graphH - 80f, 21f, ModStyle.Gold, TextAlignmentOptions.TopLeft, wrap: true);
 
             // Buttons under the detail.
             float by = size.y - graphH - Gap - 48f;
@@ -197,13 +226,13 @@ namespace PalaceMod
                 bx += width + 10f;
             }
             if (P.Plan.Perks.Count > 0)
-                Button("reset", "Back to your loadout", 240f, () => { focus = "reset"; m.Edit(() => P.Plan.Perks.Clear()); }, "Drop this plan's perk changes.");
+                Button("reset", "Your run's loadout", 230f, () => { focus = "reset"; m.Edit(() => P.Plan.Perks.Clear()); }, "Drops this plan's perk changes.");
             Button("branch", "Try in a branch", 210f, () =>
             {
                 focus = "branch";
                 m.Edit(() => m.Branch(P.File, P.Plan, int.MaxValue, "perks"));
-                Notify.Show("A branch with the same steps: change its perks and compare the two on the board.", NotifyKind.Info, 3f, key: "econ-branch");
-            }, "A branch with this plan's steps, compared with it on the board, to try another loadout.");
+                Notify.Show("Branched: same steps, its own perks", NotifyKind.Info, 2.5f, key: "econ-branch");
+            }, "A new plan with the same steps and its own perks, compared with this one.");
 
             Graph(runLoadout, size.y - graphH, graphH);
             Wire();
@@ -213,25 +242,17 @@ namespace PalaceMod
             if (target != null) frame?.Frame?.Select(target);
         }
 
-        private void Show(Equippable eq, EconPerk perk, bool on, int change)
+        private void Show(Equippable eq, EconPerk perk, bool on, bool equipped, int change)
         {
             if (detail == null) return;
             string name = eq != null ? EconomySnapshot.Translate(eq.LOCIDENTIFIER_NAME, eq.displayName) : perk?.Name ?? "?";
-            string description = eq != null ? EconomySnapshot.Translate(eq.LOCIDENTIFIER_DESCRIPTION, eq.description) : "";
+            string description = eq != null ? EconomySnapshot.Clean(EconomySnapshot.Translate(eq.LOCIDENTIFIER_DESCRIPTION, eq.description)) : "";
             var lines = new List<string> { $"<font=\"{ModStyle.TitleFont?.name}\"><size=150%>{name}</size></font>" };
             if (!string.IsNullOrEmpty(description)) lines.Add($"<color=#{Dim}>{description}</color>");
-            if (perk == null)
-            {
-                lines.Add("Doesn't change gold: the planner leaves it as it is." + (on ? " Equipped in your run." : ""));
-            }
-            else
-            {
-                lines.Add(EconomyPlannerManager.PerkText(perk, P.World));
-                lines.Add((on ? "On in this plan" : "Off in this plan") + (on != perk.Equipped ? $", <color=#{ModStyle.Hex(ModStyle.Accent)}>{(perk.Equipped ? "on" : "off")} in your run</color>." : ", as in your run."));
-                lines.Add(change == 0 ? $"<color=#{Dim}>Turning it {(on ? "off" : "on")} wouldn't change the end gold.</color>"
-                    : $"Turning it {(on ? "off" : "on")}: {EconomyPlannerManager.Signed(change)} at the end ({P.Result.EndGold + change}).");
-                lines.Add($"<color=#{Dim}>{(ModNumber.UsingController ? "A" : "Enter or click")} turns it {(on ? "off" : "on")}.</color>");
-            }
+            lines.Add((on ? "On" : "Off") + (on != equipped ? $" <color=#{ModStyle.Hex(ModStyle.Accent)}>({(equipped ? "on" : "off")} in your run)</color>" : ""));
+            if (perk != null && perk.Kind != EconPerkKind.Building) lines.Add(EconomyPlannerManager.PerkText(perk, P.World));
+            if (change != 0) lines.Add($"{(on ? "Off" : "On")}: {EconomyPlannerManager.Signed(change)} at the end");
+            else if (perk == null) lines.Add($"<color=#{Dim}>No effect on gold</color>");
             detail.text = string.Join("\n", lines);
         }
 
@@ -245,15 +266,16 @@ namespace PalaceMod
             var rect = (RectTransform)view.transform;
             rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0f, 1f);
             rect.anchoredPosition = new Vector2(0f, -y);
-            rect.sizeDelta = new Vector2(size.x, height);
+            float width = size.x - Pad;
+            rect.sizeDelta = new Vector2(width, height);
             var back = G.Rect(view.transform, "Back", new Color(ModStyle.Panel.r, ModStyle.Panel.g, ModStyle.Panel.b, 0.6f));
             back.anchorMin = back.anchorMax = back.pivot = new Vector2(0f, 1f);
             back.anchoredPosition = new Vector2(gutter, 0f);
-            back.sizeDelta = new Vector2(size.x - gutter, height);
+            back.sizeDelta = new Vector2(width - gutter, height);
             int n = days.Count + 1;
-            float colW = (size.x - gutter) / n;
+            float colW = (width - gutter) / n;
             var xs = Enumerable.Range(0, n).Select(i => gutter + colW * (i + 0.5f)).ToArray();
-            float[] Values(EconResult r) => days.Select(d => (float)(r.Days.FirstOrDefault(x => x.Day == d.Day)?.Start ?? float.NaN)).Append(r.EndGold).ToArray();
+            float[] Values(EconResult r) => days.Select(d => m.GoldOf(r.Days.FirstOrDefault(x => x.Day == d.Day))).Append(r.EndGold).ToArray();
             var series = new List<GraphSeries>
             {
                 new("Your run's loadout", G.Fade(G.Dim, 0.95f), Values(run)),
@@ -264,8 +286,8 @@ namespace PalaceMod
             plot.transform.SetParent(view.transform, false);
             var plotRect = (RectTransform)plot.transform;
             plotRect.anchorMin = plotRect.anchorMax = plotRect.pivot = Vector2.zero;
-            plotRect.sizeDelta = new Vector2(size.x, height);
-            V.Strip(plotRect, size.x, height, xs, colW, series, range, null, -1);
+            plotRect.sizeDelta = new Vector2(width, height);
+            V.Strip(plotRect, width, height, xs, colW, series, range, null, -1);
             var axis = new GameObject("Axis", typeof(RectTransform));
             axis.transform.SetParent(view.transform, false);
             var axisRect = (RectTransform)axis.transform;

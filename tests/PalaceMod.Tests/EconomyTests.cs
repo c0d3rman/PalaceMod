@@ -557,7 +557,7 @@ namespace PalaceMod.Tests
             file.CurrentScenario.Actions.Add(new EconAction { Kind = EconActionKind.Gold, Day = 4, Amount = 12 });
             var copy = file.CurrentScenario.CopyAs(file.FreeName("Plan 1"));
             file.Scenarios.Add(copy);
-            file.Compare = copy.Id;
+            file.Compares = [copy.Id, PlannerFile.Nothing];
             PlannerStore.Save(dir.Path, file);
             var back = PlannerStore.Load(dir.Path, "Neuland", out error);
             Assert.Null(error, "reload");
@@ -565,13 +565,125 @@ namespace PalaceMod.Tests
             Assert.Equal("Plan 1 2", back.Scenarios[1].Name, "free name");
             Assert.Equal("knights", back.CurrentScenario.Actions[0].Choice, "choice kept");
             Assert.Equal(12, back.CurrentScenario.Actions[1].Amount ?? 0, "gold items kept");
-            Assert.Equal(copy.Id, back.CompareScenario?.Id, "compare kept");
+            Assert.Equal(copy.Id + "," + PlannerFile.Nothing, string.Join(",", back.Compares), "compares kept, in order, once each");
 
             System.IO.File.WriteAllText(PlannerStore.FileFor(dir.Path, "Broken"), "{ not json");
             var broken = PlannerStore.Load(dir.Path, "Broken", out error);
             Assert.NotNull(error, "bad file reported");
             Assert.Equal(1, broken.Scenarios.Count, "fresh plan instead");
             Assert.True(System.IO.File.Exists(PlannerStore.FileFor(dir.Path, "Broken") + ".bad"), "bad file kept");
+        }
+
+        // ---- Round 3: same-day steps, the game's destroyed-building rules, reach, research -------------------------
+
+        public static void SeveralStepsOnOneSlotInADay()
+        {
+            var w = World(gold: 40);
+            var castle = w.Slots[0];
+            var house = Slot(w, "House", 0, 0, Step(2, 1), Step(3, 1), Step(4, 1));
+            // Castle 1 -> 2 -> 3, then a house built and taken to level 2, all on day 1.
+            var r = EconSim.Run(w, [Do(1, castle, 2), Do(1, castle, 3), Do(1, house, 1), Do(1, house, 2)]);
+            Assert.True(r.Actions.All(x => x.Status == ActionStatus.Planned), "every step counts: " + string.Join(", ", r.Actions.Select(x => $"{x.Status} {x.Reason}")));
+            Assert.Equal(10 + 20 + 2 + 3, r.Days[0].Spent, "paid in full");
+            Assert.Equal(1 + 2, r.Days[0].Buildings, "castle 1, house 2 at dawn 1");
+            // The castle's cap still applies within the day: the house can't pass the castle's level.
+            var capped = World(gold: 40);
+            var h = Slot(capped, "House", 0, 0, Step(2, 1), Step(3, 1));
+            h.RootLevelDifference = 0;
+            var c = EconSim.Run(capped, [Do(1, h, 1), Do(1, h, 2)]);
+            Assert.Equal(ActionStatus.Blocked, c.Actions[1].Status, "house 2 needs castle 2");
+            var ok = EconSim.Run(capped, [Do(1, h, 1), Do(1, capped.Slots[0], 2), Do(1, h, 2)]);
+            Assert.Equal(ActionStatus.Planned, ok.Actions[2].Status, "castle 2 first, the same day");
+        }
+
+        public static void ResearchKeepsItsBuildingBusy()
+        {
+            var w = World(gold: 100);
+            var smith = Slot(w, "Blacksmith", 1, 0, Step(0), Step(5), Step(5));
+            smith.Steps[1].Branches[0].BusyDawns = 2;
+            var r = EconSim.Run(w, [Do(1, smith, 2), Do(2, smith, 3)]);
+            Assert.Equal(ActionStatus.Blocked, r.Actions[1].Status, "still researching on day 2");
+            Assert.Equal(ActionStatus.Planned, EconSim.Run(w, [Do(1, smith, 2), Do(3, smith, 3)]).Actions[1].Status, "free on day 3");
+        }
+
+        private static EconSlot Mine(EconWorld w, bool perk)
+        {
+            // Every level's data: floor 1 either way, reset to 7 with Indestructible Mines (its +1 makes it 7 to start).
+            var mine = Slot(w, "Gold Mine", 1, perk ? 7 : 6);
+            mine.IsBuilding = true;
+            mine.Modifiers.Add(new EconModifier { Kind = EconModifierKind.Mine, Step = 1, Min = 1, SustainableMin = 1, SustainableReset = 7, Sustainable = perk });
+            return mine;
+        }
+
+        public static void IndestructibleMinesUnderTheGodOfDestruction()
+        {
+            foreach (bool perk in new[] { false, true })
+            {
+                var w = World(gold: 0);
+                w.WaveGold = new int[5];
+                var mine = Mine(w, perk);
+                // Pays, then drops; a knocked-out dawn pays nothing (and resets with the perk, freezes without).
+                Assert.Equal(perk ? "8,1,8,7,6" : "7,1,6,5,4", string.Join(",", EconSim.Run(w, [Lose(2, mine)]).Days.Select(d => d.Buildings)), $"one night, perk {perk}");
+                w.DestructionGod = true;
+                // God of Destruction: down at dawns 2 and 3, both count as knock-outs.
+                Assert.Equal(perk ? "8,1,1,8,7" : "7,1,1,6,5", string.Join(",", EconSim.Run(w, [Lose(2, mine)]).Days.Select(d => d.Buildings)), $"two nights, perk {perk}");
+            }
+        }
+
+        public static void ResilientResidencesUnderTheGodOfDestruction()
+        {
+            var w = World(gold: 0);
+            w.WaveGold = new int[5];
+            w.DestructionGod = true;
+            var house = Slot(w, "House", 1, 3);
+            house.IsBuilding = true;
+            house.NeverDenied = true;
+            house.NeverDeniedPerk = "resilient";
+            Assert.Equal("4,4,4,4,4", string.Join(",", EconSim.Run(w, [Lose(2, house)]).Days.Select(d => d.Buildings)), "pays at every dawn while down");
+            // As a perk what-if: without it the house misses both dawns.
+            var off = EconPerks.Apply(w, new Dictionary<string, bool> { ["resilient"] = false });
+            Assert.Equal("4,1,1,4,4", string.Join(",", EconSim.Run(off, [Lose(2, off.Slots[house.Index])]).Days.Select(d => d.Buildings)), "perk off");
+        }
+
+        public static void UpgradingRevivesABuildingTheGodKeepsDown()
+        {
+            var w = World(gold: 100);
+            w.WaveGold = new int[5];
+            w.DestructionGod = true;
+            var house = Slot(w, "House", 1, 3, Step(0, 3), Step(5, 1));
+            house.IsBuilding = true;
+            var r = EconSim.Run(w, [Lose(2, house), Do(3, house, 2)]);
+            Assert.Equal(1 + 4, r.Days[2].Buildings, "revived by the upgrade on day 3: pays at dawn 3");
+            // Still down from night 2: it can't be lost again on night 3, nor drop wisdom coins.
+            var again = EconSim.Run(w, [Lose(2, house), Lose(3, house)]);
+            Assert.Equal(ActionStatus.AlreadyDone, again.Actions[1].Status, "already down");
+        }
+
+        public static void SlotsOutOfReachUntilABridgeIsBuilt()
+        {
+            var w = World(gold: 100);
+            var b1 = Slot(w, "Bridge", 0, 0, Step(3));
+            var b2 = Slot(w, "Bridge", 0, 0, Step(3));
+            var b3 = Slot(w, "Bridge", 0, 0, Step(3));
+            var harbour = Slot(w, "Harbour", 0, 0, Step(5, 2));
+            harbour.Reach = [[b1.Index], [b2.Index, b3.Index]];
+            Assert.True(EconSim.Blocker(w, harbour)?.StartsWith("Out of reach") == true, "nothing built");
+            Assert.Equal(ActionStatus.Blocked, EconSim.Run(w, [Do(1, b2, 1), Do(1, harbour, 1)]).Actions[1].Status, "one of two");
+            Assert.Equal(ActionStatus.Planned, EconSim.Run(w, [Do(1, b2, 1), Do(1, b3, 1), Do(1, harbour, 1)]).Actions[2].Status, "both");
+            Assert.Equal(ActionStatus.Planned, EconSim.Run(w, [Do(1, b1, 1), Do(1, harbour, 1)]).Actions[1].Status, "the other way");
+        }
+
+        public static void ComparesMigrateFromTheOldField()
+        {
+            var f = new PlannerFile { Scenarios = [new PlannerScenario { Id = "a", Name = "A" }, new PlannerScenario { Id = "b", Name = "B" }], Current = "a", Compare = "b" };
+            f.Normalize();
+            Assert.Equal("b", string.Join(",", f.Compares), "old single compare kept");
+            Assert.Null(f.Compare, "moved");
+            f.Compares.Add("a");
+            f.Compares.Add(PlannerFile.Nothing);
+            f.Compares.Add("gone");
+            f.Normalize();
+            Assert.Equal("b," + PlannerFile.Nothing, string.Join(",", f.Compares), "the plan shown and missing plans dropped");
         }
     }
 }

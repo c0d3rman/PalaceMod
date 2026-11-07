@@ -35,6 +35,7 @@ namespace PalaceMod
         private const int BottomPadding = 6, NoTitleExtraTop = 6;
         private static object owner;
         private static RectTransform anchor; // what the tooltip sits beside; followed while it moves (e.g. scrolling)
+        private static bool anchored;        // shown beside something: hidden once that's gone
         private static bool failed;
 
         /// <summary>Shows the tooltip beside <paramref name="near"/> (right of it if there's room, else left).</summary>
@@ -52,6 +53,7 @@ namespace PalaceMod
             panel.gameObject.SetActive(true);
             LayoutRebuilder.ForceRebuildLayoutImmediate(panel);
             anchor = near;
+            anchored = near != null;
             Place(near);
         }
 
@@ -160,7 +162,8 @@ namespace PalaceMod
         {
             private void LateUpdate()
             {
-                if (anchor == null) return;
+                // What it described was destroyed (a page rebuilt under it) or hidden: it describes nothing now.
+                if (anchor == null) { if (anchored) { anchored = false; Hide(); } return; }
                 if (!anchor.gameObject.activeInHierarchy) Hide();
                 else Place(anchor);
             }

@@ -697,12 +697,16 @@ namespace PalaceMod
         /// one screen).</summary>
         public bool WheelNeedsHover;
 
+        /// <summary>Gap between the viewport's right edge and the scroll bar.</summary>
+        public float BarGap = 16f;
+
         public void Init(UIFrame frame, RectTransform viewport, RectTransform content)
         {
             this.frame = frame;
             this.viewport = viewport;
             this.content = content;
             frame.onNewSelection.AddListener(KeepSelectionVisible);
+            listening = true;
             // A thin scroll bar right of the page, in the game's slider colours; shown only when the page overflows.
             track = Bar("Scroll Bar", viewport.parent, new Color(ModStyle.Dim.r, ModStyle.Dim.g, ModStyle.Dim.b, 0.6f), 2f);
             track.anchorMin = track.anchorMax = new Vector2(0f, 1f);
@@ -713,6 +717,14 @@ namespace PalaceMod
         }
 
         private RectTransform track, thumb;
+        private bool listening;
+
+        // A scroll area inside a page or popup goes away with it; its frame lives on.
+        private void OnDestroy()
+        {
+            if (listening && frame != null) frame.onNewSelection.RemoveListener(KeepSelectionVisible);
+            if (track != null) Destroy(track.gameObject);
+        }
 
         private static RectTransform Bar(string name, Transform parent, Color color, float width)
         {
@@ -752,6 +764,7 @@ namespace PalaceMod
         {
             if (stepping) return;
             var previous = last;
+            if (content == null || viewport == null) return;
             var selected = frame.CurrentSelection;
             last = selected;
             if (selected == null || !selected.transform.IsChildOf(content)) return;
@@ -805,7 +818,7 @@ namespace PalaceMod
             track.gameObject.SetActive(max > 1f);
             if (max <= 1f) return;
             // Track sits just right of the viewport, over its full height.
-            track.anchoredPosition = new Vector2(viewport.offsetMax.x + 16f, viewport.offsetMax.y);
+            track.anchoredPosition = new Vector2(viewport.offsetMax.x + BarGap, viewport.offsetMax.y);
             track.sizeDelta = new Vector2(2f, height);
             float thumbHeight = Mathf.Max(30f, height * height / content.rect.height);
             thumb.sizeDelta = new Vector2(4f, thumbHeight);

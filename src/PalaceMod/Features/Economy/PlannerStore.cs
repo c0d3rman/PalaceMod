@@ -36,8 +36,15 @@ namespace PalaceMod.Economy
         public int Version = 1;
         public string Level;
         public List<PlannerScenario> Scenarios = [];
-        /// <summary>The plan shown, and the one it's compared with (null: doing nothing).</summary>
-        public string Current, Compare;
+        /// <summary>The plan shown.</summary>
+        public string Current;
+        /// <summary>What it's compared with, in the order picked (each its own colour): plan ids, or
+        /// <see cref="Nothing"/> for doing nothing.</summary>
+        [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+        public List<string> Compares = [Nothing];
+        public const string Nothing = "nothing";
+        /// <summary>Older files' single comparison (null: doing nothing); read into <see cref="Compares"/>.</summary>
+        public string Compare;
         /// <summary>Just made (no file yet): the planner seeds its first plan.</summary>
         [JsonIgnore] public bool Fresh;
         /// <summary>The castle's build on day 1, part of every plan (and of doing nothing) while the castle isn't built
@@ -48,7 +55,6 @@ namespace PalaceMod.Economy
         public bool IsFixed(EconAction a) => a != null && a == Fixed;
 
         [JsonIgnore] public PlannerScenario CurrentScenario => Scenarios.FirstOrDefault(s => s.Id == Current) ?? Scenarios.FirstOrDefault();
-        [JsonIgnore] public PlannerScenario CompareScenario => Compare == null ? null : Scenarios.FirstOrDefault(s => s.Id == Compare && s.Id != CurrentScenario?.Id);
 
         public PlannerScenario Get(string id) => id == null ? null : Scenarios.FirstOrDefault(s => s.Id == id);
 
@@ -118,7 +124,7 @@ namespace PalaceMod.Economy
                 child.ForkDay = s.Parent == null ? 0 : Math.Min(child.ForkDay, s.ForkDay);
             }
             Scenarios.Remove(s);
-            if (Compare == s.Id) Compare = null;
+            Compares.Remove(s.Id);
             if (Current == s.Id) Current = null;
             Normalize();
         }
@@ -149,7 +155,15 @@ namespace PalaceMod.Economy
                 if (s.Parent != null && (Get(s.Parent) == null || Ancestors(s).Contains(s) || s.Parent == s.Id)) s.Parent = null;
             if (Scenarios.Count == 0) Scenarios.Add(new PlannerScenario { Name = "Plan 1" });
             if (Scenarios.All(s => s.Id != Current)) Current = Scenarios[0].Id;
-            if (Compare != null && (Compare == Current || Scenarios.All(s => s.Id != Compare))) Compare = null;
+            Compares ??= [];
+            if (Compare != null)
+            {
+                if (!Compares.Contains(Compare)) Compares.Insert(0, Compare);
+                Compares.Remove(Nothing);
+                Compare = null;
+            }
+            var seen = new HashSet<string>();
+            Compares.RemoveAll(c => c == null || !seen.Add(c) || (c != Nothing && (c == Current || Scenarios.All(s => s.Id != c))));
         }
     }
 

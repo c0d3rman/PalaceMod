@@ -20,8 +20,9 @@ using System.Linq;
                  add gold found that night.
       dawn N     every built building with an interactor pays its GoldIncome unless knocked out tonight
                  (BuildingInteractor.OnDawn_AfterSunrise -> Harvest), then its income modifiers run:
-                   mine     -incomeReductionPerTurn, floored (higher floor with Sustainable Mining); knocked out with
-                            Sustainable Mining: reset instead; knocked out without it: unchanged
+                   mine     -incomeReductionPerTurn, floored at minimumIncome; knocked out: pays nothing, and with
+                            Indestructible Mines (sustainableMiningPerk) its income resets to resetIncomeSustainableMining
+                            (7 in every level's data), without it stays as it was
                    harbour  +incomeIncreasePerTurn up to maximumIncome unless knocked out, and the level-2 upgrade's
                             income change becomes the new income (FishingHarbour writes Upgrades[1].branches[0]);
                             that upgrade doubles the cap and growth (FishingHarbourUpgrade)
@@ -87,6 +88,9 @@ namespace PalaceMod.Economy
         public bool DoublesHarbour;
         /// <summary>Keeps the building from another step until the next dawn (TempleUpgrade).</summary>
         public bool BusyUntilDawn;
+        /// <summary>Research: keeps the building from another step for this many dawns (BlacksmithUpgrade,
+        /// RoyalForgeUpgrade: researchTime, one less with the research-speed perk).</summary>
+        public int BusyDawns;
         /// <summary>Temple prayers: shrines are knocked out that night.</summary>
         public bool Prayers;
         /// <summary>Temple wisdom: gold per building destroyed that night, and the health it drains from every
@@ -180,14 +184,25 @@ namespace PalaceMod.Economy
         /// <summary>Already paid today (BuildingInteractor.harvestedToday): a slot that hasn't, and gets income by
         /// day, pays it that day (the night horn collects it).</summary>
         public bool HarvestedToday;
-        /// <summary>Can't take another step until the next dawn (a temple upgrade in effect).</summary>
-        public bool Busy;
+        /// <summary>Dawns until it can take another step (a temple upgrade in effect, research running).</summary>
+        public int BusyDawns;
+        public bool Busy
+        {
+            get => BusyDawns > 0;
+            set => BusyDawns = value ? Math.Max(1, BusyDawns) : 0;
+        }
         /// <summary>Knocked out last night: not harvestable until dusk, even if it starts earning by day.</summary>
         public bool DownToday;
         /// <summary>God of Destruction: destroyed and not revived this dawn, so it's knocked out next night too.</summary>
         public bool StillDown;
-        /// <summary>A knock-out doesn't stop its pay (PerkRemoveDestroyedAtNightTag).</summary>
+        /// <summary>A knock-out doesn't stop its pay (PerkRemoveDestroyedAtNightTag: Resilient Residences on houses,
+        /// Relentless Research on the Blacksmith and Royal Forge).</summary>
         public bool NeverDenied;
+        /// <summary>The perk behind <see cref="NeverDenied"/>, for perk what-ifs (null: none).</summary>
+        public string NeverDeniedPerk;
+        /// <summary>Can't be walked to until one of these sets of slots is built (bridges): any one set, all of it.
+        /// Null: no such rule. Level data the game doesn't encode as an unlock (PlannerReach.cs).</summary>
+        public List<int[]> Reach;
         /// <summary>Can't be knocked out (PerkIndestructible).</summary>
         public bool Indestructible;
         /// <summary>Harbour: the level-2 upgrade's current income change.</summary>
@@ -623,6 +638,8 @@ namespace PalaceMod.Economy
                 foreach (var slot in w.Slots) if (slot.KnockedOut) knocked.Add(slot.Index);
             int lostByPlan = 0;
             var destroyed = new HashSet<int>();
+            // God of Destruction: what's still down from last night can't be destroyed (or drop wisdom coins) again.
+            var stillDown = w.DestructionGod ? new HashSet<int>(s.Carry) : [];
             int extra = 0;
             foreach (var a in ordered.Where(a => !a.IsStep && a.Day == night))
             {
@@ -639,6 +656,7 @@ namespace PalaceMod.Economy
                 if (slot.Level < 1) { Block(r, "Not built by then"); continue; }
                 if (slot.Indestructible) { Block(r, "It can't be destroyed"); continue; }
                 if (knocked.Contains(slot.Index) || destroyed.Contains(slot.Index)) { r.Status = ActionStatus.AlreadyDone; r.Reason = "Already knocked out that night"; continue; }
+                if (stillDown.Contains(slot.Index)) { r.Status = ActionStatus.AlreadyDone; r.Reason = "Still down from the night before"; continue; }
                 r.Status = ActionStatus.Planned;
                 destroyed.Add(slot.Index);
                 if (slot.IsBuilding) lostByPlan++;
@@ -677,7 +695,7 @@ namespace PalaceMod.Economy
                 // OnDawn_BeforeSunrise clears harvestedToday and temple locks; the harvest sets it again.
                 slot.HarvestedToday = false;
                 slot.DownToday = knocked.Contains(slot.Index);
-                slot.Busy = false;
+                slot.BusyDawns = Math.Max(0, slot.BusyDawns - 1);
                 if (slot.Level < 1 || !slot.Pays || slot.Income <= 0 || knocked.Contains(slot.Index)) continue;
                 buildings += slot.Income;
                 slot.HarvestedToday = true;
@@ -750,6 +768,8 @@ namespace PalaceMod.Economy
                 r.Reason = $"Short by {r.Shortfall}";
             }
             w.Gold -= r.Cost;
+            // Upgrading a building God of Destruction keeps down revives it (BuildSlot.ApplyLocalUpgradeChanges).
+            s.Carry.Remove(slot.Index);
             int before = s.FamilyIncome(slot);
             s.StepUp(slot, branchIndex, byPlayer: true);
             r.IncomeDelta = s.FamilyIncome(slot) - before;
@@ -827,13 +847,24 @@ namespace PalaceMod.Economy
                 var step = slot.Level < slot.Steps.Count ? slot.Steps[slot.Level] : null;
                 if (step == null) return "Already at its highest level";
                 if (step.Disabled) return "Not available in this mode";
-                if (slot.Busy) return "Busy until the next dawn (its last upgrade is in effect)";
+                if (slot.BusyDawns > 1) return $"Busy for {slot.BusyDawns} more dawns";
+                if (slot.Busy) return "Busy until the next dawn";
+                if (Unreached(slot) is { } far) return far;
                 if (!CanUpgrade(slot))
                 {
                     var root = World.Slots[slot.Root];
                     return $"Needs the {root.TypeName} at level {slot.Level + slot.RootLevelDifference + 1}";
                 }
                 return null;
+            }
+
+            // Out of reach until a bridge (or some other set of slots) is built: level data, not a game rule.
+            public string Unreached(EconSlot slot)
+            {
+                if (slot.Reach == null || slot.Reach.Count == 0 || IgnoreRequirements) return null;
+                if (slot.Reach.Any(set => set.All(i => i >= 0 && i < World.Slots.Count && World.Slots[i].Level >= 1))) return null;
+                string Name(int i) => i >= 0 && i < World.Slots.Count ? World.Slots[i].Label ?? World.Slots[i].TypeName : "?";
+                return "Out of reach until " + string.Join(" or ", slot.Reach.Select(set => string.Join(" + ", set.Select(Name)))) + " is built";
             }
 
             // What unlocks a slot: its activator reaching a level (BuildSlot.Activate), along the chain.
@@ -899,7 +930,8 @@ namespace PalaceMod.Economy
                 slot.Income += change;
                 // The player's own build marks the building harvested for the day (BuildingInteractor.BuildComplete).
                 if (byPlayer) slot.HarvestedToday = true;
-                if (branch != null && branch.BusyUntilDawn) slot.Busy = true;
+                if (branch != null && branch.BusyUntilDawn) slot.BusyDawns = Math.Max(1, slot.BusyDawns);
+                if (branch != null && branch.BusyDawns > 0) slot.BusyDawns = Math.Max(branch.BusyDawns, slot.BusyDawns);
                 if (built && slot.IsHouse && !World.HouseOrder.Contains(slot.Index)) World.HouseOrder.Add(slot.Index);
 
                 foreach (var child in World.Slots)
@@ -979,7 +1011,8 @@ namespace PalaceMod.Economy
             if (changes == null || changes.Count == 0) return world;
             bool Differs(string key, bool now) => key != null && changes.TryGetValue(key, out bool v) && v != now;
             if (!world.Perks.Any(p => Differs(p.Key, p.Equipped))
-                && !world.Slots.Any(s => s.PerkMods.Any(m => Differs(m.Key, m.Applied)) || s.Modifiers.Any(m => Differs(m.PerkKey, m.Kind == EconModifierKind.Mine ? m.Sustainable : m.PerkOn))))
+                && !world.Slots.Any(s => s.PerkMods.Any(m => Differs(m.Key, m.Applied)) || Differs(s.NeverDeniedPerk, s.NeverDenied)
+                    || s.Modifiers.Any(m => Differs(m.PerkKey, m.Kind == EconModifierKind.Mine ? m.Sustainable : m.PerkOn))))
                 return world;
 
             var w = world.Clone();
@@ -1037,6 +1070,7 @@ namespace PalaceMod.Economy
             }
             foreach (var slot in w.Slots)
             {
+                if (slot.NeverDeniedPerk != null && changes.TryGetValue(slot.NeverDeniedPerk, out bool keep)) slot.NeverDenied = keep;
                 foreach (var m in slot.Modifiers)
                 {
                     if (m.PerkKey == null || !changes.TryGetValue(m.PerkKey, out bool on)) continue;

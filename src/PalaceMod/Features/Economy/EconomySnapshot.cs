@@ -248,6 +248,9 @@ namespace PalaceMod.Economy
             e.KnockedOut = interactor != null && interactor.KnockedOutTonight;
             e.HarvestedToday = interactor != null && Traverse.Create(interactor).Field("harvestedToday").GetValue<bool>();
             e.Busy = interactor != null && interactor.buildingIsCurrentlyBusyAndCantBeUpgraded;
+            // Research running: busy for the dawns it has left.
+            foreach (var research in Owned<MonoBehaviour>(slot).Where(c => c is BlacksmithUpgrade or RoyalForgeUpgrade && c.isActiveAndEnabled))
+                if (e.Busy) e.BusyDawns = Math.Max(e.BusyDawns, Traverse.Create(research).Field("researchTimeLeft").GetValue<int>());
             e.IsCastle = slot.GetComponentInChildren<CastleCenter>(true) != null;
             e.IsHouse = Owned<TaggedObject>(slot).Any(o => o.Tags.Contains(TagManager.ETag.House));
             // UpgradeCastleUp finds walls and towers through the tag manager (TaggedObject -> its parent BuildSlot).
@@ -257,6 +260,16 @@ namespace PalaceMod.Economy
             e.CastleUpReceivers = Owned<CaslteUpReciever>(slot, c => Traverse.Create(c).Field("buildSlot").GetValue<BuildSlot>()).Count();
             e.ObjectName = slot.gameObject.name;
             e.NeverDenied = interactor != null && Traverse.Create(interactor).Field("neverDenyHarvest").GetValue<bool>();
+            // Resilient Residences (houses) and Relentless Research (Blacksmith, Royal Forge): PerkRemoveDestroyedAtNightTag
+            // turns NeverDenied on at Start if its perk is equipped, then destroys itself; one not yet started is still here.
+            var neverDeny = Owned<PerkRemoveDestroyedAtNightTag>(slot).Select(c => Traverse.Create(c).Field("perkRequirement").GetValue<Equippable>()).FirstOrDefault(p => p != null)
+                ?? PerkCapture.NeverDenyPerk(slot);
+            if (neverDeny != null)
+            {
+                e.NeverDeniedPerk = neverDeny.name;
+                e.NeverDenied |= PerkManager.IsEquipped(neverDeny);
+                AddPerk(snap.World, neverDeny, EconPerkKind.Building);
+            }
             var tagged = Owned<TaggedObject>(slot).Where(o => o.Tags.Contains(TagManager.ETag.Building)).ToList();
             e.Indestructible = e.Level >= 1 && tagged.Count > 0 && tagged.All(o => !o.Tags.Contains(TagManager.ETag.PlayerOwned));
             e.StillDown = tagged.Any(o => o.Tags.Contains(TagManager.ETag.AUTO_NoReviveNextMorning) && o.Tags.Contains(TagManager.ETag.AUTO_KnockedOutAndHealOnDawn));
@@ -288,6 +301,7 @@ namespace PalaceMod.Economy
                         StartsCastleUp = Activates<UpgradeCastleUp>(branch),
                         DoublesHarbour = Activates<FishingHarbourUpgrade>(branch),
                         BusyUntilDawn = Activates<TempleUpgrade>(branch),
+                        BusyDawns = Research(branch),
                         Prayers = Activates<TemplePrayers>(branch),
                     });
                     var added = step.Branches[step.Branches.Count - 1];
@@ -417,6 +431,17 @@ namespace PalaceMod.Economy
             slot.GetComponentsInChildren<T>(true).Where(c => c != null && (target != null ? target(c) == slot : c.GetComponentInParent<BuildSlot>(true) == slot));
 
         private static bool Activates<T>(BuildSlot.UpgradeBranch branch) where T : Component => ActivatedComponent<T>(branch) != null;
+
+        // Dawns a research upgrade keeps its building busy: researchTime, one less with the research-speed perk.
+        private static int Research(BuildSlot.UpgradeBranch branch)
+        {
+            Component c = ActivatedComponent<BlacksmithUpgrade>(branch);
+            c ??= ActivatedComponent<RoyalForgeUpgrade>(branch);
+            if (c == null) return 0;
+            var t = Traverse.Create(c);
+            int time = t.Field("researchTime").GetValue<int>();
+            return Math.Max(1, time - (PerkManager.IsEquipped(t.Field("researchSpeedPerk").GetValue<Equippable>()) ? 1 : 0));
+        }
 
         private static T ActivatedComponent<T>(BuildSlot.UpgradeBranch branch) where T : Component
         {

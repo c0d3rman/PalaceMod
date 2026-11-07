@@ -63,7 +63,7 @@ namespace PalaceMod
                 ("Upgrades", ["Upgrade info", "Undo upgrade", "Level 4 buildings"]),
             ]),
             ("Pause menu & info", [
-                ("Pause menu", ["Pause menu score", "Enemy previews", "Run analytics"]),
+                ("Pause menu", ["Pause menu score", "Enemy previews", "Run analytics", "Economy planner"]),
                 ("Stat details", ["Stat details"]),
             ]),
             ("Runs & saves", [
