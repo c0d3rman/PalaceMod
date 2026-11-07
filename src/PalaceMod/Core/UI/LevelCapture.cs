@@ -3,9 +3,10 @@ using UnityEngine;
 
 /*
     A picture of the level from straight above, for maps in mod menus (ModMap): an orthographic camera with the main
-    camera's settings renders the area once into a RenderTexture, turned so that "up" in the picture is the way the
-    player's camera looks (what the player calls north). Fog is switched off for the shot. Works while the game is
-    paused. The texture belongs to the caller: Release() it when the menu goes away.
+    camera's settings renders the area once, turned so that "up" in the picture is the way the player's camera looks
+    (what the player calls north), and the picture is copied into a plain Texture2D at once (a render target kept
+    for later came out black once the frame ended). Fog is switched off for the shot. Works while the game is paused.
+    The texture belongs to the caller: Release() it when the menu goes away.
 
         var shot = LevelCapture.Take(center, halfWidth: 60f, halfHeight: 40f, pixelWidth: 1400);
         Vector2 uv = shot.ToUV(slot.transform.position);   // 0..1 across the picture, (0,0) bottom left
@@ -14,7 +15,7 @@ namespace PalaceMod
 {
     public sealed class LevelShot
     {
-        public RenderTexture Texture;
+        public Texture2D Texture;
         public Vector3 Center, Right, Up;
         public float HalfWidth, HalfHeight;
 
@@ -28,7 +29,6 @@ namespace PalaceMod
         public void Release()
         {
             if (Texture == null) return;
-            Texture.Release();
             UnityEngine.Object.Destroy(Texture);
             Texture = null;
         }
@@ -60,11 +60,12 @@ namespace PalaceMod
             int w = Mathf.Clamp(pixelWidth, 64, 4096), h = Mathf.Clamp(Mathf.RoundToInt(pixelWidth * halfHeight / halfWidth), 64, 4096);
             var shot = new LevelShot { Center = center, Right = right, Up = up, HalfWidth = halfWidth, HalfHeight = halfHeight };
             GameObject obj = null;
+            RenderTexture target = null;
+            var active = RenderTexture.active;
             bool fog = RenderSettings.fog;
             try
             {
-                shot.Texture = new RenderTexture(w, h, 24, RenderTextureFormat.ARGB32) { name = "PalaceMod LevelCapture", antiAliasing = 1 };
-                shot.Texture.Create();
+                target = RenderTexture.GetTemporary(w, h, 24, RenderTextureFormat.ARGB32);
                 obj = new GameObject("PalaceMod LevelCapture Camera");
                 obj.SetActive(false);
                 var cam = obj.AddComponent<Camera>();
@@ -76,11 +77,16 @@ namespace PalaceMod
                 cam.nearClipPlane = 1f;
                 cam.farClipPlane = 1000f;
                 cam.cullingMask = main.cullingMask & ~(1 << 5); // no UI layer
-                cam.targetTexture = shot.Texture;
+                cam.targetTexture = target;
                 obj.transform.position = center + Vector3.up * 400f;
                 obj.transform.rotation = Quaternion.LookRotation(Vector3.down, up);
                 RenderSettings.fog = false;
                 cam.Render();
+                RenderTexture.active = target;
+                shot.Texture = new Texture2D(w, h, TextureFormat.RGB24, false) { name = "PalaceMod LevelCapture", wrapMode = TextureWrapMode.Clamp };
+                shot.Texture.ReadPixels(new Rect(0, 0, w, h), 0, 0);
+                shot.Texture.Apply(false, true); // GPU only from here: no CPU copy kept
+                Log.Core.Debug($"LevelCapture: {w}x{h} at {obj.transform.position} from {main.name}");
                 return shot;
             }
             catch (Exception e)
@@ -92,6 +98,8 @@ namespace PalaceMod
             finally
             {
                 RenderSettings.fog = fog;
+                RenderTexture.active = active;
+                if (target != null) RenderTexture.ReleaseTemporary(target);
                 if (obj != null) UnityEngine.Object.Destroy(obj);
             }
         }
@@ -99,17 +107,24 @@ namespace PalaceMod
         /// <summary>Saves a shot as PNG (for dev commands).</summary>
         internal static void SavePng(LevelShot shot, string path)
         {
+            // The texture keeps no CPU copy: draw it into a readable one.
+            var target = RenderTexture.GetTemporary(shot.Texture.width, shot.Texture.height, 0, RenderTextureFormat.ARGB32);
             var previous = RenderTexture.active;
             try
             {
-                RenderTexture.active = shot.Texture;
-                var tex = new Texture2D(shot.Texture.width, shot.Texture.height, TextureFormat.RGB24, false);
+                Graphics.Blit(shot.Texture, target);
+                RenderTexture.active = target;
+                var tex = new Texture2D(target.width, target.height, TextureFormat.RGB24, false);
                 tex.ReadPixels(new Rect(0, 0, tex.width, tex.height), 0, 0);
                 tex.Apply();
                 System.IO.File.WriteAllBytes(path, tex.EncodeToPNG());
                 UnityEngine.Object.Destroy(tex);
             }
-            finally { RenderTexture.active = previous; }
+            finally
+            {
+                RenderTexture.active = previous;
+                RenderTexture.ReleaseTemporary(target);
+            }
         }
     }
 }

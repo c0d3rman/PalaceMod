@@ -56,23 +56,20 @@ namespace PalaceMod
             float aspect = size.x / Mathf.Max(1f, size.y);
             if (halfW / halfH < aspect) halfW = halfH * aspect;
             else halfH = halfW / aspect;
-            map.Shot = LevelCapture.Take(center, halfW, halfH, Mathf.RoundToInt(Mathf.Min(2048f, size.x * 2f)));
-            if (map.Shot == null)
-            {
-                // No picture: positions still need a frame.
-                map.Shot = new LevelShot { Center = center, Right = right, Up = up, HalfWidth = halfW, HalfHeight = halfH };
-            }
-            else
-            {
-                var pic = new GameObject("Picture", typeof(RectTransform), typeof(CanvasRenderer), typeof(RawImage));
-                pic.transform.SetParent(map.Root, false);
-                var raw = pic.GetComponent<RawImage>();
-                raw.texture = map.Shot.Texture;
-                raw.color = new Color(dim, dim, dim, 1f);
-                raw.raycastTarget = false;
-                Stretch((RectTransform)pic.transform);
-                obj.AddComponent<Releaser>().Shot = map.Shot;
-            }
+            // The frame is fixed now (markers need it); the picture is taken on the next Update: rendered while
+            // a menu is being built, a camera's output comes out black.
+            map.Shot = new LevelShot { Center = center, Right = right, Up = up, HalfWidth = halfW, HalfHeight = halfH };
+            var pic = new GameObject("Picture", typeof(RectTransform), typeof(CanvasRenderer), typeof(RawImage));
+            pic.transform.SetParent(map.Root, false);
+            var raw = pic.GetComponent<RawImage>();
+            raw.color = new Color(dim, dim, dim, 1f);
+            raw.raycastTarget = false;
+            raw.enabled = false;
+            Stretch((RectTransform)pic.transform);
+            var painter = obj.AddComponent<Painter>();
+            painter.Map = map;
+            painter.Picture = raw;
+            painter.Pixels = Mathf.RoundToInt(Mathf.Min(2048f, size.x * 2f));
             var layerObj = new GameObject("Markers", typeof(RectTransform));
             layerObj.transform.SetParent(map.Root, false);
             map.layer = (RectTransform)layerObj.transform;
@@ -134,10 +131,27 @@ namespace PalaceMod
             rect.offsetMin = rect.offsetMax = Vector2.zero;
         }
 
-        private class Releaser : MonoBehaviour
+        // Takes the picture once, and releases it with the map.
+        private class Painter : MonoBehaviour
         {
-            public LevelShot Shot;
-            private void OnDestroy() => Shot?.Release();
+            public ModMap Map;
+            public RawImage Picture;
+            public int Pixels;
+            private LevelShot taken;
+
+            private void Update()
+            {
+                if (taken != null || Map == null) { enabled = false; return; }
+                var s = Map.Shot;
+                taken = LevelCapture.Take(s.Center, s.HalfWidth, s.HalfHeight, Pixels);
+                enabled = false;
+                if (taken == null || Picture == null) return;
+                s.Texture = taken.Texture;
+                Picture.texture = taken.Texture;
+                Picture.enabled = true;
+            }
+
+            private void OnDestroy() => taken?.Release();
         }
     }
 }

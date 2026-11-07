@@ -45,8 +45,7 @@ namespace PalaceMod
             page.Text($"<color=#{(r.Status == ActionStatus.Short ? RedHex : DimHex)}>{Detail(r)}</color>");
             if (holder != p.Plan) page.Text($"<color=#{DimHex}>Part of {p.File.FullName(holder)}, which this branches from: changes here change it too.</color>");
 
-            page.Stepper(DayWord(a), () => $"{DayWord(a)} {a.Day}", d => MoveGroup(Project(), members, null, Math.Sign(d)),
-                tooltip: a.IsStep ? "The day to do it. Left/right moves it." : "The night it happens. Left/right moves it.");
+            page.Stepper(DayWord(a), () => $"{DayWord(a)} {a.Day}", d => MoveGroup(Project(), members, null, Math.Sign(d)));
 
             // How many: more of the same kind on that day, nearest the castle first.
             if (slot != null && (a.IsStep && a.Level == 1 || a.Kind == EconActionKind.KnockOut))

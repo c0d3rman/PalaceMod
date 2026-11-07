@@ -104,10 +104,10 @@ namespace PalaceMod
             var effective = P.File.EffectivePerks(P.Plan);
             bool On(EconPerk k) => effective.TryGetValue(k.Key, out bool v) ? v : k.Equipped;
             var runLoadout = EconSim.Run(EconPerks.Apply(snapWorld, new Dictionary<string, bool>()), P.Actions, paybacks: false);
-            frame?.SetTitle($"Perks for {P.PlanName}");
+            frame?.SetTitle("Perks");
 
             int delta = P.Result.EndGold - runLoadout.EndGold;
-            Words(root, $"<size=125%><b>{EconomyPlannerManager.Coin(P.Result.EndGold)}</b></size> at the end with these perks" +
+            Words(root, $"<size=125%><b>{EconomyPlannerManager.Coin(P.Result.EndGold)}</b></size> at the end with {P.PlanName}'s perks" +
                 (delta != 0 ? $"  <color=#{Dim}>·</color>  {EconomyPlannerManager.Signed(delta)} vs your run's loadout ({runLoadout.EndGold})" : $"  <color=#{Dim}>· the same as your run's loadout</color>"),
                 0f, 0f, size.x, 34f, 22f, ModStyle.Gold, TextAlignmentOptions.MidlineLeft, ModStyle.BoldFont);
 
@@ -138,7 +138,16 @@ namespace PalaceMod
                 econ.TryGetValue(key, out var perk);
                 float x = i % perRow * (Tile + TileGap);
                 float ty = y + i / perRow * (Tile + TileGap);
-                var t = ModTile.Create(root, "perk:" + key, new Vector2(Tile, Tile), eq?.icon, eq == null ? perk?.Name : null, 14f).Place(new Vector2(x, -ty));
+                string name = eq == null ? perk?.Name : eq.icon == null ? EconomySnapshot.Translate(eq.LOCIDENTIFIER_NAME, eq.displayName) : null;
+                var t = ModTile.Create(root, "perk:" + key, new Vector2(Tile, Tile), eq?.icon, name, 13f).Place(new Vector2(x, -ty));
+                if (name != null)
+                {
+                    // No icon: its name, small and wrapped.
+                    t.Label.enableWordWrapping = true;
+                    t.Label.alignment = TextAlignmentOptions.Center;
+                    t.Label.overflowMode = TextOverflowModes.Truncate;
+                    t.Label.lineSpacing = -20f;
+                }
                 t.Key = "perk:" + key;
                 Tiles[t.Key] = t;
                 if (perk != null)

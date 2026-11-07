@@ -77,13 +77,13 @@ The Economy tab uses the frame's full width (a new "wide" tab mode).
  │   0  │ ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ │  red below zero
  └──────┴────────────────────────────────────────────────────────────────────────────────────┘
  Mill to level 2: Improved Plow · 8◉ · +1 per dawn · pays for itself by dawn 9
- Enter: edit · Q/E: move a day · Del: remove · drag to move · right-click: remove
+ Enter: edit · ,/.: move a day · Backspace: remove · Z: undo · drag to another day · right-click: remove
 ```
 
 - **Columns** are day N (top, sunlit) and night N (bottom, darker). A day's builds sit above the night line; buildings
   lost and gold found that night below it. With a night in progress, a narrow "Tonight" column comes first.
-- **Chips** show the game's icon (the choice's own tile icon for a choice upgrade, the matching game icon for a
-  building type), a short name, the level as a numeral, and "×5" when several of the same thing happen that day:
+- **Chips** show the game's icon (the choice's own tile icon for a choice upgrade; for a plain build, the game's
+  icon that pictures that building, borrowed from a perk or choice, since the game has no per-building icons), a short name, the level as a numeral, and "×5" when several of the same thing happen that day:
   identical steps on a day are one chip (bulk houses don't flood the column). Colour carries status: red outline =
   not enough gold that day, dimmed = skipped or already done, faint with a "›" = inherited from the plan this branch
   comes from.
@@ -162,9 +162,9 @@ Kept as its own screen (it's a comparison, not an edit), opened from the toolbar
 | --- | --- | --- | --- |
 | Move around the board | arrows | d-pad / stick | hover |
 | Edit a chip / day | Enter (popup) | A | click |
-| Move a chip a day | Q / E (rebindable) | LB / RB | drag to another column |
-| Remove a chip | Delete (rebindable) | popup › Remove | right-click |
-| Undo | Ctrl+Z (rebindable) | toolbar › Undo | toolbar › Undo |
+| Move a chip a day | , / . (rebindable) | LB / RB | drag to another column |
+| Remove a chip | Backspace (rebindable) | popup › Remove | right-click |
+| Undo | Z (rebindable) | toolbar › Undo | toolbar › Undo |
 | Add on a day | Enter on "+ add" | A on "+ add" | click "+ add" |
 | Map: pick a slot | arrows between markers, Enter | stick, A | click |
 | Map: one more of a kind | Enter on its tile | A on its tile | click its tile |
@@ -202,3 +202,12 @@ Reusable, in Core/UI (documented in CLAUDE.md):
 
 Feature-specific, in Features/Economy: the board (PlannerBoard), the gold strip aligned with its columns, the Add
 screen, the perk grid, the chip/day/plan popups, building icons (PlannerIcons), undo.
+
+## As built
+
+- Keys are registered through the Keybinds API under "Economy planner" (context "Economy planner", claimed while a
+  planner screen is open), so they show in Settings > Controls and can be rebound; the shoulders (the game's
+  NextTab/PrevTab) also move a chip, and change the day on the Add screen.
+- The map picture is rendered once per Add screen (LevelCapture) and copied into a texture straight away.
+- Dev commands drive every screen: `econ view|select|press|popup|drag|shift|remove-chip|undo|addview|addpick|addkind|
+  addday|addselect|addcommit|addmap|perksview|perktile|sourcesview` (`dev.py cmd help` lists them).

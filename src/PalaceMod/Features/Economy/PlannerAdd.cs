@@ -357,8 +357,6 @@ namespace PalaceMod
             if (cands.Count == 0 && Mode != PlannerAddMode.Gold)
                 Words(map.Root, Mode == PlannerAddMode.Build ? "Nothing can be built or upgraded that day: try a later day." : "Nothing is standing that night.",
                     20f, 16f, mapSize.x - 40f, 30f, 22f, ModStyle.Gold, font: ModStyle.ButtonFont);
-            // A compass of sorts: which way is up.
-            Words(map.Root, "north is up the screen, as you play", 12f, mapSize.y - 28f, mapSize.x - 24f, 24f, 17f, G.Fade(ModStyle.Gold, 0.7f), font: ModStyle.ButtonFont);
         }
 
         private void ShowSlot(EconSlot e)
@@ -743,7 +741,7 @@ namespace PalaceMod
             if (shot.Texture == null) return "no picture";
             LevelCapture.SavePng(shot, path);
             var raw = map.Root.GetComponentInChildren<RawImage>(true);
-            return $"saved {path}: {shot.Texture.width}x{shot.Texture.height} created {shot.Texture.IsCreated()}, raw {(raw == null ? "none" : $"{raw.texture?.name} {raw.color} active {raw.isActiveAndEnabled} rect {raw.rectTransform.rect}")}, " +
+            return $"saved {path}: {shot.Texture.width}x{shot.Texture.height} raw {(raw == null ? "none" : $"{raw.texture?.name} {raw.color} active {raw.isActiveAndEnabled} rect {raw.rectTransform.rect}")}, " +
                 $"center {shot.Center} half {shot.HalfWidth:0}x{shot.HalfHeight:0}";
         }
 
