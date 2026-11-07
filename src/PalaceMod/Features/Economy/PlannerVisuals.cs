@@ -8,10 +8,9 @@ using G = PalaceMod.AnalyticsGraph;
 
 /*
     The planner's drawings, from plain UI Images in the game's palette (AnalyticsGraph's primitives):
-      - Gold: gold per day as lines, with room below zero (a plan can overspend), red marks under days that do, and a
-        small diamond above days with planned steps.
-      - Map: every build slot from above, oriented like the screen, the castle in the middle; the slot being looked at
-        is the large verdigris diamond, slots in the plan are bronze.
+      - Strip: gold per day as lines over the board's columns, with room below zero (a plan can overspend), red marks
+        under days that do, and the selected column lit.
+      - SourceBars: the income-sources chart.
 */
 namespace PalaceMod.Economy
 {
@@ -29,90 +28,101 @@ namespace PalaceMod.Economy
             return panel;
         }
 
-        /// <summary>Lines over <paramref name="labels"/> columns; NaN breaks a line. Columns flagged in <paramref name="shortCols"/>
-        /// get a red mark, those in <paramref name="actionCols"/> a diamond.</summary>
-        public static void Gold(RectTransform parent, float width, float height, string[] labels, IList<GraphSeries> series,
-            ISet<int> shortCols, ISet<int> actionCols)
+        /// <summary>The value range and grid step for a gold strip over <paramref name="series"/> (room below zero when
+        /// a plan overspends).</summary>
+        public static (float Bottom, float Top, float Step) Range(IEnumerable<GraphSeries> series)
         {
-            var panel = Panel(parent, "Gold graph", width, height, 0.85f);
             float min = 0f, max = 1f;
             foreach (var s in series)
                 foreach (var v in s.Values)
                     if (!float.IsNaN(v)) { min = Mathf.Min(min, v); max = Mathf.Max(max, v); }
-            float step = G.NiceStep(Mathf.Max(1f, max - min) / 4f);
+            float step = G.NiceStep(Mathf.Max(1f, max - min) / 3f);
             float bottom = Mathf.Floor(min / step) * step, top = Mathf.Max(bottom + step, Mathf.Ceil(max / step) * step);
+            return (bottom, top, step);
+        }
 
-            var plot = G.Rect(panel, "Plot", Color.clear);
-            plot.anchorMin = plot.anchorMax = plot.pivot = Vector2.zero;
-            plot.anchoredPosition = new Vector2(PadLeft, PadBottom);
-            float w = width - PadLeft - PadRight, h = height - PadTop - PadBottom;
-            plot.sizeDelta = new Vector2(w, h);
-            int columns = Mathf.Max(1, labels.Length);
-            float slot = w / columns;
-            float Y(float v) => h * (v - bottom) / (top - bottom);
+        /// <summary>The y axis of a gold strip: grid values right-aligned in <paramref name="gutter"/> (bottom left origin).</summary>
+        public static void StripAxis(RectTransform gutter, float width, float height, (float Bottom, float Top, float Step) range)
+        {
+            float Y(float v) => StripPad + (height - 2f * StripPad) * (v - range.Bottom) / (range.Top - range.Bottom);
+            for (float v = range.Bottom; v <= range.Top + range.Step * 0.01f; v += range.Step)
+            {
+                var label = G.Label(gutter, (v < 0f ? "-" : "") + G.Short(Mathf.Abs(v)), 17f, v < 0f ? Red : G.Dim, TextAlignmentOptions.MidlineRight);
+                label.rectTransform.anchoredPosition = new Vector2(0f, Y(v) - 12f);
+                label.rectTransform.sizeDelta = new Vector2(width - 8f, 24f);
+            }
+        }
 
-            // Legend.
-            float x = 14f;
-            foreach (var s in series)
-            {
-                var swatch = G.Rect(panel, "Swatch", s.Color);
-                swatch.anchorMin = swatch.anchorMax = swatch.pivot = new Vector2(0f, 1f);
-                swatch.anchoredPosition = new Vector2(x, -15f);
-                swatch.sizeDelta = new Vector2(12f, 12f);
-                var label = G.Label(panel, s.Label, 20f, ModStyle.Gold, TextAlignmentOptions.MidlineLeft);
-                label.rectTransform.anchorMin = label.rectTransform.anchorMax = label.rectTransform.pivot = new Vector2(0f, 1f);
-                label.rectTransform.anchoredPosition = new Vector2(x + 18f, -7f);
-                label.rectTransform.sizeDelta = new Vector2(220f, 26f);
-                x += 18f + label.GetPreferredValues(s.Label).x + 22f;
-            }
+        private const float StripPad = 12f;
 
-            // Below zero: a faint red band.
-            if (bottom < 0f)
+        /// <summary>
+        /// Gold lines over columns whose centres are <paramref name="xs"/> (in <paramref name="plot"/>, bottom left
+        /// origin), with grid lines across <paramref name="width"/>, a red band below zero, a red tick under columns in
+        /// <paramref name="shortCols"/>, and a lit band behind column <paramref name="lit"/>. NaN breaks a line.
+        /// </summary>
+        public static void Strip(RectTransform plot, float width, float height, float[] xs, float colWidth, IList<GraphSeries> series,
+            (float Bottom, float Top, float Step) range, ISet<int> shortCols, int lit)
+        {
+            float Y(float v) => StripPad + (height - 2f * StripPad) * (v - range.Bottom) / (range.Top - range.Bottom);
+            if (lit >= 0 && lit < xs.Length)
             {
-                var band = G.Rect(plot, "Below zero", G.Fade(Red, 0.12f));
-                band.anchoredPosition = Vector2.zero;
-                band.sizeDelta = new Vector2(w, Y(0f));
+                var band = G.Rect(plot, "Lit", G.Fade(ModStyle.Gold, 0.08f));
+                band.anchoredPosition = new Vector2(xs[lit] - colWidth / 2f, 0f);
+                band.sizeDelta = new Vector2(colWidth, height);
             }
-            for (float v = bottom; v <= top + step * 0.01f; v += step)
+            if (range.Bottom < 0f)
             {
-                float y = Y(v);
-                bool zero = Mathf.Abs(v) < step * 0.01f;
-                var line = G.Rect(plot, "Grid", new Color(G.Dim.r, G.Dim.g, G.Dim.b, zero ? 0.8f : 0.28f));
-                line.anchoredPosition = new Vector2(0f, y - 0.5f);
-                line.sizeDelta = new Vector2(w, zero ? 2f : 1f);
-                var label = G.Label(plot, (v < 0f ? "-" : "") + G.Short(Mathf.Abs(v)), 18f, v < 0f ? Red : G.Dim, TextAlignmentOptions.MidlineRight);
-                label.rectTransform.anchoredPosition = new Vector2(-58f, y - 13f);
-                label.rectTransform.sizeDelta = new Vector2(52f, 26f);
+                var below = G.Rect(plot, "Below zero", G.Fade(Red, 0.12f));
+                below.anchoredPosition = Vector2.zero;
+                below.sizeDelta = new Vector2(width, Y(0f));
             }
-            int every = columns > 24 ? 3 : columns > 14 ? 2 : 1;
-            for (int i = 0; i < labels.Length; i++)
+            for (float v = range.Bottom; v <= range.Top + range.Step * 0.01f; v += range.Step)
             {
-                float cx = (i + 0.5f) * slot;
-                if (i % every == 0 || i == labels.Length - 1)
+                bool zero = Mathf.Abs(v) < range.Step * 0.01f;
+                var line = G.Rect(plot, "Grid", new Color(G.Dim.r, G.Dim.g, G.Dim.b, zero ? 0.8f : 0.25f));
+                line.anchoredPosition = new Vector2(0f, Y(v) - 0.5f);
+                line.sizeDelta = new Vector2(width, zero ? 2f : 1f);
+            }
+            if (shortCols != null)
+                foreach (int i in shortCols)
                 {
-                    bool bad = shortCols != null && shortCols.Contains(i);
-                    var label = G.Label(plot, labels[i], 18f, bad ? Red : ModStyle.Gold, TextAlignmentOptions.Midline);
-                    label.rectTransform.anchoredPosition = new Vector2(cx - 30f, -28f);
-                    label.rectTransform.sizeDelta = new Vector2(60f, 26f);
+                    if (i < 0 || i >= xs.Length) continue;
+                    var tick = G.Rect(plot, "Short", Red);
+                    tick.anchoredPosition = new Vector2(xs[i] - colWidth * 0.3f, 0f);
+                    tick.sizeDelta = new Vector2(colWidth * 0.6f, 4f);
                 }
-                if (actionCols != null && actionCols.Contains(i)) Diamond(plot, new Vector2(cx, -9f), 8f, ModStyle.Accent);
-            }
             foreach (var s in series)
             {
                 Vector2? prev = null;
-                for (int i = 0; i < s.Values.Length; i++)
+                for (int i = 0; i < s.Values.Length && i < xs.Length; i++)
                 {
                     float v = s.Values[i];
                     if (float.IsNaN(v)) { prev = null; continue; }
-                    var point = new Vector2((i + 0.5f) * slot, Y(v));
-                    var color = v < 0f ? Red : s.Color;
+                    var point = new Vector2(xs[i], Y(v));
                     if (prev is Vector2 a) G.Segment(plot, a, point, 2.5f, s.Color);
-                    G.Dot(plot, point, 7f, color);
+                    G.Dot(plot, point, 7f, v < 0f ? Red : s.Color);
                     prev = point;
                 }
             }
         }
 
+        /// <summary>A legend row (swatches and names) at the top left of <paramref name="parent"/>; returns its width.</summary>
+        public static float Legend(RectTransform parent, IList<GraphSeries> series, float x = 0f, float y = 0f)
+        {
+            foreach (var s in series)
+            {
+                var swatch = G.Rect(parent, "Swatch", s.Color);
+                swatch.anchorMin = swatch.anchorMax = swatch.pivot = new Vector2(0f, 1f);
+                swatch.anchoredPosition = new Vector2(x, y - 7f);
+                swatch.sizeDelta = new Vector2(11f, 11f);
+                var label = G.Label(parent, s.Label, 18f, ModStyle.Gold, TextAlignmentOptions.MidlineLeft);
+                label.rectTransform.anchorMin = label.rectTransform.anchorMax = label.rectTransform.pivot = new Vector2(0f, 1f);
+                label.rectTransform.anchoredPosition = new Vector2(x + 16f, y);
+                label.rectTransform.sizeDelta = new Vector2(240f, 24f);
+                x += 16f + label.GetPreferredValues(s.Label).x + 20f;
+            }
+            return x;
+        }
         // ---- Income sources ---------------------------------------------------------------------------------
 
         internal sealed class SourceBar
@@ -168,93 +178,6 @@ namespace PalaceMod.Economy
             rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0f, 1f);
             rect.anchoredPosition = new Vector2(x, y);
             rect.sizeDelta = new Vector2(w, h);
-        }
-
-        // ---- Map ----------------------------------------------------------------------------------------------
-
-        /// <summary>The map of every slot, <paramref name="selected"/> highlighted (and its type lit), slots in
-        /// <paramref name="planned"/> marked.</summary>
-        public static void Map(RectTransform parent, float width, float height, EconWorld world, int selected, ISet<int> planned)
-        {
-            var panel = Panel(parent, "Map", width, height, 0.85f);
-            var slots = world.Slots.Where(s => s.Steps.Count > 0 || s.IsCastle).ToList();
-            if (slots.Count == 0) return;
-            float minX = slots.Min(s => s.MapX), maxX = slots.Max(s => s.MapX);
-            float minY = slots.Min(s => s.MapY), maxY = slots.Max(s => s.MapY);
-            const float pad = 22f;
-            float scale = Mathf.Min((width - 2f * pad) / Mathf.Max(1f, maxX - minX), (height - 2f * pad) / Mathf.Max(1f, maxY - minY));
-            float ox = (width - (maxX - minX) * scale) / 2f, oy = (height - (maxY - minY) * scale) / 2f;
-            Vector2 P(EconSlot s) => new(ox + (s.MapX - minX) * scale, oy + (s.MapY - minY) * scale);
-            var area = G.Rect(panel, "Area", Color.clear);
-            area.anchorMin = area.anchorMax = area.pivot = Vector2.zero;
-            area.sizeDelta = new Vector2(width, height);
-            area.anchoredPosition = Vector2.zero; // from the panel's bottom left, like the graph's plot
-
-            var sel = selected >= 0 && selected < world.Slots.Count ? world.Slots[selected] : null;
-            // Draw the small things first so highlights end up on top.
-            foreach (var s in slots.OrderBy(s => s == sel ? 3 : planned != null && planned.Contains(s.Index) ? 2 : sel != null && s.TypeName == sel.TypeName ? 1 : 0))
-            {
-                var at = P(s);
-                if (s.IsCastle) { Diamond(area, at, 22f, ModStyle.Gold); continue; }
-                bool built = s.Level >= 1;
-                if (s == sel)
-                {
-                    Diamond(area, at, 30f, G.Fade(ModStyle.Accent, 0.35f));
-                    Diamond(area, at, 16f, ModStyle.Accent);
-                }
-                else if (planned != null && planned.Contains(s.Index)) Diamond(area, at, 12f, G.Bronze);
-                else if (sel != null && s.TypeName == sel.TypeName && !s.IsDependent) Square(area, at, 9f, G.Fade(ModStyle.Bright, built ? 1f : 0.6f));
-                else if (s.IsDependent) Square(area, at, 4f, G.Fade(G.Dim, built ? 0.9f : 0.45f));
-                else Square(area, at, built ? 8f : 6f, built ? G.Fade(ModStyle.Gold, 0.85f) : G.Fade(G.Dim, s.Active ? 0.9f : 0.4f));
-            }
-        }
-
-        public static void MapLegend(Transform parent, float width)
-        {
-            // Drawn marks (the game's fonts have no shape glyphs).
-            var items = new (string Label, Color Color, bool Diamond)[]
-            {
-                ("this slot", ModStyle.Accent, true), ("same building", ModStyle.Bright, false), ("in the plan", G.Bronze, true),
-                ("built", ModStyle.Gold, false), ("not built", G.Dim, false),
-            };
-            float x = 4f;
-            var area = G.Rect(parent, "Legend", Color.clear);
-            area.anchorMin = area.anchorMax = area.pivot = new Vector2(0f, 1f);
-            area.anchoredPosition = Vector2.zero;
-            area.sizeDelta = new Vector2(width, 30f);
-            foreach (var (label, color, diamond) in items)
-            {
-                var mark = G.Rect(area, "Mark", color);
-                mark.anchorMin = mark.anchorMax = new Vector2(0f, 1f);
-                mark.pivot = new Vector2(0.5f, 0.5f);
-                mark.anchoredPosition = new Vector2(x + 6f, -14f);
-                mark.sizeDelta = new Vector2(10f, 10f);
-                if (diamond) mark.localRotation = Quaternion.Euler(0f, 0f, 45f);
-                var text = G.Label(area, label, 19f, ModStyle.Gold, TextAlignmentOptions.MidlineLeft, ModStyle.BodyFont);
-                var rect = text.rectTransform;
-                rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0f, 1f);
-                rect.anchoredPosition = new Vector2(x + 16f, -1f);
-                rect.sizeDelta = new Vector2(200f, 26f);
-                x += 16f + text.GetPreferredValues(label).x + 22f;
-            }
-        }
-
-        private static void Square(RectTransform parent, Vector2 at, float size, Color color)
-        {
-            var r = G.Rect(parent, "Slot", color);
-            r.pivot = new Vector2(0.5f, 0.5f);
-            r.anchoredPosition = at;
-            r.sizeDelta = new Vector2(size, size);
-        }
-
-        private static void Diamond(RectTransform parent, Vector2 at, float size, Color color)
-        {
-            var r = G.Rect(parent, "Mark", color);
-            r.pivot = new Vector2(0.5f, 0.5f);
-            r.anchoredPosition = at;
-            float side = size / Mathf.Sqrt(2f);
-            r.sizeDelta = new Vector2(side, side);
-            r.localRotation = Quaternion.Euler(0f, 0f, 45f);
         }
 
         /// <summary>A dark panel behind everything in the aside, so the level behind the menu doesn't show through.</summary>

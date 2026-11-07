@@ -59,8 +59,10 @@ namespace PalaceMod
         }
 
         internal static readonly Dictionary<UIFrame, ModFrame> Frames = [];
-        private readonly List<(string Label, Action<ModPage> Build)> tabs = [];
+        private readonly List<(string Label, Action<ModPage> Build, bool Wide)> tabs = [];
         private Action<ModPage> content;
+        private bool contentWide;
+        private float viewTop;
 
         private GameObject root;
         private UIFrame frame;
@@ -73,18 +75,21 @@ namespace PalaceMod
 
         public ModFrame(string title) => Title = title;
 
-        /// <summary>Adds a tab; <paramref name="build"/> fills its page each time it's shown.</summary>
-        public ModFrame AddTab(string label, Action<ModPage> build)
+        /// <summary>Adds a tab; <paramref name="build"/> fills its page each time it's shown. A <paramref name="wide"/>
+        /// page gets the frame's full width and no aside (for boards, maps and grids that lay themselves out; see
+        /// ModPage.Size).</summary>
+        public ModFrame AddTab(string label, Action<ModPage> build, bool wide = false)
         {
             if (root != null) throw new InvalidOperationException("add tabs before the frame is first opened");
-            tabs.Add((label, build));
+            tabs.Add((label, build, wide));
             return this;
         }
 
-        /// <summary>A single page without tabs.</summary>
-        public ModFrame SetContent(Action<ModPage> build)
+        /// <summary>A single page without tabs (<paramref name="wide"/>: see AddTab).</summary>
+        public ModFrame SetContent(Action<ModPage> build, bool wide = false)
         {
             content = build;
+            contentWide = wide;
             return this;
         }
 
@@ -267,6 +272,7 @@ namespace PalaceMod
             viewport.pivot = new Vector2(0f, 1f);
             viewport.offsetMin = new Vector2(Left - 30f, 150f);  // a little room on the left for selection growth
             viewport.offsetMax = new Vector2(Left + ContentWidth, top - 10f);
+            viewTop = top - 10f;
             var list = new GameObject("Content", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
             list.transform.SetParent(view.transform, false);
             contentRoot = (RectTransform)list.transform;
@@ -316,7 +322,17 @@ namespace PalaceMod
 
             foreach (Transform child in contentRoot.Cast<Transform>().ToList()) Object.DestroyImmediate(child.gameObject);
             foreach (Transform child in aside.Cast<Transform>().ToList()) Object.DestroyImmediate(child.gameObject);
-            page = new ModPage(contentRoot, aside);
+            bool wide = tabs.Count > 0 ? tabs[currentTab].Wide : contentWide;
+            // Wide: the viewport runs to the right edge and the aside is hidden.
+            viewport.anchorMax = new Vector2(wide ? 1f : 0f, 1f);
+            viewport.offsetMax = new Vector2(wide ? -80f : Left + ContentWidth, viewTop);
+            aside.gameObject.SetActive(!wide);
+            page = new ModPage(contentRoot, wide ? null : aside)
+            {
+                // Content padding (VerticalLayoutGroup: 4 top, 24 bottom) and its 30 px left inset come off.
+                Size = new Vector2(viewport.rect.width - 30f, viewport.rect.height - 29f),
+                Frame = this,
+            };
             var build = tabs.Count > 0 ? tabs[currentTab].Build : content;
             try
             {
@@ -343,6 +359,7 @@ namespace PalaceMod
                 }
             }
             back.topNav = rows.Count > 0 ? rows[rows.Count - 1][0] : up;
+            page.RaiseWired(up, back);
             frame.RefetchManagedElements();
             // Lay the page out now, so scrolling to the restored selection measures its real position.
             LayoutRebuilder.ForceRebuildLayoutImmediate(contentRoot);
@@ -420,6 +437,22 @@ namespace PalaceMod
 
         /// <summary>The page's content area (a vertical layout), for parenting custom widgets.</summary>
         public RectTransform Content => (RectTransform)content;
+
+        /// <summary>The room the page has without scrolling (width, height), e.g. for a wide page's Custom area.</summary>
+        public Vector2 Size { get; internal set; } = new(860f, 600f);
+
+        /// <summary>The frame showing the page (null in a ModPopup).</summary>
+        public ModFrame Frame { get; internal set; }
+
+        /// <summary>Runs after the frame has wired the page's up/down navigation, with what's above the first row (the
+        /// current tab, or null) and below the last (Back). For elements wired by hand (ModNav), to connect them.</summary>
+        public event Action<ThronefallUIElement, ThronefallUIElement> Wired;
+
+        internal void RaiseWired(ThronefallUIElement above, ThronefallUIElement below)
+        {
+            try { Wired?.Invoke(above, below); }
+            catch (Exception e) { Log.For<ModFrameManager>().Caught("ModPage: Wired handler failed", e); }
+        }
 
         /// <summary>Adds a selectable you made yourself to the page's up/down navigation, after what's there.
         /// Its topNav/botNav are overwritten; set leftNav/rightNav yourself.</summary>

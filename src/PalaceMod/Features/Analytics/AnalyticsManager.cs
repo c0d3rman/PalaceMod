@@ -316,7 +316,7 @@ namespace PalaceMod
                         var planner = Feature<EconomyPlannerManager>.Instance;
                         if (planner != null) planner.BuildPage(page);
                         else page.Text("The economy planner isn't loaded; see the log.");
-                    })
+                    }, wide: true)
                     .AddTab("Projection", page =>
                     {
                         if (!Recorded(page)) return;
