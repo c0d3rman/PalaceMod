@@ -3,13 +3,15 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using PalaceMod.Economy;
+using V = PalaceMod.Economy.PlannerVisuals;
 
 /*
     The board's popups (ModPopup: small menus over the board, which stays visible and updates as you change things):
-      chip     day, how many, level, choice, wisdom gold, gold amount, order within the day, branch, remove
-      day      build / lose / gold found on that day (the Add screen), branch from it, clear it
+      chip     day, how many, level, choice, wisdom gold, order within the day, branch, remove
       plan     switch plans, new, copy, rename, clear, delete
-      compare  what the dim line compares with
+      compare  the plans (and doing nothing) the graph compares with, any number, each in its own colour
+      more     the gold a day shows, the run's score and projection
+      done     steps from days that are over
 */
 namespace PalaceMod
 {
@@ -43,7 +45,7 @@ namespace PalaceMod
             var holder = Holder(p, a);
             ModPopup.Current?.SetTitle(members.Count > 1 ? $"{Title(r)} ×{members.Count}" : Title(r));
             page.Text($"<color=#{(r.Status == ActionStatus.Short ? RedHex : DimHex)}>{Detail(r)}</color>");
-            if (holder != p.Plan) page.Text($"<color=#{DimHex}>Part of {p.File.FullName(holder)}, which this branches from: changes here change it too.</color>");
+            if (holder != p.Plan) page.Text($"<color=#{DimHex}>From {p.File.FullName(holder)}</color>");
 
             page.Stepper(DayWord(a), () => $"{DayWord(a)} {a.Day}", d => MoveGroup(Project(), members, null, Math.Sign(d)));
 
@@ -52,8 +54,7 @@ namespace PalaceMod
             {
                 int free = Candidates(p, a, members).Count;
                 if (free > 0 || members.Count > 1)
-                    page.Number("How many", () => members.Count, v => SetCount(members, v), 1, members.Count + free,
-                        tooltip: () => a.IsStep ? $"How many {slot.TypeName} to build that day ({free} more can be)." : $"How many {slot.TypeName} are lost that night.");
+                    page.Number("How many", () => members.Count, v => SetCount(members, v), 1, members.Count + free);
             }
             if (a.IsStep && slot != null && members.Count == 1 && Fields(w, slot).Count > 0)
             {
@@ -63,8 +64,7 @@ namespace PalaceMod
                 var ids = new HashSet<string>(fields.Select(e => e.Id));
                 int Planned() => Project().Actions.Count(x => x.IsStep && x.Day == a.Day && ids.Contains(x.Slot));
                 int free = FreeFields(p, slot, a.Day).Count;
-                page.Number($"{kind}s that day", Planned, v => SetFields(slot, a, v), 0, Planned() + free,
-                    tooltip: () => $"{kind}s of this {slot.TypeName} built on day {a.Day}, nearest it first ({FreeFields(Project(), slot, a.Day).Count} more can be). Each pays from that day on.");
+                page.Number($"{kind}s that day", Planned, v => SetFields(slot, a, v), 0, Planned() + free);
             }
             if (a.IsStep && slot != null && members.Count == 1)
             {
@@ -79,8 +79,7 @@ namespace PalaceMod
                     var st = slot.Steps[Mathf.Clamp(v, 1, slot.Steps.Count) - 1];
                     a.Choice = st.IsChoice ? st.Branches[EconSim.BranchIndex(st, a.Choice)].Key : null;
                 }, a.Id);
-                }, 1, Math.Max(1, slot.MaxLevel), format: v => v <= 1 ? "Build" : $"Level {v}",
-                    tooltip: () => "The level this step takes the building to (1 builds it). It needs the level before it by then.");
+                }, 1, Math.Max(1, slot.MaxLevel), format: v => v <= 1 ? "Build" : $"Level {v}");
             }
             var step = a.IsStep && slot != null && a.Level >= 1 && a.Level <= slot.Steps.Count ? slot.Steps[a.Level - 1] : null;
             if (step != null && step.IsChoice)
@@ -98,17 +97,17 @@ namespace PalaceMod
             var branch = step != null && step.Branches.Count > 0 ? step.Branches[EconSim.BranchIndex(step, a.Choice)] : null;
             if (branch != null && branch.IsWisdom)
             {
-                page.Number("Wisdom gold", () => a.Amount ?? r.Wisdom, v => Edit(() => a.Amount = v, a.Id), 0, 99999,
-                    format: v => a.Amount == null ? $"{v} (from {(branch.WisdomGold > 0 ? v / branch.WisdomGold : 0)} lost)" : $"{v}",
-                    tooltip: () => $"Gold from buildings destroyed that night: {branch.WisdomGold} each. Worked out from the buildings the plan marks lost that night; type your own estimate instead (empty: back to working it out).",
+                page.Number("Wisdom gold", () => a.Amount ?? r.Wisdom, v => Edit(() => a.Amount = v, a.Id), 0, 9999,
+                    format: v => a.Amount == null ? $"{v}  <color=#{DimHex}>{(branch.WisdomGold > 0 ? v / branch.WisdomGold : 0)} lost × {branch.WisdomGold}</color>" : $"{v}  <color=#{DimHex}>typed</color>",
+                    tooltip: () => $"{branch.WisdomGold} per building destroyed that night. Empty: count the buildings marked lost.",
                     onClear: () => Edit(() => a.Amount = null, a.Id));
             }
             if (a.Kind == EconActionKind.Gold)
-                page.Number("Gold", () => a.Amount ?? 0, v => Edit(() => a.Amount = v, a.Id), 0, 99999, tooltip: () => "How much gold you expect that night beyond the enemies' drops.");
+                page.Number("Gold", () => a.Amount ?? 0, v => Edit(() => a.Amount = v, a.Id), 0, 99999);
 
             if (a.IsStep && holder.Actions.Count(x => x.Day == a.Day && x.IsStep && !members.Contains(x)) > 0)
             {
-                page.Button("Earlier that day", () => Edit(() => Reorder(holder, a, -1), a.Id), "Steps on a day are done in order: it matters when one unlocks another or gold runs short.");
+                page.Button("Earlier that day", () => Edit(() => Reorder(holder, a, -1), a.Id));
                 page.Button("Later that day", () => Edit(() => Reorder(holder, members[members.Count - 1], 1), a.Id));
             }
             if (w.FirstDay <= w.LastNight)
@@ -118,8 +117,8 @@ namespace PalaceMod
                 {
                     ModPopup.Current?.Close();
                     Edit(() => Branch(p.File, p.Plan, day));
-                    Notify.Show($"Branched: from day {day} this plan goes its own way, compared with the one before.", NotifyKind.Info, 3f, key: "econ-branch");
-                }, "A branch shares this plan's items before that day and has its own after; the graph compares the two.");
+                    Notify.Show($"Branched from day {day}", NotifyKind.Info, 2.5f, key: "econ-branch");
+                });
             }
             page.Button(members.Count > 1 ? $"Remove all {members.Count}" : "Remove", () =>
             {
@@ -259,8 +258,7 @@ namespace PalaceMod
                 return;
             }
             ModPopup.Current?.SetTitle($"Short on day {day}");
-            page.Text($"Day {day}'s builds cost {Coin(ShortOn(p.Result, day))} more than there'll be that day: an earlier change spent it. " +
-                $"<color=#{DimHex}>Move them to a day that can pay, take them out, or undo.</color>");
+            page.Text($"{Coin(ShortOn(p.Result, day))} short on day {day}");
             var groups = PlanGroup.Build(p).Where(g => g.First.IsStep && g.First.Day == day && g.R.Status == ActionStatus.Short && !p.IsFixed(g.First)).ToList();
             foreach (var g in groups)
             {
@@ -279,66 +277,34 @@ namespace PalaceMod
                     {
                         MoveGroup(Project(), members, t);
                         ModPopup.Current?.Refresh();
-                    }, $"Day {t} is the first that can pay for it.");
+                    });
                 page.Button($"Take out {what}", () =>
                 {
                     RemoveGroup(Project(), members);
                     ModPopup.Current?.Refresh();
                 });
             }
-            if (CanUndo) page.Button("Undo the last change", Undo, "Puts the plan back as it was before your last change.");
+            if (CanUndo) page.Button("Undo the last change", Undo);
         }
 
-        // ---- Day ----------------------------------------------------------------------------------------------------
+        // ---- Done ---------------------------------------------------------------------------------------------------
 
-        internal void DayPopup(PlannerBoard b, int day, bool tonight, ModTile near)
+        /// <summary>The board's "Earlier" column: steps from days that are over.</summary>
+        internal void DonePopup(ModTile near)
         {
-            confirm = null;
-            string title = day == int.MinValue ? "Earlier days" : tonight ? $"Tonight (night {day})" : $"Day {day}";
-            ModPopup.Open(title, page => BuildDay(page, day, tonight), near.Rect);
-        }
-
-        private void BuildDay(ModPage page, int day, bool tonight)
-        {
-            var p = Project();
-            if (p == null) return;
-            var w = p.World;
-            if (day == int.MinValue)
+            ModPopup.Open("Earlier days", page =>
             {
+                var p = Project();
+                if (p == null) return;
+                var w = p.World;
                 var old = p.Plan.Actions.Where(a => a.IsStep ? a.Day < w.FirstDay : a.Day < (w.DawnPending ? w.FirstDay - 1 : w.FirstDay)).ToList();
-                page.Text($"<color=#{DimHex}>Steps from days that are over: they're done, or were missed. They don't cost anything any more.</color>");
-                if (old.Count > 0)
-                    page.Button($"Remove them ({old.Count})", () =>
-                    {
-                        ModPopup.Current?.Close();
-                        Edit(() => p.Plan.Actions.RemoveAll(old.Contains));
-                    });
-                return;
-            }
-            void Open(PlannerAddMode mode)
-            {
-                ModPopup.Current?.Close();
-                OpenAdd(day, mode);
-            }
-            if (!tonight) page.Button($"Build or upgrade on day {day}…", () => Open(PlannerAddMode.Build), "Pick buildings on the map.");
-            page.Button($"Buildings lost on night {day}…", () => Open(PlannerAddMode.Lose), "Mark buildings you expect to lose that night: they pay nothing at the next dawn.");
-            page.Button($"Gold found on night {day}…", () => Open(PlannerAddMode.Gold), "Gold you expect beyond the enemies' drops (Temple wisdom, a chest...).");
-            if (!tonight && day > w.FirstDay)
-                page.Button($"Branch from day {day}", () =>
+                if (old.Count == 0) { page.Text($"<color=#{DimHex}>Nothing left from earlier days</color>"); return; }
+                page.Button($"Remove them · {old.Count}", () =>
                 {
                     ModPopup.Current?.Close();
-                    Edit(() => Branch(p.File, p.Plan, day));
-                    Notify.Show($"Branched: from day {day} this plan goes its own way, compared with the one before.", NotifyKind.Info, 3f, key: "econ-branch");
-                }, "A branch shares this plan's items before that day and has its own after; the graph compares the two.");
-            var own = p.Plan.Actions.Where(a => a.Day == day && (!tonight || !a.IsStep)).ToList();
-            if (own.Count > 0)
-                page.Button(confirm == "clear-day" ? $"Press again to clear day {day}" : $"Clear day {day} ({own.Count})", () =>
-                {
-                    if (confirm != "clear-day") { confirm = "clear-day"; ModPopup.Current?.Refresh(); return; }
-                    confirm = null;
-                    ModPopup.Current?.Close();
-                    Edit(() => p.Plan.Actions.RemoveAll(own.Contains));
+                    Edit(() => p.Plan.Actions.RemoveAll(old.Contains));
                 });
+            }, near.Rect);
         }
 
         // ---- Plans --------------------------------------------------------------------------------------------------
@@ -377,13 +343,13 @@ namespace PalaceMod
                 string name = new string(' ', depth * 3) + (depth > 0 ? "› " : "") + s.Name;
                 if (s == p.Plan) name = $"<color=#{ModStyle.Hex(ModStyle.Accent)}>{name}</color>";
                 string fork = s.Parent == null ? "" : s.ForkDay == int.MaxValue ? " · same steps" : $" · from day {s.ForkDay}";
-                var row = page.Row(name, $"{Coin(r.EndGold)}{fork}", s == p.Plan ? "The plan shown." : "Show this plan.", () =>
+                var row = page.Row(name, $"{Coin(r.EndGold)}{fork}", (string)null, () =>
                 {
                     ModPopup.Current?.Close();
                     Edit(() =>
                     {
                         f.Current = plan.Id;
-                        if (plan.Parent != null && f.Compare == null) f.Compare = plan.Parent;
+                        if (plan.Parent != null && !f.Compares.Contains(plan.Parent)) f.Compares.Insert(0, plan.Parent);
                     });
                 });
                 row.Button.gameObject.name = "Plan " + s.Id;
@@ -393,7 +359,7 @@ namespace PalaceMod
                 text = text?.Trim();
                 if (string.IsNullOrEmpty(text)) return;
                 Edit(() => p.Plan.Name = text);
-            }, () => "Select and type to rename the plan shown.", maxLength: 40);
+            }, null, maxLength: 40);
             page.Button("New plan", () =>
             {
                 ModPopup.Current?.Close();
@@ -403,7 +369,7 @@ namespace PalaceMod
                     f.Scenarios.Add(s);
                     f.Current = s.Id;
                 });
-            }, "A plan of its own, starting with the castle's build.");
+            });
             page.Button("Copy this plan", () =>
             {
                 ModPopup.Current?.Close();
@@ -413,7 +379,7 @@ namespace PalaceMod
                     f.Scenarios.Add(s);
                     f.Current = s.Id;
                 });
-            }, "A copy that goes its own way. To share the early days, branch from a day instead (a day's header).");
+            });
             if (p.Plan.Actions.Count > 0)
                 page.Button(confirm == "clear" ? $"Press again to clear \"{p.Plan.Name}\"" : "Clear its items", () =>
                 {
@@ -428,9 +394,11 @@ namespace PalaceMod
                     confirm = null;
                     ModPopup.Current?.Close();
                     Edit(() => f.Delete(p.Plan));
-                }, "Its branches keep the items they had from it.");
+                });
         }
 
+        /// <summary>What the graph compares the plan with: any number of plans, and doing nothing, each in its own
+        /// colour (in the order picked). Stays open; each row toggles one.</summary>
         internal void ComparePopup(PlannerBoard b, ModTile near)
         {
             ModPopup.Open("Compare with", page =>
@@ -438,17 +406,40 @@ namespace PalaceMod
                 var p = Project();
                 if (p == null) return;
                 var f = p.File;
-                page.Row(p.Other == null ? $"<color=#{ModStyle.Hex(ModStyle.Accent)}>Doing nothing</color>" : "Doing nothing", Coin(p.Baseline.EndGold),
-                    "No more builds: what you'd end with if you stopped now.", () => { ModPopup.Current?.Close(); Edit(() => f.Compare = null); });
-                foreach (var (s, r) in Tree(p))
+                void Row(string id, string name, EconResult r)
                 {
-                    if (s == p.Plan) continue;
-                    var plan = s;
-                    string name = f.FullName(s);
-                    page.Row(s == p.Other ? $"<color=#{ModStyle.Hex(ModStyle.Accent)}>{name}</color>" : name, Coin(r.EndGold), (string)null,
-                        () => { ModPopup.Current?.Close(); Edit(() => f.Compare = plan.Id); });
+                    var shown = p.Compares.FirstOrDefault(c => c.Id == id);
+                    var row = page.Row(shown != null ? name : $"<color=#{DimHex}>{name}</color>", Coin(r.EndGold), (string)null, () => Edit(() =>
+                    {
+                        if (!f.Compares.Remove(id)) f.Compares.Add(id);
+                    }));
+                    row.Button.gameObject.name = "Compare " + id;
+                    row.SetIcon(V.Swatch);
+                    if (row.Button.transform.Find("Row Icon")?.GetComponent<UnityEngine.UI.Image>() is { } icon)
+                    {
+                        icon.color = shown?.Color ?? new Color(ModStyle.Dim.r, ModStyle.Dim.g, ModStyle.Dim.b, 0.35f);
+                        icon.rectTransform.sizeDelta = new Vector2(18f, 18f);
+                    }
                 }
+                Row(PlannerFile.Nothing, "Doing nothing", p.Baseline);
+                foreach (var (s, r) in Tree(p))
+                    if (s != p.Plan) Row(s.Id, f.FullName(s), r);
             }, near.Rect, width: 620f);
+        }
+
+        /// <summary>The toolbar's More: the gold a day shows, and the run's score and projection.</summary>
+        internal void MorePopup(ModTile near)
+        {
+            ModPopup.Open("More", page =>
+            {
+                page.Stepper("Gold on a day", () => Moment == GoldMoment.AfterBuilding ? "After building" : "At sunrise",
+                    _ => goldMoment.Value = Moment == GoldMoment.AfterBuilding ? GoldMoment.AtSunrise : GoldMoment.AfterBuilding,
+                    () => goldMoment.Value = Moment == GoldMoment.AfterBuilding ? GoldMoment.AtSunrise : GoldMoment.AfterBuilding);
+                var analytics = Feature<AnalyticsManager>.Instance;
+                if (analytics == null) return;
+                page.Button("Score", () => { ModPopup.Current?.Close(); analytics.OpenTab("Score"); });
+                page.Button("Projection", () => { ModPopup.Current?.Close(); analytics.OpenTab("Projection"); });
+            }, near.Rect, width: 520f);
         }
     }
 }

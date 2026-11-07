@@ -43,7 +43,7 @@ namespace PalaceMod
             switch (r.Action.Kind)
             {
                 case EconActionKind.KnockOut: return r.IncomeDelta < 0 ? $"pays nothing that dawn ({Signed(r.IncomeDelta)})" : "pays nothing that dawn";
-                case EconActionKind.Gold: return "your estimate, e.g. from Temple wisdom or a cheat";
+                case EconActionKind.Gold: return "your estimate";
             }
             return string.Join(" · ", new[]
             {
@@ -60,44 +60,6 @@ namespace PalaceMod
             if (!r.Counts || !r.Action.IsStep || r.IncomeDelta <= 0 && r.ExtraIncome <= 0 || r.Cost <= 0) return null;
             return r.PaybackDawn is int d ? $"pays for itself by dawn {d}" : $"earns back {r.ExtraIncome} of {r.Cost} by the end";
         }
-
-        internal static string Tooltip(ActionResult r, Projection p)
-        {
-            var lines = new List<string>();
-            switch (r.Status)
-            {
-                case ActionStatus.Short:
-                    lines.Add($"Not enough gold: {r.Shortfall} short on day {r.Action.Day}. The projection carries on as if you'd found it.");
-                    break;
-                case ActionStatus.Blocked:
-                    lines.Add($"Skipped: {r.Reason}.");
-                    break;
-                case ActionStatus.Past:
-                    lines.Add($"{r.Reason}, and this wasn't done.");
-                    break;
-                case ActionStatus.AlreadyDone:
-                    lines.Add(r.Reason == "Done" ? "Done." : $"{r.Reason}, so this costs nothing.");
-                    break;
-            }
-            if (r.Counts && r.Action.IsStep)
-            {
-                lines.Add($"Costs {r.Cost}; buildings pay {Signed(r.IncomeDelta)} per dawn after it.");
-                if (r.IncomeDelta != 0 || r.ExtraIncome != 0)
-                    lines.Add(r.PaybackDawn is int d ? $"It has paid for itself by dawn {d}, and brings {r.ExtraIncome} by the last dawn." : $"It brings {r.ExtraIncome} by the last dawn, against its cost of {r.Cost}.");
-            }
-            if (r.Counts && r.Action.Kind == EconActionKind.KnockOut)
-                lines.Add("Knocked out that night: it pays nothing at dawn (a mine with Sustainable Mining resets, a harbour doesn't grow), and with Temple wisdom it drops gold.");
-            if (r.Branch?.Description is { Length: > 0 } desc) lines.Add(desc);
-            if (p.InheritedFrom(r.Action)) lines.Add($"Part of {p.File.FullName(p.File.OwnerOf(r.Action))}, which this branches from: changing it changes that plan too.");
-            return string.Join("\n", lines);
-        }
-
-        internal static string About(EconWorld w) =>
-            "Sunrise: gold when the day starts. Spent: what the plan builds that day (in red, with what's missing, when there isn't enough). " +
-            "Income: interest at dusk" + (w.Interest ? "" : " (with the Interest perk)") + ", the night's enemy gold, gold the plan expects (Temple wisdom, estimates), " +
-            "and what buildings pay (Buildings, including a mill's fields paying the day they're built)" + (w.TreasureHunter ? " plus Treasure Hunter" : "") + ". At dawn: gold the next day starts with.\n" +
-            "Worked out from this map's buildings, costs and your perks: mines run dry, harbours grow, Builder's Guild upgrades a house each dusk, every coin is picked up at dusk. " +
-            "Buildings only get knocked out where the plan says so. Not counted: shrines unlocking.";
 
         /// <summary>"build · 8 · +2 per dawn", or why it can't go further.</summary>
         internal static string NextStep(EconWorld state, EconSlot e)
@@ -119,7 +81,7 @@ namespace PalaceMod
             EconPerkKind.Loan => $"{p.Amount} gold at the start, paid back with {p.Amount2} of the first nights' enemy gold.",
             EconPerkKind.RatGod => $"Enemies drop {p.Factor * 100f:0}% of their gold.",
             EconPerkKind.Outpost => "Building an outpost builds some of its towers for free.",
-            EconPerkKind.DestructionGod => "Destroyed buildings stay down a second night (and pay nothing at either dawn).",
+            EconPerkKind.DestructionGod => "Destroyed buildings stay down a second night (and pay nothing at either dawn) unless upgraded the day between.",
             _ => "Changes some buildings' costs or income on this map.",
         };
 

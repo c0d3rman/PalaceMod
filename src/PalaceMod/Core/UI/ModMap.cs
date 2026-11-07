@@ -101,6 +101,29 @@ namespace PalaceMod
             return tile;
         }
 
+        /// <summary>Removes every marker and dot, keeping the picture (to redraw the markers without taking it again).</summary>
+        public void ClearMarkers()
+        {
+            foreach (Transform child in layer.Cast<Transform>().ToList()) Object.DestroyImmediate(child.gameObject);
+            Markers.Clear();
+        }
+
+        /// <summary>A layer over the picture and under the markers, for the caller's own drawing (a legend, a note).</summary>
+        public RectTransform Overlay
+        {
+            get
+            {
+                if (overlay != null) return overlay;
+                var obj = new GameObject("Overlay", typeof(RectTransform));
+                obj.transform.SetParent(Root, false);
+                overlay = (RectTransform)obj.transform;
+                Stretch(overlay);
+                overlay.SetAsLastSibling();
+                return overlay;
+            }
+        }
+        private RectTransform overlay;
+
         /// <summary>A plain dot (not selectable).</summary>
         public Image AddDot(Vector3 world, float size, Color color, bool diamond = true)
         {

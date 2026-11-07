@@ -7,9 +7,10 @@ using BepInEx.Configuration;
 using HarmonyLib;
 using UnityEngine;
 using PalaceMod.Economy;
+using V = PalaceMod.Economy.PlannerVisuals;
 
 /*
-    Economy planner: the Economy tab of Run Analytics. The player lays out builds and upgrades on the days ahead ("on
+    Economy planner: the pause menu's Run Analytics. The player lays out builds and upgrades on the days ahead ("on
     day 4, build three houses; on day 6, take the castle to level 3 with Builder's Guild"), the buildings they expect to
     lose on a night, temple prayers, and perk loadouts to try, and sees the gold that leaves at every dawn up to the
     level's last night, against doing nothing, another plan or a branch of this one, with shortfalls and paybacks.
@@ -18,8 +19,13 @@ using PalaceMod.Economy;
       EconomySnapshot.cs  reads the live level into it
       PerkCapture.cs      perk numbers the game throws away at level load, recorded by the patches below
       PlannerStore.cs     plans and branches, saved per level under BepInEx/PalaceMod/EconomyPlanner/
-      PlannerPages.cs     the tab and the screens on top of it
-      PlannerVisuals.cs   the graphs, the map and the income-sources chart
+      PlannerBoard.cs     the board (every day), its toolbar and the chips' moves
+      PlannerDay.cs       one day: the map, building and upgrading, buildings lost that night
+      PlannerQuick.cs     the board's quick add (a day's kinds of building, without leaving the board)
+      PlannerPopups.cs    chip, plans, compare and More popups
+      PlannerPerks.cs, PlannerSources.cs   perk loadouts, income sources
+      PlannerReach.cs     slots each map keeps out of reach until a bridge is built
+      PlannerVisuals.cs   the graphs and the income-sources chart
 
     Read-only planning: it never changes the run, so it has no Enabled switch and doesn't mark gameplay impact (the
     patches only read). Accuracy check: the snapshot's projection of the coming dawns with nothing planned must match
@@ -32,12 +38,15 @@ namespace PalaceMod
     {
         public override string FeatureSection => "Economy planner";
         public override string FeatureDescription =>
-            "Run Analytics > Economy: plan builds and upgrades for the rest of the level and see the gold they leave you at every dawn.";
+            "Pause > Run Analytics: plan builds and upgrades for the rest of the level and see the gold they leave you at every dawn.";
         protected override bool HasEnabledSwitch => false;
 
         internal static string Folder => Path.Combine(Paths.BepInExRootPath, "PalaceMod", "EconomyPlanner");
 
         private Keybind openKey;
+        internal enum GoldMoment { AtSunrise, AfterBuilding }
+        private ConfigEntry<GoldMoment> goldMoment;
+        internal GoldMoment Moment => goldMoment?.Value ?? GoldMoment.AtSunrise;
         private PlannerFile file;
         private EconSnapshot snap;
         private float snapTime = float.NaN;
@@ -47,7 +56,10 @@ namespace PalaceMod
         {
             base.Awake(plugin);
             openKey = Keybinds.Register(FeatureSection, "open", "Open economy planner", KeyboardShortcut.Empty,
-                "Opens Run Analytics on the Economy tab, to plan builds and upgrades.");
+                "Opens the economy planner (Run Analytics).");
+            goldMoment = plugin.Config.Bind(FeatureSection, "Gold on a day", GoldMoment.AtSunrise,
+                "Which gold the planner's graphs and day headers show for a day: what you have at sunrise, or what's left after that day's builds.");
+            goldMoment.SettingChanged += (_, _) => RefreshOpen();
             DevCommands.Register("econ", Usage, Command);
             BuildFrames();
             RegisterKeys();
@@ -58,8 +70,13 @@ namespace PalaceMod
             if (openKey.Down && EconomySnapshot.Available) Open();
         }
 
-        /// <summary>Opens Run Analytics on the planner.</summary>
-        internal void Open() => Feature<AnalyticsManager>.Instance?.OpenTab(AnalyticsManager.EconomyTab);
+        /// <summary>Opens the planner (Run Analytics).</summary>
+        internal void Open()
+        {
+            if (EconomySnapshot.Available) host?.Open();
+        }
+
+        internal bool IsOpen => host != null && host.IsOpen;
 
         // ---- Perk capture (read-only) -----------------------------------------------------------------------------
 
@@ -92,6 +109,12 @@ namespace PalaceMod
         private static class ReduceChildrenCapturePatch
         {
             private static void Prefix(ReduceChildrensBuildRequirementIfPerk __instance) => Capture(() => PerkCapture.ReduceChildren(__instance));
+        }
+
+        [HarmonyPatch(typeof(PerkRemoveDestroyedAtNightTag), "Start")]
+        private static class NeverDenyCapturePatch
+        {
+            private static void Prefix(PerkRemoveDestroyedAtNightTag __instance) => Capture(() => PerkCapture.NeverDeny(__instance));
         }
 
         [HarmonyPatch(typeof(InterestPerk), "Start")]
@@ -185,9 +208,21 @@ namespace PalaceMod
             };
             f.Scenarios.Add(b);
             f.Current = b.Id;
-            f.Compare = parent.Id;
+            // Compared with the plan it branched from, first.
+            f.Compares.Remove(parent.Id);
+            f.Compares.Insert(0, parent.Id);
             f.Normalize();
             return b;
+        }
+
+        /// <summary>A plan (or doing nothing) the one shown is compared with, in its own colour.</summary>
+        internal sealed class Compared
+        {
+            public string Id;
+            public PlannerScenario Plan;
+            public string Name;
+            public EconResult Result;
+            public Color Color;
         }
 
         internal sealed class Projection
@@ -196,15 +231,22 @@ namespace PalaceMod
             /// <summary>The world with the plan's perks.</summary>
             public EconWorld World;
             public PlannerFile File;
-            public PlannerScenario Plan, Other;
-            public List<EconAction> Actions, OtherActions;
-            public EconResult Result, Compare, Baseline;
+            public PlannerScenario Plan;
+            public List<EconAction> Actions;
+            public EconResult Result, Baseline;
+            /// <summary>What it's compared with, in the order picked.</summary>
+            public List<Compared> Compares = [];
             public List<string> PerkNotes = [];
             public string PlanName => File.FullName(Plan);
-            public string OtherName => Other != null ? File.FullName(Other) : "doing nothing";
+            /// <summary>The first comparison (the day headers' +/-), or doing nothing.</summary>
+            public EconResult Compare => Compares.Count > 0 ? Compares[0].Result : Baseline;
+            public string OtherName => Compares.Count > 0 ? Compares[0].Name : "doing nothing";
             public bool InheritedFrom(EconAction a) => !Plan.Actions.Contains(a) && !File.IsFixed(a);
             public bool IsFixed(EconAction a) => File.IsFixed(a);
         }
+
+        /// <summary>The gold a day shows (graphs, headers): at sunrise, or after its builds (the setting).</summary>
+        internal float GoldOf(DayResult d) => d == null ? float.NaN : Moment == GoldMoment.AfterBuilding ? d.AfterSpend : d.Start;
 
         internal Projection Project()
         {
@@ -213,19 +255,29 @@ namespace PalaceMod
             var f = Plans(s.World.Level);
             f.Fresh = false;
             FixCastle(f, s.World);
-            var p = new Projection { Snap = s, File = f, Plan = f.CurrentScenario, Other = f.CompareScenario };
+            var p = new Projection { Snap = s, File = f, Plan = f.CurrentScenario };
             p.Actions = f.Effective(p.Plan);
             p.World = EconPerks.Apply(s.World, f.EffectivePerks(p.Plan), p.PerkNotes);
             p.Result = EconSim.Run(p.World, p.Actions);
             // Doing nothing still builds the castle on day 1.
             var nothing = f.Fixed != null ? new List<EconAction> { f.Fixed } : [];
             p.Baseline = p.Actions.Count == nothing.Count ? p.Result : EconSim.Run(p.World, nothing, paybacks: false);
-            if (p.Other != null)
+            int colour = 0;
+            foreach (string id in f.Compares)
             {
-                p.OtherActions = f.Effective(p.Other);
-                p.Compare = EconSim.Run(EconPerks.Apply(s.World, f.EffectivePerks(p.Other)), p.OtherActions, paybacks: false);
+                if (id == PlannerFile.Nothing)
+                {
+                    p.Compares.Add(new Compared { Id = id, Name = "doing nothing", Result = p.Baseline, Color = V.NothingColor });
+                    continue;
+                }
+                var other = f.Get(id);
+                if (other == null) continue;
+                p.Compares.Add(new Compared
+                {
+                    Id = id, Plan = other, Name = f.FullName(other), Color = V.CompareColor(colour++),
+                    Result = EconSim.Run(EconPerks.Apply(s.World, f.EffectivePerks(other)), f.Effective(other), paybacks: false),
+                });
             }
-            else p.Compare = p.Baseline;
             return p;
         }
 
@@ -278,8 +330,9 @@ namespace PalaceMod
             "econ [open|check|dump [slot]|slots [all|income|text]|add <day> <slot> [level] [choice]|addmany <day> <type> <n>|ko <night> <slot>|" +
             "gold <night> <amount>|wisdom <n> <amount|auto>|remove <n>|move <n> <day>|order <n> up|down|level <n> <L>|choice <n> <key|#>|" +
             "branch <day|all> [name]|perk [list|<key|#> on|off|reset]|sources [day]|plan list|new [name]|copy|rename <name>|delete|use <n|name>|clear|" +
-            "compare <n|name|none>|view|select <key>|press [key]|popup [select <row>|apply|close]|drag <chip> <day>|remove-chip|shift <±n>|undo|" +
-            "addview [day] [build|lose|gold]|addpick <slot#>|addkind <kind> [n]|addday <±n>|addselect <key>|addcommit|perksview|perktile <key> [look]|sourcesview]   economy planner";
+            "compare <n|name|nothing|none> (toggles)|view|select <key>|press [key]|popup [select <row>|apply|close]|drag <chip> <day>|remove-chip|shift <±n>|undo|" +
+            "day [day] [build|lost]|dayclick <slot#> [right]|daykind <kind> [n] [remove]|dayday <±n>|dayselect <key>|daymap <png>|quick <day>|quickkind <kind> [remove]|" +
+            "perksview|perktile <key> [look]|sourcesview|sourcesday <day>|ui|moment [sunrise|after]]   economy planner";
 
         private string Command(string[] args)
         {
@@ -309,7 +362,7 @@ namespace PalaceMod
                     return "\n" + Summary(Project());
                 case "open":
                     Open();
-                    return Feature<AnalyticsManager>.Instance?.FrameOpen == true ? "opened\n" + Summary(Project()) : throw new InvalidOperationException("didn't open; see the log");
+                    return IsOpen ? "opened\n" + Summary(Project()) : throw new InvalidOperationException("didn't open; see the log");
                 case "capture":
                 {
                     var shot = LevelCapture.Take(CastleCenter.instance.transform.position, args.Length > 2 ? float.Parse(args[2]) : 60f, args.Length > 3 ? float.Parse(args[3]) : 40f, 1400)
@@ -436,14 +489,19 @@ namespace PalaceMod
                 case "compare":
                 {
                     string which = args.Length > 1 ? string.Join(" ", args.Skip(1)) : "none";
-                    f.Compare = which == "none" ? null : ScenarioArg(f, which).Id;
+                    if (which == "none") f.Compares.Clear();
+                    else
+                    {
+                        string id = which == "nothing" ? PlannerFile.Nothing : ScenarioArg(f, which).Id;
+                        if (!f.Compares.Remove(id)) f.Compares.Add(id);
+                    }
                     f.Normalize();
                     Done();
                     return "\n" + Summary(Project());
                 }
                 case "view":
                 case "board":
-                    if (board == null || host == null || !host.IsOpen) Open();
+                    if (board == null || !IsOpen) Open();
                     return board != null ? "\n" + board.Describe() : throw new InvalidOperationException("the board isn't showing");
                 case "select":
                     if (board == null) throw new InvalidOperationException("the board isn't showing");
@@ -483,47 +541,94 @@ namespace PalaceMod
                 case "undo":
                     Undo();
                     return board != null ? "\n" + board.Describe() : "undone";
-                case "addview":
+                case "day":
                 {
-                    if (host == null || !host.IsOpen) Open();
-                    var mode = args.Length > 2 ? args[2] switch { "lose" or "ko" => PlannerAddMode.Lose, "gold" => PlannerAddMode.Gold, _ => PlannerAddMode.Build } : PlannerAddMode.Build;
-                    OpenAdd(args.Length > 1 ? int.Parse(args[1]) : w.FirstDay, mode);
-                    return addView != null && addFrame.IsOpen ? addView.Describe() : throw new InvalidOperationException("didn't open");
+                    if (!IsOpen && !dayFrame.IsOpen) Open();
+                    var layer = args.Length > 2 && args[2].StartsWith("l") ? PlannerDayLayer.Lost : PlannerDayLayer.Build;
+                    OpenDay(args.Length > 1 ? int.Parse(args[1]) : w.FirstDay, layer);
+                    return dayView != null && dayFrame.IsOpen ? dayView.Describe() : throw new InvalidOperationException("didn't open");
                 }
-                case "addpick":
-                    (addView ?? throw new InvalidOperationException("the Add screen isn't open")).DebugPickSlot(int.Parse(args[1].TrimStart('#')));
-                    return addView.Describe();
-                case "addkind":
-                    (addView ?? throw new InvalidOperationException("the Add screen isn't open")).DebugPickKind(args[1], args.Length > 2 ? int.Parse(args[2]) : 1);
-                    return addView.Describe();
-                case "addday":
-                    (addView ?? throw new InvalidOperationException("the Add screen isn't open")).ChangeDay(Int(1));
-                    return addView.Describe();
-                case "addselect":
-                    return (addView ?? throw new InvalidOperationException("the Add screen isn't open")).DebugSelect(args[1]) ? addView.Describe() : throw new ArgumentException($"no element {args[1]}");
-                case "addmap":
-                    return (addView ?? throw new InvalidOperationException("the Add screen isn't open")).DebugMap(args[1]);
-                case "addcommit":
-                    (addView ?? throw new InvalidOperationException("the Add screen isn't open")).DebugCommit();
-                    return board != null ? "\n" + board.Describe() : "added";
+                case "dayclick":
+                    DayViewOrThrow().DebugClick(int.Parse(args[1].TrimStart('#')), args.Length > 2 && args[2] == "right");
+                    return dayView.Describe();
+                case "daykind":
+                    DayViewOrThrow().DebugKind(args[1], args.Length > 2 && int.TryParse(args[2], out int kn) ? kn : 1, args.Contains("remove"));
+                    return dayView.Describe();
+                case "dayday":
+                    DayViewOrThrow().ChangeDay(Int(1));
+                    return dayView.Describe();
+                case "dayselect":
+                    return DayViewOrThrow().DebugSelect(args[1]) ? dayView.Describe() : throw new ArgumentException($"no element {args[1]}");
+                case "daymap":
+                    return DayViewOrThrow().DebugMap(args[1]);
+                case "quick":
+                {
+                    if (!IsOpen) Open();
+                    int day = args.Length > 1 ? int.Parse(args[1]) : w.FirstDay;
+                    if (board == null || !board.Tiles.TryGetValue($"add:{day}", out var plus)) throw new InvalidOperationException($"no + on day {day}");
+                    plus.Press();
+                    return ModPopup.Current != null ? string.Join(" | ", ModPopup.Current.RowNames) : "no popup";
+                }
+                case "quickkind":
+                {
+                    var k = FindKind(args.Length > 1 ? args[1] : throw new ArgumentException("quickkind <kind>"))
+                        ?? KindsOf(DayOf(Project(), quickDay)).FirstOrDefault(x => x.Key.StartsWith(args[1], StringComparison.OrdinalIgnoreCase))
+                        ?? throw new ArgumentException($"kinds: {string.Join(", ", KindsOf(DayOf(Project(), quickDay)).Select(x => x.Key))}");
+                    if (args.Contains("remove")) RemoveKind(DayOf(Project(), quickDay), k);
+                    else AddKind(DayOf(Project(), quickDay), k);
+                    return $"day {quickDay}: " + string.Join(", ", KindsOf(DayOf(Project(), quickDay)).Select(x => $"{x.Key} +{x.Planned} ({x.Open.Count} free)")) + $"; popup {(ModPopup.Current?.IsOpen == true ? "open" : "closed")}";
+                }
+                case "ui":
+                    return UiState();
+                case "moment":
+                    goldMoment.Value = args.Length > 1 && args[1].StartsWith("a") ? GoldMoment.AfterBuilding : GoldMoment.AtSunrise;
+                    return "gold on a day: " + goldMoment.Value;
                 case "perksview":
-                    if (host == null || !host.IsOpen) Open();
+                    if (!IsOpen) Open();
                     OpenPerks();
                     return perksView != null && perksFrame.IsOpen ? perksView.Describe() : throw new InvalidOperationException("didn't open");
                 case "perktile":
                 {
                     if (perksView == null || !perksFrame.IsOpen) throw new InvalidOperationException("the perks screen isn't open");
-                    if (!perksView.Select("perk:" + args[1])) throw new ArgumentException($"no perk {args[1]}");
-                    if (args.Length < 3 || args[2] != "look") perksView.Tiles["perk:" + args[1]].Press();
+                    string perkKey = string.Join(" ", args.Skip(1).Where(x => x != "look"));
+                    if (!perksView.Select("perk:" + perkKey)) throw new ArgumentException($"no perk {perkKey}; perks: {string.Join(", ", perksView.Tiles.Keys)}");
+                    if (!args.Contains("look")) perksView.Tiles["perk:" + perkKey].Press();
                     return perksView.Describe();
                 }
                 case "sourcesview":
                     Open();
                     OpenSources();
-                    return sourcesFrame.IsOpen ? "income sources open" : throw new InvalidOperationException("didn't open");
+                    return sourcesFrame.IsOpen ? "income sources open\n" + UiState() : throw new InvalidOperationException("didn't open");
+                case "sourcesday":
+                    sourcesDay = Int(1);
+                    DrawSources();
+                    return UiState();
                 default:
                     throw new ArgumentException($"usage: {Usage}");
             }
+        }
+
+        private PlannerDayView DayViewOrThrow() => dayView != null && dayFrame.IsOpen ? dayView : throw new InvalidOperationException("the day view isn't open (econ day)");
+
+        /// <summary>The menus on screen, for checking Esc and leftovers: the active frame, the stack under it, the
+        /// popup and the tooltip.</summary>
+        internal static string UiState()
+        {
+            var manager = UIFrameManager.instance;
+            if (manager == null) return "no UI";
+            string Name(UIFrame f) => f == null ? "none" : !ModFrame.Frames.ContainsKey(f) && f.name.StartsWith("PalaceMod Popup") ? "popup" : ModFrame.Frames.TryGetValue(f, out var mf) ? $"\"{mf.Title}\"" : f.name;
+            var stack = new List<string>();
+            try
+            {
+                foreach (var element in Traverse.Create(manager).Field("frameStack").GetValue<System.Collections.IEnumerable>())
+                    stack.Add(Name(Traverse.Create(element).Field("frame").GetValue<UIFrame>()));
+            }
+            catch (Exception e) { stack.Add("? " + e.Message); }
+            var popups = UnityEngine.Object.FindObjectsOfType<RectTransform>(true).Where(r => r.name.StartsWith("PalaceMod Popup") && r.gameObject.activeInHierarchy).Select(r => r.name).ToList();
+            var selected = manager.ActiveFrame != null ? manager.ActiveFrame.CurrentSelection : null;
+            return $"active {Name(manager.ActiveFrame)} (selected {(selected != null ? selected.name : "-")}); stack [{string.Join(" < ", stack)}]; " +
+                $"popup {(ModPopup.Current == null ? "none" : ModPopup.Current.IsOpen ? "open" : "current, not on top")}; visible popups {popups.Count} [{string.Join(", ", popups)}]; " +
+                $"tooltip {ModTooltip.Describe() ?? "hidden"}; typing {ModTextInput.Active}";
         }
 
         private static string PerkCommand(PlannerFile f, PlannerScenario plan, string[] args, Action done)
@@ -585,7 +690,7 @@ namespace PalaceMod
             f.Normalize();
             if (verb != "list") done();
             return "\n" + string.Join("\n", f.Scenarios.Select((s, i) =>
-                $"  {i + 1}. {(s.Id == f.Current ? "*" : " ")}{(s.Id == f.Compare ? "~" : " ")} {f.FullName(s)}: {s.Actions.Count} own steps" +
+                $"  {i + 1}. {(s.Id == f.Current ? "*" : " ")}{(f.Compares.Contains(s.Id) ? "~" : " ")} {f.FullName(s)}: {s.Actions.Count} own steps" +
                 (s.Parent != null ? $", from day {(s.ForkDay == int.MaxValue ? "∞" : s.ForkDay.ToString())}" : "") + (s.Perks.Count > 0 ? $", {s.Perks.Count} perk changes" : "")));
         }
 
@@ -698,7 +803,7 @@ namespace PalaceMod
                     (d.Shortfall > 0 ? $"  SHORT {d.Shortfall}" : ""));
             }
             lines.Add($"  end gold {p.Result.EndGold} ({Signed(p.Result.EndGold - p.Baseline.EndGold)} vs doing nothing" +
-                (p.Other != null ? $", {Signed(p.Result.EndGold - p.Compare.EndGold)} vs {p.OtherName}" : "") +
+                string.Concat(p.Compares.Where(c => c.Plan != null).Select(c => $", {Signed(p.Result.EndGold - c.Result.EndGold)} vs {c.Name}")) +
                 $"); spent {p.Result.TotalSpent}; buildings pay {p.Result.LastDawnBuildings} at the last dawn");
             var ordered = EconSim.Ordered(p.Actions);
             for (int i = 0; i < ordered.Count; i++) lines.Add($"  {i + 1}. " + Describe(p, ordered[i]) + (p.InheritedFrom(ordered[i]) ? "  (inherited)" : ""));

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using HarmonyLib;
 using UnityEngine;
+using PalaceMod.Economy;
 using UnityEngine.SceneManagement;
 
 /*
@@ -292,38 +293,34 @@ namespace PalaceMod
 
         // ---- Frame ------------------------------------------------------------------------------------------------
 
-        internal const string EconomyTab = "Economy";
-
-        /// <summary>Whether the Run Analytics frame is on screen.</summary>
+        /// <summary>Whether the score and projection frame is on screen.</summary>
         internal bool FrameOpen => frame != null && frame.IsOpen;
 
-        // Without a recorded history only the Economy tab (the economy planner) has anything to show.
-        private void Open() => OpenTab(IsEnabled && history != null ? null : EconomyTab);
+        // Run Analytics opens on the economy planner, which has the score and the projection under More.
+        private void Open()
+        {
+            var planner = Feature<EconomyPlannerManager>.Instance;
+            if (planner != null && EconomySnapshot.Available) planner.Open();
+            else OpenTab(null);
+        }
 
-        /// <summary>Opens Run Analytics, on <paramref name="tab"/> if given.</summary>
+        /// <summary>Opens the run's score and projection, on <paramref name="tab"/> ("Score", "Projection") if given.</summary>
         internal void OpenTab(string tab)
         {
             if (!Rules.Available) return;
             if (frame == null)
             {
-                frame = new ModFrame("Run Analytics")
+                frame = new ModFrame("Score and projection")
                     .AddTab("Score", page =>
                     {
                         if (Recorded(page)) AnalyticsPages.Score(page, history, Rules, scenario);
                     })
-                    .AddTab(EconomyTab, page =>
-                    {
-                        var planner = Feature<EconomyPlannerManager>.Instance;
-                        if (planner != null) planner.BuildPage(page);
-                        else page.Text("The economy planner isn't loaded; see the log.");
-                    }, wide: true)
                     .AddTab("Projection", page =>
                     {
                         if (!Recorded(page)) return;
                         scenario.ExtraFromNight = Mathf.Clamp(scenario.ExtraFromNight, RunProjection.NextNight, Mathf.Max(RunProjection.NextNight, RunProjection.NightCount));
                         AnalyticsPages.Projection(page, history, Rules, scenario, () => frame.Refresh());
                     });
-                Feature<EconomyPlannerManager>.Instance?.AttachHost(frame);
             }
             if (tab != null) frame.SelectTab(tab);
             frame.Open();
@@ -333,8 +330,8 @@ namespace PalaceMod
         {
             if (IsEnabled && history != null) return true;
             page.Text(IsEnabled
-                ? "Nothing recorded yet for this run. The Economy tab works without it."
-                : "Run recording is off. Turn on \"Record runs\" in Settings > Mods > Pause menu; nights from then on are recorded. The Economy tab works without it.");
+                ? "Nothing recorded yet for this run."
+                : "Run recording is off: Settings > Mods > Pause menu > \"Record runs\".");
             return false;
         }
 

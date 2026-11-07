@@ -40,7 +40,8 @@ namespace PalaceMod
         private TextMeshProUGUI titleText;
         private ModPage page;
         private RectTransform near;
-        private Vector2? at;
+        private bool hadNear;
+        private Vector2? at, placed;
 
         private ModPopup(string title, Action<ModPage> build, float width)
         {
@@ -56,7 +57,8 @@ namespace PalaceMod
             var manager = UIFrameManager.instance;
             if (manager == null || GameWidgets.Canvas == null) return null;
             if (Current != null && Current.IsOpen) Current.Close();
-            var popup = new ModPopup(title, build, width) { near = near, at = screenPoint };
+            else Current?.DropIfOrphaned();
+            var popup = new ModPopup(title, build, width) { near = near, hadNear = near != null, at = screenPoint };
             try { popup.Build(); }
             catch (Exception e)
             {
@@ -188,7 +190,9 @@ namespace PalaceMod
             var bounds = canvasRect.rect;
             var size = panel.rect.size;
             Vector2 topLeft;
-            if (near != null)
+            // What it was opened beside was rebuilt (the screen below redraws as the popup edits it): stay put.
+            if (hadNear && near == null && placed is Vector2 kept) topLeft = kept;
+            else if (near != null)
             {
                 var corners = new Vector3[4];
                 near.GetWorldCorners(corners);
@@ -205,6 +209,7 @@ namespace PalaceMod
             topLeft.x = Mathf.Clamp(topLeft.x, bounds.xMin + 16f, bounds.xMax - 16f - size.x);
             topLeft.y = Mathf.Clamp(topLeft.y, bounds.yMin + 16f + size.y, bounds.yMax - 16f);
             panel.anchoredPosition = topLeft;
+            placed = topLeft;
         }
 
         private bool Stacked()
@@ -226,6 +231,15 @@ namespace PalaceMod
             if (Current == this) Current = null;
             try { Closed?.Invoke(); }
             catch (Exception e) { Log.Core.Caught($"ModPopup \"{title}\": Closed handler failed", e); }
+            Destroy();
+        }
+
+        /// <summary>Destroys it if it's neither on screen nor on the frame stack to come back to (left behind when
+        /// the menus under it were closed some other way).</summary>
+        private void DropIfOrphaned()
+        {
+            if (root == null || IsOpen || (UIFrameManager.instance != null && Stacked())) return;
+            if (Current == this) Current = null;
             Destroy();
         }
 
@@ -262,7 +276,14 @@ namespace PalaceMod
 
             private void Update()
             {
-                if (Popup == null || !Popup.IsOpen) { pressedOutside = false; return; }
+                if (Popup == null) return;
+                if (!Popup.IsOpen)
+                {
+                    pressedOutside = false;
+                    // Visible but neither on top nor waiting on the stack: nothing can close it any more.
+                    Popup.DropIfOrphaned();
+                    return;
+                }
                 var mouse = Plugin.Input?.controllers?.Mouse;
                 bool down, up;
                 try

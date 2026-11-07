@@ -12,15 +12,15 @@ using G = PalaceMod.AnalyticsGraph;
 using V = PalaceMod.Economy.PlannerVisuals;
 
 /*
-    The planner's board (Run Analytics > Economy, a wide tab): a toolbar (plan, compare, perks, income sources, undo,
-    and the end gold), then one column per day left to the level's last night. A day's builds and upgrades are chips
-    above the night line, the buildings lost and gold found that night below it; identical steps on a day are one chip
-    ("House ×5"). Under the columns, on the same x, the gold at each sunrise (and after building, and what it's
-    compared with). An info line at the bottom says what's selected and what the inputs do.
+    The planner's board (Pause > Run Analytics, a wide page): a toolbar (plan, compare, perks, income sources, More,
+    undo, and the end gold), then one column per day left to the level's last night. A day's builds and upgrades are
+    chips above the night line, the buildings lost that night below it; identical steps on a day are one chip
+    ("House ×5"). Under the columns, on the same x, the gold each day (at sunrise or after building: the setting) and
+    what it's compared with, each in its own colour. An info line at the bottom says what's selected.
 
     Inputs on a chip: apply opens its popup (PlannerPopups.cs); the move keys (the controller's shoulders) move it a
-    day; the remove key or a right click removes it; dragging drops it on another day. A day's header opens the day's
-    popup; "+ build" / "+ lost" open the Add screen (PlannerAdd.cs). Every change can be undone.
+    day; the remove key or a right click removes it; dragging drops it on another day. A day's header opens that day
+    (PlannerDay.cs); "+" opens quick add (PlannerQuick.cs), "+ lost" the day on its Lost layer. Every change can be undone.
 
     The board re-renders itself in place after each change (not the whole frame), keeping the selection on the same
     thing by key, and its scroll position across tab switches.
@@ -39,9 +39,10 @@ namespace PalaceMod
 
         private void BuildFrames()
         {
+            host = new ModFrame("Run Analytics").SetContent(BuildPage, wide: true);
+            host.Activated += () => board?.OnActivated();
             sourcesFrame = new ModFrame("Income sources").SetContent(BuildSources);
-            addFrame = new ModFrame("Add to the plan").SetContent(BuildAdd, wide: true);
-            addFrame.Activated += () => addView?.OnActivated();
+            dayFrame = new ModFrame("Day").SetContent(BuildDayPage, wide: true);
             perksFrame = new ModFrame("Perks").SetContent(BuildPerks, wide: true);
         }
 
@@ -55,7 +56,7 @@ namespace PalaceMod
                 "On the economy planner's board: removes the selected item (a right click does too).", KeybindFlags.AllowInMenus, KeyContext);
             keyUndo = Keybinds.Register(FeatureSection, "undo", "Planner: undo", new KeyboardShortcut(KeyCode.Z),
                 "In the economy planner: undoes the last change.", KeybindFlags.AllowInMenus, KeyContext);
-            Keybinds.ClaimContext(KeyContext, () => (host != null && host.IsOpen && board != null) || (addFrame != null && addFrame.IsOpen) || (perksFrame != null && perksFrame.IsOpen));
+            Keybinds.ClaimContext(KeyContext, () => (host != null && host.IsOpen && board != null) || (dayFrame != null && dayFrame.IsOpen) || (perksFrame != null && perksFrame.IsOpen));
         }
 
         internal Keybind EarlierKey => keyEarlier;
@@ -73,15 +74,7 @@ namespace PalaceMod
             catch { return false; }
         }
 
-        /// <summary>Run Analytics hands over its frame: the board re-renders when the player comes back to it.</summary>
-        internal void AttachHost(ModFrame frame)
-        {
-            if (host == frame) return;
-            host = frame;
-            frame.Activated += () => board?.OnActivated();
-        }
-
-        /// <summary>The Economy tab.</summary>
+        /// <summary>The board, the planner's page.</summary>
         internal void BuildPage(ModPage page)
         {
             board = null;
@@ -144,9 +137,9 @@ namespace PalaceMod
         internal void RefreshOpen()
         {
             board?.Render();
-            if (addFrame != null && addFrame.IsOpen) addView?.Render();
+            if (dayFrame != null && dayFrame.IsOpen) dayView?.Render();
             if (perksFrame != null && perksFrame.IsOpen) perksView?.Render();
-            if (sourcesFrame != null && sourcesFrame.IsOpen) sourcesFrame.Refresh();
+            if (sourcesFrame != null && sourcesFrame.IsOpen) DrawSources();
             ModPopup.Current?.Refresh();
         }
 
@@ -157,7 +150,7 @@ namespace PalaceMod
         internal static (int First, int Last) DayRange(EconWorld w, EconActionKind kind) =>
             (kind == EconActionKind.Step || !w.DawnPending ? w.FirstDay : w.FirstDay - 1, w.LastNight);
 
-        internal const string FixedNote = "Every run starts by building the castle on day 1: it's part of every plan, and of doing nothing.";
+        internal const string FixedNote = "The castle is built on day 1 in every plan";
 
         /// <summary>Gold short on <paramref name="day"/>: what its steps cost beyond the gold there was when each was paid.</summary>
         internal static int ShortOn(EconResult r, int day) =>
@@ -275,7 +268,7 @@ namespace PalaceMod
     internal sealed class PlannerBoard
     {
         private const float Gutter = 70f, ToolbarH = 42f, HeaderH = 54f, RowH = 38f, ChipH = 34f, AddH = 28f, Divider = 18f,
-            InfoH = 56f, EndW = 92f, MinCol = 122f, MaxCol = 200f, Gap = 10f;
+            InfoH = 56f, EndW = 92f, MinCol = 104f, MaxCol = 200f, Gap = 10f, Pad = 24f;
 
         private enum Kind { Done, Tonight, Day }
 
@@ -315,7 +308,8 @@ namespace PalaceMod
             this.m = m;
             this.host = host;
             this.area = area;
-            this.size = size;
+            // Room on the right, so nothing runs into the screen's edge.
+            this.size = new Vector2(size.x - Pad, size.y);
             scrollX = m.BoardScrollX;
             scrollY = m.BoardScrollY;
         }
@@ -362,7 +356,7 @@ namespace PalaceMod
             root.sizeDelta = size;
             rootObj.AddComponent<Driver>().Board = this;
             // A dark panel behind it all, so the level doesn't show through the board.
-            var backdrop = V.Panel(root, "Backdrop", size.x + 40f, size.y + 24f, 0.9f);
+            var backdrop = V.Panel(root, "Backdrop", size.x + Pad + 40f, size.y + 24f, 0.9f);
             backdrop.anchoredPosition = new Vector2(-20f, 12f);
             if (P == null)
             {
@@ -392,7 +386,7 @@ namespace PalaceMod
                 cols.Add(new Column
                 {
                     Kind = Kind.Day, Day = d, Result = P.Result.Days.FirstOrDefault(x => x.Day == d),
-                    Compare = P.Compare == P.Result ? null : P.Compare.Days.FirstOrDefault(x => x.Day == d),
+                    Compare = P.Compares.Count == 0 || P.Compare == P.Result ? null : P.Compare.Days.FirstOrDefault(x => x.Day == d),
                 });
             foreach (var g in groups)
             {
@@ -495,12 +489,15 @@ namespace PalaceMod
                 x += width + 10f;
                 return t;
             }
-            Add("tool:plan", 270f, $"<color=#{dim}>Plan</color>  {p.PlanName}", () => m.PlanPopup(this, Tiles["tool:plan"]));
-            Add("tool:compare", 230f, $"<color=#{dim}>vs</color>  {EconomyPlannerManager.Capital(p.OtherName)}", () => m.ComparePopup(this, Tiles["tool:compare"]));
-            int changed = p.File.EffectivePerks(p.Plan).Count(kv => w.Perks.Any(k => k.Key == kv.Key && k.Equipped != kv.Value));
-            var perks = Add("tool:perks", 170f, changed == 0 ? "Perks" : $"Perks <color=#{dim}>·</color> {changed}", m.OpenPerks);
-            perks.SetMarker(changed > 0);
-            Add("tool:sources", 180f, "Income sources", m.OpenSources);
+            Add("tool:plan", 260f, $"<color=#{dim}>Plan</color>  {p.PlanName}", () => m.PlanPopup(this, Tiles["tool:plan"]));
+            string vs = p.Compares.Count == 0 ? "nothing" : p.Compares.Count == 1 ? EconomyPlannerManager.Capital(p.Compares[0].Name) : $"{p.Compares.Count} plans";
+            var compare = Add("tool:compare", 230f, $"<color=#{dim}>vs</color>  {vs}", () => m.ComparePopup(this, Tiles["tool:compare"]));
+            if (p.Compares.Count > 0) compare.SetMarker(true, p.Compares[0].Color);
+            int on = m.PerkCount(p), max = EconomyPlannerManager.MaxPerks;
+            var perks = Add("tool:perks", 150f, $"Perks <color=#{(on > max ? EconomyPlannerManager.RedHex : dim)}>{on}/{max}</color>", m.OpenPerks);
+            perks.SetMarker(m.PerksChanged(p));
+            Add("tool:sources", 170f, "Income sources", m.OpenSources);
+            Add("tool:more", 100f, "More", () => m.MorePopup(Tiles["tool:more"]));
             var undo = Add("tool:undo", 90f, "Undo", m.Undo);
             undo.SetDim(!m.CanUndo, 0.5f);
 
@@ -515,8 +512,7 @@ namespace PalaceMod
                 fix.Label.color = ModStyle.Bright;
             }
             var parts = new List<string> { $"<size=120%><b>{EconomyPlannerManager.Coin(r.EndGold)}</b></size> at the end" };
-            if (p.Compare != r) parts.Add($"{EconomyPlannerManager.Signed(r.EndGold - p.Compare.EndGold)} vs {EconomyPlannerManager.Short(p.OtherName, 18)}");
-            else if (p.Baseline != r) parts.Add($"{EconomyPlannerManager.Signed(r.EndGold - p.Baseline.EndGold)} vs doing nothing");
+            if (p.Compares.Count > 0 && p.Compare != r) parts.Add($"{EconomyPlannerManager.Signed(r.EndGold - p.Compare.EndGold)} vs {EconomyPlannerManager.Short(p.OtherName, 18)}");
             var summary = Words(root, string.Join($"  <color=#{dim}>·</color>  ", parts), x + 4f, 0f, size.x - x - 4f, ToolbarH - 12f, 21f, ModStyle.Gold,
                 TextAlignmentOptions.MidlineRight, ModStyle.BoldFont);
             summary.enableAutoSizing = true;
@@ -557,12 +553,13 @@ namespace PalaceMod
                     for (int k = 0; k < c.DayGroups.Count; k++) Chip(c, c.DayGroups[k], x, k * RowH + 3f);
                     if (c.Kind == Kind.Day)
                     {
-                        c.AddDay = Tile(bodyLayer, $"add:{c.Day}", x + 5f, c.DayGroups.Count * RowH + 6f, colW - 10f, AddH, null, "+ build", 17f);
+                        c.AddDay = Tile(bodyLayer, $"add:{c.Day}", x + 5f, c.DayGroups.Count * RowH + 6f, colW - 10f, AddH, null, "+", 20f);
                         c.AddDay.SetFill(new Color(ModStyle.Panel.r, ModStyle.Panel.g, ModStyle.Panel.b, 0.3f));
                         c.AddDay.Label.color = ModStyle.Dim;
                         c.AddDay.Label.alignment = TextAlignmentOptions.Center;
                         int day = c.Day;
-                        c.AddDay.Applied += () => m.OpenAdd(day, PlannerAddMode.Build);
+                        var addTile = c.AddDay;
+                        c.AddDay.Applied += () => m.QuickAdd(day, addTile.Rect);
                         c.Elements.Add(c.AddDay);
                         columnOf[c.AddDay] = c;
                     }
@@ -575,7 +572,7 @@ namespace PalaceMod
                     c.AddNight.Label.color = ModStyle.Dim;
                     c.AddNight.Label.alignment = TextAlignmentOptions.Center;
                     int day = c.Day;
-                    c.AddNight.Applied += () => m.OpenAdd(day, PlannerAddMode.Lose);
+                    c.AddNight.Applied += () => m.OpenDay(day, PlannerDayLayer.Lost);
                     c.Elements.Add(c.AddNight);
                     columnOf[c.AddNight] = c;
                 }
@@ -629,18 +626,20 @@ namespace PalaceMod
                 default:
                     var d = c.Result;
                     // What the day has to spend, and what's left after its builds: the budget being split up.
+                    // Left after the day's steps / gold at sunrise.
                     string gold = "";
                     if (d != null)
                     {
                         int left = d.AfterSpend;
-                        string leftText = left < 0 ? $"<color=#{EconomyPlannerManager.RedHex}>{left} short</color>" : d.Spent > 0 ? $"<color=#{ModStyle.Hex(ModStyle.Bright)}>{left} left</color>" : "to spend";
-                        gold = $"{EconomyPlannerManager.Coin(d.Start)} <color=#{EconomyPlannerManager.DimHex}>·</color> {leftText}";
+                        string leftText = left < 0 ? $"<color=#{EconomyPlannerManager.RedHex}>{left}</color>" : d.Spent > 0 ? $"<color=#{ModStyle.Hex(ModStyle.Bright)}>{left}</color>" : left.ToString();
+                        gold = $"{leftText}<color=#{EconomyPlannerManager.DimHex}>/</color>{EconomyPlannerManager.Coin(d.Start)}";
                     }
                     text = $"Day {c.Day}\n<size=74%>{gold}</size>";
-                    if (d != null && c.Compare != null && d.Start != c.Compare.Start)
+                    int delta = d != null && c.Compare != null ? Mathf.RoundToInt(m.GoldOf(d) - m.GoldOf(c.Compare)) : 0;
+                    if (delta != 0)
                     {
-                        badge = EconomyPlannerManager.Signed(d.Start - c.Compare.Start);
-                        badgeColor = d.Start > c.Compare.Start ? ModStyle.Accent : V.Red;
+                        badge = EconomyPlannerManager.Signed(delta);
+                        badgeColor = delta > 0 ? ModStyle.Accent : V.Red;
                     }
                     break;
             }
@@ -653,7 +652,8 @@ namespace PalaceMod
             if (c.Kind == Kind.Day && c.Result != null && c.Result.Shortfall > 0) tile.SetWarning(true);
             if (c.Kind == Kind.Tonight) tile.SetFill(new Color(0.07f, 0.075f, 0.09f, 1f));
             var col = c;
-            tile.Applied += () => m.DayPopup(this, col.Kind == Kind.Done ? int.MinValue : col.Day, col.Kind == Kind.Tonight, tile);
+            if (col.Kind == Kind.Done) tile.Applied += () => m.DonePopup(tile);
+            else tile.Applied += () => m.OpenDay(col.Day, col.Kind == Kind.Tonight ? PlannerDayLayer.Lost : PlannerDayLayer.Build);
             c.Header = tile;
             columnOf[tile] = c;
         }
@@ -785,14 +785,13 @@ namespace PalaceMod
 
             var p = P;
             var r = p.Result;
-            float Gold(Column c, Func<DayResult, float> f) => c.Kind == Kind.Day && c.Result != null ? f(c.Result) : float.NaN;
-            float[] Values(Func<Column, float> f, float end) => cols.Select(f).Append(end).ToArray();
+            // One line per plan: the gold each day (at sunrise, or after its builds: the setting).
+            float[] Values(EconResult res) => cols.Select(c => c.Kind == Kind.Day ? m.GoldOf(res.Days.FirstOrDefault(x => x.Day == c.Day)) : c.Kind == Kind.Tonight ? p.World.Gold : float.NaN)
+                .Append(res.EndGold).ToArray();
             var series = new List<GraphSeries>();
-            if (p.Compare != r)
-                series.Add(new GraphSeries(EconomyPlannerManager.Capital(EconomyPlannerManager.Short(p.OtherName, 22)), G.Fade(G.Dim, 0.95f),
-                    Values(c => c.Kind == Kind.Day ? (float)(c.Compare?.Start ?? float.NaN) : c.Kind == Kind.Tonight ? p.World.Gold : float.NaN, p.Compare.EndGold)));
-            series.Add(new GraphSeries("After building", G.Bronze, Values(c => Gold(c, d => d.AfterSpend), float.NaN)));
-            series.Add(new GraphSeries("At sunrise", ModStyle.Bright, Values(c => c.Kind == Kind.Tonight ? p.World.Gold : Gold(c, d => d.Start), r.EndGold)));
+            foreach (var c in p.Compares)
+                if (c.Result != r) series.Add(new GraphSeries(EconomyPlannerManager.Capital(EconomyPlannerManager.Short(c.Name, 22)), c.Color, Values(c.Result)));
+            series.Add(new GraphSeries(EconomyPlannerManager.Short(p.PlanName, 22), ModStyle.Bright, Values(r)));
             var range = V.Range(series);
             var xs = cols.Select((c, i) => ColX(i) + colW / 2f).Append(ColX(cols.Count) + EndW / 2f).ToArray();
             var shortCols = new HashSet<int>(cols.Select((c, i) => (c, i)).Where(t => t.c.Result != null && t.c.Result.Shortfall > 0).Select(t => t.i));
@@ -804,7 +803,8 @@ namespace PalaceMod
             axisRect.sizeDelta = new Vector2(Gutter, graphH);
             V.StripAxis(axisRect, Gutter, graphH, range);
             var legend = Box(view, "Legend", Gutter + 10f, 4f, viewW, 24f);
-            V.Legend(legend, series.AsEnumerable().Reverse().ToList());
+            float lx = V.Legend(legend, series.AsEnumerable().Reverse().ToList());
+            Words(legend, m.Moment == EconomyPlannerManager.GoldMoment.AfterBuilding ? "gold after building" : "gold at sunrise", lx, 0f, 260f, 24f, 16f, G.Dim);
         }
 
         // ---- Info line --------------------------------------------------------------------------------------------
@@ -815,19 +815,10 @@ namespace PalaceMod
             hints = Words(root, "", 0f, size.y - InfoH + 32f, size.x, 24f, 19f, ModStyle.Dim, font: ModStyle.ButtonFont);
         }
 
-        private string Hints(string what) => ModNumber.UsingController ? what switch
-        {
-            "chip" => "A: edit · LB/RB: move a day · B: back",
-            "day" => "A: add, branch or clear this day",
-            "add" => "A: open the map to pick",
-            _ => "A: open",
-        } : what switch
-        {
-            "chip" => $"Enter: edit · {KeyName(m.EarlierKey)}/{KeyName(m.LaterKey)}: move a day · {KeyName(m.RemoveKey)}: remove · {KeyName(m.UndoKey)}: undo · drag to another day · right-click: remove",
-            "day" => $"Enter: add, branch or clear this day · {KeyName(m.UndoKey)}: undo",
-            "add" => "Enter: open the map to pick buildings",
-            _ => $"Enter: open · {KeyName(m.UndoKey)}: undo",
-        };
+        // Only the inputs nothing on screen shows: moving and removing chips.
+        private string Hints(string what) => what != "chip" ? "" : ModNumber.UsingController
+            ? "LB/RB: move a day"
+            : $"{KeyName(m.EarlierKey)}/{KeyName(m.LaterKey)} or drag: move a day · {KeyName(m.RemoveKey)} or right-click: remove · {KeyName(m.UndoKey)}: undo";
 
         private static string KeyName(Keybind k) => k == null || k.Shortcut.MainKey == KeyCode.None ? "-" : k.Shortcut.ToString();
 
@@ -848,7 +839,7 @@ namespace PalaceMod
             if (groupOf.TryGetValue(tile, out var g))
             {
                 var r = g.R;
-                string title = EconomyPlannerManager.Title(r) + (g.Count > 1 ? $" <color=#{EconomyPlannerManager.DimHex}>and {g.Count - 1} more {r.Slot?.TypeName}</color>" : "");
+                string title = g.Count > 1 ? $"{r.Slot?.TypeName} ×{g.Count}" + (r.Action.IsStep && r.Action.Level > 1 ? $" to level {r.Action.Level}" : "") : EconomyPlannerManager.Title(r);
                 string detail = EconomyPlannerManager.Detail(r);
                 if (g.Count > 1 && r.Counts && r.Action.IsStep) detail = $"{EconomyPlannerManager.Coin(g.Members.Sum(a => P.Result.Actions.FirstOrDefault(x => x.Action == a)?.Cost ?? 0))} for all {g.Count}";
                 if (g.Inherited) detail += $" · from {P.File.FullName(g.Owner)}";
@@ -864,19 +855,16 @@ namespace PalaceMod
             else if (tile.Key.StartsWith("add:") || tile.Key.StartsWith("lost:"))
             {
                 bool lost = tile.Key.StartsWith("lost:");
-                text = lost ? $"Mark buildings you expect to lose on night {col?.Day}: they pay nothing at the next dawn." : $"Build or upgrade on day {col?.Day}: pick buildings on the map.";
+                text = lost ? $"Buildings lost on night {col?.Day}" : $"Add to day {col?.Day}";
                 hint = Hints("add");
             }
             else
             {
                 text = tile.Key switch
                 {
-                    "tool:plan" => $"Showing {P.PlanName}. Switch plans, make one, rename, copy or delete it.",
-                    "tool:compare" => $"The dim line and the days' +/- compare this plan with {P.OtherName}.",
-                    "tool:perks" => "Try this plan with other perks: the gold perks as the loadout screen shows them.",
-                    "tool:sources" => "What each kind of income building costs, pays and when it pays for itself.",
-                    "tool:undo" => m.CanUndo ? "Undo the last change to your plans." : "Nothing to undo yet.",
-                    "tool:short" => "A change left a later day without the gold for its builds. Enter: move them to a day that can pay, or undo.",
+                    "tool:compare" => P.Compares.Count == 0 ? "Compared with nothing" : "Compared with " + string.Join(", ", P.Compares.Select(c => $"<color=#{ModStyle.Hex(c.Color)}>{c.Name}</color>")),
+                    "tool:perks" => $"{m.PerkCount(P)} of {EconomyPlannerManager.MaxPerks} perks",
+                    "tool:short" => "A later day can't pay for its builds",
                     _ => "",
                 };
                 hint = Hints("tool");
@@ -894,7 +882,7 @@ namespace PalaceMod
         private string DayText(Column c)
         {
             var w = P.World;
-            if (c.Kind == Kind.Done) return "Steps from days that are over: done, or missed. Enter to clear them out.";
+            if (c.Kind == Kind.Done) return "Steps from days that are over";
             if (c.Kind == Kind.Tonight)
             {
                 var r = P.Result;
@@ -907,10 +895,10 @@ namespace PalaceMod
             if (d.Drops > 0) parts.Add($"enemies {d.Drops}");
             if (d.Buildings + d.Harvest > 0) parts.Add($"buildings {d.Buildings + d.Harvest}");
             if (d.Interest > 0) parts.Add($"interest {d.Interest}");
-            if (d.Extra > 0) parts.Add($"other {d.Extra}");
+            if (d.Extra > 0) parts.Add($"wisdom {d.Extra}");
             if (d.Treasure > 0) parts.Add($"treasure {d.Treasure}");
             string spent = d.Spent == 0 ? "" : d.Shortfall > 0
-                ? $", spends {d.Spent} <color=#{EconomyPlannerManager.RedHex}>({d.Shortfall} short)</color>"
+                ? $", spends {d.Spent} <color=#{EconomyPlannerManager.RedHex}>{d.Shortfall} short</color>"
                 : $", spends {d.Spent}";
             string vs = c.Compare != null ? $" <color=#{EconomyPlannerManager.DimHex}>({EconomyPlannerManager.Signed(d.AtDawn - c.Compare.AtDawn)} vs {P.OtherName})</color>" : "";
             return $"Day {c.Day}: {EconomyPlannerManager.Coin(d.Start)} at sunrise{spent}; night {c.Day} brings {d.Income} <color=#{EconomyPlannerManager.DimHex}>({string.Join(", ", parts)})</color>, {EconomyPlannerManager.Coin(d.AtDawn)} at dawn{vs}";

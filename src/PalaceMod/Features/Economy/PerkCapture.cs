@@ -35,6 +35,19 @@ namespace PalaceMod.Economy
         }
 
         private static readonly List<SlotMod> slotMods = [];
+        private static readonly Dictionary<BuildSlot, Equippable> neverDeny = [];
+
+        /// <summary>The perk of the PerkRemoveDestroyedAtNightTag that ran on this slot (it destroys itself), or null.</summary>
+        public static Equippable NeverDenyPerk(BuildSlot slot) => slot != null && neverDeny.TryGetValue(slot, out var p) ? p : null;
+
+        public static void NeverDeny(PerkRemoveDestroyedAtNightTag c)
+        {
+            var slot = c.GetComponentInParent<BuildSlot>();
+            var perk = Traverse.Create(c).Field("perkRequirement").GetValue<Equippable>();
+            if (slot == null || perk == null) return;
+            foreach (var dead in neverDeny.Keys.Where(k => k == null).ToList()) neverDeny.Remove(dead);
+            neverDeny[slot] = perk;
+        }
         private static Interest interest;
         private static Object spawnOwner;
         private static int[][] spawnGold;

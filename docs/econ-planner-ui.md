@@ -51,12 +51,13 @@ modal frames entered.
 
 One screen, the **board**: days left to right, the plan's actions as icon chips in their day's column, and the gold
 curve directly underneath on the same columns. Everything that changes the plan happens on the board, in a small
-popup over it (the board stays visible and updates live), or in the Add screen, which has its own map and its own
-preview of the curve.
+popup over it (the board stays visible and updates live), or in a day's view, which has its own map and its own
+preview of the curve. (Round 3 changed the Add screen into the day view and moved the planner out of Run Analytics'
+tabs; see "Feedback round 3" below, which supersedes the sketches here where they differ.)
 
-### Board (Run Analytics > Economy)
+### Board (Pause > Run Analytics)
 
-The Economy tab uses the frame's full width (a new "wide" tab mode).
+The planner is the Run Analytics frame's only page, full width; the run's score and projection are under More.
 
 ```
  Run Analytics
@@ -96,7 +97,7 @@ The Economy tab uses the frame's full width (a new "wide" tab mode).
   sideways with the selection (or the wheel), with "◂ 3"/"3 ▸" markers for the hidden days. Columns taller than the
   board scroll up and down the same way. Identical steps grouping keeps 40+ actions to a few chips per day.
 
-### Add screen (on top of the board)
+### Add screen (on top of the board; replaced by the day view in round 3)
 
 Opened from a column's "+ add" (day) or "+ lost" (night). It's the one place with a large map.
 
@@ -251,7 +252,57 @@ What changed after the first play test, and why.
   planner screen is open), so they show in Settings > Controls and can be rebound; the shoulders (the game's
   NextTab/PrevTab) also move a chip, and change the day on the Add screen.
 - The map picture is rendered once per Add screen (LevelCapture) and copied into a texture straight away.
-- Dev commands drive every screen: `econ view|select|press|popup|drag|shift|remove-chip|undo|addview|addpick|addkind|
-  addday|addselect|addcommit|addmap|perksview|perktile|sourcesview` (`dev.py cmd help` lists them). `econ addday 0`
-  describes the Add screen (picks, gold left, greyed markers, the selection); with `uikit mouse "Marker marker:<n>" [fx fy]`
-  and `uikit click` it checks real clicks land on the marker aimed at.
+- Dev commands drive every screen (`dev.py cmd help` lists them); round 3's are listed below.
+
+## Feedback round 3 (as built)
+
+- **One day view** (`PlannerDay.cs`). A day's header opens it straight away (no popup); "+ lost" opens it on the
+  Lost layer. It edits the plan directly, every change undoable: a marker click takes that slot one step further that
+  day, so a spot can take several steps in a day (castle 1 → 3, build a house and upgrade it), as the game allows
+  (`BuildSlot.TryToBuildOrUpgradeAndPay` has no per-day limit; only a temple prayer, blacksmith/forge research and
+  the castle's level stop a next step). When a slot can't go further, the next click takes its steps on that day off
+  again; right-click (or Backspace) takes one off. Coming back to a day shows its steps lit on the map and listed with
+  − / +, never everything greyed. The list row shows "I → III" and the cost; choice steps show the game's choice tiles,
+  a mill its fields' − / +. Two layers on the same map: Build, and Lost that night (with a Temple wisdom prayer that
+  day, a Wisdom row: buildings marked lost × the prayer's gold, or a typed amount). Top bar: ‹ Day N-1 / Day N+1 ›,
+  the layers, the day's gold, Branch here, Clear day.
+- **Markers**: can take a step: bright; unlocked but too dear: normal, with the cost in red; not unlocked (or out of
+  reach, below): dark, smaller, with a padlock; planned that day: lit with the level it reaches. A legend sits under
+  the map. "Nothing can be built…" is on a dark band over the map.
+- **Quick add** (`PlannerQuick.cs`): a day's "+" on the board opens a popup with a tile per kind the day can take
+  (icon, how many are free, cost; "House → II" for upgrades), the day's gold, and a link to the day view. Each press
+  adds the nearest free one straight away (right-click takes the last off), the board updates underneath, and the
+  popup stays open, so several adds take several clicks and no screens. Its tiles scroll.
+- **Budget** everywhere is "left/at sunrise": "6/8◉" (red when short).
+- **Compare** with any number of plans and doing nothing, each in its own colour (`PlannerVisuals.CompareColor`, a
+  categorical set clear of the plan's cream line, copper and red; doing nothing is slate), in the board's graph and the
+  day view's. The day headers' +/- are against the first. Files keep `Compares` (older files' `Compare` is read in).
+- **One gold line** per plan. Settings > Mods > Pause menu > Economy planner > "Gold on a day" (also More > Gold on a
+  day): at sunrise (default) or after that day's builds.
+- **Perks**: every perk toggles, gold or not, to plan the loadout; "X/5" (the level's `maxPerkCount`) turns red over
+  the limit; more are allowed. Perks that move gold show what toggling them does to the end gold.
+- **Run analytics in More**: no tab bar; the planner is the Run Analytics frame, and More opens Score and Projection
+  (their own frame).
+- **Scroll areas** (`ModScrollArea`) instead of "and N more": the day view's kinds and steps, quick add's kinds.
+- **Wisdom, not "gold found"**: the made-up "a chest" estimate is gone. Temple wisdom pays
+  `goldForDestroyedBuilding` (1/2/3 for the temple's levels 1/2/3) per Building-tagged object destroyed that night
+  (walls, towers, fields and the castle count; bridges and barricades don't). The planner counts the buildings marked
+  lost; the player can type their own number. Old plans' "gold found" items still count and show as chips.
+- **Reach** (`PlannerReach.cs`): slots a map keeps out of reach until a bridge is built (the game doesn't encode
+  these as unlocks) are locked with "Out of reach until … is built" (any one set of bridges).
+- **Destroyed buildings**, from the game's code and every level's data: a knocked-out building pays nothing at the next
+  dawn. Indestructible Mines (the code's `sustainableMiningPerk`) resets a destroyed mine to 7 a dawn (it pays, then
+  drops by 1, floor 1 with or without the perk); without the perk a destroyed mine's income is frozen that dawn.
+  Resilient Residences (houses) and Relentless Research (Blacksmith, Royal Forge) keep a destroyed building paying.
+  Challenge the God of Destruction keeps a destroyed building down at the next two dawns (it pays at neither, and a mine
+  resets or freezes at both) unless it's upgraded on the day between; with Resilient Residences a house pays at both.
+  A building still down can't be lost again (or drop wisdom gold) the second night. All of these are perk what-ifs too.
+- **Esc**: one layer each. `ModFrame.Open` on a frame already under the active one closes back down to it instead of
+  pushing a copy (a copy left on the stack made Esc come back to a closed screen). `ModPopup` keeps its place when
+  what it was opened beside is rebuilt, and destroys itself if it's left neither on top nor on the stack. `ModTooltip`
+  hides when what it described is destroyed. Income sources' day field no longer rebuilds the page (and no longer has
+  a tooltip, which, being the screen's only row, was always selected and covered the side panel).
+- Text: no instructions in labels or tooltips; the board's info line keeps only the chip keys nothing else shows.
+- Dev: `econ day [day] [build|lost]`, `dayclick <slot#> [right]`, `daykind <kind> [n] [remove]`, `dayday <±n>`,
+  `quick <day>`, `quickkind <kind> [remove]`, `moment sunrise|after`, `sourcesday <day>`, and `econ ui` (the active
+  frame, the stack under it, popups and the tooltip, for checking Esc and leftovers).

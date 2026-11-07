@@ -210,6 +210,34 @@ namespace PalaceMod
             }
         }
 
+        /// <summary>A small icon on the bottom right corner (e.g. a padlock: can't be picked yet); null removes it.</summary>
+        public void SetCornerIcon(Sprite sprite, Color? color = null)
+        {
+            if (sprite == null)
+            {
+                if (corner != null) corner.gameObject.SetActive(false);
+                return;
+            }
+            if (corner == null)
+            {
+                var obj = new GameObject("Corner", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+                obj.transform.SetParent(body, false);
+                corner = obj.GetComponent<Image>();
+                corner.raycastTarget = false;
+                corner.preserveAspect = true;
+                var rect = corner.rectTransform;
+                rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(1f, 0f);
+                float side = Mathf.Clamp(Mathf.Min(Rect.sizeDelta.x, Rect.sizeDelta.y) * 0.5f, 10f, 18f);
+                rect.sizeDelta = new Vector2(side, side);
+                rect.anchoredPosition = new Vector2(side * 0.25f, -side * 0.25f);
+            }
+            corner.sprite = sprite;
+            corner.color = color ?? ModStyle.Bright;
+            corner.gameObject.SetActive(true);
+        }
+
+        private Image corner;
+
         private void ApplyFill()
         {
             if (Background == null) return;

@@ -17,6 +17,42 @@ namespace PalaceMod.Economy
     internal static class PlannerVisuals
     {
         public static readonly Color Red = new(0.86f, 0.36f, 0.30f);
+
+        // Plans compared with the one shown, in the order picked: a categorical set that reads on the dark panels and
+        // stays clear of the plan's own line (bright cream), the copper of costs and the red of shortfalls.
+        private static readonly Color[] Compare =
+        [
+            new(0.33f, 0.72f, 0.68f), // teal
+            new(0.66f, 0.55f, 0.86f), // violet
+            new(0.40f, 0.62f, 0.86f), // blue
+            new(0.88f, 0.56f, 0.24f), // orange
+            new(0.84f, 0.45f, 0.62f), // rose
+            new(0.60f, 0.77f, 0.36f), // green
+            new(0.89f, 0.80f, 0.36f), // yellow
+        ];
+
+        public static Color CompareColor(int i) => Compare[((i % Compare.Length) + Compare.Length) % Compare.Length];
+
+        /// <summary>Doing nothing, when compared: a neutral slate.</summary>
+        public static readonly Color NothingColor = new(0.56f, 0.60f, 0.64f);
+
+        /// <summary>A plain white square, tinted for colour keys.</summary>
+        public static Sprite Swatch
+        {
+            get
+            {
+                if (swatch != null) return swatch;
+                var tex = new Texture2D(4, 4, TextureFormat.RGBA32, false) { hideFlags = HideFlags.HideAndDontSave };
+                var pixels = new Color32[16];
+                for (int i = 0; i < pixels.Length; i++) pixels[i] = new Color32(255, 255, 255, 255);
+                tex.SetPixels32(pixels);
+                tex.Apply();
+                swatch = Sprite.Create(tex, new Rect(0, 0, 4, 4), new Vector2(0.5f, 0.5f));
+                swatch.hideFlags = HideFlags.HideAndDontSave;
+                return swatch;
+            }
+        }
+        private static Sprite swatch;
         private const float PadLeft = 62f, PadRight = 14f, PadTop = 40f, PadBottom = 30f;
 
         public static RectTransform Panel(Transform parent, string name, float width, float height, float alpha = 0.55f)
