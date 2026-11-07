@@ -50,6 +50,7 @@ namespace PalaceMod
                 "Opens Run Analytics on the Economy tab, to plan builds and upgrades.");
             DevCommands.Register("econ", Usage, Command);
             BuildFrames();
+            RegisterKeys();
         }
 
         public override void Update()
@@ -264,7 +265,8 @@ namespace PalaceMod
             "econ [open|check|dump [slot]|slots [all|income|text]|add <day> <slot> [level] [choice]|addmany <day> <type> <n>|ko <night> <slot>|" +
             "gold <night> <amount>|wisdom <n> <amount|auto>|remove <n>|move <n> <day>|order <n> up|down|level <n> <L>|choice <n> <key|#>|" +
             "branch <day|all> [name]|perk [list|<key|#> on|off|reset]|sources [day]|plan list|new [name]|copy|rename <name>|delete|use <n|name>|clear|" +
-            "compare <n|name|none>|picker [day] [build|ko|gold]|editor <n>|plans|perks|sourcesview]   economy planner";
+            "compare <n|name|none>|view|select <key>|press [key]|popup [select <row>|apply|close]|drag <chip> <day>|remove-chip|shift <±n>|undo|" +
+            "addview [day] [build|lose|gold]|addpick <slot#>|addkind <kind> [n]|addday <±n>|addselect <key>|addcommit|perksview|perktile <key> [look]|sourcesview]   economy planner";
 
         private string Command(string[] args)
         {
@@ -286,7 +288,6 @@ namespace PalaceMod
             void Done()
             {
                 Save();
-                hostDirty = true;
                 RefreshOpen();
             }
             switch (verb)
@@ -296,6 +297,14 @@ namespace PalaceMod
                 case "open":
                     Open();
                     return Feature<AnalyticsManager>.Instance?.FrameOpen == true ? "opened\n" + Summary(Project()) : throw new InvalidOperationException("didn't open; see the log");
+                case "capture":
+                {
+                    var shot = LevelCapture.Take(CastleCenter.instance.transform.position, args.Length > 2 ? float.Parse(args[2]) : 60f, args.Length > 3 ? float.Parse(args[3]) : 40f, 1400)
+                        ?? throw new InvalidOperationException("no picture");
+                    LevelCapture.SavePng(shot, args.Length > 1 ? args[1] : throw new ArgumentException("capture <png path> [half width] [half height]"));
+                    shot.Release();
+                    return "saved " + args[1];
+                }
                 case "check":
                 {
                     var problems = Check(s);
@@ -419,28 +428,82 @@ namespace PalaceMod
                     Done();
                     return "\n" + Summary(Project());
                 }
-                case "picker":
+                case "view":
+                case "board":
+                    if (board == null || host == null || !host.IsOpen) Open();
+                    return board != null ? "\n" + board.Describe() : throw new InvalidOperationException("the board isn't showing");
+                case "select":
+                    if (board == null) throw new InvalidOperationException("the board isn't showing");
+                    return board.Select(args.Length > 1 ? args[1] : throw new ArgumentException("select <key>")) ? "\n" + board.Describe() : throw new ArgumentException($"no element {args[1]}");
+                case "press":
                 {
-                    Open();
-                    pickMode = args.Length > 2 ? args[2] switch { "ko" => 1, "gold" => 2, _ => 0 } : 0;
-                    OpenPicker(args.Length > 1 ? int.Parse(args[1]) : w.FirstDay, null);
-                    return pickerFrame.IsOpen ? $"picker open on day {pickDay}, {pickerRows} buildings listed" : throw new InvalidOperationException("didn't open");
+                    if (board == null) throw new InvalidOperationException("the board isn't showing");
+                    if (args.Length > 1 && !board.Select(args[1])) throw new ArgumentException($"no element {args[1]}");
+                    var t = board.Selected ?? throw new InvalidOperationException("nothing selected on the board");
+                    t.Press();
+                    return ModPopup.Current != null ? $"popup \"{ModPopup.Current.RowNames.FirstOrDefault()}\" open: {string.Join(" | ", ModPopup.Current.RowNames)}" : "pressed " + t.Key;
                 }
-                case "editor":
+                case "popup":
                 {
-                    var a = Nth(1);
-                    Open();
-                    OpenEditor(a.Id);
-                    return editorFrame.IsOpen ? "editor open\n" + Describe(Project(), a) : throw new InvalidOperationException("didn't open");
+                    var pop = ModPopup.Current ?? throw new InvalidOperationException("no popup open");
+                    if (args.Length > 2 && args[1] == "select") { if (!pop.SelectRow(string.Join(" ", args.Skip(2)))) throw new ArgumentException("no such row"); }
+                    else if (args.Length > 1 && args[1] == "apply") pop.ApplySelected();
+                    else if (args.Length > 1 && args[1] == "close") pop.Close();
+                    return ModPopup.Current != null ? string.Join(" | ", ModPopup.Current.RowNames) : "popup closed";
                 }
-                case "plans":
-                    Open();
-                    OpenPlans();
-                    return plansFrame.IsOpen ? $"plans open, {f.Scenarios.Count} plans" : throw new InvalidOperationException("didn't open");
-                case "perks":
-                    Open();
-                    perksFrame.Open();
-                    return perksFrame.IsOpen ? "perks open" : throw new InvalidOperationException("didn't open");
+                case "drag":
+                    if (board == null) throw new InvalidOperationException("the board isn't showing");
+                    board.DebugDrop(args.Length > 2 ? args[1] : throw new ArgumentException("drag <chip key> <day>"), int.Parse(args[2]));
+                    return "\n" + board.Describe();
+                case "remove-chip":
+                {
+                    var g = board?.GroupOf(board.Selected) ?? throw new InvalidOperationException("select a chip first");
+                    RemoveGroup(Project(), g.Members);
+                    return "\n" + board.Describe();
+                }
+                case "shift":
+                {
+                    var g = board?.GroupOf(board.Selected) ?? throw new InvalidOperationException("select a chip first");
+                    MoveGroup(Project(), g.Members, null, Int(1));
+                    return "\n" + board.Describe();
+                }
+                case "undo":
+                    Undo();
+                    return board != null ? "\n" + board.Describe() : "undone";
+                case "addview":
+                {
+                    if (host == null || !host.IsOpen) Open();
+                    var mode = args.Length > 2 ? args[2] switch { "lose" or "ko" => PlannerAddMode.Lose, "gold" => PlannerAddMode.Gold, _ => PlannerAddMode.Build } : PlannerAddMode.Build;
+                    OpenAdd(args.Length > 1 ? int.Parse(args[1]) : w.FirstDay, mode);
+                    return addView != null && addFrame.IsOpen ? addView.Describe() : throw new InvalidOperationException("didn't open");
+                }
+                case "addpick":
+                    (addView ?? throw new InvalidOperationException("the Add screen isn't open")).DebugPickSlot(int.Parse(args[1].TrimStart('#')));
+                    return addView.Describe();
+                case "addkind":
+                    (addView ?? throw new InvalidOperationException("the Add screen isn't open")).DebugPickKind(args[1], args.Length > 2 ? int.Parse(args[2]) : 1);
+                    return addView.Describe();
+                case "addday":
+                    (addView ?? throw new InvalidOperationException("the Add screen isn't open")).ChangeDay(Int(1));
+                    return addView.Describe();
+                case "addselect":
+                    return (addView ?? throw new InvalidOperationException("the Add screen isn't open")).DebugSelect(args[1]) ? addView.Describe() : throw new ArgumentException($"no element {args[1]}");
+                case "addmap":
+                    return (addView ?? throw new InvalidOperationException("the Add screen isn't open")).DebugMap(args[1]);
+                case "addcommit":
+                    (addView ?? throw new InvalidOperationException("the Add screen isn't open")).DebugCommit();
+                    return board != null ? "\n" + board.Describe() : "added";
+                case "perksview":
+                    if (host == null || !host.IsOpen) Open();
+                    OpenPerks();
+                    return perksView != null && perksFrame.IsOpen ? perksView.Describe() : throw new InvalidOperationException("didn't open");
+                case "perktile":
+                {
+                    if (perksView == null || !perksFrame.IsOpen) throw new InvalidOperationException("the perks screen isn't open");
+                    if (!perksView.Select("perk:" + args[1])) throw new ArgumentException($"no perk {args[1]}");
+                    if (args.Length < 3 || args[2] != "look") perksView.Tiles["perk:" + args[1]].Press();
+                    return perksView.Describe();
+                }
                 case "sourcesview":
                     Open();
                     OpenSources();
