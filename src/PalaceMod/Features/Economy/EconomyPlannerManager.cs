@@ -87,6 +87,13 @@ namespace PalaceMod
             private static void Prefix(PerkUnrestrictedUpgrading __instance) => Capture(() => PerkCapture.Unrestricted(__instance));
         }
 
+        // Runs once on its first Update, then destroys itself: records the unlock levels before it lowers them.
+        [HarmonyPatch(typeof(ReduceChildrensBuildRequirementIfPerk), "Update")]
+        private static class ReduceChildrenCapturePatch
+        {
+            private static void Prefix(ReduceChildrensBuildRequirementIfPerk __instance) => Capture(() => PerkCapture.ReduceChildren(__instance));
+        }
+
         [HarmonyPatch(typeof(InterestPerk), "Start")]
         private static class InterestCapturePatch
         {
@@ -148,13 +155,24 @@ namespace PalaceMod
             }
         }
 
-        /// <summary>A new plan, starting with the castle's build on day 1 (every run's first step).</summary>
-        internal static PlannerScenario NewPlan(PlannerFile f, EconWorld w, string name)
+        /// <summary>A new, empty plan (the castle's build on day 1 is part of every plan: <see cref="FixCastle"/>).</summary>
+        internal static PlannerScenario NewPlan(PlannerFile f, EconWorld w, string name) => new() { Name = f.FreeName(name) };
+
+        /// <summary>Every run starts by building the castle on day 1: while it isn't built, that step is part of every
+        /// plan and of doing nothing, fixed on day 1. Plans don't store it (older ones did: those copies go).</summary>
+        private void FixCastle(PlannerFile f, EconWorld w)
         {
-            var plan = new PlannerScenario { Name = f.FreeName(name) };
             var castle = w.Slots.FirstOrDefault(s => s.IsCastle && !s.IsDependent && s.Steps.Count > 0);
-            if (castle != null) plan.Actions.Add(new EconAction { Day = 1, Slot = castle.Id, Level = 1 });
-            return plan;
+            string id = castle?.Id;
+            bool stored = id != null && f.Scenarios.Any(s => s.Actions.Any(a => a.IsStep && a.Slot == id && a.Level == 1));
+            f.CastleId = id;
+            if (castle == null || castle.Level >= 1 || w.FirstDay > 1) f.Fixed = null;
+            else if (f.Fixed == null || f.Fixed.Slot != id) f.Fixed = new EconAction { Id = "castle", Day = 1, Slot = id, Level = 1 };
+            if (stored)
+            {
+                f.Normalize();
+                Save();
+            }
         }
 
         /// <summary>A branch of <paramref name="parent"/> from <paramref name="day"/> on (int.MaxValue: all its steps,
@@ -184,7 +202,8 @@ namespace PalaceMod
             public List<string> PerkNotes = [];
             public string PlanName => File.FullName(Plan);
             public string OtherName => Other != null ? File.FullName(Other) : "doing nothing";
-            public bool InheritedFrom(EconAction a) => !Plan.Actions.Contains(a);
+            public bool InheritedFrom(EconAction a) => !Plan.Actions.Contains(a) && !File.IsFixed(a);
+            public bool IsFixed(EconAction a) => File.IsFixed(a);
         }
 
         internal Projection Project()
@@ -192,21 +211,15 @@ namespace PalaceMod
             var s = Snap();
             if (s == null) return null;
             var f = Plans(s.World.Level);
-            if (f.Fresh)
-            {
-                f.Fresh = false;
-                if (f.Scenarios.Count == 1 && f.Scenarios[0].Actions.Count == 0)
-                {
-                    var seeded = NewPlan(f, s.World, f.Scenarios[0].Name);
-                    f.Scenarios[0].Actions.AddRange(seeded.Actions);
-                    Save();
-                }
-            }
+            f.Fresh = false;
+            FixCastle(f, s.World);
             var p = new Projection { Snap = s, File = f, Plan = f.CurrentScenario, Other = f.CompareScenario };
             p.Actions = f.Effective(p.Plan);
             p.World = EconPerks.Apply(s.World, f.EffectivePerks(p.Plan), p.PerkNotes);
             p.Result = EconSim.Run(p.World, p.Actions);
-            p.Baseline = p.Actions.Count == 0 ? p.Result : EconSim.Run(p.World, [], paybacks: false);
+            // Doing nothing still builds the castle on day 1.
+            var nothing = f.Fixed != null ? new List<EconAction> { f.Fixed } : [];
+            p.Baseline = p.Actions.Count == nothing.Count ? p.Result : EconSim.Run(p.World, nothing, paybacks: false);
             if (p.Other != null)
             {
                 p.OtherActions = f.Effective(p.Other);
@@ -722,7 +735,7 @@ namespace PalaceMod
                     $"{(e.IsHouse ? "house " : "")}{(e.IsWallOrTower ? $"wall/tower {e.CastleUpTags}t{e.CastleUpReceivers}r " : "")}{(e.HarvestedToday ? "harvested " : "")}{(e.Busy ? "busy " : "")}" +
                     $"{(e.IsCastle ? "castle " : "")}{(e.IsShrine ? "shrine " : "")}{(e.IsBuilding ? "building " : "")}{(e.OutpostTowers > 0 ? $"outpost:{e.OutpostTowers} " : "")}" +
                     $"mods [{string.Join(",", e.Modifiers.Select(m => $"{m.Kind}:{m.Step}/{m.Min}/{m.Max}{(m.Sustainable ? "S" : "")}{(m.PerkKey != null ? $"({m.PerkKey})" : "")}"))}] harbourField {e.HarbourField}" +
-                    (e.PerkMods.Count > 0 ? $" perkMods [{string.Join(",", e.PerkMods.Select(m => $"{m.Key}->#{m.Tree} c[{string.Join(" ", m.Cost)}] i[{string.Join(" ", m.Income)}]{(m.RootDifference != null ? $" root{m.RootDifference}" : "")}{(m.Applied ? " on" : " off")}{(m.Pending ? " pending" : "")}"))}]" : "") +
+                    (e.PerkMods.Count > 0 ? $" perkMods [{string.Join(",", e.PerkMods.Select(m => $"{m.Key}->#{m.Tree} c[{string.Join(" ", m.Cost)}] i[{string.Join(" ", m.Income)}]{(m.RootDifference != null ? $" root{m.RootDifference}" : "")}{(m.Children != null ? $" unlocks[{string.Join(" ", m.Children.Select((k, j) => $"#{k}>{m.ChildLevels[j]}"))}]" : "")}{(m.Applied ? " on" : " off")}{(m.Pending ? " pending" : "")}"))}]" : "") +
                     $"\n      at ({e.MapX:0},{e.MapY:0}) steps {steps}");
             }
             if (s.Notes.Count > 0) lines.Add("  notes: " + string.Join("; ", s.Notes));

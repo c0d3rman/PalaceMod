@@ -119,25 +119,52 @@ namespace PalaceMod
         /// <summary>What a slot's next step is that day, for a pick ("build", "to level 2").</summary>
         private static string StepWord(EconSlot e) => e.Level == 0 ? "build" : $"to level {e.Level + 1}";
 
-        /// <summary>Slots that can be picked that day: buildable or upgradable (Build), standing (Lose).</summary>
-        private List<EconSlot> Candidates()
+        /// <summary>Every slot that gets a marker: what can be built or upgraded, and what can't (yet), greyed.</summary>
+        private List<EconSlot> Shown() => state.Slots.Where(e => !e.IsDependent && e.Steps.Count > 0).ToList();
+
+        /// <summary>The state with the picks done too (picks unlock others: a mill its fields, a wall the house behind it).</summary>
+        private EconWorld after;
+        /// <summary>Gold left on the day after the plan's steps and the picks.</summary>
+        private int left;
+
+        /// <summary>Why a slot can't be picked that day (null: it can). <paramref name="money"/>: only the gold is missing.</summary>
+        private string Why(EconSlot e, out bool money)
         {
-            if (Mode == PlannerAddMode.Build)
-                return state.Slots.Where(e => !e.IsDependent && e.Steps.Count > 0 && e.Active && e.Level < e.MaxLevel && e.Level < e.Steps.Count
-                    && !e.Busy && EconSim.CanUpgrade(state, e)).ToList();
+            money = false;
+            if (Picks.Any(k => k.Slot == e.Index)) return null;
             if (Mode == PlannerAddMode.Lose)
             {
-                var lost = new HashSet<string>(P.Actions.Where(a => a.Kind == EconActionKind.KnockOut && a.Day == Day).Select(a => a.Slot));
-                return state.Slots.Where(e => !e.IsDependent && e.Steps.Count > 0 && e.Level >= 1 && !e.Indestructible && !lost.Contains(e.Id)).ToList();
+                if (e.Level < 1) return $"Not built by night {Day}";
+                if (e.Indestructible) return "It can't be destroyed";
+                if (P.Actions.Any(a => a.Kind == EconActionKind.KnockOut && a.Day == Day && a.Slot == e.Id)) return $"Already marked lost on night {Day}";
+                return null;
             }
-            return [];
+            var s = after.Slots[e.Index];
+            if (s.Level >= s.MaxLevel) return s.Level == 0 ? "Not available in this mode" : $"Level {s.Level}, its highest";
+            if (EconSim.Blocker(after, s) is { } why) return why;
+            int cost = s.Steps[s.Level].Cost;
+            if (cost > left)
+            {
+                money = true;
+                return $"Costs {EconomyPlannerManager.Coin(cost)}: only {EconomyPlannerManager.Coin(Math.Max(0, left))} left on day {Day}";
+            }
+            return null;
         }
+
+        private string Why(EconSlot e) => Why(e, out _);
+
+        /// <summary>Slots that can be picked that day and aren't yet: buildable or upgradable and affordable (Build),
+        /// standing (Lose).</summary>
+        private List<EconSlot> Candidates() =>
+            Mode == PlannerAddMode.Gold ? [] : Shown().Where(e => Picks.All(k => k.Slot != e.Index) && Why(e) == null).ToList();
 
         private string KindOf(EconSlot e) => Mode == PlannerAddMode.Build && e.Level > 0 ? $"{e.TypeName}|{e.Level + 1}" : e.TypeName;
 
         private static float Distance(EconSlot e) => e.MapX * e.MapX + e.MapY * e.MapY;
 
-        private List<EconAction> Actions() => Picks.Select(k => new EconAction
+        private List<EconAction> Actions() => Acts(Picks);
+
+        private List<EconAction> Acts(IEnumerable<Pick> picks) => picks.Select(k => new EconAction
         {
             Kind = k.Kind, Day = Day, Slot = P.World.Slots[k.Slot].Id, Level = k.Level, Choice = k.Choice,
         }).ToList();
@@ -146,6 +173,11 @@ namespace PalaceMod
         {
             var existing = Picks.FirstOrDefault(k => k.Slot == e.Index);
             if (existing != null) Picks.Remove(existing);
+            else if (Why(e) is { } why)
+            {
+                Notify.Show($"{e.Label}: {Plain(why)}.", NotifyKind.Info, 3f, key: "econ-add");
+                return;
+            }
             else AddPick(e);
             focus = "marker:" + e.Index;
             Render();
@@ -156,25 +188,31 @@ namespace PalaceMod
             if (Mode == PlannerAddMode.Lose) Picks.Add(new Pick { Slot = e.Index, Kind = EconActionKind.KnockOut });
             else
             {
-                var step = e.Steps[e.Level];
+                var s = after.Slots[e.Index];
+                var step = s.Steps[s.Level];
                 string choice = null;
                 if (step.IsChoice)
                 {
                     int first = step.Branches.FindIndex(b => !b.Locked);
                     choice = step.Branches[first < 0 ? 0 : first].Key;
                 }
-                Picks.Add(new Pick { Slot = e.Index, Level = e.Level + 1, Choice = choice, Kind = EconActionKind.Step });
+                Picks.Add(new Pick { Slot = e.Index, Level = s.Level + 1, Choice = choice, Kind = EconActionKind.Step });
             }
         }
+
+        // Fields of a picked building first (picking a mill and then "Field" puts them around that mill), then nearest
+        // the castle.
+        private float Order(EconSlot e) => (e.Activator >= 0 && Picks.Any(k => k.Slot == e.Activator) ? 0f : 1e7f) + Distance(e);
 
         private void PickKind(string kind, int delta)
         {
             if (delta > 0)
             {
-                var next = Candidates().Where(e => KindOf(e) == kind && Picks.All(k => k.Slot != e.Index)).OrderBy(Distance).FirstOrDefault();
+                var next = Candidates().Where(e => KindOf(e) == kind).OrderBy(Order).FirstOrDefault();
                 if (next == null)
                 {
-                    Notify.Show("No more of those that day.", NotifyKind.Info, 2f, key: "econ-add");
+                    var blocked = Shown().Where(e => KindOf(e) == kind && Picks.All(k => k.Slot != e.Index)).Select(e => Why(e)).FirstOrDefault(w => w != null);
+                    Notify.Show(blocked != null ? Plain(blocked) + "." : "No more of those that day.", NotifyKind.Info, 3f, key: "econ-add");
                     return;
                 }
                 AddPick(next);
@@ -186,6 +224,33 @@ namespace PalaceMod
                 Picks.Remove(last);
             }
             focus = "kind:" + kind;
+            Render();
+        }
+
+        /// <summary>One more (or one fewer) of a picked building's fields, nearest it.</summary>
+        private void PickField(int owner, int delta)
+        {
+            var fields = EconomyPlannerManager.Fields(state, state.Slots[owner]);
+            if (delta > 0)
+            {
+                var o = state.Slots[owner];
+                var next = fields.Where(f => Picks.All(k => k.Slot != f.Index) && Why(f) == null)
+                    .OrderBy(f => (f.MapX - o.MapX) * (f.MapX - o.MapX) + (f.MapY - o.MapY) * (f.MapY - o.MapY)).FirstOrDefault();
+                if (next == null)
+                {
+                    var blocked = fields.Where(f => Picks.All(k => k.Slot != f.Index) && f.Level == 0).Select(f => Why(f)).FirstOrDefault(w => w != null);
+                    Notify.Show(blocked != null ? Plain(blocked) + "." : "No more fields to build there.", NotifyKind.Info, 3f, key: "econ-add");
+                    return;
+                }
+                AddPick(next);
+            }
+            else
+            {
+                var last = Picks.LastOrDefault(k => fields.Any(f => f.Index == k.Slot));
+                if (last == null) return;
+                Picks.Remove(last);
+            }
+            focus = (delta > 0 ? "field+:" : "field-:") + owner;
             Render();
         }
 
@@ -226,9 +291,26 @@ namespace PalaceMod
             });
             var steps = Mode == PlannerAddMode.Build ? P.Actions : P.Actions.Where(a => a.IsStep).ToList();
             state = EconSim.StateOn(w, steps, Math.Max(Day, w.FirstDay));
-            // Picks that can't be done on this day any more go.
-            var cands = new HashSet<int>(Candidates().Select(e => e.Index));
-            Picks.RemoveAll(k => !cands.Contains(k.Slot) || (Mode == PlannerAddMode.Lose) != (k.Kind == EconActionKind.KnockOut));
+            // Picks that can't be done on this day any more go (each with the picks before it done: a field needs its
+            // mill picked first). Gold doesn't drop a pick: the summary says the day is short, and Add waits.
+            Picks.RemoveAll(k => (Mode == PlannerAddMode.Lose) != (k.Kind == EconActionKind.KnockOut));
+            if (Mode == PlannerAddMode.Build)
+            {
+                var kept = new List<Pick>();
+                foreach (var k in Picks)
+                {
+                    var before = kept.Count == 0 ? state : EconSim.StateOn(w, steps.Concat(Acts(kept)).ToList(), Math.Max(Day, w.FirstDay));
+                    var s = before.Slots[k.Slot];
+                    if (EconSim.Blocker(before, s) != null || s.Level + 1 != k.Level) continue;
+                    kept.Add(k);
+                }
+                Picks.Clear();
+                Picks.AddRange(kept);
+            }
+            else if (Mode == PlannerAddMode.Lose) Picks.RemoveAll(k => state.Slots[k.Slot].Level < 1);
+            after = Mode == PlannerAddMode.Build && Picks.Count > 0 ? EconSim.StateOn(w, steps.Concat(Actions()).ToList(), Math.Max(Day, w.FirstDay)) : state;
+            preview = Picks.Count == 0 ? P.Result : EconSim.Run(P.World, P.Actions.Concat(Actions()).ToList(), paybacks: false);
+            left = EconomyPlannerManager.LeftOn(preview, Day);
 
             Top();
             float mapW = Mathf.Round(size.x * 0.6f), panelX = mapW + 24f, panelW = size.x - panelX;
@@ -291,6 +373,22 @@ namespace PalaceMod
             next.Label.alignment = TextAlignmentOptions.Center;
             next.Applied += () => ChangeDay(1);
             top.Add(next);
+            x += 56f;
+            if (m.AddMode == PlannerAddMode.Build)
+            {
+                // The day's budget: what it has to spend after the plan's builds, and what's left with the picks.
+                int avail = EconomyPlannerManager.LeftOn(P.Result, Day);
+                int cost = Picks.Sum(k => state.Slots[k.Slot].Steps[k.Level - 1].Cost);
+                string red = EconomyPlannerManager.RedHex;
+                string leftText = left < 0 ? $"<color=#{red}>{EconomyPlannerManager.Coin(left)} short</color>" : $"<b>{EconomyPlannerManager.Coin(left)}</b> left";
+                string text = Picks.Count == 0
+                    ? $"<b>{EconomyPlannerManager.Coin(avail)}</b> to spend <color=#{Dim}>on day {Day}</color>"
+                    : $"{EconomyPlannerManager.Coin(avail)} <color=#{Dim}>to spend · picks</color> {EconomyPlannerManager.Coin(cost)} <color=#{Dim}>·</color> {leftText}";
+                var budget = Words(root, text, x, 0f, size.x - x, TopH - 4f, 24f, ModStyle.Bright, TextAlignmentOptions.MidlineRight, ModStyle.BoldFont);
+                budget.enableAutoSizing = true;
+                budget.fontSizeMin = 16f;
+                budget.fontSizeMax = 24f;
+            }
             foreach (var t in new[] { prev, next })
                 t.Shown += _ => hover?.SetText(ModNumber.UsingController ? "Another day (LB/RB too); your picks stay if they can still be done." : "Another day (the shoulder buttons too); your picks stay if they can still be done.");
         }
@@ -332,30 +430,30 @@ namespace PalaceMod
             Vector3 Pos(int i) => snap.Objects.TryGetValue(i, out var o) && o != null ? o.transform.position : Vector3.zero;
             var all = state.Slots.Where(e => e.Steps.Count > 0 && snap.Objects.ContainsKey(e.Index)).ToList();
             map = ModMap.Create(holder.transform, mapSize, all.Select(e => Pos(e.Index)));
-            var cands = Mode == PlannerAddMode.Gold ? [] : Candidates();
-            var candSet = new HashSet<int>(cands.Select(e => e.Index));
-            foreach (var e in all)
-            {
-                if (candSet.Contains(e.Index) || e.IsDependent) continue;
-                bool built = e.Level >= 1;
-                map.AddDot(Pos(e.Index), built ? 9f : 6f, built ? G.Fade(ModStyle.Gold, 0.9f) : G.Fade(ModStyle.Dim, e.Active ? 0.9f : 0.45f));
-            }
-            var castle = state.Slots.FirstOrDefault(e => e.IsCastle && !e.IsDependent);
-            foreach (var e in cands.OrderBy(Distance))
+            if (Mode == PlannerAddMode.Gold) return;
+            // Every slot gets a marker. What can't take a step that day is greyed (its reason shows on hover), smaller
+            // if it's the game's rules that stop it and full size with its cost if only the gold is missing; those go
+            // under the ones that can be picked.
+            var marks = Shown().Where(e => snap.Objects.ContainsKey(e.Index))
+                .Select(e => (e, why: Why(e, out bool money), money)).OrderBy(t => t.why == null ? 2 : t.money ? 1 : 0).ThenBy(t => Distance(t.e)).ToList();
+            foreach (var (e, why, money) in marks)
             {
                 var slot = e;
-                var marker = map.AddMarker("marker:" + e.Index, Pos(e.Index), 30f, PlannerIcons.Kind(e.TypeName));
+                bool open = why == null;
+                var marker = map.AddMarker("marker:" + e.Index, Pos(e.Index), open || money ? 30f : 22f, PlannerIcons.Kind(e.TypeName));
                 Tiles[marker.Key] = marker;
                 var pick = Picks.FirstOrDefault(k => k.Slot == e.Index);
                 marker.SetOn(pick != null);
-                if (Mode == PlannerAddMode.Build && e.Level > 0) marker.SetBadge(PlannerIcons.Roman(e.Level), ModStyle.Gold);
-                if (Mode == PlannerAddMode.Lose) marker.SetFill(pick != null ? Color.Lerp(ModStyle.Panel, V.Red, 0.6f) : null);
                 marker.Badge.fontSize = 13f;
+                if (money && Mode == PlannerAddMode.Build && EconSim.NextCost(after.Slots[e.Index]) is int cost) marker.SetBadge(cost.ToString(), V.Red);
+                else if (e.Level > 0) marker.SetBadge(PlannerIcons.Roman(e.Level), ModStyle.Gold);
+                if (Mode == PlannerAddMode.Lose) marker.SetFill(pick != null ? Color.Lerp(ModStyle.Panel, V.Red, 0.6f) : null);
+                if (!open) marker.SetDim(true, money ? 0.55f : 0.38f);
                 marker.Applied += () => Toggle(slot);
                 marker.Shown += _ => ShowSlot(slot);
             }
-            if (cands.Count == 0 && Mode != PlannerAddMode.Gold)
-                Words(map.Root, Mode == PlannerAddMode.Build ? "Nothing can be built or upgraded that day: try a later day." : "Nothing is standing that night.",
+            if (marks.All(t => t.why != null) && Picks.Count == 0)
+                Words(map.Root, Mode == PlannerAddMode.Build ? "Nothing can be built or upgraded that day (hover a building to see why): try a later day." : "Nothing is standing that night.",
                     20f, 16f, mapSize.x - 40f, 30f, 22f, ModStyle.Gold, font: ModStyle.ButtonFont);
         }
 
@@ -365,8 +463,18 @@ namespace PalaceMod
             var now = P.World.Slots[e.Index];
             string what = Mode == PlannerAddMode.Lose
                 ? (e.Pays && e.Income > 0 ? $"pays {e.Income} that dawn" : "pays nothing")
-                : EconomyPlannerManager.NextStep(state, e);
+                : EconomyPlannerManager.NextStep(after, after.Slots[e.Index]);
             string level = e.Level == 0 ? "not built" : $"level {e.Level}{(e.Level != now.Level ? $" by day {Day}" : "")}";
+            bool picked = Picks.Any(k => k.Slot == e.Index);
+            if (!picked && Why(e) is { } why) what = $"<color=#{EconomyPlannerManager.RedHex}>{why}</color>";
+            else if (picked) what = $"picked: {(Mode == PlannerAddMode.Lose ? "lost" : EconomyPlannerManager.NextStep(state, e))} <color=#{Dim}>(click again to drop it)</color>";
+            // A mill's fields: how many there are and how many are built.
+            var fields = Mode == PlannerAddMode.Build ? EconomyPlannerManager.Fields(after, after.Slots[e.Index]) : [];
+            if (fields.Count > 0)
+            {
+                int built = fields.Count(f => f.Level > 0);
+                what += $" <color=#{Dim}>· {fields[0].TypeName}s: {built} of {fields.Count} built{(after.Slots[e.Index].Level == 0 ? $" once it's built" : "")}</color>";
+            }
             hover.text = $"<b>{e.Label}</b>  <color=#{Dim}>{level}</color>\n{what}";
         }
 
@@ -377,8 +485,6 @@ namespace PalaceMod
         private void Strip(float width, float y, float height)
         {
             var w = P.World;
-            var acts = P.Actions.Concat(Actions()).ToList();
-            preview = Picks.Count == 0 ? P.Result : EconSim.Run(P.World, acts, paybacks: false);
             var days = P.Result.Days;
             if (days.Count == 0) return;
             const float gutter = 58f;
@@ -437,8 +543,8 @@ namespace PalaceMod
         {
             float y = TopH + Gap;
             var w = P.World;
-            hover = Words(root, "", x, y, width, 54f, 20f, ModStyle.Gold, wrap: true);
-            y += 60f;
+            hover = Words(root, "", x, y, width, 80f, 20f, ModStyle.Gold, wrap: true);
+            y += 86f;
             if (Mode == PlannerAddMode.Gold)
             {
                 var holder = new GameObject("Gold", typeof(RectTransform), typeof(VerticalLayoutGroup));
@@ -463,7 +569,10 @@ namespace PalaceMod
 
             // Kinds.
             var cands = Candidates();
-            var groups = cands.GroupBy(KindOf).OrderBy(g => w.Slots[g.First().Index].EverPays ? 0 : 1).ThenBy(g => g.First().TypeName).ThenBy(g => g.Key).ToList();
+            // Kinds that can take one more, kinds already picked (to see and drop them), and kinds only the gold stops
+            // (greyed, with their cost).
+            var poor = Mode == PlannerAddMode.Build ? Shown().Where(e => Picks.All(k => k.Slot != e.Index) && Why(e, out bool money) != null && money).ToList() : [];
+            var groups = cands.Concat(Picks.Select(k => state.Slots[k.Slot])).Concat(poor).GroupBy(KindOf).OrderBy(g => w.Slots[g.First().Index].EverPays ? 0 : 1).ThenBy(g => g.First().TypeName).ThenBy(g => g.Key).ToList();
             Words(root, Mode == PlannerAddMode.Build ? "By kind <size=80%><color=#" + Dim + ">(each press picks the next nearest the castle)</color></size>" : "By kind",
                 x, y, width, 24f, 20f, ModStyle.Gold, font: ModStyle.BoldFont);
             y += 28f;
@@ -477,30 +586,41 @@ namespace PalaceMod
                 var e = g.First();
                 string kind = g.Key;
                 int picked = Picks.Count(k => KindOf(state.Slots[k.Slot]) == kind);
+                int free = g.Count(x => cands.Contains(x));
+                bool tooDear = free == 0 && g.Any(x => poor.Contains(x));
+                string why = tooDear ? Why(g.First(x => poor.Contains(x))) : null;
                 string name = Mode == PlannerAddMode.Build && e.Level > 0 ? $"{PlannerIcons.Short(e.TypeName)} → {PlannerIcons.Roman(e.Level + 1)}" : PlannerIcons.Short(e.TypeName);
-                string sub = Mode == PlannerAddMode.Build ? Plain(EconomyPlannerManager.NextStep(state, g.OrderBy(Distance).First())) : $"{g.Count()} standing";
+                var next = g.OrderBy(x => cands.Contains(x) ? 0 : 1).ThenBy(Distance).First();
+                string sub = Mode == PlannerAddMode.Build ? Plain(EconomyPlannerManager.NextStep(after, after.Slots[next.Index])) : $"{g.Count()} standing";
                 var t = Tile(root, "kind:" + kind, x + i % perRow * (kindW + 10f), y + i / perRow * (KindH + 8f), new Vector2(kindW, KindH),
-                    PlannerIcons.Kind(e.TypeName), $"{name} <size=80%><color=#{Dim}>×{g.Count()}</color></size>\n<size=72%><color=#{Dim}>{sub}</color></size>", 19f);
+                    PlannerIcons.Kind(e.TypeName), $"{name} <size=80%><color=#{Dim}>×{free}</color></size>\n<size=72%><color=#{Dim}>{sub}</color></size>", 19f);
                 t.Label.enableWordWrapping = true;
                 t.Label.lineSpacing = -14f;
                 t.SetOn(picked > 0);
                 if (picked > 0) t.SetBadge($"+{picked}");
+                if (tooDear)
+                {
+                    t.SetDim(true, 0.55f);
+                    if (picked == 0 && EconSim.NextCost(after.Slots[g.First().Index]) is int c) t.SetBadge(c.ToString(), V.Red);
+                }
                 t.Applied += () => PickKind(kind, 1);
                 t.RightClicked += () => PickKind(kind, -1);
-                t.Shown += _ => hover?.SetText($"<b>{e.TypeName}</b>: {g.Count()} {(Mode == PlannerAddMode.Build ? "can take this step" : "standing")}. " +
+                t.Shown += _ => hover?.SetText(why != null ? $"<b>{e.TypeName}</b>: <color=#{EconomyPlannerManager.RedHex}>{why}</color>" :
+                    $"<b>{e.TypeName}</b>: {free} more {(Mode == PlannerAddMode.Build ? "can take this step" : "standing")}. " +
                     (ModNumber.UsingController ? "A picks one more." : "Enter or click picks one more, right-click drops one."));
                 kinds.Add(t);
             }
-            if (Mode == PlannerAddMode.Lose && cands.Count > 1)
+            var standing = Mode == PlannerAddMode.Lose ? cands.Concat(Picks.Select(k => state.Slots[k.Slot])).ToList() : [];
+            if (Mode == PlannerAddMode.Lose && standing.Count > 1)
             {
                 int i = shown;
                 var all = Tile(root, "kind:*", x + i % perRow * (kindW + 10f), y + i / perRow * (KindH + 8f), new Vector2(kindW, KindH), null,
-                    $"Every building <size=80%><color=#{Dim}>×{cands.Count}</color></size>", 19f);
+                    $"Every building <size=80%><color=#{Dim}>×{standing.Count}</color></size>", 19f);
                 all.Applied += () =>
                 {
-                    bool everything = cands.All(e => Picks.Any(k => k.Slot == e.Index));
+                    bool everything = cands.Count == 0;
                     Picks.Clear();
-                    if (!everything) Picks.AddRange(cands.Select(e => new Pick { Slot = e.Index, Kind = EconActionKind.KnockOut }));
+                    if (!everything) Picks.AddRange(standing.Select(e => new Pick { Slot = e.Index, Kind = EconActionKind.KnockOut }));
                     focus = "kind:*";
                     Render();
                 };
@@ -518,7 +638,8 @@ namespace PalaceMod
             var rows = PickRows();
             foreach (var row in rows)
             {
-                float need = PickH + (row.Choice ? ChoiceTile + 6f : 0f) + 4f;
+                var fields = Mode == PlannerAddMode.Build && row.Members.Count == 1 ? EconomyPlannerManager.Fields(state, row.Slot) : [];
+                float need = PickH + (row.Choice || fields.Count > 0 ? ChoiceTile + 6f : 0f) + 4f;
                 if (y + need > bottom)
                 {
                     Words(root, $"<color=#{Dim}>and {rows.Count - rows.IndexOf(row)} more</color>", x, y, width, 22f, 18f, ModStyle.Gold);
@@ -536,13 +657,13 @@ namespace PalaceMod
                 t.Shown += _ => hover?.SetText($"{row.Slot.Label}: " + (ModNumber.UsingController ? "A drops it." : "Enter or click drops it."));
                 picksList.Add(t);
                 y += PickH + 4f;
-                if (row.Choice)
+                if (row.Choice || fields.Count > 0)
                 {
                     var pick = members[0];
                     var slot = state.Slots[pick.Slot];
                     var step = slot.Steps[pick.Level - 1];
                     var tiles = new List<ModTile>();
-                    for (int b = 0; b < step.Branches.Count; b++)
+                    for (int b = 0; row.Choice && b < step.Branches.Count; b++)
                     {
                         var br = step.Branches[b];
                         var icon = PlannerIcons.Choice(m.Snap(), slot, pick.Level, br.Key);
@@ -561,6 +682,30 @@ namespace PalaceMod
                         c.Shown += _ => hover?.SetText($"<b>{br.Name}</b>{(br.Locked ? " (locked)" : "")}{(income != 0 ? $" · {EconomyPlannerManager.Signed(income)} per dawn" : "")}\n<size=85%><color=#{Dim}>{br.Description}</color></size>");
                         tiles.Add(c);
                     }
+                    if (fields.Count > 0)
+                    {
+                        // Its fields, right here: − / + picks them nearest it (they unlock with it).
+                        float fx = x + 30f + (row.Choice ? step.Branches.Count * (ChoiceTile + 8f) + 18f : 0f);
+                        int owner = pick.Slot;
+                        int picked = Picks.Count(k => fields.Any(f => f.Index == k.Slot));
+                        string kind = fields[0].TypeName;
+                        var minus = Tile(root, "field-:" + owner, fx, y, new Vector2(ChoiceTile, ChoiceTile), null, "−", 26f);
+                        minus.Label.alignment = TextAlignmentOptions.Center;
+                        minus.SetDim(picked == 0, 0.45f);
+                        minus.Applied += () => PickField(owner, -1);
+                        var plus = Tile(root, "field+:" + owner, fx + ChoiceTile + 6f, y, new Vector2(ChoiceTile, ChoiceTile), PlannerIcons.Kind(kind), null);
+                        plus.SetBadge("+", ModStyle.Bright);
+                        plus.Applied += () => PickField(owner, 1);
+                        int now = fields.Count(f => Picks.All(k => k.Slot != f.Index) && Why(f) == null);
+                        int later = fields.Count(f => f.Level == 0 && Picks.All(k => k.Slot != f.Index) && Why(f, out bool poorOnly) != null && !poorOnly);
+                        string fieldText = $"{kind}s <b>{picked}</b> <color=#{Dim}>· {now} more now{(later > 0 ? $", {later} later" : "")}</color>";
+                        Words(root, fieldText, fx + 2f * (ChoiceTile + 6f) + 4f, y, width - (fx - x) - 2f * (ChoiceTile + 6f) - 4f, ChoiceTile, 18f, ModStyle.Gold, TextAlignmentOptions.MidlineLeft);
+                        string fieldHint = $"{kind}s of this {slot.TypeName}: {(ModNumber.UsingController ? "A on +/−" : "click + or −")} adds or drops one, nearest it. Each pays from the day it's built.";
+                        minus.Shown += _ => hover?.SetText(fieldHint);
+                        plus.Shown += _ => hover?.SetText(fieldHint);
+                        tiles.Add(minus);
+                        tiles.Add(plus);
+                    }
                     choiceRows.Add(tiles);
                     y += ChoiceTile + 6f;
                 }
@@ -574,9 +719,22 @@ namespace PalaceMod
             add.Label.alignment = TextAlignmentOptions.Center;
             add.SetFill(Picks.Count > 0 ? Color.Lerp(ModStyle.Panel, ModStyle.Accent, 0.32f) : null);
             add.SetDim(Picks.Count == 0, 0.5f);
+            int shortNow = EconomyPlannerManager.ShortOn(preview, Day), shortBefore = EconomyPlannerManager.ShortOn(P.Result, Day);
+            bool shortDay = Mode == PlannerAddMode.Build && Picks.Count > 0 && shortNow > 0 && shortNow >= shortBefore;
+            if (shortDay)
+            {
+                add.SetText($"Not enough gold on day {Day}");
+                add.SetFill(null);
+                add.SetWarning(true);
+            }
             add.Applied += () =>
             {
                 if (Picks.Count == 0) return;
+                if (shortDay)
+                {
+                    Notify.Show($"Day {Day} doesn't have the gold for all of these: drop some, or pick another day.", NotifyKind.Warning, 3f, key: "econ-add");
+                    return;
+                }
                 m.CommitAdd(P, Actions());
             };
             add.Shown += _ => hover?.SetText(summary);
@@ -710,13 +868,14 @@ namespace PalaceMod
         // ---- Dev ----------------------------------------------------------------------------------------------------
 
         internal string Describe() =>
-            $"{Mode} {(Mode == PlannerAddMode.Build ? "day" : "night")} {Day}: {map?.Markers.Count ?? 0} markers, {kinds.Count} kinds, {Picks.Count} picked " +
+            $"{Mode} {(Mode == PlannerAddMode.Build ? "day" : "night")} {Day}: {map?.Markers.Count ?? 0} markers, {kinds.Count} kinds, {Picks.Count} picked, {left} left, {Shown().Count(e => Why(e) != null)} greyed, selected {(frame?.Frame?.CurrentSelection as ModTile)?.Key ?? "-"} " +
             $"[{string.Join(", ", Picks.Select(k => $"{state.Slots[k.Slot].Label}{(k.Choice != null ? ":" + k.Choice : "")}"))}]; {Plain(Summary())}" +
-            $"\n  markers: {string.Join(", ", (map?.Markers ?? []).Take(12).Select(mk => $"{mk.Key}={state.Slots[int.Parse(mk.Key.Substring(7))].Label}"))}";
+            $"\n  markers: {string.Join(", ", (map?.Markers ?? []).Select(mk => $"{mk.Key}={state.Slots[int.Parse(mk.Key.Substring(7))].Label}"))}";
 
         internal void DebugPickSlot(int index)
         {
-            var e = Candidates().FirstOrDefault(x => x.Index == index) ?? throw new ArgumentException($"slot #{index} can't be picked {Day}");
+            var e = Shown().FirstOrDefault(x => x.Index == index) ?? throw new ArgumentException($"slot #{index} has no marker");
+            if (Picks.All(k => k.Slot != e.Index) && Why(e) is { } why) throw new ArgumentException($"slot #{index} can't be picked on day {Day}: {Plain(why)}");
             Toggle(e);
         }
 
@@ -748,7 +907,7 @@ namespace PalaceMod
         internal void DebugCommit()
         {
             if (Picks.Count == 0) throw new InvalidOperationException("nothing picked");
-            m.CommitAdd(P, Actions());
+            Tiles["commit"].Press();
         }
 
         private void Tick()

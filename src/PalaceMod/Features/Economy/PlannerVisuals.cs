@@ -8,8 +8,8 @@ using G = PalaceMod.AnalyticsGraph;
 
 /*
     The planner's drawings, from plain UI Images in the game's palette (AnalyticsGraph's primitives):
-      - Strip: gold per day as lines over the board's columns, with room below zero (a plan can overspend), red marks
-        under days that do, and the selected column lit.
+      - Strip: gold per day as lines over the board's columns, red marks
+        under days that are short of gold, and the selected column lit.
       - SourceBars: the income-sources chart.
 */
 namespace PalaceMod.Economy
@@ -28,14 +28,16 @@ namespace PalaceMod.Economy
             return panel;
         }
 
-        /// <summary>The value range and grid step for a gold strip over <paramref name="series"/> (room below zero when
-        /// a plan overspends).</summary>
+        /// <summary>The value range and grid step for a gold strip over <paramref name="series"/> (below zero only as far as a
+        /// flagged shortfall goes).</summary>
         public static (float Bottom, float Top, float Step) Range(IEnumerable<GraphSeries> series)
         {
             float min = 0f, max = 1f;
             foreach (var s in series)
                 foreach (var v in s.Values)
                     if (!float.IsNaN(v)) { min = Mathf.Min(min, v); max = Mathf.Max(max, v); }
+            // A plan can't spend gold it doesn't have (the board refuses it), so a dip below zero is only ever a small
+            // flagged shortfall: the strip shows it without giving a whole band to it.
             float step = G.NiceStep(Mathf.Max(1f, max - min) / 3f);
             float bottom = Mathf.Floor(min / step) * step, top = Mathf.Max(bottom + step, Mathf.Ceil(max / step) * step);
             return (bottom, top, step);
@@ -57,7 +59,7 @@ namespace PalaceMod.Economy
 
         /// <summary>
         /// Gold lines over columns whose centres are <paramref name="xs"/> (in <paramref name="plot"/>, bottom left
-        /// origin), with grid lines across <paramref name="width"/>, a red band below zero, a red tick under columns in
+        /// origin), with grid lines across <paramref name="width"/>, a red tick under columns in
         /// <paramref name="shortCols"/>, and a lit band behind column <paramref name="lit"/>. NaN breaks a line.
         /// </summary>
         public static void Strip(RectTransform plot, float width, float height, float[] xs, float colWidth, IList<GraphSeries> series,
@@ -69,12 +71,6 @@ namespace PalaceMod.Economy
                 var band = G.Rect(plot, "Lit", G.Fade(ModStyle.Gold, 0.08f));
                 band.anchoredPosition = new Vector2(xs[lit] - colWidth / 2f, 0f);
                 band.sizeDelta = new Vector2(colWidth, height);
-            }
-            if (range.Bottom < 0f)
-            {
-                var below = G.Rect(plot, "Below zero", G.Fade(Red, 0.12f));
-                below.anchoredPosition = Vector2.zero;
-                below.sizeDelta = new Vector2(width, Y(0f));
             }
             for (float v = range.Bottom; v <= range.Top + range.Step * 0.01f; v += range.Step)
             {

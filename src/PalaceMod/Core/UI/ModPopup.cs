@@ -252,21 +252,31 @@ namespace PalaceMod
 
         internal UIFrame Frame => frame;
 
-        // Closes on a click outside the panel.
+        // Closes on a click outside the panel. It closes when the button comes back up, not when it goes down: closed on
+        // the press, the screen below would become the active menu that same frame and take the press as a click of its
+        // own, on whatever is under the pointer (another chip, a tab, Back).
         private class OutsideClick : MonoBehaviour
         {
             public ModPopup Popup;
+            private bool pressedOutside;
 
             private void Update()
             {
-                if (Popup == null || !Popup.IsOpen) return;
+                if (Popup == null || !Popup.IsOpen) { pressedOutside = false; return; }
                 var mouse = Plugin.Input?.controllers?.Mouse;
-                bool down;
-                try { down = mouse != null ? mouse.GetButtonDown(0) || mouse.GetButtonDown(1) : Input.GetMouseButtonDown(0); }
+                bool down, up;
+                try
+                {
+                    down = mouse != null ? mouse.GetButtonDown(0) || mouse.GetButtonDown(1) : Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1);
+                    up = mouse != null ? mouse.GetButtonUp(0) || mouse.GetButtonUp(1) : Input.GetMouseButtonUp(0) || Input.GetMouseButtonUp(1);
+                }
                 catch { return; }
-                if (!down) return;
-                if (RectTransformUtility.RectangleContainsScreenPoint(Popup.panel, ModTile.MousePosition, null)) return;
-                Popup.Close();
+                if (down) pressedOutside = !RectTransformUtility.RectangleContainsScreenPoint(Popup.panel, ModTile.MousePosition, null);
+                if (up && pressedOutside)
+                {
+                    pressedOutside = false;
+                    Popup.Close();
+                }
             }
         }
     }
