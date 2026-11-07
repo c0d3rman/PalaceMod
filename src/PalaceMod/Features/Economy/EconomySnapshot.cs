@@ -75,6 +75,7 @@ namespace PalaceMod.Economy
             foreach (var group in w.Slots.GroupBy(s => s.Id).Where(g => g.Count() > 1))
                 foreach (var s in group.Skip(1)) s.Id += $"#{s.Index}";
             Label(w);
+            PlannerReach.Apply(w);
 
             var player = PlayerInteraction.instance;
             var cycle = DayNightCycle.Instance;
