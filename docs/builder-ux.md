@@ -231,7 +231,7 @@ returns), Leave (back to the pack screen, map unloaded), Studio settings (label 
   View dropdown.
 - **Labels** are one pooled screen-space canvas, as in `Features/Previews/IncomeLabelManager.cs`. Each slot gets an
   icon (`Economy/PlannerIcons.Kind(typeName)`), a short name, the cost chain ("2·6·12◉") and a requirement badge
-  ("♜2" or "⤳ House 6").
+  ("Castle 2" or "after House 6"; the game's fonts have no chess or arrow glyphs).
   - Density follows zoom: icons only when zoomed out, full labels when zoomed in, and always full on hover and
     selection.
   - The View dropdown picks what the text shows.
@@ -250,7 +250,7 @@ returns), Leave (back to the pack screen, map unloaded), Studio settings (label 
   draws rings with ZTest Always, and labels are UI.
 - **Requirement arrows** (View ▾ Links, `RequirementArrows`): curved ground arrows from prerequisite to dependent,
   verdigris for slot links and gold for castle-level links (thicker for higher castle levels). The level shows in each
-  slot's badge ("♜2", "⤳ House 6 2") instead of a label on the arrow. Off / the selection's (and the hovered slot's) /
+  slot's badge ("Castle 2", "after House 6 2") instead of a label on the arrow. Off / the selection's (and the hovered slot's) /
   all; all while the Link tool is active, where the hovered slot's chain to the castle is brightened and the rest
   dimmed. Add-ons' links (walls to their gate) aren't drawn.
 
@@ -370,7 +370,7 @@ Code: `Studio/Requirements/` (`BuilderRequirementsManager` registers everything 
 - **Auto-link while placing** (View ▾ "Auto-link new slots", on by default; `Studio.AddPlaceHook`, inside the placing
   edit): a new house needs the nearest house within 25 m, else castle level 1; other kinds need castle level 1.
 - **Labels** (`SlotKinds.Provide`, a label provider): kind colour, the planner's icon, the cost chain with the level's
-  overrides, and the requirement badge ("♜2" castle level, "⤳ House 6" a slot, "★" from the start).
+  overrides, and the requirement badge ("Castle 2" castle level, "after House 6" a slot, "start" from the start).
 - Dev: `builder-req click [ctrl] [shift] [alt] <key>` (the Link tool's click), `link <key>|<key> > <key> [level]`,
   `chain branching|nearest|order [apply|popup]` (over the selection), `select <key>|<key>`, `view links off|selection|all / built on|off / xray on|off`, `label <key>`, `needs`; on a live level
   `slots`, `upgrade <slot>`, `unlocks <slot>`, `proxy <slot> [level]`; `import <pack.json>`, `play <pack> <level>`,
