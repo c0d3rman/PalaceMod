@@ -213,6 +213,7 @@ namespace PalaceMod.Builder.Model
                 if (l == null) { Error(p, "is empty"); continue; }
                 if (!Ids.IsValid(l.Id)) Error(p + ".id", "must be 1-64 characters of a-z, 0-9, '.', '_' or '-'");
                 else if (!levelIds.Add(l.Id)) Error(p + ".id", $"\"{l.Id}\" is used twice");
+                CheckColors(l.Colors, p + ".colors");
                 if (string.IsNullOrEmpty(l.Host) || (game != null && !game.HasHost(l.Host))) Error(p + ".host", $"unknown host map \"{l.Host}\"");
                 if (l.WaveSet != null)
                 {
@@ -255,6 +256,7 @@ namespace PalaceMod.Builder.Model
                         Error(pp + ".base", "must be \"mesh:<scenery mesh>\" (the map's or the scenery library's), optionally ending \"@<Map>\"");
                     CheckPos(pr.Pos, pp + ".pos", optional: false);
                     Range(pr.Scale, 0.1f, 10f, pp + ".scale");
+                    CheckColors(pr.Colors, pp + ".colors");
                 }
                 for (int j = 0; j < (l.SpawnLines?.Edit?.Count ?? 0); j++)
                 {
@@ -359,6 +361,12 @@ namespace PalaceMod.Builder.Model
                 var graph = edges.ToDictionary(kv => kv.Key, kv => kv.Value.Slot == null ? null : kv.Value, StringComparer.Ordinal);
                 foreach (var loop in LevelRequirements.Cycles(graph))
                     Error(paths[loop[0]], $"requirement loop: {string.Join(" needs ", loop.Concat([loop[0]]))}");
+            }
+
+            void CheckColors(string map, string path)
+            {
+                if (map != null && !LevelColors.IsMap(map))
+                    Error(path, $"must be a main map ({string.Join(", ", LevelColors.Maps)}) or left out for the level's own colours");
             }
 
             void Range(float? value, float min, float max, string path)

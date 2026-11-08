@@ -132,6 +132,8 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
                                    // castle removed and scenery hidden; "flat" = cleared + the map's ground replaced by
                                    // your terrain grid (section 7)
   "waveSet": "gorge-nights",       // a wave set id in this pack; absent = the map's vanilla nights
+  "colors": "Frostsee",            // another main map's colour scheme for the whole level (ground, scenery,
+                                   // buildings, light); absent = the host's
   "buildSlots": {
     "remove": ["House Variant (3)"],               // host slots to take away (slots they unlock never appear)
     "edit": [{ "ref": "Mill Variant",              // a host slot by name (ref slots <map>)
@@ -152,7 +154,8 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
                                                                      // north-south; which enemies may use it
     "remove": ["Forest", "Right Bridge"]   // host lines taken off the map: no enemies, routes or markers
   },
-  "props": [{ "id": "rock-1", "base": "mesh:Rock A", "pos": [x,y,z], "rotY": 0, "scale": 1.0, "solid": true }],
+  "props": [{ "id": "rock-1", "base": "mesh:Rock A", "pos": [x,y,z], "rotY": 0, "scale": 1.0, "solid": true,
+              "colors": "Totend" }],   // optional: keep that map's colours (absent = the level's)
   "terrain": { ... }                                  // section 7
 }
 ```
@@ -176,6 +179,10 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
   `scale` 0.1-10, relative to how the map itself uses the mesh (a map's own rocks are often scaled up: "Rock A" on
   Nordfels is ~30 m across at scale 1), so check sizes with `render --live`. Props are decoration and walls of rock;
   slots are the gameplay.
+- Colours: every map recolours the same materials, so a library prop takes the level's colours (a Totend tree on
+  Frostsee is Frostsee-coloured). `colors: "<Map>"` on a prop keeps that map's colours (the ops' `"colors":
+  "original"` picks the map the mesh comes from); `colors` on the level gives the whole level another map's scheme
+  (`{"op":"set","path":"levels[0].colors","value":"Totend"}`). Maps: Neuland and the nine main maps.
 
 ### Requirements (castle level, prerequisites, house chains)
 
@@ -285,8 +292,8 @@ and damage list. Use custom units sparingly; vanilla enemies are well balanced a
 | `set_slot` | `slot` (or `castle`), `requires` (null = back to the map's), `upgradeCap`, `costs` |
 | `remove_slot` | `slot` |
 | `chain` | `slots` [ids/names], `mode` `tree`\|`nearest`\|`order`, `first` (requirement of the root(s), default `"castle"`), `every` N (order/nearest: every N-th link needs one more castle level instead) |
-| `add_prop` | `mesh`, `at`/`pos`, `rotY`, `scale`, `solid`, `id` (auto) |
-| `scatter` | `mesh` (name or list), `count`, shape (`circle`/`rect`/`line`/`polygon`), `spacing` (3), `avoid` (6 m from slots and lines), `scale` [min,max], `solid`, `seed` |
+| `add_prop` | `mesh`, `at`/`pos`, `rotY`, `scale`, `solid`, `colors` (a map or `original`), `id` (auto) |
+| `scatter` | `mesh` (name or list), `count`, shape (`circle`/`rect`/`line`/`polygon`), `spacing` (3), `avoid` (6 m from slots and lines), `scale` [min,max], `solid`, `colors`, `seed` |
 | `remove_prop` | `id` or `ids` |
 | `add_spawn_line` | `id`, `at`/`pos`, `rotY`, `width`, `ground`, `large`, `flying` |
 | `move_spawn_line` | `line` (added id or host name), `at`/`pos`, `rotY` (added lines also `width`, flags) |
