@@ -235,6 +235,7 @@ namespace PalaceMod.Builder.Studio
             public Vector3 Offset;
             public float Yaw, Scale = 1f;
             public bool Solid = true;
+            public string Colors;
             public List<UpgradeEdit> Upgrades;
             public SlotRequirement Requires;
             public int? UpgradeCap;
@@ -256,7 +257,7 @@ namespace PalaceMod.Builder.Studio
                 {
                     var d = lv?.Props?.FirstOrDefault(p => p?.Id == i.Id);
                     if (d == null) continue;
-                    clips.Add(new Clip { Base = d.Base, IsProp = true, Offset = i.Pos - center, Yaw = i.Yaw, Scale = d.Scale, Solid = d.Solid });
+                    clips.Add(new Clip { Base = d.Base, IsProp = true, Offset = i.Pos - center, Yaw = i.Yaw, Scale = d.Scale, Solid = d.Solid, Colors = d.Colors });
                 }
                 else
                 {
@@ -303,7 +304,7 @@ namespace PalaceMod.Builder.Studio
                         lv.Props ??= [];
                         string id = UniqueId("prop", lv, made);
                         made.Add(id);
-                        lv.Props.Add(new PropDef { Id = id, Base = c.Base, Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(c.Yaw, 360f)), Scale = c.Scale, Solid = c.Solid });
+                        lv.Props.Add(new PropDef { Id = id, Base = c.Base, Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(c.Yaw, 360f)), Scale = c.Scale, Solid = c.Solid, Colors = c.Colors });
                         keys.Add("prop:" + id);
                     }
                     else

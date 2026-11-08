@@ -183,6 +183,7 @@ namespace PalaceMod.Builder.Studio
         public static void Reconcile(LevelDef lv)
         {
             if (lv == null || Root == null) return;
+            StudioServices.Colors?.ApplyLevel(lv.Colors);
             var seen = new HashSet<string>(StringComparer.Ordinal);
             bool empty = LevelBases.IsEmpty(lv);
             ordered.Clear();
@@ -244,6 +245,7 @@ namespace PalaceMod.Builder.Studio
                 item.Pos = LayoutScene.ToVector(prop.Pos);
                 item.Yaw = prop.RotY;
                 EnsureProxy(item, () => LayoutScene.MakeProp(Scene, b, "edit " + prop.Id, item.Pos, item.Yaw, 1f, false));
+                StudioServices.Colors?.Paint(item.Proxy, b, prop.Colors);
                 item.Proxy.transform.SetParent(Root, true);
                 item.Proxy.transform.SetPositionAndRotation(item.Pos, Quaternion.Euler(0f, item.Yaw, 0f) * b.Upright);
                 item.Proxy.transform.localScale = b.Scale * Mathf.Clamp(prop.Scale, 0.1f, 10f);

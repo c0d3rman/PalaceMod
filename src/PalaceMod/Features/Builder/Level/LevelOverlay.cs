@@ -46,6 +46,8 @@ namespace PalaceMod.Builder.Level
                 GroundLayer.Apply(scene, pack, level, issues);
                 return;
             }
+            // The level's colour scheme (the Studio applies it itself while editing).
+            if (level.Colors != null) Library.MapColors.ApplyLevel(level.Colors);
             if (!HasEdits(level)) return;
             int moved = 0, added = 0, removed = 0, props = 0, lines = 0, wired = 0;
             var all = LayoutScene.Slots(scene);
@@ -158,7 +160,8 @@ namespace PalaceMod.Builder.Level
                 // The host's own scenery first, then the cross-map library (Library/SceneryLibrary).
                 if (prop.Base == null || !bases.TryGetValue(prop.Base, out var b)) b = Library.SceneryLibrary.Resolve(scene, prop.Base);
                 if (b == null) { issues.Add(Warn($"prop \"{prop.Id}\": no scenery \"{prop.Base}\" on {level.Host} or in the library")); continue; }
-                LayoutScene.MakeProp(scene, b, prop.Id, LayoutScene.ToVector(prop.Pos), prop.RotY, Mathf.Clamp(prop.Scale, 0.1f, 10f), prop.Solid);
+                var go = LayoutScene.MakeProp(scene, b, prop.Id, LayoutScene.ToVector(prop.Pos), prop.RotY, Mathf.Clamp(prop.Scale, 0.1f, 10f), prop.Solid);
+                if (prop.Colors != null) Library.MapColors.Paint(go, b, prop.Colors);
                 props++;
             }
 

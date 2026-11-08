@@ -47,10 +47,12 @@ Stages 3 to 7 repeat many times, so their actions are one or two inputs each, wi
 
 ```text
 Title / pause menu
-  └ Builder (home: packs)                      ModFrame, as today (PackListPage)
-      └ Pack (Units · Wave Sets · Levels · Pack · Problems)
-          ├ Levels row "Open"  ───────────────►  STUDIO (in-world, on the level's map)
-          └ "New level" → Start popup ────────►  STUDIO
+  └ Builder home (My Levels · My Enemies)      ModFrame, wide tabs of preview tiles (Designs/LibraryHome.cs)
+      ├ level tile ─────────────────────────►  STUDIO (in-world, on the level's map)
+      ├ "New level" → Start popup ──────────►  STUDIO
+      ├ enemy tile / "New enemy" ───────────►  ENEMY STUDIO (StudioServices.Enemies; else the unit page)
+      ├ right-click: Rename · Duplicate · Delete · Export
+      └ Import · Export (packs exist only here)
 STUDIO
   ├ Edit mode: toolbar · palette · inspector/outliner/level · top bar · status line
   ├ popups: context menu, requirement picker, chain preset, start/base, nights, problems, Studio menu
@@ -58,7 +60,7 @@ STUDIO
   └ F5 ⇄ Play mode: the level as it plays + sandbox panel
 ```
 
-Leaving the Studio (Studio menu → Leave) returns to the pack screen where it was opened (today's `EditorReturn`).
+Leaving the Studio (Studio menu → Leave) returns to the home (`EditorReturn`; `BuilderEditor.CurrentPlace` counts the home).
 
 ## The Studio (edit mode)
 
@@ -486,6 +488,78 @@ Non-modal dock like the Studio's. Keys in brackets (context `BuilderPlay`).
      `EditorReturn.OnTransition` whenever it redirects.
 3. **Del deletes nothing and says "Nothing to undo today."** See "Input ownership".
 
+## Library: levels and enemies (R2-C1)
+
+The Builder is centred on two libraries, **My Levels** and **My Enemies**; packs exist only at export and import.
+
+**Storage** (`Model/LibraryStore.cs`, pure C#, tested in `tests/PalaceMod.Tests/LibraryTests.cs`):
+
+```text
+BepInEx/PalaceBuilder/library/
+  levels/<id>.json  levels/<id>.png      a level and the wave set(s) it owns; its saved preview
+  enemies/<id>.json enemies/<id>.png     one unit (enemy or custom troop); its saved portrait
+  assets.json  assets/                   the shared asset map and files
+  trash/                                 deleted and replaced items
+  .migrated                              written once the old packs were moved in (lists what moved)
+```
+
+- Item files are ordinary pack files (`palace-builder`, same version and migrations) holding one level or one unit,
+  plus `"library": {kind, created, origin}`. The file name is the id; ids never change (Rename sets the name).
+- **Wave sets belong to their level** (nights are per map: lines and gold are the host's). Their ids are unique across
+  the library; SaveWorkspace renames a clash in the workspace too.
+- **Enemies are shared**: any level spawns any library enemy by its plain unit id. Custom player troops live in the same
+  library (shown with an "ally" badge).
+- At runtime the library is one composed pack, id `library` (`LibraryStore.PackId`), registered in `PackRepository`
+  with the library root as its folder, so sessions, the unit factory, assets and validation are unchanged. Playing a
+  library level validates only that level, its nights and the units they use (`TestPacks.Play`).
+
+**Editing = workspaces** (`Designs/DesignLibrary.cs`). `DesignLibrary.OpenLevel(id)` gives a `PackDraft` holding that
+level, its nights and every enemy and asset; `OpenEnemies()` every enemy and no level. Both have pack id `library`
+(`draft.IsLibrary`). `draft.Save` writes only items that differ from the workspace's baseline (an untouched stale enemy
+never overwrites another workspace's save); enemies removed in the workspace go to trash. A dirty cached workspace is
+rebased on reopen (`PackDraft.RebaseLibrary`: untouched enemies follow the library). Level and enemy edits made from
+the Level Studio share its undo history and its save.
+
+**Previews** are saved snapshots, never live renders: `PackDraft.Saved` → `DesignLibraryManager` pictures the open
+Studio level from above (framing its items) into `levels/<id>.png` on every save; the Enemy Studio saves a portrait
+with `DesignLibrary.SavePreview(DesignKind.Enemy, id, texture)`. `DesignLibrary.Preview(kind, id)` loads a sprite,
+cached until the file changes.
+
+**Home** (`Designs/LibraryHome.cs`; `BuilderEditor.Open` opens it, the old pack list is `BuilderEditor.OpenPackList` for
+dev and installed packs). Two wide tabs, My Levels and My Enemies. A toolbar row (New, Import, Export, a search tile that
+types in place, Sort: Recent / Name / Map or Base) over a grid of 268×214 tiles: the saved snapshot (fallback: the map's
+thumbnail, or the base enemy's icon), the name, and one line of facts (map · nights; base · levels that use it).
+Click opens; right-click gives Open, Name, Duplicate, Export… (levels) or Used in (enemies), Delete… (to trash, with
+the levels that use an enemy named). Tiles of installed packs' levels and enemies follow under a header, dimmed; a
+click copies one into the library (with the enemies it needs). The Export popup picks levels and extra enemies (the
+ones the chosen levels use are listed as included) and saves a `.tfpack` (opens the exports folder) or copies a share
+code. In the Level Studio, the Studio menu's Share/Pack editor rows become Export… for library levels, and each spawn
+group in the nights page gets Edit enemy… / Customize enemy… / New enemy… (`Designs/EnemyEditing.cs`). Dev:
+`library home|open|enemy|new-enemy|rename|duplicate|delete|list|preview|export|code|import`.
+
+**Enemy Studio hook** (`StudioServices.Enemies`, `IStudioEnemyEditor.Open(draft, unitId | null, returnToLevelStudio,
+onReturn, out error)`): R2-C2 implements it; the Level Studio's spawn-group picker ("Edit enemy…", "New enemy…") and
+the home's enemy tiles call it. `DesignLibrary.NewEnemy(draft, baseRef, name)` adds a unit with a free id (one undo
+step).
+
+**Export / import.** `DesignLibrary.ExportFile/ShareCode(levels, enemies, name)` build a pack of the chosen levels, the
+chosen enemies, every enemy they use (spawns, troops, behaviours, transitively) and every asset named, in a staging
+folder, then write it with the existing `.tfpack`/share-code code. Every import (`IPackRepository.InstallNew`: share
+codes, `.tfpack` files, the import folder) adds the pack's levels and enemies to the library: an identical item is
+reused, an item from the same pack (`origin`) is replaced (old file to trash), any other clash gets a new id
+(`goblin-2`) and every reference (spawns, troops, behaviour params, `asset:` keys) is rewritten. Wave sets no level uses
+aren't imported (a warning says so).
+
+**Migration.** On the first scan, every pack folder in `packs/` (the player's own, e.g. `my-designs`, and installed
+demo packs) is imported with origin = its pack id and moved to `PalaceBuilder/migrated-packs/` (kept, never deleted).
+Unreadable packs stay where they are. Later folders in `packs/`, plugin and built-in packs stay installed packs: the
+home lists their levels read-only and copies one into the library to edit it. An old pack id still resolves (agent
+bridge `FindPack`, `palace.py`) to the levels that came from it.
+
+**Agent kit.** `palace.py` treats `library` as a pack (load composes the files, save writes changed items);
+`new <level> --host` makes a library level, `list` shows the library, `export` writes a `.tfpack` through the game
+(`agent library export ...`). `apply` checks only the levels its ops touched.
+
 ## Starting a level, and the empty map
 
 **Start popup** (`Studio/Start/StartPopup.cs`, `StartPopup.Open(draft)`; Pack › Levels › "New level"):
@@ -805,9 +879,18 @@ placed on any map.
   and logged once (Warn); a level that uses it gets the usual "no scenery" warning, and the rest still loads.
 - **Colours:** a library mesh is drawn with the loaded level's material of the same name (the FlatKit materials
   `ColorAndLightManager` recolours per level: Trees, Mountain, Buildings, Enemy, Ground Patches), so it takes the host
-  map's colours. "Keep the donor map's colours" (cloning a material with the donor level's `Colorscheme`) is deferred:
-  the colorschemes live in each level's own file as MonoBehaviour data, which needs a type-tree-free reader for that
-  class too.
+  map's colours by default. **Original colours** (`Library/MapColors.cs`): the catalog also records where each main
+  map's `Colorscheme` asset is (`colorschemes`: all ten live in `sharedassets1.assets`, found through each level's
+  `ColorAndLightManager.colorscheme` reference by the generator). `AssetFileReader.ReadColorscheme` reads one from
+  the install (fixed layout: the MonoBehaviour header, then the colour fields in declaration order with
+  `dayLightColor` skipped as readonly and the particles prefab reference in between; checked by name and exact
+  size) into a new `Colorscheme`, cached for the session. A prop's `colors: "<Map>"` swaps each material
+  `ColorAndLightManager` recolours (found by reference on its fields) for a clone coloured from that scheme the way
+  `ApplyColorScheme` does it; the clones' outlines follow the host's sunlight through dusk and dawn
+  (`OnColorChange`). Inspector: "Colours" on any scenery selection toggles between "Level's" and the map it comes
+  from (the library entry's "@Map" or home map; the host for its own scenery). The level's `colors` (Level tab,
+  "Colours") gives the whole level another map's scheme through the game's own `EasySwitchEntireColorSchemeTo` (set
+  before `ColorAndLightManager.Start` in play), keeping the host's weather particles.
 - **Refs:** placed library items are ordinary `props` entries with `base: "mesh:<name>"`, optionally
   `"mesh:<name>@<Map>"` should two maps ever ship a mesh by the same name (the catalog generator refuses that case
   today). `SceneryLibrary.Resolve(scene, base)` looks in the host's own scenery first (so existing levels look the

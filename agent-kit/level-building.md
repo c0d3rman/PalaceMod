@@ -5,9 +5,16 @@ Builder. This guide plus `palace.py` (next to it) is everything you need: the da
 the tools, and how to test. `reference.md` holds the generated tables (maps, buildings, enemies, vanilla curves,
 scenery); `palace.py ref ...` prints the same data as JSON.
 
-Everything you make is a **pack**: one JSON file (`pack.json`) that the game reads from its packs folder and reloads
-when it changes. You never edit the game; you write the pack (through `palace.py apply`), then test it in the running
-game through the **Agent bridge**.
+Everything you make goes into the player's **library**: each level is one file (`library/levels/<id>.json`, the level
+and its nights) and each custom enemy is one file (`library/enemies/<id>.json`). Any level can spawn any library enemy by
+its id. `palace.py` shows the whole library as one pack named `library` (pass `library` wherever a command takes a
+pack); the game reloads it within ~2 s of a change. Packs only exist for sharing: `palace.py export` writes a `.tfpack`
+of chosen levels with every enemy and asset they use. You never edit the game; you write the library (through
+`palace.py apply`), then test it in the running game through the **Agent bridge**.
+
+Old packs: packs the player had before the library existed were moved into it (the folders are kept in
+`PalaceBuilder/migrated-packs/`); their old pack id still works in every command and names the levels that came from
+that pack. A folder under `packs/` (an installed pack) is read and written as before.
 
 ## 1. The loop
 
@@ -15,13 +22,13 @@ game through the **Agent bridge**.
 2. `python3 palace.py ref build` – once (game running, bridge on): caches every map's layout and the enemy data
    (about a minute; it loads each map). Then `ref maps`, `ref slots <map>`, `ref render <map> -o base.png`.
 3. Design on paper first (section 9): map, entrances, castle defence, economy, nights.
-4. `python3 palace.py new <pack-id> --name "..."`, then `python3 palace.py level <pack-id> <level-id> --host <Map> --base cleared`
-   (its new wave set has no nights yet: the game refuses the pack until you add them with the `waves` op).
-5. Write ops to a JSON file and `python3 palace.py apply <pack-id> ops.json`. It saves, then prints `errors` and
-   `warnings` (offline checks). Fix errors before anything else.
-6. Look: `python3 palace.py render <pack-id> -o map.png --labels reqs` (then read the PNG), `show`, `economy --compare`,
-   `waves --compare`.
-7. Test in the game: `python3 palace.py test <pack-id> <level-id> --plan plan.json --shots shots/` (buys what a player
+4. `python3 palace.py new <level-id> --host <Map> --base cleared` (its new nights are empty: the game refuses to play
+   the level until you add them with the `waves` op). `python3 palace.py list` shows the library.
+5. Write ops to a JSON file and `python3 palace.py apply library ops.json --level <level-id>`. It saves, then prints
+   `errors` and `warnings` (offline checks of the levels the ops touched). Fix errors before anything else.
+6. Look: `python3 palace.py render library <level-id> -o map.png --labels reqs` (then read the PNG), `show`,
+   `economy --compare`, `waves --compare`.
+7. Test in the game: `python3 palace.py test library <level-id> --plan plan.json --shots shots/` (buys what a player
    would, plays the nights at 3x speed, reports each night), or `play` / `sandbox` and drive it step by step.
    `render --live` draws your overlay on a real top-down picture and the game's own enemy routes.
 8. Iterate: change the ops file and `apply --fresh` it (the level is emptied back to what `level` made, its nights kept,
@@ -94,6 +101,12 @@ All commands print JSON. Errors go to stderr as `{"error": "..."}` with exit cod
 
 ## 5. The pack format (every field)
 
+The library's files and shared packs use this one format. A library level file holds one level and the wave set it
+uses (`levels: [one]`, `waveSets: [its nights]`) plus a `"library": {kind, created, origin}` field; an enemy file holds
+`units: [one]`; the library's assets map is `library/assets.json`. Wave set ids are unique across the library
+(`palace.py` names a level's nights `<level-id>-nights`). `palace.py` reads and writes them through the `library` pack,
+so you edit the composed view below.
+
 ```jsonc
 {
   "format": "palace-builder", "version": 2,          // fixed
@@ -119,6 +132,8 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
                                    // castle removed and scenery hidden; "flat" = cleared + the map's ground replaced by
                                    // your terrain grid (section 7)
   "waveSet": "gorge-nights",       // a wave set id in this pack; absent = the map's vanilla nights
+  "colors": "Frostsee",            // another main map's colour scheme for the whole level (ground, scenery,
+                                   // buildings, light); absent = the host's
   "buildSlots": {
     "remove": ["House Variant (3)"],               // host slots to take away (slots they unlock never appear)
     "edit": [{ "ref": "Mill Variant",              // a host slot by name (ref slots <map>)
@@ -139,7 +154,8 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
                                                                      // north-south; which enemies may use it
     "remove": ["Forest", "Right Bridge"]   // host lines taken off the map: no enemies, routes or markers
   },
-  "props": [{ "id": "rock-1", "base": "mesh:Rock A", "pos": [x,y,z], "rotY": 0, "scale": 1.0, "solid": true }],
+  "props": [{ "id": "rock-1", "base": "mesh:Rock A", "pos": [x,y,z], "rotY": 0, "scale": 1.0, "solid": true,
+              "colors": "Totend" }],   // optional: keep that map's colours (absent = the level's)
   "terrain": { ... }                                  // section 7
 }
 ```
@@ -164,6 +180,10 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
   `scale` 0.1-10, relative to how the map itself uses the mesh (a map's own rocks are often scaled up: "Rock A" on
   Nordfels is ~30 m across at scale 1), so check sizes with `render --live`. Props are decoration and walls of rock;
   slots are the gameplay.
+- Colours: every map recolours the same materials, so a library prop takes the level's colours (a Totend tree on
+  Frostsee is Frostsee-coloured). `colors: "<Map>"` on a prop keeps that map's colours (the ops' `"colors":
+  "original"` picks the map the mesh comes from); `colors` on the level gives the whole level another map's scheme
+  (`{"op":"set","path":"levels[0].colors","value":"Totend"}`). Maps: Neuland and the nine main maps.
 
 ### Requirements (castle level, prerequisites, house chains)
 
@@ -239,7 +259,9 @@ and damage list. Use custom units sparingly; vanilla enemies are well balanced a
 | `ref build [--maps A,B] [--force]` | cache catalog + map dumps from the game (needed once) |
 | `ref maps` / `ref slots <map> [--kind House]` / `ref buildings [--kind]` / `ref enemies [--player]` / `ref waves <map> [--raw]` / `ref scenery [map]` | reference data |
 | `ref render <map> -o f.png` / `ref doc` | base map picture (with offline enemy routes) / regenerate reference.md |
-| `new <pack>` / `level <pack> <level> --host M [--base map\|cleared\|flat] [--waves empty\|vanilla\|none] [--force]` | create (`--base flat` also runs a default `terrain_init`; `--force` replaces the level) |
+| `new <level> --host M [--base map\|cleared\|flat] [--waves empty\|vanilla\|none] [--name N] [--force]` | a new library level (`--base flat` also runs a default `terrain_init`; `--force` replaces it). `level library <level> --host M ...` is the same; `new <pack>` without `--host` / `level <pack> ...` still make an old-style pack folder |
+| `list` | the library: levels (map, nights, where they came from, whether a preview was saved) and enemies (base, which levels use them) |
+| `export "<name>" <level,...> [--enemies a,b]` | through the game: a `.tfpack` with those levels, the extra enemies, and every enemy and asset they use (JSON: `written` path) |
 | `apply <pack> ops.json [--level L] [--dry-run] [--fresh]` | run ops; saves; prints offline errors/warnings. `--fresh` first empties the level (nights kept) so the same file can be re-applied |
 | `check <pack> [--live]` | offline checks; `--live` adds the game's validator (exit 1 on errors) |
 | `show <pack> [level]` | the level as it will play: every slot, what it needs, costs, income, lines |
@@ -271,8 +293,8 @@ and damage list. Use custom units sparingly; vanilla enemies are well balanced a
 | `set_slot` | `slot` (or `castle`), `requires` (null = back to the map's), `upgradeCap`, `costs` |
 | `remove_slot` | `slot` |
 | `chain` | `slots` [ids/names], `mode` `tree`\|`nearest`\|`order`, `first` (requirement of the root(s), default `"castle"`), `every` N (order/nearest: every N-th link needs one more castle level instead) |
-| `add_prop` | `mesh`, `at`/`pos`, `rotY`, `scale`, `solid`, `id` (auto) |
-| `scatter` | `mesh` (name or list), `count`, shape (`circle`/`rect`/`line`/`polygon`), `spacing` (3), `avoid` (6 m from slots and lines), `scale` [min,max], `solid`, `seed` |
+| `add_prop` | `mesh`, `at`/`pos`, `rotY`, `scale`, `solid`, `colors` (a map or `original`), `id` (auto) |
+| `scatter` | `mesh` (name or list), `count`, shape (`circle`/`rect`/`line`/`polygon`), `spacing` (3), `avoid` (6 m from slots and lines), `scale` [min,max], `solid`, `colors`, `seed` |
 | `remove_prop` | `id` or `ids` |
 | `add_spawn_line` | `id`, `at`/`pos`, `rotY`, `width`, `ground`, `large`, `flying` |
 | `move_spawn_line` | `line` (added id or host name), `at`/`pos`, `rotY` (added lines also `width`, flags) |

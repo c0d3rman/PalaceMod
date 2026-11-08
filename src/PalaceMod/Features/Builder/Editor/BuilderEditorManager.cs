@@ -63,7 +63,7 @@ namespace PalaceMod
                 {
                     case "open":
                         BuilderEditor.Open();
-                        return BuilderEditor.EditorFocused ? "opened" : throw new InvalidOperationException("didn't open; see the log");
+                        return BuilderEditor.EditorFocused || LibraryHome.IsActive ? "opened" : throw new InvalidOperationException("didn't open; see the log");
                     case "pack":
                         BuilderEditor.OpenPack(Arg(args, 1));
                         return BuilderEditor.Draft != null ? $"editing {BuilderEditor.Draft.Pack.Id}" : throw new InvalidOperationException("didn't open");
