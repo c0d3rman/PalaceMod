@@ -37,6 +37,7 @@
     <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Requirements/ChainPreset.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Contracts/Contracts.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Sharing/ShareCodec.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Play/TestPacks.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Sharing/PackArchive.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Assets/GltfCheck.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Assets/Loaders.cs" />
