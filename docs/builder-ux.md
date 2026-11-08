@@ -745,9 +745,11 @@ at once. On release the graphs are **stale** (`IStudioTerrain.PathsStale`; the s
 and updates them on click). A local `GraphUpdateObject` costs a full scan (one-tile graphs), so `UpdatePaths` is a
 full `GroundGraphs.Scan`: 400-800 ms on a Nordfels field. Play reloads the map, so F5 needs no rescan of its own.
 
-**Dev:** `builder-terrain flat [cell] | brush <name> [size] | stroke [shift] <x> <z> ... | raise/flatten/smooth/ramp/
-paint/block/water ... | waterlevel | marks | king <x> <z> | snap | scan | grid | encode | save <pack> | clear`.
-`save` writes the shown terrain into a one-level pack; `builder-req play <pack>` plays it.
+**Dev:** `builder-terrain flat [cell] | host [cell] | brush <name> [size] | stroke [shift] <x> <z> ... |
+raise/flatten/smooth/ramp/paint/block/water ... | waterlevel | marks | king <x> <z> | walk <dx> <dz> <s> |
+probe <x> <z> [y] [r] | snap | scan | grid | encode | save <pack> | clear`. `host` puts a sculptable grid on the map's
+own ground; `walk` moves the king through his CharacterController (what he can climb); `probe` lists the colliders he
+meets around a point. `save` writes the shown terrain into a one-level pack; `builder-req play <pack>` plays it.
 
 **Not built (and why):**
 
