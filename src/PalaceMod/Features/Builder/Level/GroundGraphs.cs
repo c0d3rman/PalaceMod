@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Diagnostics;
 using HarmonyLib;
 using Pathfinding;
@@ -28,6 +29,7 @@ namespace PalaceMod.Builder.Level
         {
             var astar = AstarPath.active;
             if (astar == null) return -1;
+            RememberBake();
             var sw = Stopwatch.StartNew();
             var restore = new List<System.Action>();
             try
@@ -65,25 +67,73 @@ namespace PalaceMod.Builder.Level
             return sw.ElapsedMilliseconds;
         }
 
-        /// <summary>The bake kept only the walkable area around the castle; a rescan also finds cliff and rock tops and
-        /// the walls' tops. Those islands are made unwalkable on the ground graphs (enemies would snap onto them, and
-        /// the minimap would draw them).</summary>
+        // The baked graphs' walkable node centres per graph, taken before the first rescan in a scene.
+        private static int bakedScene = -1;
+        private static readonly Dictionary<string, List<Vector3>> baked = [];
+
+        private static void RememberBake()
+        {
+            var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            if (bakedScene == scene.handle) return;
+            bakedScene = scene.handle;
+            baked.Clear();
+            foreach (var g in AstarPath.active.data.graphs)
+            {
+                if (g == null) continue;
+                var points = new List<Vector3>();
+                g.GetNodes(n => { if (n.Walkable) points.Add((Vector3)n.position); });
+                baked[g.name] = points;
+            }
+        }
+
+        /// <summary>The bake kept only the areas the map uses; a rescan also finds cliff, rock and wall tops. Those
+        /// islands are made unwalkable on the ground graphs (enemies would snap onto them, and the minimap would draw
+        /// them). Kept: every area the bake had (on the host's ground), and the areas of the castle and of every spawn
+        /// line, so a walled-in spawn still shows as cut off.</summary>
+        /// <summary>What the last prune kept (dev).</summary>
+        public static string LastPrune = "";
+
         private static void PruneIslands()
         {
             var astar = AstarPath.active;
-            var castle = CastleCenter.instance != null ? CastleCenter.instance.transform.position
-                : PathCheck.Castle(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
-            if (astar == null || castle == null) return;
+            var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            var anchors = new List<Vector3>();
+            var castle = CastleCenter.instance != null ? CastleCenter.instance.transform.position : PathCheck.Castle(scene);
+            if (castle != null) anchors.Add(castle.Value);
+            // On the host's ground a spawn point lies just off the walkable area, and its nearest node can be a rock top:
+            // there the bake's areas say what's real. On a flat field the lines' areas count.
+            if (GroundLayer.Flat)
+                foreach (var line in LayoutScene.Lines(scene).Where(LayoutScene.IsGroundLine))
+                    anchors.Add(LayoutScene.LineCenter(line.transform));
+            if (astar == null || anchors.Count == 0) return;
             var drop = new List<GraphNode>();
+            LastPrune = "";
             foreach (var g in astar.data.graphs)
             {
                 if (g == null || g.name == "Enemy Units Air") continue;
                 var nn = NearestNodeConstraint.Walkable;
                 nn.graphMask = GraphMask.FromGraph(g);
-                var keep = astar.GetNearest(castle.Value, nn).node;
-                if (keep == null) continue;
-                uint area = keep.Area;
-                g.GetNodes(n => { if (n.Walkable && n.Area != area) drop.Add(n); });
+                var keep = new HashSet<uint>();
+                foreach (var p in anchors)
+                {
+                    var hit = astar.GetNearest(p, nn);
+                    if (hit.node != null) keep.Add(hit.node.Area);
+                }
+                // The bake's own areas, unless the host's ground is replaced.
+                int matched = 0, total = 0;
+                float far = 0f;
+                if (!GroundLayer.Flat && baked.TryGetValue(g.name, out var points))
+                    foreach (var p in points)
+                    {
+                        total++;
+                        var hit = astar.GetNearest(p, nn);
+                        if (hit.node == null) continue;
+                        float d = (hit.position - p).sqrMagnitude;
+                        if (d < 4f) { keep.Add(hit.node.Area); matched++; }
+                        else far = Mathf.Max(far, d);
+                    }
+                LastPrune += $"{g.name}: anchors {anchors.Count}, baked {matched}/{total} (worst miss {Mathf.Sqrt(far):0.0} m), areas kept {keep.Count}; ";
+                g.GetNodes(n => { if (n.Walkable && !keep.Contains(n.Area)) drop.Add(n); });
             }
             if (drop.Count == 0) return;
             astar.AddWorkItem(new AstarWorkItem(ctx =>

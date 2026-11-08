@@ -27,6 +27,7 @@ namespace PalaceMod
                     switch (sub)
                     {
                         case "spike":
+                            if (args.Length > 5) TerrainSpike.Region = new Vector4(F(args, 2), F(args, 3), F(args, 4), F(args, 5));
                             return TerrainSpike.Run(args.Length > 1 ? args[1] : "");
                         case "flat":
                         {

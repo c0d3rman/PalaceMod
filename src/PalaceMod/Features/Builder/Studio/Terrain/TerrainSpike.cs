@@ -14,6 +14,16 @@ namespace PalaceMod.Builder.Level
 {
     internal static class TerrainSpike
     {
+        /// <summary>x0, z0, x1, z1 for "region".</summary>
+        public static Vector4 Region;
+
+        private static string Path(Transform t)
+        {
+            var parts = new List<string>();
+            for (; t != null && parts.Count < 4; t = t.parent) parts.Insert(0, t.name);
+            return string.Join("/", parts);
+        }
+
         public static string Run(string what)
         {
             var sb = new StringBuilder();
@@ -130,6 +140,22 @@ namespace PalaceMod.Builder.Level
                     }
                     break;
                 }
+                case "region":
+                {
+                    // Ground/Obstacle-layer renderers in a box (args: x0 z0 x1 z1 via Run's caller), enabled or not.
+                    var box = Region;
+                    int n = 0;
+                    foreach (var r in Resources.FindObjectsOfTypeAll<MeshRenderer>())
+                    {
+                        if (r == null || r.gameObject.scene != scene || (r.gameObject.layer != 6 && r.gameObject.layer != 7)) continue;
+                        var b = r.bounds;
+                        if (b.max.x < box.x || b.min.x > box.z || b.max.z < box.y || b.min.z > box.w) continue;
+                        if (n++ > 40) break;
+                        var mf = r.GetComponent<MeshFilter>();
+                        sb.AppendLine($"{Path(r.transform)} layer={r.gameObject.layer} enabled={r.enabled} active={r.gameObject.activeInHierarchy} force={r.forceRenderingOff} readable={mf?.sharedMesh?.isReadable} mesh={mf?.sharedMesh?.name} y={b.min.y:0.0}..{b.max.y:0.0} comps={string.Join(",", r.GetComponents<Component>().Select(c => c.GetType().Name))}");
+                    }
+                    break;
+                }
                 case "scan":
                 {
                     if (astar == null) return "no AstarPath";
@@ -138,6 +164,7 @@ namespace PalaceMod.Builder.Level
                     sb.AppendLine($"scan as baked {ms} ms");
                     sb.AppendLine($"before {before}");
                     sb.AppendLine($"after  {Counts()}");
+                    sb.AppendLine(GroundGraphs.LastPrune);
                     break;
                 }
                 default:
