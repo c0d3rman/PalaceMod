@@ -912,12 +912,7 @@ class Ops:
         return f"scattered {added} props"
 
     def lines(self, lv):
-        out_ = []
-        for l in self.ref.map(lv["host"])["spawnLines"]:
-            out_.append({"name": l["name"], "center": l["center"]})
-        for a in ((lv.get("spawnLines") or {}).get("add") or []):
-            out_.append({"name": a["id"], "center": a["pos"]})
-        return out_
+        return level_lines(self.ref, lv)
 
     # ---- spawn lines -------------------------------------------------------------------------------------------------
 
@@ -949,6 +944,8 @@ class Ops:
                 return f"moved {op['line']}"
         if not any(l["name"] == op["line"] for l in self.ref.map(lv["host"])["spawnLines"]):
             raise Fail(f"no spawn line {op['line']!r}")
+        if op["line"] in (sl.get("remove") or []):
+            raise Fail(f"{op['line']!r} is removed; restore it first ({{\"op\": \"remove_spawn_line\", \"line\": \"{op['line']}\", \"restore\": true}})")
         edits = ensure(sl, "edit", [])
         e = next((x for x in edits if x.get("ref") == op["line"]), None)
         if e is None:
@@ -961,13 +958,45 @@ class Ops:
         return f"moved host line {op['line']}"
 
     def op_remove_spawn_line(self, op):
+        """{"op":"remove_spawn_line","line":"north"}: deletes an added line, or takes a host line off the map
+        (spawnLines.remove: no enemies, routes or markers). "restore": true puts a removed host line back."""
         lv = self.level(op)
-        sl = lv.get("spawnLines") or {}
-        before = len(sl.get("add") or [])
-        sl["add"] = [a for a in sl.get("add") or [] if a.get("id") != op["line"]]
-        if len(sl["add"]) == before:
-            raise Fail("only added spawn lines can be removed (move a host line out of the way instead, or don't spawn from it)")
-        return f"removed {op['line']}"
+        name = op["line"]
+        sl = ensure(lv, "spawnLines", {})
+        adds = sl.get("add") or []
+        if any(a.get("id") == name for a in adds):
+            if op.get("restore"):
+                raise Fail(f"{name!r} is an added line; restore only applies to the map's own lines")
+            sl["add"] = [a for a in adds if a.get("id") != name]
+            if not sl["add"]:
+                del sl["add"]
+            result = f"removed {name}"
+        else:
+            host = [l["name"] for l in self.ref.map(lv["host"])["spawnLines"]]
+            if name not in host:
+                raise Fail(f"no spawn line {name!r}; the map's lines: {host}, added: {[a.get('id') for a in adds]}")
+            removed = sl.get("remove") or []
+            if op.get("restore"):
+                if name not in removed:
+                    raise Fail(f"{name!r} isn't removed")
+                removed = [r for r in removed if r != name]
+                result = f"restored host line {name}"
+            else:
+                if name not in removed:
+                    removed.append(name)
+                result = f"removed host line {name}"
+            if removed:
+                sl["remove"] = removed
+            else:
+                sl.pop("remove", None)
+        if not sl:
+            lv.pop("spawnLines", None)
+        if not op.get("restore"):
+            ws = find_waveset(self.data, lv.get("waveSet")) if lv.get("waveSet") else None
+            n = sum(1 for night in (ws or {}).get("nights", []) for s in night.get("spawns", []) if s.get("line") == name)
+            if n:
+                result += f" (warning: {n} spawn group(s) in wave set {ws['id']!r} still use it; move them to another line)"
+        return result
 
     # ---- waves -------------------------------------------------------------------------------------------------------
 
@@ -1569,20 +1598,38 @@ class LevelGround:
         return True, round(dist[g] * self.cell, 1), pts[::3] + [pts[-1]], None
 
 
-def level_lines(ref, level):
-    """Spawn lines of the level: host lines (moved by edits) + added ones. [{name, center, points, ground, large, flying, added}]"""
+def removed_lines(level):
+    """Names of the host's spawn lines the level takes off the map (spawnLines.remove)."""
+    return list((level.get("spawnLines") or {}).get("remove") or [])
+
+
+def level_lines(ref, level, include_removed=False):
+    """Spawn lines of the level: host lines (moved by edits, minus removed ones) + added ones.
+    [{name, center, points, ground, large, flying, added}] (+ "removed": true with include_removed)."""
     m = ref.map(level["host"])
     sl = level.get("spawnLines") or {}
     edits = {e["ref"]: e for e in sl.get("edit") or [] if e.get("ref")}
+    removed = set(removed_lines(level))
     lines = []
     for l in m["spawnLines"]:
+        if l["name"] in removed and not include_removed:
+            continue
         c = list(l["center"])
         pts = [list(p) for p in l["points"]]
         e = edits.get(l["name"])
+        if e and e.get("rotY"):
+            # As the game turns it (Transform.RotateAround the middle, clockwise seen from above for positive yaw).
+            yaw = math.radians(e["rotY"])
+            cs, sn = math.cos(yaw), math.sin(yaw)
+            pts = [[c[0] + (p[0] - c[0]) * cs + (p[2] - c[2]) * sn, p[1], c[2] - (p[0] - c[0]) * sn + (p[2] - c[2]) * cs] for p in pts]
         if e and e.get("pos"):
             dx, dz = e["pos"][0] - c[0], e["pos"][2] - c[2]
             pts = [[p[0] + dx, p[1], p[2] + dz] for p in pts]
             c = list(e["pos"])
+        if l["name"] in removed:
+            lines.append({"name": l["name"], "center": c, "points": pts, "ground": l["smallGround"], "large": l["bigGround"], "flying": l["flying"],
+                          "added": False, "removed": True})
+            continue
         lines.append({"name": l["name"], "center": c, "points": pts, "ground": l["smallGround"], "large": l["bigGround"], "flying": l["flying"], "added": False})
     for a in sl.get("add") or []:
         yaw = math.radians(a.get("rotY", 0))
@@ -1872,6 +1919,20 @@ def check_pack(ref, data):
         # Lines and routes.
         lines = level_lines(ref, lv)
         used = used_lines(data, lv)
+        host_lines = [l["name"] for l in m["spawnLines"]]
+        added_ids = {a.get("id") for a in ((lv.get("spawnLines") or {}).get("add") or [])}
+        for ri, name in enumerate(removed_lines(lv)):
+            rp = f"{p}.spawnLines.remove[{ri}]"
+            if name in added_ids:
+                err(rp, f"{name!r} is an added line: delete it from spawnLines.add instead (remove_spawn_line does)")
+            elif name not in host_lines:
+                err(rp, f"no spawn line {name!r} on {lv['host']}; its lines: {host_lines}")
+            elif used is not None and name in used:
+                err(rp, f"spawn line {name!r} is removed, but wave set {lv['waveSet']!r} spawns from it: move those spawns to another line")
+            elif used is None and not lv.get("waveSet"):
+                h = ref.host(lv["host"])
+                if h and any(s.get("line") == name for n in h["vanillaWaves"].get("nights", []) for s in n.get("spawns", [])):
+                    err(rp, f"spawn line {name!r} is removed, but the map's own nights spawn from it: give the level a wave set")
         for l in lines:
             if l["added"]:
                 k = ground.index(l["center"][0], l["center"][2])
@@ -2076,7 +2137,12 @@ def kind_color(kind, castle=False):
     return (170, 120, 230)
 
 
-def render(ref, data, level, path, background=None, world=None, routes=None, labels="names", px=1400):
+# Route colours, one per spawn line (none of them the blocked-route red).
+ROUTE_COLORS = [(255, 140, 30), (60, 220, 255), (255, 90, 220), (160, 255, 60), (255, 240, 80), (140, 150, 255), (255, 255, 255),
+                (60, 255, 170), (255, 170, 170), (200, 120, 60)]
+
+
+def render(ref, data, level, path, background=None, world=None, routes=None, labels="names", px=1400, route_source="offline"):
     m = ref.map(level["host"])
     slots, castle, _ = effective_slots(ref, level)
     lines = level_lines(ref, level)
@@ -2142,12 +2208,19 @@ def render(ref, data, level, path, background=None, world=None, routes=None, lab
         cv.line(0, y, W, y, (255, 255, 255), 1, a=0.12)
         if gz % 40 == 0:
             cv.text(2, y + 2, str(gz), (220, 220, 220), 1, bga=0.4)
-    # Routes.
-    for r in routes or []:
-        col = (255, 120, 40) if r.get("reachable") else (255, 0, 0)
+    # Routes: one colour per line, named where they start and in the legend (blocked ones red).
+    route_keys = []
+    for ri, r in enumerate(routes or []):
+        col = ROUTE_COLORS[ri % len(ROUTE_COLORS)] if r.get("reachable") else (255, 0, 0)
         p = [P(a, b) for a, b in r.get("points") or []]
         for i in range(len(p) - 1):
-            cv.line(p[i][0], p[i][1], p[i + 1][0], p[i + 1][1], col, 2, a=0.8, dash=6)
+            cv.line(p[i][0], p[i][1], p[i + 1][0], p[i + 1][1], col, 3, a=0.9, dash=8)
+        if p and r.get("line"):
+            k = min(len(p) - 1, max(1, len(p) // 3))
+            cv.text(p[k][0] + 6, p[k][1] + 4, r["line"], col, 1, bga=0.7)
+        length = r.get("length")
+        route_keys.append((f"{r.get('line', '?')}" + (f" {length:.0f} m" if r.get("reachable") and length else " BLOCKED" if not r.get("reachable") else "")
+                           + (" OFF GRAPH" if r.get("warning") else ""), col))
     # Spawn lines.
     for l in lines:
         p = [P(q[0], q[2]) for q in l["points"]]
@@ -2199,11 +2272,24 @@ def render(ref, data, level, path, background=None, world=None, routes=None, lab
     # Legend.
     yy = 8
     for name, col in (("castle", KIND_COLORS[0][1]), ("economy", KIND_COLORS[1][1]), ("military", KIND_COLORS[2][1]), ("walls", KIND_COLORS[3][1]),
-                      ("special", (170, 120, 230)), ("spawn line", (200, 40, 60)), ("route", (255, 120, 40)), ("needs castle", (240, 196, 60)),
+                      ("special", (170, 120, 230)), ("spawn line", (200, 40, 60)), ("needs castle", (240, 196, 60)),
                       ("needs slot", (80, 200, 180))):
         cv.rect(W - 170, yy, W - 156, yy + 14, col)
         cv.text(W - 150, yy, name, (255, 255, 255), 2, bga=0.5)
         yy += 20
+    if route_keys:
+        # Bottom right: each route's colour, line and length.
+        tw = max(len(t) for t, _ in route_keys) * 6 + 30
+        yy = H - 18 * len(route_keys) - 30
+        cv.text(W - tw, yy, "routes" + (" (offline estimate)" if route_source == "offline" else " (game)"), (255, 255, 255), 1, bga=0.6)
+        yy += 16
+        for t, col in route_keys:
+            cv.rect(W - tw, yy + 2, W - tw + 14, yy + 9, col)
+            cv.text(W - tw + 20, yy, t, (255, 255, 255), 1, bga=0.6)
+            yy += 18
+    if routes and route_source == "offline":
+        cv.text(8, H - 28, "routes are an offline estimate: the game may pick another gap. check with: palace.py paths / render --live",
+                (255, 230, 160), 1, bga=0.7)
     cv.text(8, 8, f"{level.get('id')} on {level['host']}  x ->  z ^  (m)", (255, 255, 255), 2)
     cv.save(path)
     return {"written": str(Path(path).resolve()), "pixels": [W, H], "world": {"minX": round(x0, 1), "maxX": round(x1, 1), "minZ": round(z0, 1), "maxZ": round(z1, 1)}}
@@ -2539,6 +2625,7 @@ def cmd_show(env, args):
                      **({"upgradeCap": s.cap} if s.cap is not None else {}), **({"followsActivator": True} if s.follows else {})})
     ws, vanilla = level_waveset(ref, data, lv)
     out({"level": lv["id"], "host": lv["host"], "base": lv.get("base", "map"), "slots": rows, "spawnLines": level_lines(ref, lv),
+         **({"removedSpawnLines": removed_lines(lv)} if removed_lines(lv) else {}),
          "props": len(lv.get("props") or []), "terrain": bool(lv.get("terrain")), "waveSet": lv.get("waveSet") or "(vanilla)",
          "nights": len(ws.get("nights", [])), "warnings": warns})
 
@@ -2596,8 +2683,8 @@ def cmd_render(env, args):
         cap = g.agent(f"capture {raw} {args.pixels}", timeout=60)
         bg = read_png(raw)
         paths = g.agent("paths")
-        routes = [{"reachable": r["reachable"], "points": r["points"]} for r in paths.get("routes", [])]
-        out(render(ref, data, lv, o, background=bg, world=cap["world"], routes=routes, labels=args.labels))
+        routes = [{k: r.get(k) for k in ("line", "reachable", "points", "length", "warning")} for r in paths.get("routes", [])]
+        out(render(ref, data, lv, o, background=bg, world=cap["world"], routes=routes, labels=args.labels, route_source="game"))
     else:
         routes = offline_routes(ref, data, lv, slots, castle) if castle in slots and not args.no_routes else []
         out(render(ref, data, lv, o, routes=routes, labels=args.labels, px=args.pixels))
@@ -2605,10 +2692,17 @@ def cmd_render(env, args):
 
 def cmd_paths(env, args):
     g = Game(env)
+    if args.between:
+        x1, z1, x2, z2 = args.between
+        out(g.agent(f"reach {x1} {z1} {x2} {z2}", timeout=60))
+        return
     r = g.agent("paths rescan" if args.rescan else "paths", timeout=60)
     for route in r.get("routes", []):
         if not args.points:
             route.pop("points", None)
+    warnings = [f"{route['line']}: {route['warning']}" for route in r.get("routes", []) if route.get("warning")]
+    if warnings:
+        r["warnings"] = warnings
     out(r)
 
 
@@ -2896,9 +2990,11 @@ def main(argv=None):
     p.add_argument("--pixels", type=int, default=1400)
     p.add_argument("--no-routes", action="store_true")
 
-    p = sub.add_parser("paths", help="the game's own path check (level loaded)")
+    p = sub.add_parser("paths", help="the game's own path check (level loaded): each ground line's route to the castle")
     p.add_argument("--rescan", action="store_true")
-    p.add_argument("--points", action="store_true")
+    p.add_argument("--points", action="store_true", help="include each route's waypoints [[x, z], ...]")
+    p.add_argument("--between", nargs=4, type=float, metavar=("X1", "Z1", "X2", "Z2"),
+                   help="instead: whether each ground graph (small/large enemies, the king's) connects two points")
 
     p = sub.add_parser("play", help="load the level in the game (a custom run: real gold)")
     p.add_argument("pack")

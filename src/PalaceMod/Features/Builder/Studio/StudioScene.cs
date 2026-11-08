@@ -241,7 +241,8 @@ namespace PalaceMod.Builder.Studio
                 item.TypeName = "Spawn line" + (l.Flying && !l.Small && !l.Big ? " (flying)" : "");
                 item.Pos = edit?.Pos != null ? LayoutScene.ToVector(edit.Pos) : l.Center;
                 item.Yaw = edit?.RotY ?? 0f;
-                item.Moved = edit != null;
+                item.Removed = lv.SpawnLines?.Remove?.Contains(l.Name) == true;
+                item.Moved = edit != null && !item.Removed;
                 seen.Add(item.Key);
             }
             groupOf.Clear();

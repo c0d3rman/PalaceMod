@@ -50,6 +50,7 @@ namespace PalaceMod.Builder.Editor
             Add(priced, "repriced");
             Add(lv.Props?.Count ?? 0, (lv.Props?.Count ?? 0) == 1 ? "prop" : "props");
             Add(lv.SpawnLines?.Edit?.Count ?? 0, "spawn lines moved");
+            Add(lv.SpawnLines?.Remove?.Count ?? 0, "spawn lines removed");
             return parts.Count == 0 ? "no layout changes yet" : string.Join(", ", parts);
         }
     }

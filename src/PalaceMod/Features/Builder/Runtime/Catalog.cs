@@ -18,7 +18,7 @@ using UnityEngine;
 */
 namespace PalaceMod.Builder
 {
-    public sealed class Catalog : ICatalog, ITroopValidationContext
+    public sealed class Catalog : ICatalog, ITroopValidationContext, IHostWavesContext
     {
         private List<CatalogUnit> units;
         private List<CatalogWeapon> weapons;
@@ -52,6 +52,9 @@ namespace PalaceMod.Builder
         public bool HasHost(string scene) => Hosts.Any(h => h.Scene == scene);
         public IReadOnlyCollection<string> SpawnLines(string scene) => Hosts.FirstOrDefault(h => h.Scene == scene)?.SpawnLines.Select(l => l.Name).ToList();
         public bool HasPackUnit(string packId, string unitId) => PackUnitExists?.Invoke(packId, unitId) ?? false;
+
+        public IReadOnlyCollection<string> VanillaWaveLines(string scene) =>
+            Hosts.FirstOrDefault(h => h.Scene == scene)?.VanillaWaves?.Nights?.SelectMany(n => n?.Spawns ?? []).Select(s => s?.Line).Where(l => l != null).Distinct().ToList();
 
         public IReadOnlyCollection<string> TroopBuildings(string unitId)
         {

@@ -43,8 +43,8 @@ namespace PalaceMod.Builder.Studio
                     }
                     if (items.Any(i => i.Moved && (i.Kind is StudioItemKind.Slot or StudioItemKind.Line)))
                         page.Row("Reset to the map's", "", (string)null, Then(() => { foreach (var i in items.Where(i => i.Moved)) StudioEdits.ResetPose(i); }));
-                    bool restore = items.All(i => i.Kind == StudioItemKind.Slot && i.Removed);
-                    page.Row(restore ? "Restore" : items.All(i => i.Kind == StudioItemKind.Slot) ? "Remove" : "Delete", Dim(StudioKeys.Label(StudioKeys.Delete)), (string)null, Then(() => StudioEdits.Delete(keys.ToList())));
+                    bool restore = StudioEdits.WouldRestore(items);
+                    page.Row(restore ? "Restore" : items.All(StudioEdits.IsHostItem) ? "Remove" : "Delete", Dim(StudioKeys.Label(StudioKeys.Delete)), (string)null, Then(() => StudioEdits.Delete(keys.ToList())));
                 }
                 else
                 {
@@ -199,7 +199,7 @@ namespace PalaceMod.Builder.Studio
         }
 
         // Issue paths have a fixed shape: "levels[0].buildSlots.add[2].requires", "levels[0].props[1]".
-        private static readonly Regex PathRe = new(@"^levels\[(\d+)\]\.(buildSlots\.(add|edit|remove)|props|spawnLines\.(edit|add))\[(\d+)\]");
+        private static readonly Regex PathRe = new(@"^levels\[(\d+)\]\.(buildSlots\.(add|edit|remove)|props|spawnLines\.(edit|add|remove))\[(\d+)\]");
 
         /// <summary>The Studio item an issue path points at, or null.</summary>
         public static string KeyForPath(string path)
@@ -217,6 +217,7 @@ namespace PalaceMod.Builder.Studio
                 "buildSlots.remove" => At(lv.BuildSlots?.Remove) is string n ? "slot:" + n : null,
                 "props" => At(lv.Props)?.Id is string p ? "prop:" + p : null,
                 "spawnLines.edit" => At(lv.SpawnLines?.Edit)?.Ref is string l ? "line:" + l : null,
+                "spawnLines.remove" => At(lv.SpawnLines?.Remove) is string rl ? "line:" + rl : null,
                 _ => null,
             };
         }

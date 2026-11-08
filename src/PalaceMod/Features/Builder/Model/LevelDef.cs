@@ -115,6 +115,9 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("add")] public List<SpawnLineAdd> Add { get; set; }
         /// <summary>Moves the host's own spawn lines.</summary>
         [JsonProperty("edit")] public List<SpawnLineEdit> Edit { get; set; }
+        /// <summary>Names of the host's spawn lines to take off the map (no enemies, routes or markers); a wave that
+        /// spawns from one is an error.</summary>
+        [JsonProperty("remove")] public List<string> Remove { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
