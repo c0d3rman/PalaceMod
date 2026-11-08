@@ -4,7 +4,7 @@ using System.Linq;
 using Newtonsoft.Json.Linq;
 using PalaceMod.Builder.Model;
 
-// The packs a Studio session loads its host with (pure C#: unit-tested in tests/PalaceMod.Tests/TestPackTests.cs).
+// The pack a Studio test play loads its host with (the edit load uses Studio.EditPack) (pure C#: unit-tested in tests/PalaceMod.Tests/TestPackTests.cs).
 namespace PalaceMod.Builder.Studio.Play
 {
     public static class TestPacks
@@ -38,21 +38,6 @@ namespace PalaceMod.Builder.Studio.Play
                 }
             }
             copy.Units = copy.Units.Where(u => u?.Id != null && keep.Contains(u.Id)).ToList();
-            return copy;
-        }
-
-        /// <summary>The pack an edit load runs (as the shell opens a level): the level alone, without its nights or
-        /// units, so problems there don't stop the layout from being edited.</summary>
-        public static DesignPack Edit(DesignPack source, string levelId)
-        {
-            var copy = PackSerializer.Clone(source);
-            var only = copy.FindLevel(levelId);
-            only.WaveSet = null;
-            copy.Units.Clear();
-            copy.WaveSets.Clear();
-            copy.Levels = [only];
-            copy.Requires = null;
-            copy.Assets?.Clear();
             return copy;
         }
     }

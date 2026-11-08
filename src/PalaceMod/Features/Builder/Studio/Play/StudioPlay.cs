@@ -43,7 +43,7 @@ namespace PalaceMod.Builder.Studio.Play
         private bool arrivePending, teleportOnArrive;
         private int loadedFrame;
         private readonly Stopwatch swapTimer = new();
-        private long readyMs = -1;
+        private long readyMs = -1, loadedMs = -1;
         private float? savedCloudIn, savedCloudOut;
         private bool sandboxTouched;
 
@@ -121,7 +121,7 @@ namespace PalaceMod.Builder.Studio.Play
                 return;
             }
             Studio.View = view;
-            Swap(new SessionRequest { Pack = TestPacks.Edit(draft.Pack, levelId), LevelId = levelId }, StudioSessionKind.Edit);
+            Swap(new SessionRequest { Pack = Studio.EditPack(draft.Pack, levelId), LevelId = levelId }, StudioSessionKind.Edit);
         }
 
         public void Restart()
@@ -160,6 +160,7 @@ namespace PalaceMod.Builder.Studio.Play
         /// <summary>BuilderManager forwards host loads (SceneManager.sceneLoaded, the session's host only).</summary>
         internal void OnHostLoaded(Scene scene)
         {
+            if (Swapping && scene.name == Launcher.Current?.HostScene) loadedMs = swapTimer.ElapsedMilliseconds;
             if (Launcher.StudioKind != StudioSessionKind.Play || scene.name != Launcher.Current?.HostScene) return;
             // A load we didn't start (the end screen's Try Again, a retry): play goes on, from the castle.
             if (phase != Phase.ToPlay) teleportOnArrive = false;
@@ -177,14 +178,14 @@ namespace PalaceMod.Builder.Studio.Play
             {
                 readyMs = swapTimer.ElapsedMilliseconds;
                 LastSwapMs = readyMs;
-                Log.For<BuilderManager>().Info($"Studio: play ready in {readyMs} ms (clouds cleared)");
+                Log.For<BuilderManager>().Info($"Studio: play ready in {readyMs} ms (scene loaded at {loadedMs} ms)");
             }
             if (phase == Phase.ToEdit && !TransitionRunning && Launcher.StudioKind == StudioSessionKind.Edit &&
                 (Studio.Mode == StudioMode.Edit || Studio.Shell == null) && SceneManager.GetActiveScene().name == Launcher.Current?.HostScene)
             {
                 phase = Phase.Idle;
                 LastSwapMs = swapTimer.ElapsedMilliseconds;
-                Log.For<BuilderManager>().Info($"Studio: edit ready in {LastSwapMs} ms");
+                Log.For<BuilderManager>().Info($"Studio: edit ready in {LastSwapMs} ms (scene loaded at {loadedMs} ms)");
             }
             if (InPlay) SandboxActions.KeepGold();
         }
@@ -241,7 +242,7 @@ namespace PalaceMod.Builder.Studio.Play
         // ---- Music and clouds -------------------------------------------------------------------------------------
 
         /// <summary>The pointer is over the sandbox panel or a popup: clicks there aren't map clicks.</summary>
-        internal static bool PointerOverUI() => ModPopup.Current != null;
+        internal static bool PointerOverUI() => Studio.PointerOverUI || ModPopup.Current != null;
 
         /// <summary>Fades the music out (night music would otherwise carry on into the editor or the menus).</summary>
         internal static void StopMusic()

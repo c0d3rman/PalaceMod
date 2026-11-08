@@ -52,14 +52,14 @@ namespace PalaceMod.Builder.Studio.Play
                 Run(() => DebugActions.SetGold(v));
             }, 0, 99999, 10);
 
-            page.Header(DebugActions.IsNight ? $"Night {DebugActions.CurrentNight} of {DebugActions.NightCount}" : $"Day · next night {Math.Min(DebugActions.CurrentNight, DebugActions.NightCount)} of {DebugActions.NightCount}");
+            page.Header(DebugActions.IsNight ? $"Night {DebugActions.CurrentNight}/{DebugActions.NightCount}" : $"Day {Math.Min(DebugActions.CurrentNight, DebugActions.NightCount)}/{DebugActions.NightCount}");
             if (DebugActions.IsNight) page.Button("End night", () => Run(DebugActions.EndNight));
             else
             {
                 page.Button($"Start night [{PlayKeys.Label(PlayKeys.StartNight)}]", () => Run(DebugActions.StartNight));
                 page.Number("Jump to night", () => Math.Min(DebugActions.CurrentNight, DebugActions.NightCount), v => Run(() => DebugActions.JumpToNight(v)), 1, Math.Max(1, DebugActions.NightCount));
             }
-            page.Choice($"Speed [{PlayKeys.Label(PlayKeys.Slower)} {PlayKeys.Label(PlayKeys.Faster)}]", Speeds.Select(s => $"x{s:0.##}").ToList(),
+            page.Choice($"Speed {PlayKeys.Label(PlayKeys.Slower)} {PlayKeys.Label(PlayKeys.Faster)}", Speeds.Select(s => $"x{s:0.##}").ToList(),
                 () => Array.FindIndex(Speeds, s => Mathf.Approximately(s, DebugActions.Speed)), i => SetSpeed(Speeds[i]));
 
             page.Header("King");
