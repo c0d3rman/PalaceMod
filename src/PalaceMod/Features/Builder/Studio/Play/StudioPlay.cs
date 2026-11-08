@@ -194,7 +194,7 @@ namespace PalaceMod.Builder.Studio.Play
             arrivePending = false;
             if (teleportOnArrive && spot is Vector3 at)
             {
-                try { SandboxActions.Teleport(at, followers: false); }
+                try { SandboxActions.Teleport(Level.LayoutScene.Ground(at), followers: false); }
                 catch (Exception e) { Log.For<BuilderManager>().Warn($"Couldn't drop the king at {at}: {e.Message}"); }
             }
             teleportOnArrive = false;
@@ -244,7 +244,21 @@ namespace PalaceMod.Builder.Studio.Play
         internal static bool PointerOverUI() => ModPopup.Current != null;
 
         /// <summary>Fades the music out (night music would otherwise carry on into the editor or the menus).</summary>
-        internal static void StopMusic() => MusicManager.instance?.PlayMusic(null, 0.5f);
+        internal static void StopMusic()
+        {
+            var music = MusicManager.instance;
+            if (music == null) return;
+            // A fade already running (a night's music fading in over 4 s) finishes before the manager looks at a new
+            // request; stop it so the fade-out starts now.
+            var fade = HarmonyLib.Traverse.Create(music).Field("fadeControllerCoroutine");
+            if (fade.GetValue() is Coroutine running)
+            {
+                music.StopCoroutine(running);
+                fade.SetValue(null);
+                HarmonyLib.Traverse.Create(music).Field("requestedFadeDuration").SetValue(-1f);
+            }
+            music.PlayMusic(null, 0.5f);
+        }
 
         private void ShortClouds()
         {

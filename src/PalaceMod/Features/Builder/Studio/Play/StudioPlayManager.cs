@@ -152,8 +152,8 @@ namespace PalaceMod
         private static void RegisterDevCommand()
         {
             DevCommands.Register("builder-play",
-                "builder-play start <pack> <level> [x z] | enter [castle] | back | restart | state | gold on|off|<n> | spawn <unit> [count] [elite] [line <name>|at <x> <z>] | " +
-                "teleport <x> <z> [followers] | cursor <x> <z>|off | arm teleport|spawn|none | click | panel | endscreen | music   Studio test play", args =>
+                "builder-play start <pack> <level> [x z] | enter [castle] | back | restart | state | gold on|off|<n>|spend <n> | spawn <unit> [count] [elite] [line <name>|at <x> <z>] | " +
+                "teleport <x> <z> [followers] | cursor <x> <z>|off | arm teleport|spawn|none | click | panel | endscreen | tips | music   Studio test play", args =>
             {
                 if (args.Length == 0) throw new ArgumentException("usage: builder-play start|enter|back|restart|state|gold|spawn|teleport|cursor|arm|click|panel|endscreen|music");
                 var play = StudioPlay.Instance;
@@ -165,7 +165,6 @@ namespace PalaceMod
                         var entry = BuilderServices.Packs.Find(args[1]) ?? throw new ArgumentException($"no pack \"{args[1]}\"");
                         if (entry.Pack == null) throw new InvalidOperationException($"{entry.Id} can't be read");
                         Vector3? at = args.Length >= 5 ? new Vector3(F(args[3]), 0f, F(args[4])) : null;
-                        if (at is Vector3 p) at = new Vector3(p.x, Builder.Level.LayoutScene.Ground(p + Vector3.up * 50f).y, p.z);
                         if (!play.PlayLevel(new Builder.Editor.PackDraft(entry), args[2], at)) throw new InvalidOperationException("didn't start (see the notice)");
                         return "starting";
                     }
@@ -188,6 +187,14 @@ namespace PalaceMod
                     case "gold":
                     {
                         string v = args.Length > 1 ? args[1].ToLowerInvariant() : "";
+                        if (v == "spend" && args.Length > 2)
+                        {
+                            // The game's own payment call, as filling a build slot's coin slots makes it.
+                            var player = PlayerInteraction.instance ?? throw new InvalidOperationException("not in a level");
+                            int before = player.Balance;
+                            player.SpendCoins(int.Parse(args[2]));
+                            return $"balance {before} -> {player.Balance}";
+                        }
                         if (v == "on" || v == "off") SandboxActions.InfiniteGold = v == "on";
                         else if (int.TryParse(v, out int n)) { SandboxActions.InfiniteGold = false; DebugActions.SetGold(n); }
                         else throw new ArgumentException("usage: builder-play gold on|off|<n>");
@@ -240,6 +247,14 @@ namespace PalaceMod
                         var helper = UnityEngine.Object.FindObjectOfType<EndOfMatchScoreUIHelper>(true);
                         if (helper == null) return "no end screen";
                         return string.Join(", ", helper.GetComponentsInChildren<TFUITextButton>(true).Select(b => $"{b.name}=\"{b.GetComponentInChildren<TMPro.TMP_Text>(true)?.text}\"{(b.gameObject.activeInHierarchy ? "" : " (hidden)")}"));
+                    }
+                    case "tips":
+                    {
+                        // Forget the tips this save has seen (in memory only), so the next level load would show them.
+                        var shown = LevelProgressManager.instance?.tipsShown ?? throw new InvalidOperationException("no progress manager");
+                        int n = shown.Count;
+                        shown.Clear();
+                        return $"forgot {n} seen tips; reload a level to test";
                     }
                     case "music":
                     {
