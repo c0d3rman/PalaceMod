@@ -47,10 +47,45 @@ namespace PalaceMod.Builder
         private int savedPerkLevel, savedPerkXp;
         private bool resultRecorded;
 
+        /// <summary>Whether the running session is the level Studio's, and in which state (None for every other
+        /// custom run). A Studio session spans its edit and play loads of the host: switching reloads the host with
+        /// the session kept (LaunchStudio), so it never ends in between.</summary>
+        internal StudioSessionKind StudioKind { get; private set; }
+
         public SessionLauncher()
         {
             SessionMenu.Init(this);
             SessionDevCommands.Register(this);
+        }
+
+        // ------------------------------------------------------------------ Studio sessions
+
+        /// <summary>Starts a Studio session (or switches the running one between edit and play) and loads the host.
+        /// A switch on the same host keeps the session: its pack, level and wave set are replaced in place, so the
+        /// isolation, its stand-in scores and the editor's return point all carry over. No notice, no scores.</summary>
+        internal bool LaunchStudio(SessionRequest request, StudioSessionKind kind, out string error)
+        {
+            if (kind == StudioSessionKind.None) throw new ArgumentException("a Studio session is Edit or Play");
+            var transitions = SceneTransitionManager.instance;
+            if (transitions == null || transitions.SceneTransitionIsRunning) { error = "can't start a level right now"; return false; }
+            if (!Resolve(request, out var ws, out var lv, out error)) return false;
+            string host = lv?.Host ?? ws.Host;
+            var loadout = TestLoadout.For(host);
+            if (Current != null && StudioKind != StudioSessionKind.None && Current.HostScene == host)
+            {
+                if (!CheckUnits(request.Pack, ws, out error)) return false;
+                Current.Pack = request.Pack;
+                Current.Level = lv;
+                Current.WaveSet = ws;
+                BuilderServices.Waves.SetPending(request.Pack, ws);
+                resultRecorded = false;
+                Log.For<BuilderManager>().Info($"Studio session: {kind} on {host}");
+            }
+            else if (!Start(request, out error)) return false;
+            StudioKind = kind;
+            TestLoadout.Apply(Current.HostScene, loadout);
+            transitions.TransitionFromNullToLevel(Current.HostScene);
+            return true;
         }
 
         // ------------------------------------------------------------------ ISessionLauncher
@@ -89,6 +124,7 @@ namespace PalaceMod.Builder
             var ended = Current;
             if (ended == null) return;
             Current = null;
+            StudioKind = StudioSessionKind.None;
             BuilderServices.Waves.SetPending(null, null);
             if (PerkManager.instance != null)
             {
@@ -151,7 +187,8 @@ namespace PalaceMod.Builder
         internal void RecordResult(int totalScore)
         {
             var s = Current;
-            if (s == null || resultRecorded) return;
+            // Studio play-tests are rehearsals, not runs: nothing goes to the scores.
+            if (s == null || resultRecorded || StudioKind != StudioSessionKind.None) return;
             resultRecorded = true;
             var run = new RunResult
             {
@@ -209,17 +246,14 @@ namespace PalaceMod.Builder
             if (!Resolve(request, out var waveSet, out var level, out error)) return false;
             var pack = request.Pack;
 
-            // Build every template now so problems show up before the map loads.
-            var problems = new List<string>();
-            foreach (var sp in waveSet?.Nights.SelectMany(n => n.Spawns) ?? [])
-                if (BuilderServices.Units.Resolve(pack, sp.Unit, out string e) == null) problems.Add(e);
-            if (problems.Count > 0) { error = string.Join("; ", problems.Distinct().Take(3)); return false; }
+            if (!CheckUnits(pack, waveSet, out error)) return false;
 
             string host = level?.Host ?? waveSet.Host;
             // Replacing a running session (e.g. the editor's Test from the pause menu): the new one takes over the
             // isolation at once, and the transition that follows unloads the old map.
             if (Current != null) Finish();
             Armed = null;
+            StudioKind = StudioSessionKind.None;
             // Read the vanilla record before the session's stand-in replaces it.
             bool vanillaBeaten = LevelProgressManager.instance?.GetLevelDataForScene(host)?.beatenBest ?? false;
             Current = new BuilderSessionInfo
@@ -242,6 +276,16 @@ namespace PalaceMod.Builder
             Log.For<BuilderManager>().Info($"Session started: {pack.Id} " + (level != null ? $"level {level.Id}" : $"wave set {waveSet.Id}") + $" on {Current.HostScene}");
             Started?.Invoke(Current);
             return true;
+        }
+
+        /// <summary>Builds every template the wave set spawns now, so problems show up before the map loads.</summary>
+        private static bool CheckUnits(DesignPack pack, WaveSetDef waveSet, out string error)
+        {
+            var problems = new List<string>();
+            foreach (var sp in waveSet?.Nights.SelectMany(n => n.Spawns) ?? [])
+                if (BuilderServices.Units.Resolve(pack, sp.Unit, out string e) == null) problems.Add(e);
+            error = problems.Count > 0 ? string.Join("; ", problems.Distinct().Take(3)) : null;
+            return error == null;
         }
 
         /// <summary>The host's vanilla "beaten" state, which campaign unlocks (Equippable.IsUnlocked) read through
@@ -276,9 +320,13 @@ namespace PalaceMod.Builder
                 BuilderServices.Overlay.Apply(Current.Pack, Current.Level, issues);
                 foreach (var i in issues) Log.For<BuilderManager>().Warn($"{Current.Pack.Id}/{Current.Level.Id}: {i}");
             }
-            Notify.Show($"Custom run: {SessionName(Current)}. Kept apart from your saves and scores.", NotifyKind.Info, 5f, "builder-session");
+            if (StudioKind == StudioSessionKind.None)
+                Notify.Show($"Custom run: {SessionName(Current)}. Kept apart from your saves and scores.", NotifyKind.Info, 5f, "builder-session");
         }
 
         internal static string SessionName(BuilderSessionInfo s) => s.Level?.Name ?? s.WaveSet?.Name ?? s.Pack.Name ?? s.Pack.Id;
     }
+
+    /// <summary>What a Studio session's current load of the host is for (None: not a Studio session).</summary>
+    internal enum StudioSessionKind { None, Edit, Play }
 }
