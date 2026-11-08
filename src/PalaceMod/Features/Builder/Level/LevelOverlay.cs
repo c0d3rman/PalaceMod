@@ -115,6 +115,8 @@ namespace PalaceMod.Builder.Level
                 props++;
             }
 
+            GroundLayer.Apply(scene, pack, level, issues);   // W4: terrain, after the layout is in place
+
             ScanAfterFrame = Time.frameCount + 2;
             ScanHost = level.Host;
             Log.For<BuilderManager>().Info($"level {pack.Id}/{level.Id} on {level.Host}: {moved} slots moved, {added} added, {removed} removed, {lines} spawn lines moved, {props} props");
@@ -122,7 +124,7 @@ namespace PalaceMod.Builder.Level
 
         public static bool HasEdits(LevelDef level) =>
             (level.BuildSlots?.Edit?.Count ?? 0) + (level.BuildSlots?.Add?.Count ?? 0) + (level.BuildSlots?.Remove?.Count ?? 0) +
-            (level.SpawnLines?.Edit?.Count ?? 0) + (level.SpawnLines?.Add?.Count ?? 0) + (level.Props?.Count ?? 0) > 0;
+            (level.SpawnLines?.Edit?.Count ?? 0) + (level.SpawnLines?.Add?.Count ?? 0) + (level.Props?.Count ?? 0) > 0 || GroundLayer.Wants(level);
 
         /// <summary>Moves a spawn line as a whole: pos is its new middle, rotY turns it about the middle.</summary>
         public static void MoveLine(Transform line, SpawnLineEdit edit)

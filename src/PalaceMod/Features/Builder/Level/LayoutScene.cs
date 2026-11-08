@@ -185,6 +185,7 @@ namespace PalaceMod.Builder.Level
         /// <summary>The walkable ground nearest to a point (the enemy ground graph), or the point itself.</summary>
         public static Vector3 Ground(Vector3 p)
         {
+            if (GroundLayer.TryHeight(p, out float terrain)) return new Vector3(p.x, terrain, p.z);   // the graphs may be stale while sculpting
             var astar = AstarPath.active;
             if (astar == null) return p;
             try
