@@ -372,7 +372,7 @@ Code: `Studio/Requirements/` (`BuilderRequirementsManager` registers everything 
 - **Labels** (`SlotKinds.Provide`, a label provider): kind colour, the planner's icon, the cost chain with the level's
   overrides, and the requirement badge ("♜2" castle level, "⤳ House 6" a slot, "★" from the start).
 - Dev: `builder-req click [ctrl] [shift] [alt] <key>` (the Link tool's click), `link <key>|<key> > <key> [level]`,
-  `chain branching|nearest|order [apply|popup]` (over the selection), `label <key>`, `needs`; on a live level
+  `chain branching|nearest|order [apply|popup]` (over the selection), `select <key>|<key>`, `view links off|selection|all / built on|off / xray on|off`, `label <key>`, `needs`; on a live level
   `slots`, `upgrade <slot>`, `unlocks <slot>`, `proxy <slot> [level]`; `import <pack.json>`, `play <pack> <level>`,
   `base cleared|flat <map>`, `start <pack> [create <map> <0|1|2> <name>]`, `thumb`.
 
@@ -421,11 +421,13 @@ base's activator, which is removed on an empty map, so it would never appear: `L
   and `EditorReturn`'s return point stay), then reloads through `TransitionFromNullToLevel(host)`. `EditorReturn`
   ignores it because the scene is the session's host. `Studio.NextLoad` tells the shell whether to claim the load
   (Edit) or leave it to the overlay (Play). The play pack is `TestPacks.Play` (the level, its wave set and the units
-  it reaches, unit-tested), the edit pack `TestPacks.Edit` / `Studio.EditPack`.
+  it reaches, unit-tested), the edit pack `Studio.EditPack`.
 - During a Studio swap, `cloudFadeInTime` and `cloudFadeOutTime` (`SceneTransitionManager`, fields read in
   `SceneTransitionAnimation`) are set to 0.12 s and restored after. The load itself is the cost. Each switch logs
   its time (`Studio: play ready in … ms`, `edit ready in …`). Measured on Nordfels in a pool instance (Apple
-  Silicon, native): play → play 0.9 s, play → edit 0.85 s; from the title the first load takes about 5 s.
+  Silicon, native) with the shell: edit → play 1.2-1.3 s (scene loaded at ~1.0 s), play → edit 2.0-2.1 s, of
+  which the scene load is ~0.85 s and the rest is the shell's edit Enter (proxies, labels, dock). Play → play
+  (Restart) 0.9 s. From the title the first load takes about 5 s.
 - The menu stays visible under the clouds, as today.
 - The pre-level loadout, perk screen and "Custom run" notice are skipped. The night-warning `Notify` stays: it's the
   designer's own text, worth seeing in a test. The loadout is `TestLoadout` (last used on the map) as today.
@@ -484,7 +486,7 @@ Non-modal dock like the Studio's. Keys in brackets (context `BuilderPlay`).
 
 ## Starting a level, and the empty map
 
-**Start popup** (`Studio/Start/StartPopup.cs`, `StartPopup.Open(draft)`; Pack › Levels › New level):
+**Start popup** (`Studio/Start/StartPopup.cs`, `StartPopup.Open(draft)`; Pack › Levels › "New level"):
 
 ```text
  New level
@@ -749,7 +751,7 @@ A separate effort is designing a cross-map asset library. The Studio leaves it o
 
 ### The cross-map scenery library (W5, `Features/Builder/Library/`)
 
-Every scenery mesh of the ten main maps (45 today: trees, rocks, ruins and walls, towers, graveyard pieces) can be
+Every scenery mesh of the ten main maps (45 today: trees, rocks, walls, towers, graveyard pieces) can be
 placed on any map.
 
 - **No game assets are shipped or copied.** The repo holds only a metadata catalog,
@@ -777,17 +779,20 @@ placed on any map.
 - **Solid props block with their real shape.** Library meshes are readable, so `LayoutScene.SetSolid` gives them a
   blocker child that uses the mesh itself (and a `MeshCollider`) instead of the bounding box; host meshes, which
   aren't readable, keep the box. A curved ruin wall blocks only along the wall.
-- **Library tab** (`LibraryBrowser`, registered as `StudioServices.AssetBrowser`): chips "This map" (the Studio's
-  `HostSceneryBrowser`, passed through: this map's scenery and the pack's `asset:` meshes), "All maps", then one per
-  kind (Trees, Rocks, Ruins and walls, Buildings, Graveyard). Tiles are ordered by home map, then kind; the badge is
-  the home map's first three letters, and the tooltip lists the kind and the maps that use it. The text filter matches
-  name, kind and map names ("Moorweg" lists Moorweg's). A mesh the host also has is listed once. New props start at
-  most about 6 m across, like host scenery.
-- **Tile pictures** (`LibraryThumbs`): rendered on demand by an offscreen camera (three-quarter view, transparent
-  background, the level's own materials and sun), four per frame, cached as PNGs in
+- **Library tab** (`LibraryBrowser`, registered as `StudioServices.AssetBrowser` in `SceneryLibraryManager.Awake`,
+  wrapping a `HostSceneryBrowser`). The palette's chips are narrow (three to a row), so each is one short word: the
+  palette's own "All" (every map: the host browser's items, then every library mesh), "Here" (the host browser's items
+  plus the library meshes this map uses, which the live scene mostly no longer shows as separate objects because the
+  game merges scenery into combined meshes at load), then one per kind: Trees, Rocks, Walls, Towers, Graves, Other.
+  Library tiles are ordered by home map, then kind; the badge is the home map's first three letters, and the tooltip
+  lists the kind and the maps that use it with counts. The text filter matches name, kind and map names ("Moorweg"
+  lists Moorweg's). A mesh the host also has is listed once. New props start at most about 6 m across, like host
+  scenery.
+- **Tile pictures** (`LibraryThumbs`): rendered on demand by an offscreen camera (from above on the level sun's lit
+  side, transparent background, the level's own materials), four per frame, cached as PNGs in
   `BepInEx/PalaceBuilder/cache/thumbs/<map>/<mesh>.png` (per host map, since colours differ) and in memory. The
   browser raises `Changed` once the queue drains.
-- Dev: `dev.py cmd "builder-library status | query [here|all|kind:<Kind>|-] [text] | place <mesh> [x z] | gallery
+- Dev: `dev.py cmd "builder-library status | query [here|kind:<Kind>|-] [text] | place <mesh> [x z] | gallery
   [spacing] | walkable <x> <z> | clear | thumb <mesh> | thumbs [reset]"`. Unit tests (`SceneryLibraryTests`) cover
   the reader on a synthetic file, ref parsing, the catalog, and, where the game is installed, read every catalog mesh.
 
@@ -937,7 +942,7 @@ the Place tool), `PickOnMap`, `AddViewToggle`, `AddDeleteGuard` (W3's "this slot
   - `StudioPlay.cs` (`IStudioPlay`: the session state machine, fast swap, state store and restore)
   - `SandboxPanel.cs` (a `ModDock` panel)
   - `SandboxActions.cs` (infinite gold, spawn at cursor or line, teleport; everything else calls `DebugActions`)
-  - `TestPacks.cs` (the play and edit packs, pure C#, `tests/PalaceMod.Tests/TestPackTests.cs`)
+  - `TestPacks.cs` (the play pack, pure C#, `tests/PalaceMod.Tests/TestPackTests.cs`)
   - `StudioPlayManager.cs` (as built: a manager rather than `BuilderManager.Play.cs`, because play needs its own
     Update and keys; patches: infinite gold, the cloud-time shortening during swaps, skipping the session
     notice and scores in Studio sessions, the pause-menu row, the end-screen row)

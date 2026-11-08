@@ -110,6 +110,21 @@ namespace PalaceMod.Builder.Library
 
         private static readonly Vector3 Away = new(0f, -5000f, 0f);
 
+        /// <summary>A flat direction toward the level's sun, turned 40° so lit and shaded sides both show (the
+        /// pictures are taken from the lit side; levels like Moorweg are too dark from the other one).</summary>
+        private static Vector3 SunSide()
+        {
+            var sun = RenderSettings.sun;
+            if (sun == null)
+                foreach (var l in UnityEngine.Object.FindObjectsOfType<Light>())
+                    if (l.type == LightType.Directional && (sun == null || l.intensity > sun.intensity)) sun = l;
+            if (sun == null) return new Vector3(-1f, 0f, -1f).normalized;
+            var toSun = -sun.transform.forward;
+            var flat = new Vector3(toSun.x, 0f, toSun.z);
+            if (flat.sqrMagnitude < 1e-4f) return new Vector3(-1f, 0f, -1f).normalized;
+            return Quaternion.Euler(0f, 40f, 0f) * flat.normalized;
+        }
+
         /// <summary>A readable RGBA picture of a prop base, or null (logged). The caller owns the texture.</summary>
         public static Texture2D Render(PropBase b, int pixels)
         {
@@ -139,8 +154,9 @@ namespace PalaceMod.Builder.Library
                 cam.orthographic = false;
                 cam.fieldOfView = 25f;
                 cam.aspect = 1f;
-                float distance = radius / Mathf.Sin(cam.fieldOfView * 0.5f * Mathf.Deg2Rad) * 1.02f;
-                var dir = new Vector3(-1f, 0.9f, -1f).normalized;
+                // The bounding sphere is loose for long thin meshes; 0.85 frames most of them tightly without clipping.
+                float distance = radius / Mathf.Sin(cam.fieldOfView * 0.5f * Mathf.Deg2Rad) * 0.85f;
+                var dir = (SunSide() + Vector3.up * 0.9f).normalized;
                 cam.transform.position = bounds.center + dir * distance;
                 cam.transform.rotation = Quaternion.LookRotation(-dir, Vector3.up);
                 cam.nearClipPlane = Mathf.Max(0.05f, distance - radius * 1.5f);

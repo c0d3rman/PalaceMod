@@ -24,12 +24,13 @@ namespace PalaceMod.Builder.Studio.Requirements
             if (keys.Count == 0) { Notify.Show("Select slots to chain", NotifyKind.Info, 3f, "builder-link"); return; }
             if (keys.All(k => SlotKinds.Classify(Studio.Find(k)?.TypeName) == SlotKind.Economy && (Studio.Find(k)?.TypeName ?? "").ToLowerInvariant().Contains("house")))
                 options.Mode = ChainMode.Branching;
-            popup = ModPopup.Open($"Chain {keys.Count} slots", Build, width: 460f);
+            popup = ModPopup.Open($"Chain {keys.Count} slots", Build, width: 640f);
             UpdatePreview();
         }
 
         private static void Build(ModPage page)
         {
+            page.FieldIndent = 220f;
             var modes = new[] { ChainMode.Branching, ChainMode.NearestNeighbour, ChainMode.SelectionOrder };
             page.Choice("Order", modes.Select(ChainPreset.Label).ToList(), () => System.Array.IndexOf(modes, options.Mode),
                 i => { options.Mode = modes[i]; UpdatePreview(); },

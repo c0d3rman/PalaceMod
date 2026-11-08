@@ -127,7 +127,8 @@ namespace PalaceMod
             var data = ActiveLevelData;
             if (data != null) unrankedLevelData.Add(data);
             if (!IsEnabled) return;
-            if (GameplayImpact.Reasons.Count == 1)
+            // The level Studio's sessions are never ranked play: no notice there (the badge still shows).
+            if (GameplayImpact.Reasons.Count == 1 && !Builder.Studio.Play.StudioPlay.InStudioSession)
                 Notify.Show($"Unranked run ({reason}): high scores and achievements won't be saved.", NotifyKind.Warning, 6f, "unranked");
             RefreshBadges();
         }
