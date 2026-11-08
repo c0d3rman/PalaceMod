@@ -277,7 +277,12 @@ stood (and were previewed, and appeared) in the water until they first walked.
   (`GroundGraphs.Scan`, so on the graphs the level plays on), every unit home of every slot on a Builder level that
   is more than 0.6 m off its own graph (`Seeker.graphMask`) moves to the nearest walkable point, 0.8 m further in,
   or, if a unit placed before it is within 1.3 m, the nearest free walkable spot in rings around it: a formation
-  stays spread out. The unit's transform moves (its Start, the build preview and respawns use it); units that
+  stays spread out. Never across water: a new home must be reachable from its building by a walk at most 1.5x the
+  straight line + 4 m (`UnitSpread.Flood`: Dijkstra on a 1 m lattice of the unit's walkable ground, 24 m round the
+  slot), so the far bank of a river, reachable only round by a ford, doesn't count; a unit whose nearest ground is
+  over there walks back towards its building to the first ground on the way (one standing in the water within
+  0.6 m of the far bank counts as off the ground too). The Studio's "Move units onto ground" does the same.
+  The unit's transform moves (its Start, the build preview and respawns use it); units that
   already started (a building loaded built) get `homePosition`/`homePositionOriginal` too. Logged with the rescan;
   `builder-units [live] | settle` (dev).
 - **Data:** `units: [[x, z], ...]` on a `buildSlots` edit or add: per unit spot (an Outpost holds 5 upgrade choices

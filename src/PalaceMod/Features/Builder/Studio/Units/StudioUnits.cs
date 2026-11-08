@@ -209,8 +209,12 @@ namespace PalaceMod.Builder.Studio.Units
                     var p = new Vector3(x, spots[k].World.y, z);
                     return OnGround(p, spots[k].Spot.Mask) ? (x, z) : NearestGround(p, spots[k].Spot.Mask);
                 }
-                var placed = UnitSpread.Place(spots.Select(s => (s.World.x, s.World.z)).ToList(), Near, out bool[] changed);
                 var (pos, yaw) = Pose(i);
+                // New spots stay on the building's side of any water (one flood per graph).
+                var floods = new Dictionary<GraphMask, UnitSpread.Reach>();
+                UnitSpread.Reach Reach(int k) => floods.TryGetValue(spots[k].Spot.Mask, out var r) ? r : floods[spots[k].Spot.Mask] =
+                    UnitSpread.Flood(pos.x, pos.z, (x, z) => OnGround(new Vector3(x, pos.y, z), spots[k].Spot.Mask));
+                var placed = UnitSpread.Place(spots.Select(s => (s.World.x, s.World.z)).ToList(), Near, out bool[] changed, reach: Reach);
                 var offs = Offsets(i);
                 for (int k = 0; k < spots.Count; k++)
                     if (changed[k]) { offs[k] = UnitSpread.ToSlot(pos.x, pos.z, yaw, placed[k].x, placed[k].z); moved++; }

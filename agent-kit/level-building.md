@@ -180,8 +180,8 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
   building that moves and turns with the slot: a copy placed on a river bank can put them in the water. `units` on an
   edit or add sets them: one `[x, z]` per unit spot in the order the reference lists them (`ref slots <map>` shows the
   map's as `units`; each upgrade choice's units, Knights or Spears, share the same spots), metres from the slot's centre in its own frame (x right, z forward); `null` entries keep the
-  map's. Whatever you set, play moves any unit home that is off walkable ground to the nearest free ground at level
-  start, keeping them spread out; `check` warns about units off the ground, and `set_units` places them (`at` takes
+  map's. Whatever you set, play moves any unit home that is off walkable ground to the nearest free ground on its building's side of
+  any water at level start, keeping them spread out; `check` warns about units off the ground, and `set_units` places them (`at` takes
   world points).
 - Props: `mesh:<name>` from the map's own scenery or the cross-map scenery library (`ref scenery`, reference.md);
   `mesh:<name>@<Map>` picks one map's mesh. `solid: true` props block units (pathfinding is rebuilt at level start);
