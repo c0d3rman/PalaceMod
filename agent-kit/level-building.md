@@ -280,10 +280,10 @@ and damage list. Use custom units sparingly; vanilla enemies are well balanced a
 | `night` | `night` (1-based; = count+1 appends), plus night fields |
 | `copy_waves` | `from` (map), `lines` {old name: new name} |
 | `unit` | a whole UnitDef (adds or replaces) |
-| `terrain_init` | `origin` [x,z], `cell` (2), `size` [W,H] cells (≤400), `y` (default castle height), `flat` (true: sets base flat) |
-| `terrain` | `mode` `set`\|`raise`\|`lower`\|`smooth`, `height` (m, relative to terrain y), shape, `falloff` (m) |
+| `terrain_init` | `origin` [x,z], `cell` (2), `size` [W,H] cells (≤400), `y` (default castle height), `flat` (true: sets base flat; false: sculpt the map's own ground) |
+| `terrain` | `mode` `set`\|`raise`\|`lower`\|`smooth`, `height` (m, relative to terrain y), shape, `falloff` (m); any base |
 | `ramp` | `from` [x,z], `to` [x,z], `width`, `fromHeight`, `toHeight`, `falloff` |
-| `paint` | `material` `ground`\|`high`\|`low`\|`earth`\|`sand`\|`road`\|`rock`, shape |
+| `paint` | `material` `ground`\|`high`\|`low`\|`earth`\|`sand`\|`road`\|`rock`, shape; painted per 1 m sample and drawn with smooth edges; any base |
 | `block` | `on` (true), shape: ground units and the king can't enter; works on any base |
 | `water` | `level` (m relative to y, default -1), `on`, shape; digs the ground to level-1 m. `on: false` makes the cells land again and raises the dug ground back to `height` (default 0; `fill: false` keeps it dug) |
 | `set` | `path` (e.g. `"levels[0].waveSet"`), `value` (or `delete: true`): raw edit |
@@ -343,20 +343,28 @@ The king does nothing during `test` (he stands where he was), so a defence that 
 player's help; a real player adds his own damage (roughly one strong unit). Use `--god` to keep the king alive,
 `--invulnerable` to test pathing alone.
 
-## 7. Terrain (base "flat")
+## 7. Terrain
 
-A flat base replaces the map's ground with a heightfield you sculpt; the sky, light and castle position stay the
-host's. The castle keeps its host x/z and stands on whatever height you give the ground there; slots snap to the
-ground too.
+A flat base (`"base": "flat"`) replaces the map's ground with a heightfield you sculpt; the sky, light and castle
+position stay the host's. The castle keeps its host x/z and stands on whatever height you give the ground there;
+slots snap to the ground too. On any other base (`map`, `cleared`) the same ops sculpt **the map's own ground**: every
+cell you move off the host's ground is replaced by the terrain's (the host's ground is cut out under it, so lowering
+and digging work as well as raising); untouched cells stay the host's own.
 
 - Grid: `origin` [x,z] is the min corner, `cell` metres (default 2), `size` [W,H] cells (each ≤ 400). Corner heights,
-  metres relative to `y` (default: the castle's height); the resulting **world** height is clamped to [-8, +30] m
-  (not relative to the castle: on a high host like Sturmklamm, castle y 31, nothing can rise above the castle; see
-  reference.md > "What the host decides" for each host's headroom). The grid's edge is a
-  wall. `terrain_init` without origin/size covers the map's walkable area.
+  metres relative to `y` (default: the castle's height). Heights reach from world y -8 (the king respawns below -10)
+  up to **30 m above `y`** (at least world +30), so a high host like Sturmklamm (castle y 31) can still build up.
+  reference.md > "What the host decides" lists each host's headroom. A flat field's edge is a wall. `terrain_init`
+  without origin/size covers the map's walkable area.
+- On a map's own ground the pack stores heights as **offsets from the host's ground** (0 = untouched). `raise`/`lower`
+  are exact; `set`, `ramp` and `water` aim at a height relative to `y`, worked out from the reference's sampled ground
+  (a few cm off where the host's ground is uneven). `check`/`render` don't model sculpted host ground yet: confirm
+  routes with `paths` in game. Fliers fly over the host's own flier surface there, not over raised ground.
 - Heights: `terrain` with `set` (flat plateau/basin to a height), `raise`/`lower` (add), `smooth`; `ramp` for slopes.
-  Slopes steeper than ~32° are cliffs: unwalkable for ground units and the king, painted as rock. A plateau with one
-  ramp is a choke point; fliers ignore it.
+  Ground steeper than the graphs' max slope (30°) is a cliff: unwalkable for ground units **and the king** (it's
+  walled off for him too, so he can't slide down a face he can't climb back up), drawn as rock. A plateau with one
+  ramp is a choke point; fliers ignore it. In the Studio the Ramp brush is dragged from the top to the bottom: the
+  ground previews while you drag and the guide turns red past 30°.
 - **Width matters.** The game paths ground units on two graphs: small enemies and the king keep 0.5 m from any
   obstacle, large enemies (ogres, rams, big spiders; every spawn line with `large: true` is path-checked for them)
   keep 4 m. Water and blocked cells, cliff faces steeper than 30° and the field's edge are obstacles, and a dug water
@@ -382,11 +390,15 @@ ground too.
 - The field is drawn in the host's own ground palette, which is not always green: teal on Nordfels, dark blue on
   Moorweg, pink on Wildbach, near-black on Totend, orange on Freifort, white on Frostsee (the vanilla maps look the
   same). Look at the host first if colour matters.
-- `paint`: looks only. All seven are distinct on every host: `ground` the host's grass (the unpainted field), `high` a
+- `paint`: looks only, painted per paint sample (2 per cell edge: 1 m on the default grid) and drawn as smooth
+  outlines, so a 4 m road is a road, not a staircase of 2 m squares. All seven are distinct on every host: `ground` the host's grass (the unpainted field), `high` a
   lighter and `low` a darker grass shade, `earth` a bank colour, `sand` the host's sand, `road` a path that stands out
   from the grass, `rock` the host's pale cliff colour. `block`: invisible no-walk cells (works on any base, also on
   vanilla ground). `water`: unwalkable cells drawn as water, the ground dug under it to `level` - 1 m; `on: false`
   makes the cells land again and raises the dug ground back to `height` (default 0; `"fill": false` keeps it dug).
+  The shore is drawn where the bank meets the water, not along the cell edges.
+- Format: `terrain.format` 2 (written by the game and `palace.py`) stores `materials` per paint sample with
+  `paintRes`; older packs (one material per cell) are read and upgraded on their next save.
 - On a flat base the host's own rivers, lakes and ponds are hidden (only the field's `water` cells show); a sea all
   round the map (Frostsee) stays round the field. On `cleared` the host's water stays.
 - Each level stores terrain compressed in the pack (a few KB); big terrain levels share as `.tfpack` files rather

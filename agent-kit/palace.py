@@ -610,12 +610,29 @@ class Ops:
         lid = op.get("level") if isinstance(op.get("level"), str) else self.level_id
         return find_level(self.data, lid)
 
+    def host_ground(self, level):
+        """The host's sampled ground as a function (x, z) -> world y or None, for sculpting a map's own ground."""
+        g = self.ref.map(level["host"]).get("grid")
+        if not g:
+            return None
+        grid = Grid(g)
+        return grid.height
+
+    def terrain_of(self, lv):
+        """The level's terrain with absolute heights: on a map's own ground (base not flat) the pack holds offsets from
+        the host's ground, made absolute here from the reference's sampled ground."""
+        return Terrain(lv["terrain"], host=None if lv.get("base") == "flat" else self.host_ground(lv))
+
     def ground_y(self, level, x, z):
         t = level.get("terrain")
         if t and level.get("base") == "flat":
             y = Terrain(t).height_at(x, z)
             if y is not None:
                 return round(y, 2)
+        if t and t.get("heights"):
+            T = self.terrain_of(level)
+            if T.sculpted_at(x, z):
+                return round(T.height_at(x, z), 2)
         g = self.ref.map(level["host"]).get("grid")
         if g:
             y = Grid(g).height(x, z)
@@ -1158,7 +1175,7 @@ class Ops:
         lv = self.level(op)
         if not lv.get("terrain"):
             raise Fail("no terrain grid yet: start with {\"op\":\"terrain_init\"}")
-        return lv, Terrain(lv["terrain"])
+        return lv, self.terrain_of(lv)
 
     def op_terrain_init(self, op):
         """{"op":"terrain_init","origin":[x,z],"cell":2,"size":[W,H],"y":<castle height>}: a flat grid (heights 0 = y)."""
@@ -1209,7 +1226,7 @@ class Ops:
         lv = self.level(op)
         if not lv.get("terrain"):
             self.op_terrain_init({"level": lv["id"], "flat": False})
-        t = Terrain(lv["terrain"])
+        t = self.terrain_of(lv)
         n = t.paint_cells(Shape.from_op(op), "blocked", 1 if op.get("on", True) else 0)
         t.store(lv)
         return f"blocked {n} cells"
@@ -1345,7 +1362,7 @@ class Terrain:
     def max_world(y):
         return max(Terrain.MAX_Y, y + Terrain.MAX_ABOVE)
 
-    def __init__(self, t):
+    def __init__(self, t, host=None):
         self.ox, self.oz = t["origin"]
         self.cell = float(t["cell"])
         self.w, self.h = t["size"]
@@ -1359,6 +1376,15 @@ class Terrain:
                 v = ((prev + d + 32768) % 65536) - 32768
                 self.hts[i] = v
                 prev = v
+        # A map's own ground: heights are stored as offsets from the host's ground; work on absolute ones.
+        self.host = None
+        if host is not None:
+            self.host = []
+            for j in range(self.h + 1):
+                for i in range(self.w + 1):
+                    hy = host(*self.corner(i, j))
+                    self.host.append(None if hy is None else int(round((hy - self.y) * 100)))
+            self.hts = [v + (hc or 0) for v, hc in zip(self.hts, self.host)]
         n = self.w * self.h
         fmt = int(t.get("format", 1))
         if fmt > self.FORMAT:
@@ -1538,14 +1564,28 @@ class Terrain:
         gz = ((h[2] - h[0]) + (h[3] - h[1])) / (2 * self.cell)
         return math.degrees(math.atan(math.hypot(gx, gz)))
 
+    def sculpted_at(self, x, z):
+        """Whether the point is on terrain of its own (always on a flat field; on a map's own ground, a moved cell)."""
+        if self.host is None:
+            return True
+        i, j = int((x - self.ox) // self.cell), int((z - self.oz) // self.cell)
+        if not (0 <= i < self.w and 0 <= j < self.h):
+            return False
+        W = self.w + 1
+        for c in (j * W + i, j * W + i + 1, (j + 1) * W + i, (j + 1) * W + i + 1):
+            if self.host[c] is not None and abs(self.hts[c] - self.host[c]) > 0:
+                return True
+        return False
+
     def store(self, lv):
         t = lv["terrain"]
         t["origin"], t["cell"], t["size"], t["y"] = [self.ox, self.oz], self.cell, [self.w, self.h], self.y
         t["format"] = self.FORMAT
-        if any(self.hts):
+        rel = self.hts if self.host is None else [v - (hc or 0) for v, hc in zip(self.hts, self.host)]
+        if any(rel):
             out_ = bytearray()
             prev = 0
-            for v in self.hts:
+            for v in rel:
                 d = ((v - prev + 32768) % 65536) - 32768
                 out_ += struct.pack("<h", d)
                 prev = v
