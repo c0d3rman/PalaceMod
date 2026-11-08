@@ -575,6 +575,24 @@ class Ops:
             except (KeyError, TypeError, ValueError, IndexError) as e:
                 raise Fail(f"ops[{i}] ({name}): bad or missing field: {e!r}")
             self.log.append(r or name)
+        self.resnap()
+
+    def resnap(self):
+        """On a flat base the game stands slots, props and lines on the terrain; keep the pack's y the same after
+        terrain ops that ran after the things were placed (so checks and pictures agree)."""
+        for lv in self.data.get("levels") or []:
+            if lv.get("base") != "flat" or not lv.get("terrain"):
+                continue
+            T = Terrain(lv["terrain"])
+            bs = lv.get("buildSlots") or {}
+            items = list(bs.get("add") or []) + [e for e in bs.get("edit") or [] if e.get("pos")] + list(lv.get("props") or []) + \
+                [a for a in ((lv.get("spawnLines") or {}).get("add") or [])]
+            for it in items:
+                p = it.get("pos")
+                if p and len(p) == 3:
+                    y = T.height_at(p[0], p[2])
+                    if y is not None:
+                        p[1] = round(y, 2)
 
     # ---- pack and level ----------------------------------------------------------------------------------------------
 
