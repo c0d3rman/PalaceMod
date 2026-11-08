@@ -721,6 +721,15 @@ internal interface IStudioPlay   // W2 implements; W1 calls it from F5 / the Pla
 internal static class StudioServices { public static IStudioPlay Play; public static IAssetBrowser AssetBrowser; }
 ```
 
+As landed (`StudioApi.cs`), beyond the sketch above: `Studio.SetMode` (W2 sets Loading/Play, the shell Edit/Off),
+`Studio.NextLoad` (W2 sets Play before a play swap and Edit before returning; the shell claims a host load only for
+Edit), `Studio.View` (settable; the shell restores it on the next edit load, then clears it), `Studio.Items`/`Find`/
+`ItemAt`/`ItemsChanged`/`SelectionChanged`, `Studio.Arm(StudioPlaceable)` (palette, library and terrain pieces share
+the Place tool), `PickOnMap`, `AddViewToggle`, `AddDeleteGuard` (W3's "this slot is a prerequisite" popup),
+`AddPanel(id, mode, visible, build)` (W2's sandbox panel), `StudioTool.HasPanel`/`BuildPanel` (W4's brush strip),
+`StudioServices.Terrain` (`IStudioTerrain`: height while sculpting, stale paths) and `StudioViewOptions` (View ▾).
+`Keybinds.ClaimExclusive(context, whileActive)` is in `Core/Keybinds.cs`.
+
 ### W1: Studio shell, tools, selection, inspector and menus
 
 **Owns:**
