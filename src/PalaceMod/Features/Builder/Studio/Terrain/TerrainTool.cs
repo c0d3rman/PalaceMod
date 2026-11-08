@@ -127,6 +127,7 @@ namespace PalaceMod.Builder.Studio.Terrain
         // ---- Strokes --------------------------------------------------------------------------------------------
 
         private bool stroking, invert;
+        private TerrainBrush stroke;   // the brush the stroke started with
         private Vector3 strokeStart, lastPoint;
         private float pressHeight;
         private Dirty strokeDirty;
@@ -144,18 +145,19 @@ namespace PalaceMod.Builder.Studio.Terrain
             if (!EnsureGrid()) return;
             var g = GroundLayer.Grid;
             stroking = true;
+            stroke = Brush;
             invert = shift;
             strokeStart = lastPoint = at;
             pressHeight = g.HeightAt(at.x, at.z) - g.Y;
             strokeDirty = Dirty.None;
-            if (Brush != TerrainBrush.Ramp) Apply(at, 1f / 30f);
+            if (stroke != TerrainBrush.Ramp) Apply(at, 1f / 30f);
         }
 
         public void ContinueStroke(Vector3 at, float dt)
         {
             if (!stroking) return;
             lastPoint = at;
-            if (Brush != TerrainBrush.Ramp) Apply(at, dt);
+            if (stroke != TerrainBrush.Ramp) Apply(at, dt);
         }
 
         public void EndStroke()
@@ -164,7 +166,7 @@ namespace PalaceMod.Builder.Studio.Terrain
             stroking = false;
             var g = GroundLayer.Grid;
             if (g == null) return;
-            if (Brush == TerrainBrush.Ramp)
+            if (stroke == TerrainBrush.Ramp)
             {
                 float top = g.HeightAt(strokeStart.x, strokeStart.z) - g.Y, bottom = g.HeightAt(lastPoint.x, lastPoint.z) - g.Y;
                 var d = TerrainBrushes.Ramp(g, strokeStart.x, strokeStart.z, top, lastPoint.x, lastPoint.z, bottom, RampWidth);
@@ -175,7 +177,7 @@ namespace PalaceMod.Builder.Studio.Terrain
             Commit(Label());
         }
 
-        private string Label() => Brush switch
+        private string Label() => stroke switch
         {
             TerrainBrush.Raise => invert ? "Lower ground" : "Raise ground",
             TerrainBrush.Flatten => "Flatten ground",
@@ -193,7 +195,7 @@ namespace PalaceMod.Builder.Studio.Terrain
             var g = GroundLayer.Grid;
             if (g == null) return;
             dt = Mathf.Min(dt, 0.1f);
-            Dirty d = Brush switch
+            Dirty d = stroke switch
             {
                 TerrainBrush.Raise => TerrainBrushes.Raise(g, at.x, at.z, Radius, Softness, (invert ? -1f : 1f) * Strength * dt),
                 TerrainBrush.Flatten => TerrainBrushes.Flatten(g, at.x, at.z, Radius, Softness, pressHeight),
@@ -313,7 +315,7 @@ namespace PalaceMod.Builder.Studio.Terrain
                 return;
             }
             ring ??= MakeLine("ring", RingPoints, loop: true);
-            ring.enabled = Brush != TerrainBrush.Ramp || !stroking;
+            ring.enabled = !(stroking && stroke == TerrainBrush.Ramp);
             var color = Brush switch
             {
                 TerrainBrush.Block => new Color(0.95f, 0.3f, 0.25f),
@@ -329,7 +331,7 @@ namespace PalaceMod.Builder.Studio.Terrain
                 ring.SetPosition(i, new Vector3(p.x, GroundY(p) + 0.2f, p.z));
             }
             rampLine ??= MakeLine("ramp", 2, loop: false);
-            rampLine.enabled = stroking && Brush == TerrainBrush.Ramp;
+            rampLine.enabled = stroking && stroke == TerrainBrush.Ramp;
             if (rampLine.enabled)
             {
                 rampLine.startColor = rampLine.endColor = color;
@@ -387,7 +389,6 @@ namespace PalaceMod.Builder.Studio.Terrain
 
         public override void BuildPanel(ModPage page)
         {
-            page.Header("Terrain");
             var brushes = Available;
             page.Choice("Brush", brushes.Select(b => BrushNames[(int)b]).ToList(), () => brushes.ToList().IndexOf(Brush), i =>
             {

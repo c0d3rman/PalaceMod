@@ -372,7 +372,7 @@ Code: `Studio/Requirements/` (`BuilderRequirementsManager` registers everything 
 - **Labels** (`SlotKinds.Provide`, a label provider): kind colour, the planner's icon, the cost chain with the level's
   overrides, and the requirement badge ("♜2" castle level, "⤳ House 6" a slot, "★" from the start).
 - Dev: `builder-req click [ctrl] [shift] [alt] <key>` (the Link tool's click), `link <key>|<key> > <key> [level]`,
-  `chain branching|nearest|order [apply|popup]` (over the selection), `label <key>`, `needs`; on a live level
+  `chain branching|nearest|order [apply|popup]` (over the selection), `select <key>|<key>`, `view links off|selection|all / built on|off / xray on|off`, `label <key>`, `needs`; on a live level
   `slots`, `upgrade <slot>`, `unlocks <slot>`, `proxy <slot> [level]`; `import <pack.json>`, `play <pack> <level>`,
   `base cleared|flat <map>`, `start <pack> [create <map> <0|1|2> <name>]`, `thumb`.
 
@@ -486,7 +486,7 @@ Non-modal dock like the Studio's. Keys in brackets (context `BuilderPlay`).
 
 ## Starting a level, and the empty map
 
-**Start popup** (`Studio/Start/StartPopup.cs`, `StartPopup.Open(draft)`; Pack › Levels › New level):
+**Start popup** (`Studio/Start/StartPopup.cs`, `StartPopup.Open(draft)`; Pack › Levels › "New level"):
 
 ```text
  New level
@@ -715,7 +715,11 @@ a ramp, a hill, a pond and a blocked strip, saved as a pack and played):
 
 - The king walks up the ramp onto the plateau (y 0 → 4) and is stopped by the cliff.
 - All three ground lines reach the castle; with a 6 m ramp the large-enemy graph (radius 4) is correctly cut off.
-- The minimap shows the new shape. Level-start rescan 639 ms.
+- At night a ground enemy was seen on the ramp at (0, 3.3, -23), between the ramp's 0 m foot and 4 m top.
+- The minimap shows the new shape. Level-start rescan 470-640 ms.
+- In the Studio: strokes through the pointer (set height, ramp, water, raise), the strip, the ring and the red wash
+  on blocked cells; undo and redo rebuild the ground; F5 to play and back keeps it; the Studio's path check updates
+  stale paths first (423 ms).
 
 ## Asset browser slot
 
@@ -747,7 +751,7 @@ A separate effort is designing a cross-map asset library. The Studio leaves it o
 
 ### The cross-map scenery library (W5, `Features/Builder/Library/`)
 
-Every scenery mesh of the ten main maps (45 today: trees, rocks, ruins and walls, towers, graveyard pieces) can be
+Every scenery mesh of the ten main maps (45 today: trees, rocks, walls, towers, graveyard pieces) can be
 placed on any map.
 
 - **No game assets are shipped or copied.** The repo holds only a metadata catalog,
@@ -775,17 +779,20 @@ placed on any map.
 - **Solid props block with their real shape.** Library meshes are readable, so `LayoutScene.SetSolid` gives them a
   blocker child that uses the mesh itself (and a `MeshCollider`) instead of the bounding box; host meshes, which
   aren't readable, keep the box. A curved ruin wall blocks only along the wall.
-- **Library tab** (`LibraryBrowser`, registered as `StudioServices.AssetBrowser`): chips "This map" (the Studio's
-  `HostSceneryBrowser`, passed through: this map's scenery and the pack's `asset:` meshes), "All maps", then one per
-  kind (Trees, Rocks, Ruins and walls, Buildings, Graveyard). Tiles are ordered by home map, then kind; the badge is
-  the home map's first three letters, and the tooltip lists the kind and the maps that use it. The text filter matches
-  name, kind and map names ("Moorweg" lists Moorweg's). A mesh the host also has is listed once. New props start at
-  most about 6 m across, like host scenery.
-- **Tile pictures** (`LibraryThumbs`): rendered on demand by an offscreen camera (three-quarter view, transparent
-  background, the level's own materials and sun), four per frame, cached as PNGs in
+- **Library tab** (`LibraryBrowser`, registered as `StudioServices.AssetBrowser` in `SceneryLibraryManager.Awake`,
+  wrapping a `HostSceneryBrowser`). The palette's chips are narrow (three to a row), so each is one short word: the
+  palette's own "All" (every map: the host browser's items, then every library mesh), "Here" (the host browser's items
+  plus the library meshes this map uses, which the live scene mostly no longer shows as separate objects because the
+  game merges scenery into combined meshes at load), then one per kind: Trees, Rocks, Walls, Towers, Graves, Other.
+  Library tiles are ordered by home map, then kind; the badge is the home map's first three letters, and the tooltip
+  lists the kind and the maps that use it with counts. The text filter matches name, kind and map names ("Moorweg"
+  lists Moorweg's). A mesh the host also has is listed once. New props start at most about 6 m across, like host
+  scenery.
+- **Tile pictures** (`LibraryThumbs`): rendered on demand by an offscreen camera (from above on the level sun's lit
+  side, transparent background, the level's own materials), four per frame, cached as PNGs in
   `BepInEx/PalaceBuilder/cache/thumbs/<map>/<mesh>.png` (per host map, since colours differ) and in memory. The
   browser raises `Changed` once the queue drains.
-- Dev: `dev.py cmd "builder-library status | query [here|all|kind:<Kind>|-] [text] | place <mesh> [x z] | gallery
+- Dev: `dev.py cmd "builder-library status | query [here|kind:<Kind>|-] [text] | place <mesh> [x z] | gallery
   [spacing] | walkable <x> <z> | clear | thumb <mesh> | thumbs [reset]"`. Unit tests (`SceneryLibraryTests`) cover
   the reader on a synthetic file, ref parsing, the catalog, and, where the game is installed, read every catalog mesh.
 

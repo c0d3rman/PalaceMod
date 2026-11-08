@@ -37,6 +37,8 @@ namespace PalaceMod
             var scene = SceneManager.GetActiveScene().name;
             if (scene != thumbScene) { thumbScene = scene; thumbAt = UnityEngine.Time.unscaledTime + 4f; return; }
             if (thumbAt < 0f || UnityEngine.Time.unscaledTime < thumbAt || !Feature<BuilderManager>.On) return;
+            if (scene.StartsWith("_")) { thumbAt = -1f; return; }
+            if (!Catalog.GameReady) { thumbAt = UnityEngine.Time.unscaledTime + 2f; return; }
             thumbAt = -1f;
             if (scene.Contains(' ') || Builder.Studio.Start.Thumbnails.Has(scene) || !Builder.Studio.Start.StartPopup.Maps().Any(h => h.Scene == scene)) return;
             var level = Studio.Running ? Studio.Level : BuilderServices.Sessions.Current?.Level;
@@ -58,6 +60,7 @@ namespace PalaceMod
             Studio.AddLabelProvider(SlotKinds.Provide);
             Studio.AddContextItems(RequirementHooks.ContextItems);
             Studio.AddDeleteGuard(RequirementHooks.GuardDelete);
+            Studio.AddPlaceHook(RequirementHooks.OnPlaced);
             Studio.AddViewToggle("built", "Built preview", () => BuiltPreview.On, on => BuiltPreview.On = on);
             Studio.AddViewToggle("autolink", "Auto-link new slots", () => RequirementHooks.AutoLink, on => RequirementHooks.AutoLink = on);
         }
@@ -139,6 +142,20 @@ namespace PalaceMod
                     {
                         var l = Studio.LabelFor(rest);
                         return $"color={l.Color} icon={l.Icon?.name} costs={l.Costs} badge={l.Badge}\n{l.Card}";
+                    }
+                    case "select":
+                        // select <key>|<key>... (keys may hold spaces)
+                        Studio.Select(rest.Split('|').Select(s => s.Trim()).Where(s => s.Length > 0));
+                        return "selected " + string.Join(", ", Studio.Selection);
+                    case "view":
+                    {
+                        // view links off|selection|all | built on|off | xray on|off
+                        string what = args.ElementAtOrDefault(1), value = args.ElementAtOrDefault(2);
+                        if (what == "links") StudioViewOptions.Links = value == "off" ? StudioViewOptions.LinkMode.Off : value == "all" ? StudioViewOptions.LinkMode.All : StudioViewOptions.LinkMode.Selection;
+                        else if (what == "built") BuiltPreview.On = value == "on";
+                        else if (what == "xray") StudioViewOptions.XRay = value == "on";
+                        StudioViewOptions.RaiseChanged();
+                        return $"links {StudioViewOptions.Links}, built {BuiltPreview.On}, xray {StudioViewOptions.XRay}";
                     }
                     case "needs":
                         return string.Join("\n", Studio.Items.Where(i => RequirementState.Ref(i.Key) != null && !i.Removed).Select(i => $"{i.Key}: {RequirementState.DescribeFor(i.Key)}"));
