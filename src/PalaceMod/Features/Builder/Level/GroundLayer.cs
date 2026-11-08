@@ -37,8 +37,9 @@ namespace PalaceMod.Builder.Level
         private sealed class Chunk
         {
             public int X0, Z0, X1, Z1;   // cells, exclusive end
-            public Mesh Ground, Blocks, Water;
+            public Mesh Ground, Blocks, Water, Marks;
             public MeshFilter GroundFilter, BlocksFilter, WaterFilter;
+            public MeshRenderer MarksRenderer;
             public MeshCollider GroundCollider, BlocksCollider;
         }
 
@@ -53,6 +54,13 @@ namespace PalaceMod.Builder.Level
 
         /// <summary>The terrain being shown, or null.</summary>
         public static TerrainGrid Grid { get; private set; }
+
+        /// <summary>KeyOf the level data the shown ground was built from (the Studio rebuilds when the level's differs).</summary>
+        public static string SourceKey;
+
+        /// <summary>A comparable digest of a level's base and terrain.</summary>
+        public static string KeyOf(string levelBase, TerrainDef t) => t == null ? $"{levelBase}|-" :
+            $"{levelBase}|{string.Join(",", t.Origin ?? [])}|{t.Cell}|{string.Join(",", t.Size ?? [])}|{t.Y}|{t.Heights}|{t.Materials}|{t.Blocked}|{t.Water?.Level}|{t.Water?.Cells}";
         public static bool Active => root != null && Grid != null;
         /// <summary>Whether the host's ground is replaced (a flat base).</summary>
         public static bool Flat => Active && flat;
@@ -85,6 +93,7 @@ namespace PalaceMod.Builder.Level
             }
             if (grid == null) return;
             Show(scene, grid, IsFlat(level));
+            SourceKey = KeyOf(level.Base, level.Terrain);
             if (Flat) SnapToGround(scene);
             Log.For<BuilderManager>().Info($"terrain on {scene.name}: {grid.W}x{grid.H} cells of {grid.Cell} m, {(Flat ? "flat base" : "host ground")}, {grid.Blocked.Count(b => b)} blocked, {grid.Water.Count(b => b)} water");
         }
@@ -165,6 +174,7 @@ namespace PalaceMod.Builder.Level
             chunks = null;
             air = null;
             flat = false;
+            SourceKey = null;
         }
 
         /// <summary>The terrain's surface height under a point, when it has a ground of its own there.</summary>
@@ -311,6 +321,16 @@ namespace PalaceMod.Builder.Level
             c.BlocksFilter.sharedMesh = c.Blocks;
             b.AddComponent<MeshRenderer>().forceRenderingOff = true;   // enabled so the scanner takes it, never drawn
             c.BlocksCollider = b.AddComponent<MeshCollider>();
+
+            // Editor only: blocked cells drawn as a red wash on the ground.
+            var m = Part("marks", 0);
+            c.Marks = NewMesh(m.name);
+            m.AddComponent<MeshFilter>().sharedMesh = c.Marks;
+            c.MarksRenderer = m.AddComponent<MeshRenderer>();
+            c.MarksRenderer.sharedMaterial = MarksMaterial();
+            c.MarksRenderer.shadowCastingMode = ShadowCastingMode.Off;
+            c.MarksRenderer.receiveShadows = false;
+            c.MarksRenderer.enabled = showMarks;
             return c;
         }
 
@@ -437,6 +457,67 @@ namespace PalaceMod.Builder.Level
             c.BlocksCollider.sharedMesh = null;
             if (verts.Count > 0) c.BlocksCollider.sharedMesh = c.Blocks;
             c.BlocksCollider.enabled = verts.Count > 0;
+            if (showMarks) BuildMarks(g, c);
+        }
+
+        private static bool showMarks;
+
+        /// <summary>Whether blocked cells are drawn (the Studio's edit mode).</summary>
+        public static bool ShowMarks
+        {
+            get => showMarks;
+            set
+            {
+                if (showMarks == value) return;
+                showMarks = value;
+                if (chunks == null) return;
+                foreach (var c in chunks)
+                {
+                    if (c.MarksRenderer != null) c.MarksRenderer.enabled = value;
+                    if (value) BuildMarks(Grid, c);
+                }
+            }
+        }
+
+        private static Material marksMaterial;
+
+        private static Material MarksMaterial()
+        {
+            if (marksMaterial != null) return marksMaterial;
+            var shader = Shader.Find("Sprites/Default") ?? Shader.Find("Unlit/Color");
+            marksMaterial = new Material(shader) { name = LayoutScene.AddedPrefix + "terrain marks", color = new Color(0.95f, 0.25f, 0.2f, 0.45f), renderQueue = 3000 };
+            return marksMaterial;
+        }
+
+        /// <summary>A quad a little above the ground on each blocked cell (the host's ground is found by raycast).</summary>
+        private static void BuildMarks(TerrainGrid g, Chunk c)
+        {
+            var verts = new List<Vector3>();
+            var tris = new List<int>();
+            const float lift = 0.12f;
+            for (int z = c.Z0; z < c.Z1; z++)
+                for (int x = c.X0; x < c.X1; x++)
+                {
+                    if (!g.Blocked[g.CellIndex(x, z)]) continue;
+                    int b = verts.Count;
+                    for (int k = 0; k < 4; k++)
+                    {
+                        float wx = g.CornerX(x + (k & 1)), wz = g.CornerZ(z + (k >> 1));
+                        verts.Add(new Vector3(wx, SurfaceY(g, wx, wz) + lift, wz));
+                    }
+                    tris.AddRange([b, b + 2, b + 3, b, b + 3, b + 1]);
+                }
+            c.Marks.Clear();
+            c.Marks.SetVertices(verts);
+            c.Marks.SetTriangles(tris, 0);
+            c.Marks.RecalculateBounds();
+        }
+
+        private static float SurfaceY(TerrainGrid g, float x, float z)
+        {
+            if (flat) return g.HeightAt(x, z);
+            return Physics.Raycast(new Vector3(x, 80f, z), Vector3.down, out var hit, 200f, 1 << GroundLayerIndex, QueryTriggerInteraction.Ignore)
+                ? hit.point.y : LayoutScene.Ground(new Vector3(x, 0f, z)).y;
         }
 
         private static bool IsBlocked(TerrainGrid g, int x, int z)
