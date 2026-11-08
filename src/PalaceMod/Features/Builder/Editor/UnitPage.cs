@@ -309,7 +309,7 @@ namespace PalaceMod.Builder.Editor
         /// <summary>Tag choices. Movement tags can't be added to or removed from a unit, but damage can target them.</summary>
         private static IEnumerable<Picker.Item> TagItems(Func<string, bool> filter = null, bool unitTags = false) =>
             Enum.GetNames(typeof(TagManager.ETag)).Where(t => !(unitTags && MovementTags.Contains(t)) && (filter?.Invoke(t) ?? true)).OrderBy(t => t)
-                .Select(t => new Picker.Item { Id = t, Label = Schema.Words(t) });
+                .Select(t => new Picker.Item { Id = t, Label = Schema.Words(t), Tooltip = Descriptions.Tag(t) });
 
         private static string TagList(List<string> tags, string none) =>
             tags == null || tags.Count == 0 ? Dim(none) : string.Join(", ", tags.Select(Schema.Words));
