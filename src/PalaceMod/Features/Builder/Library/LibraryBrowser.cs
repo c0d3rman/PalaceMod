@@ -66,7 +66,13 @@ namespace PalaceMod.Builder.Library
             string filter = string.IsNullOrWhiteSpace(text) ? null : text.Trim();
             bool here = category == ThisMap;
             if ((category == null || here) && host != null)
-                result.AddRange(host.Query(null, filter) ?? []);
+                foreach (var item in host.Query(null, filter) ?? [])
+                {
+                    // The host's own tiles have no picture; the library's of the same mesh fits.
+                    if (item.Icon == null && SceneryLibrary.Catalog.Find(host.BaseRef(item)) is SceneryEntry e && SceneryLibrary.MeshOf(e) != null)
+                        item.Icon = LibraryThumbs.Get(e);
+                    result.Add(item);
+                }
 
             var taken = new HashSet<string>(result.Select(i => host?.BaseRef(i)).Where(r => r != null), StringComparer.Ordinal);
             string kind = category != null && category.StartsWith("kind:", StringComparison.Ordinal) ? category.Substring(5) : null;
