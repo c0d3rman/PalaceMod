@@ -233,9 +233,9 @@ Per night: enemies, effective HP (sum of HP x difficulty, elite x4), gold droppe
 
 ## Vanilla economy (greedy all-economy player, gold income per dawn by day)
 
-**Nordfels**: d1 2, d2 6, d3 13, d4 19, d5 33, d6 43, d7 51, d8 51, d9 51, d10 51, d11 51, d12 51, d13 51
+**Nordfels**: d1 2, d2 6, d3 13, d4 19, d5 33, d6 42, d7 51, d8 51, d9 51, d10 51, d11 51, d12 51, d13 51
 
-**Durststein**: d1 13, d2 25, d3 38, d4 60, d5 86, d6 88, d7 88, d8 88, d9 88, d10 88, d11 88, d12 88
+**Durststein**: d1 13, d2 25, d3 38, d4 60, d5 84, d6 88, d7 88, d8 88, d9 88, d10 88, d11 88, d12 88
 
 **Frostsee**: d1 2, d2 5, d3 6, d4 13, d5 21, d6 35, d7 42, d8 42, d9 42, d10 42, d11 42, d12 42, d13 42
 
@@ -243,19 +243,11 @@ Per night: enemies, effective HP (sum of HP x difficulty, elite x4), gold droppe
 
 **Sturmklamm**: d1 4, d2 10, d3 15, d4 30, d5 50, d6 65, d7 65, d8 65, d9 65, d10 65, d11 65, d12 65, d13 65
 
-**Wildbach**: d1 5, d2 6, d3 15, d4 27, d5 35, d6 62, d7 65, d8 65, d9 65, d10 65, d11 65, d12 65, d13 65
+**Wildbach**: d1 5, d2 6, d3 15, d4 27, d5 45, d6 65, d7 65, d8 65, d9 65, d10 65, d11 65, d12 65, d13 65
 
-**Moorweg**: d1 6, d2 13, d3 25, d4 33, d5 58, d6 58, d7 58, d8 58, d9 58, d10 58, d11 58, d12 58
+**Moorweg**: d1 6, d2 13, d3 25, d4 43, d5 58, d6 58, d7 58, d8 58, d9 58, d10 58, d11 58, d12 58
 
-**Freifort**: d1 5, d2 11, d3 22, d4 39, d5 57, d6 62, d7 62, d8 62, d9 62, d10 62, d11 62, d12 62, d13 62
+**Freifort**: d1 5, d2 11, d3 22, d4 39, d5 54, d6 62, d7 62, d8 62, d9 62, d10 62, d11 62, d12 62, d13 62
 
-**Totend**: d1 6, d2 19, d3 35, d4 53, d5 61, d6 61, d7 61, d8 61, d9 61, d10 61, d11 61, d12 61, d13 61, d14 61, d15 61
-
-## Scenery library (prop meshes usable on any map)
-
-- **Buildings**: Bridge (17 m), Broken Graveyard Tower (2 m), Defense Tower lvl 1 (3 m), Defense Tower lvl 2  (3 m), Graveyard Tower (2 m), Totend Insignia (20 m), Totend Tower (5 m)
-- **Graveyard**: GraveBot (5 m), GraveTop (4 m), Gravestone (2 m), Gravewall (7 m), Graveyard Wall Post (1 m)
-- **Rocks**: Icicle Sharp (3 m), Rectangular Rock (13 m), Rock A (10 m), Rock A Alternate (9 m), Rock B (16 m), Rock B Alternate (17 m), SpikyRock (9 m), SpikyRock2 (12 m), SpikyRock3 (16 m), Square Rock (14 m), Stepping Stone (3 m)
-- **Ruins and walls**: Broken Down Wall (25 m), Ruin Wall.002 (16 m), Ruin Wall.003 (15 m), Ruin Wall.005 (25 m), Ruin Wall.006 (21 m), Ruin Wall.007 (20 m), Totend Gate Segment (2 m), Totend Small Stair Wall (26 m), Totend Small Wall Straight (31 m), Totendwall (7 m), Wall Segment lvl2 (9 m)
-- **Trees**: Agave Tree (4 m), Blob Tree (4 m), Cone Tree (3 m), Cone Tree High Waist (3 m), Cone Tree Slim High (3 m), Dead Classic Conetree (1 m), Freifort Tree 02 (4 m), Jungle Tree Trunk (7 m), Mediteranean Tree (3 m), Totend Tree (2 m), Twisted Tree (3 m)
+**Totend**: d1 6, d2 19, d3 35, d4 49, d5 61, d6 61, d7 61, d8 61, d9 61, d10 61, d11 61, d12 61, d13 61, d14 61, d15 61
 

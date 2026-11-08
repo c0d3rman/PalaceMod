@@ -171,7 +171,14 @@ class Game:
                 return result
         raise Fail(f"The game didn't answer `{text}` within {timeout} s (loading? check `palace.py game log`).")
 
+    LOADS = ("play ", "sandbox ", "edit ", "vanilla ", "menu")
+
     def agent(self, text, timeout=60):
+        if text.startswith(self.LOADS):
+            # A scene change can't start while another is running (e.g. right after `menu`).
+            deadline = time.time() + 60
+            while time.time() < deadline and json.loads(self.raw("agent status", timeout)).get("loading"):
+                time.sleep(0.5)
         result = self.raw("agent " + text, timeout)
         try:
             return json.loads(result)
@@ -417,6 +424,11 @@ def host_req(s):
     return (s["activator"], s.get("activatorLevel", 0))
 
 
+def playable(upgrades):
+    """A slot's upgrade levels without the hidden top tier (disabled in normal play; it is always the last ones)."""
+    return [copy.deepcopy(u) for u in upgrades if not u.get("disabled")]
+
+
 def effective_slots(ref, level):
     """Returns (slots by key, castle key, warnings). Keys: host slot name, or 'add:<id>'."""
     m = ref.map(level["host"])
@@ -437,7 +449,7 @@ def effective_slots(ref, level):
             continue
         r = host_req(s)
         slots[s["name"]] = Slot(key=s["name"], name=s["name"], kind=s["kind"], pos=s["pos"], rot=s.get("rotY", 0), castle=bool(s.get("castle")),
-                                upgrades=copy.deepcopy(s["upgrades"]), req=r, cap=s.get("upgradeCap"), follows=bool(s.get("followsActivator")),
+                                upgrades=playable(s["upgrades"]), req=r, cap=s.get("upgradeCap"), follows=bool(s.get("followsActivator")),
                                 added=False, base=None)
     warnings = []
 
@@ -469,7 +481,7 @@ def effective_slots(ref, level):
             continue
         key = "add:" + a["id"]
         s = Slot(key=key, name="PalaceBuilder " + a["id"], kind=src["kind"], pos=a.get("pos") or src["pos"], rot=a.get("rotY", 0), castle=False,
-                 upgrades=copy.deepcopy(src["upgrades"]), req=host_req(src), cap=src.get("upgradeCap"), follows=False, added=True, base=base)
+                 upgrades=playable(src["upgrades"]), req=host_req(src), cap=src.get("upgradeCap"), follows=False, added=True, base=base)
         if is_empty_base(level) and s.req and s.req[0] != castle and "requires" not in a:
             s.req = ("__removed__", 0)
         apply_common(s, a)

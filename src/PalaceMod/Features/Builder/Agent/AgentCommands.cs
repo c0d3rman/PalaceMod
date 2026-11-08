@@ -183,7 +183,9 @@ namespace PalaceMod.Builder.Agent
                     PlayerMovement.instance.TeleportTo(p);
                     return Json(new JObject { ["king"] = V(p) });
                 }
-                case "paths": return Json(Paths(rescan: args.Length > 1 && args[1] == "rescan"));
+                case "paths":
+                    if (EnemySpawner.instance == null) throw new InvalidOperationException("no level is loaded");
+                    return Json(Paths(rescan: args.Length > 1 && args[1] == "rescan"));
                 case "capture":
                 {
                     string path = PathArg(args, 1, out float? option);
