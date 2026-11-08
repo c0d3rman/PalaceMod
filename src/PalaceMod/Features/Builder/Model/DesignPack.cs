@@ -17,7 +17,7 @@ namespace PalaceMod.Builder.Model
     public sealed class DesignPack
     {
         public const string FormatName = "palace-builder";
-        public const int CurrentVersion = 1;
+        public const int CurrentVersion = 2;
 
         [JsonProperty("format", Order = -10)] public string Format { get; set; } = FormatName;
         [JsonProperty("version", Order = -9)] public int Version { get; set; } = CurrentVersion;

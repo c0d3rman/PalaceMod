@@ -6,7 +6,8 @@ using Newtonsoft.Json.Linq;
     Level overlays (stage 2, WP4b/c). Features/Builder/Level/LevelOverlay applies them when a session loads the host
     (after Awake, before Start) and then rescans pathfinding once; the layout editor (Features/Builder/Level) writes
     them. Positions are world coordinates on the host map ([x, y, z]); rotY is the world yaw in degrees.
-    Not applied yet: spawnLines.add (moving the host's own lines with spawnLines.edit works).
+    Requirements (version 2): every slot has at most one prerequisite, the game's own BuildSlot.activatorBuilding /
+    activatorLevel; "needs castle level N" is the castle slot at level N-1. See docs/builder-ux.md, "Requirements".
 */
 namespace PalaceMod.Builder.Model
 {
@@ -19,6 +20,9 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("host")] public string Host { get; set; }
         /// <summary>Id of a wave set in this pack; null plays the host's vanilla waves.</summary>
         [JsonProperty("waveSet")] public string WaveSet { get; set; }
+        /// <summary>null plays the host as it is; "cleared" keeps its ground and castle and removes every other build
+        /// slot and the scenery; "flat" also replaces the ground with a generated field (LevelBases).</summary>
+        [JsonProperty("base")] public string Base { get; set; }
         [JsonProperty("buildSlots")] public BuildSlotOverlay BuildSlots { get; set; }
         [JsonProperty("spawnLines")] public SpawnLineOverlay SpawnLines { get; set; }
         /// <summary>Decoration placed on the map (copies of the host's own scenery meshes).</summary>
@@ -55,6 +59,11 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("pos")] public float[] Pos { get; set; }
         /// <summary>New yaw in degrees; null keeps the host's.</summary>
         [JsonProperty("rotY")] public float? RotY { get; set; }
+        /// <summary>What unlocks the slot; null keeps the host's (or, for an added slot, its base's).</summary>
+        [JsonProperty("requires")] public SlotRequirement Requires { get; set; }
+        /// <summary>BuildSlot.requiredRootLevelDifference: 0 = never above the castle's level, n = up to n above;
+        /// -100 = no cap; null keeps the host's (or the base's).</summary>
+        [JsonProperty("upgradeCap")] public int? UpgradeCap { get; set; }
         /// <summary>Per upgrade level (index 0 = build), the fields to change; null entries keep that level.</summary>
         [JsonProperty("upgrades")] public List<UpgradeEdit> Upgrades { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
@@ -74,18 +83,33 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("base")] public string Base { get; set; }
         [JsonProperty("pos")] public float[] Pos { get; set; }
         [JsonProperty("rotY")] public float RotY { get; set; }
-        /// <summary>BuildSlot that unlocks this one (name on host or an added slot id); null unlocks it like its base.</summary>
-        [JsonProperty("activator")] public string Activator { get; set; }
-        /// <summary>With activator set: the activator level after which this slot appears (0 = once it's built).</summary>
-        [JsonProperty("activatorLevel")] public int ActivatorLevel { get; set; }
+        /// <summary>What unlocks the slot; null keeps the host's (or, for an added slot, its base's).</summary>
+        [JsonProperty("requires")] public SlotRequirement Requires { get; set; }
+        /// <summary>BuildSlot.requiredRootLevelDifference: 0 = never above the castle's level, n = up to n above;
+        /// -100 = no cap; null keeps the host's (or the base's).</summary>
+        [JsonProperty("upgradeCap")] public int? UpgradeCap { get; set; }
         /// <summary>Per upgrade level (index 0 = build), changes against the base's; null entries keep that level.</summary>
         [JsonProperty("upgrades")] public List<UpgradeEdit> Upgrades { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
+    /// <summary>A slot's one prerequisite (BuildSlot.activatorBuilding + activatorLevel).</summary>
+    public sealed class SlotRequirement
+    {
+        /// <summary>"castle", the name of a build slot on the host, or "add:&lt;id&gt;" for an added slot; null = available
+        /// from the start.</summary>
+        [JsonProperty("slot")] public string Slot { get; set; }
+        /// <summary>The prerequisite's level after which this slot appears: 0 = once it's built, n = once it reaches
+        /// level n+1. "Castle level N" is level N-1.</summary>
+        [JsonProperty("level")] public int Level { get; set; }
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+
+        public SlotRequirement Copy() => new() { Slot = Slot, Level = Level };
+    }
+
     public sealed class SpawnLineOverlay
     {
-        /// <summary>New spawn lines. Not applied yet (reported as a warning).</summary>
+        /// <summary>New spawn lines: copies of one of the host's lines, under its enemy spawner.</summary>
         [JsonProperty("add")] public List<SpawnLineAdd> Add { get; set; }
         /// <summary>Moves the host's own spawn lines.</summary>
         [JsonProperty("edit")] public List<SpawnLineEdit> Edit { get; set; }
@@ -107,6 +131,7 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("id")] public string Id { get; set; }
         [JsonProperty("pos")] public float[] Pos { get; set; }
         [JsonProperty("rotY")] public float RotY { get; set; }
+        /// <summary>Length of the line in metres (enemies appear anywhere along it).</summary>
         [JsonProperty("width")] public float Width { get; set; } = 10f;
         [JsonProperty("ground")] public bool Ground { get; set; } = true;
         [JsonProperty("large")] public bool Large { get; set; } = true;
