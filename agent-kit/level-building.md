@@ -165,8 +165,9 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
   you don't use (`remove_spawn_line`), or they keep showing in `paths`, renders and the minimap. A wave set that
   still spawns from a removed line is an error, and so is removing a line the map's own nights use while the level
   has no wave set. Every slot you add defaults to "needs the castle built" when you use ops.
-- **The host still decides a lot**, even on `flat`: which building kinds exist (`add_slot` copies a host slot of that
-  kind, so a kind the host lacks can't be placed: Frostsee has no Mill), the castle position, the playable rectangle
+- **The host still decides a lot**, even on `flat`: `add_slot` copies the host's own slot of a kind when it has one, and
+  places the game's standard building of a kind it lacks (base `building:<kind>`, e.g. a Mill on Frostsee; it needs
+  the castle built unless you say otherwise), the castle position, the playable rectangle
   (`terrain_init`'s default grid), the light and ground palette, and how much room the terrain has above the castle
   (heights are world heights, clamped to [-8, 30] m: Sturmklamm's castle sits at 31 m, so nothing there can rise above
   it). `reference.md` > Maps > "What the host decides" has the kinds-by-host table and each host's rectangle and
@@ -287,7 +288,7 @@ and damage list. Use custom units sparingly; vanilla enemies are well balanced a
 | Op | Fields |
 |---|---|
 | `level` | `name`, `description`, `base` (`cleared`/`flat`/null), `waveSet`, `host` |
-| `add_slot` | `id`, `kind` (e.g. `"House"`, `"Defense Tower"`, `"Barracks"`; copies the host's slot of that kind) or `from` (a host slot name), `at` [x,z] or `pos`, `rotY`, `requires` (shorthand), `upgradeCap`, `costs` [per level, null keeps] |
+| `add_slot` | `id`, `kind` (e.g. `"House"`, `"Defense Tower"`, `"Barracks"`; copies the host's slot of that kind, or places the game's standard one, base `building:<kind>`, when the host has none) or `from` (a host slot name), `at` [x,z] or `pos`, `rotY`, `requires` (shorthand), `upgradeCap`, `costs` [per level, null keeps] |
 | `move_slot` | `slot` (added id, host name, `castle` can't move), `at`/`pos`, `rotY` |
 | `set_slot` | `slot` (or `castle`), `requires` (null = back to the map's), `upgradeCap`, `costs` |
 | `remove_slot` | `slot` |

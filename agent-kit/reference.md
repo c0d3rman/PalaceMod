@@ -20,7 +20,7 @@ The castle slot of each map is named in `palace.py ref slots <map>` (`"castle": 
 
 ### What the host decides
 
-Even on a `cleared` or `flat` base the host map fixes: **which building kinds you can place** (`add_slot` copies a slot of that kind from the host, so a kind the host lacks can't be added: no Mill on Frostsee), the castle's position, the playable rectangle (`terrain_init`'s default grid is the host's walkable extent), the sky, light and ground palette, and the starting gold default. Terrain heights go from world y -8 m (the king respawns below -10) up to 30 m above the terrain's `y` (the castle's height; at least world 30 m), so every host has room to build up (headroom below). Pick the host from this table before designing.
+Even on a `cleared` or `flat` base the host map fixes: **which of its slots `add_slot` copies** (a kind the host has is a copy of its most complete slot of that kind; a kind it lacks, like a Mill on Frostsee, is the game's standard building of that kind, `building:<kind>`, the same tree as the table below), the castle's position, the playable rectangle (`terrain_init`'s default grid is the host's walkable extent), the sky, light and ground palette, and the starting gold default. Terrain heights go from world y -8 m (the king respawns below -10) up to 30 m above the terrain's `y` (the castle's height; at least world 30 m), so every host has room to build up (headroom below). Pick the host from this table before designing.
 
 | Kind | Nordfels | Durststein | Frostsee | Uferwind | Sturmklamm | Wildbach | Moorweg | Freifort | Totend |
 |---|---|---|---|---|---|---|---|---|---|
@@ -56,7 +56,7 @@ Even on a `cleared` or `flat` base the host map fixes: **which building kinds yo
 
 ## Buildings (slot kinds)
 
-Per level: cost in gold, then each choice (branch) with its income change (+g per dawn), extra HP and what it adds. Hidden tiers exist in the data but are switched off in normal play (PalaceMod's optional "Level 4 buildings" turns them on). `add_slot` copies the most complete slot of the kind on the host map, so these trees are what you get.
+Per level: cost in gold, then each choice (branch) with its income change (+g per dawn), extra HP and what it adds. Hidden tiers exist in the data but are switched off in normal play (PalaceMod's optional "Level 4 buildings" turns them on). `add_slot` copies the most complete slot of the kind on the host map, or places the game's standard building of a kind the host lacks (`building:<kind>`: `archery-range`, `barracks`, `barricades`, `blacksmith`, `bridge`, `defense-tower`, `field`, `gold-mine`, `harbour`, `heros-quarter`, `house`, `mill`, `royal-forge`, `shrine`, `summoning-circle`, `temple`), so these trees are what you get.
 
 ### Archery Range
 
