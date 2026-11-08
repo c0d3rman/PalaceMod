@@ -88,6 +88,57 @@ namespace PalaceMod.Tests
             }
         }
 
+        /// <summary>The library model: `new <level> --host` writes library/levels/<id>.json, apply edits it through the
+        /// "library" pack, units are their own files, LibraryStore reads them, and a migrated pack id still works.</summary>
+        public static void PalacePyLibraryLevels()
+        {
+            string script = FindScript();
+            if (script == null || !HasPython()) { Console.WriteLine("  (skipped: no python3 or agent-kit/palace.py)"); return; }
+            string root = Path.Combine(Path.GetTempPath(), "palace-agent-test-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                string game = Path.Combine(root, "game");
+                Directory.CreateDirectory(Path.Combine(game, "BepInEx"));
+                string refDir = Path.Combine(root, "ref");
+                WriteReference(refDir);
+                string ops = Path.Combine(root, "ops.json");
+                File.WriteAllText(ops, """
+                [
+                 {"op": "add_slot", "id": "h1", "kind": "House", "at": [6, 5]},
+                 {"op": "add_spawn_line", "id": "north", "at": [0, 30], "width": 12, "flying": false},
+                 {"op": "waves", "startingGold": 9, "nights": [{"spawns": [{"unit": "E Melee", "count": 3, "line": "north", "gold": 4}]}]}
+                ]
+                """);
+                Run(script, game, refDir, "new", "lv", "--host", "Testmap", "--base", "cleared");
+                Run(script, game, refDir, "new", "lv2", "--host", "Testmap");
+                string applied = Run(script, game, refDir, "apply", "library", ops, "--level", "lv");
+                Assert.True(JObject.Parse(applied)["errors"]!.Count() == 0, "no errors: " + applied);
+                string libDir = Path.Combine(game, "BepInEx", "PalaceBuilder", "library");
+                Assert.True(File.Exists(Path.Combine(libDir, "levels", "lv.json")) && File.Exists(Path.Combine(libDir, "levels", "lv2.json")), "level files");
+
+                var lib = new LibraryStore(libDir);
+                lib.Load();
+                Assert.Equal(0, lib.Issues.Count, "reads cleanly: " + string.Join("; ", lib.Issues));
+                var level = lib.Level("lv");
+                Assert.Equal("cleared", level.Base, "base");
+                Assert.Equal(1, level.BuildSlots.Add.Count, "slot added");
+                var ws = lib.Workspace("lv").FindWaveSet(level.WaveSet);
+                Assert.Equal(9, ws.StartingGold, "nights live with the level");
+                Assert.True(lib.Level("lv2").WaveSet != level.WaveSet, "each level owns its nights");
+
+                // An old pack id that was moved into the library resolves to the levels that came from it.
+                lib.Import(new DesignPack { Id = "old.pack", Levels = [new LevelDef { Id = "legacy", Host = "Testmap" }] }, null);
+                string shown = Run(script, game, refDir, "show", "old.pack");
+                Assert.True(shown.Contains("legacy") || shown.Contains("castle"), "old id resolves: " + shown);
+                string listed = Run(script, game, refDir, "list");
+                Assert.Equal(3, JObject.Parse(listed)["levels"]!.Count(), "list: " + listed);
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch (IOException) { }
+            }
+        }
+
         /// <summary>Un-watering refills the dug ground; an ops file can be re-applied with --fresh (not without); a
         /// level can be replaced with --force; economy --report reads a test report's knock-outs and income.</summary>
         public static void PalacePyReapplyUnwaterAndReport()

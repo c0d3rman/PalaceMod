@@ -5,9 +5,16 @@ Builder. This guide plus `palace.py` (next to it) is everything you need: the da
 the tools, and how to test. `reference.md` holds the generated tables (maps, buildings, enemies, vanilla curves,
 scenery); `palace.py ref ...` prints the same data as JSON.
 
-Everything you make is a **pack**: one JSON file (`pack.json`) that the game reads from its packs folder and reloads
-when it changes. You never edit the game; you write the pack (through `palace.py apply`), then test it in the running
-game through the **Agent bridge**.
+Everything you make goes into the player's **library**: each level is one file (`library/levels/<id>.json`, the level
+and its nights) and each custom enemy is one file (`library/enemies/<id>.json`). Any level can spawn any library enemy by
+its id. `palace.py` shows the whole library as one pack named `library` (pass `library` wherever a command takes a
+pack); the game reloads it within ~2 s of a change. Packs only exist for sharing: `palace.py export` writes a `.tfpack`
+of chosen levels with every enemy and asset they use. You never edit the game; you write the library (through
+`palace.py apply`), then test it in the running game through the **Agent bridge**.
+
+Old packs: packs the player had before the library existed were moved into it (the folders are kept in
+`PalaceBuilder/migrated-packs/`); their old pack id still works in every command and names the levels that came from
+that pack. A folder under `packs/` (an installed pack) is read and written as before.
 
 ## 1. The loop
 
@@ -15,13 +22,13 @@ game through the **Agent bridge**.
 2. `python3 palace.py ref build` – once (game running, bridge on): caches every map's layout and the enemy data
    (about a minute; it loads each map). Then `ref maps`, `ref slots <map>`, `ref render <map> -o base.png`.
 3. Design on paper first (section 9): map, entrances, castle defence, economy, nights.
-4. `python3 palace.py new <pack-id> --name "..."`, then `python3 palace.py level <pack-id> <level-id> --host <Map> --base cleared`
-   (its new wave set has no nights yet: the game refuses the pack until you add them with the `waves` op).
-5. Write ops to a JSON file and `python3 palace.py apply <pack-id> ops.json`. It saves, then prints `errors` and
-   `warnings` (offline checks). Fix errors before anything else.
-6. Look: `python3 palace.py render <pack-id> -o map.png --labels reqs` (then read the PNG), `show`, `economy --compare`,
-   `waves --compare`.
-7. Test in the game: `python3 palace.py test <pack-id> <level-id> --plan plan.json --shots shots/` (buys what a player
+4. `python3 palace.py new <level-id> --host <Map> --base cleared` (its new nights are empty: the game refuses to play
+   the level until you add them with the `waves` op). `python3 palace.py list` shows the library.
+5. Write ops to a JSON file and `python3 palace.py apply library ops.json --level <level-id>`. It saves, then prints
+   `errors` and `warnings` (offline checks of the levels the ops touched). Fix errors before anything else.
+6. Look: `python3 palace.py render library <level-id> -o map.png --labels reqs` (then read the PNG), `show`,
+   `economy --compare`, `waves --compare`.
+7. Test in the game: `python3 palace.py test library <level-id> --plan plan.json --shots shots/` (buys what a player
    would, plays the nights at 3x speed, reports each night), or `play` / `sandbox` and drive it step by step.
    `render --live` draws your overlay on a real top-down picture and the game's own enemy routes.
 8. Iterate: change the ops file and `apply --fresh` it (the level is emptied back to what `level` made, its nights kept,
@@ -93,6 +100,12 @@ All commands print JSON. Errors go to stderr as `{"error": "..."}` with exit cod
 - The game camera looks at the map from the south-ish at an angle; a picture's "up" is +z, not the player's view.
 
 ## 5. The pack format (every field)
+
+The library's files and shared packs use this one format. A library level file holds one level and the wave set it
+uses (`levels: [one]`, `waveSets: [its nights]`) plus a `"library": {kind, created, origin}` field; an enemy file holds
+`units: [one]`; the library's assets map is `library/assets.json`. Wave set ids are unique across the library
+(`palace.py` names a level's nights `<level-id>-nights`). `palace.py` reads and writes them through the `library` pack,
+so you edit the composed view below.
 
 ```jsonc
 {
@@ -245,7 +258,9 @@ and damage list. Use custom units sparingly; vanilla enemies are well balanced a
 | `ref build [--maps A,B] [--force]` | cache catalog + map dumps from the game (needed once) |
 | `ref maps` / `ref slots <map> [--kind House]` / `ref buildings [--kind]` / `ref enemies [--player]` / `ref waves <map> [--raw]` / `ref scenery [map]` | reference data |
 | `ref render <map> -o f.png` / `ref doc` | base map picture (with offline enemy routes) / regenerate reference.md |
-| `new <pack>` / `level <pack> <level> --host M [--base map\|cleared\|flat] [--waves empty\|vanilla\|none] [--force]` | create (`--base flat` also runs a default `terrain_init`; `--force` replaces the level) |
+| `new <level> --host M [--base map\|cleared\|flat] [--waves empty\|vanilla\|none] [--name N] [--force]` | a new library level (`--base flat` also runs a default `terrain_init`; `--force` replaces it). `level library <level> --host M ...` is the same; `new <pack>` without `--host` / `level <pack> ...` still make an old-style pack folder |
+| `list` | the library: levels (map, nights, where they came from, whether a preview was saved) and enemies (base, which levels use them) |
+| `export "<name>" <level,...> [--enemies a,b]` | through the game: a `.tfpack` with those levels, the extra enemies, and every enemy and asset they use (JSON: `written` path) |
 | `apply <pack> ops.json [--level L] [--dry-run] [--fresh]` | run ops; saves; prints offline errors/warnings. `--fresh` first empties the level (nights kept) so the same file can be re-applied |
 | `check <pack> [--live]` | offline checks; `--live` adds the game's validator (exit 1 on errors) |
 | `show <pack> [level]` | the level as it will play: every slot, what it needs, costs, income, lines |
