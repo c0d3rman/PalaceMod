@@ -125,8 +125,10 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
   },
   "spawnLines": {
     "edit": [{ "ref": "Main Bridge", "pos": [x,y,z], "rotY": 30 }],   // move a host line (pos = its middle)
-    "add": [{ "id": "north", "pos": [x,y,z], "rotY": 0, "width": 12,  // new line: a segment width m long,
-              "ground": true, "large": true, "flying": true }]       // across its rotY; which enemies may use it
+    "add": [{ "id": "north", "pos": [x,y,z], "rotY": 0, "width": 12,  // new line: a segment width m long;
+              "ground": true, "large": true, "flying": true }],      // rotY 0 runs east-west (along x), 90
+                                                                     // north-south; which enemies may use it
+    "remove": ["Forest", "Right Bridge"]   // host lines taken off the map: no enemies, routes or markers
   },
   "props": [{ "id": "rock-1", "base": "mesh:Rock A", "pos": [x,y,z], "rotY": 0, "scale": 1.0, "solid": true }],
   "terrain": { ... }                                  // section 7
@@ -134,8 +136,10 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
 ```
 
 - On a **cleared/flat** base only the castle (and its own add-ons) remain; host spawn lines stay where they are
-  (on flat they may sit outside your ground: add your own lines inside the field). Every slot you add defaults to
-  "needs the castle built" when you use ops.
+  (on flat they may sit outside your ground) until you remove them. Add your own lines, then take off the host's
+  you don't use (`remove_spawn_line`), or they keep showing in `paths`, renders and the minimap. A wave set that
+  still spawns from a removed line is an error, and so is removing a line the map's own nights use while the level
+  has no wave set. Every slot you add defaults to "needs the castle built" when you use ops.
 - `base: null` (the map as it is) keeps all vanilla slots, scenery and routes; you then remove, move, re-price and
   add. Good for remixes; for original designs use `cleared` or `flat`.
 - Added slots are named `PalaceBuilder <id>` in the running game; `palace.py build`/plans accept the bare id.
@@ -219,7 +223,7 @@ and damage list. Use custom units sparingly; vanilla enemies are well balanced a
 | `apply <pack> ops.json [--level L] [--dry-run]` | run ops; saves; prints offline errors/warnings |
 | `check <pack> [--live]` | offline checks; `--live` adds the game's validator (exit 1 on errors) |
 | `show <pack> [level]` | the level as it will play: every slot, what it needs, costs, income, lines |
-| `render <pack> [level] -o f.png [--labels names\|costs\|reqs\|none] [--live]` | top-down picture; `--live` = real game render + game routes (level loaded) |
+| `render <pack> [level] -o f.png [--labels names\|costs\|reqs\|none] [--live]` | top-down picture; routes in one colour per line, named, lengths in the legend; offline they're an estimate, `--live` = real game render + the game's routes (level loaded) |
 | `economy <pack> [level] [--compare]` | gold curve of a greedy all-economy player; vs the base map's vanilla |
 | `waves <pack> [level] [--compare [Map]]` | per night: enemies, effective HP, gold, flyers; vs vanilla |
 | `play <pack> <level>` | load as a normal run (real gold); prints load warnings |
@@ -230,7 +234,8 @@ and damage list. Use custom units sparingly; vanilla enemies are well balanced a
 | `build <slot> [level] [branch] [--pay]` | build/upgrade now (free unless --pay); `castle`, an added id, or a host name |
 | `spawn <unit> [count] [--elite] [--line L \| --at X Z]` | spawn enemies now |
 | `cheat god\|invulnerable\|infinitegold [on\|off]`, `cheat gold N`, `cheat speed X`, `cheat kill`, `cheat heal`, `cheat endnight`, `cheat teleport X,Z` | test helpers |
-| `paths [--rescan] [--points]` | the game's own route check from every ground line to the castle |
+| `paths [--rescan] [--points]` | the game's own route from every ground line to the castle, on the graph its enemies use (`Enemy Units L` if the line spawns large ones): `length` m from the line itself, `at` (the line's middle), `start` (where that lands on walkable ground), `snap` (m between them) and a `warning` when the line is over 10 m off walkable ground; `--points` adds the waypoints `[[x, z], ...]` |
+| `paths --between X1 Z1 X2 Z2` | whether each ground graph (small enemies, large enemies, the king's `Player Units S`) connects two points, and how far each point is from walkable ground |
 | `report` | the current or last night's report |
 | `shot -o f.png` | screenshot of the game window |
 | `game status` / `game slots` / `game log` / `game menu` / `game cmd "<raw>"` | raw game access |
@@ -251,7 +256,7 @@ and damage list. Use custom units sparingly; vanilla enemies are well balanced a
 | `remove_prop` | `id` or `ids` |
 | `add_spawn_line` | `id`, `at`/`pos`, `rotY`, `width`, `ground`, `large`, `flying` |
 | `move_spawn_line` | `line` (added id or host name), `at`/`pos`, `rotY` (added lines also `width`, flags) |
-| `remove_spawn_line` | `line` (added lines only) |
+| `remove_spawn_line` | `line`: an added id deletes it; a host line's name takes it off the map (`spawnLines.remove`); `restore: true` puts a removed host line back |
 | `waves` | `startingGold`, `nights` [night objects; unit refs may omit `vanilla:`], `name` (creates/links the level's wave set) |
 | `night` | `night` (1-based; = count+1 appends), plus night fields |
 | `copy_waves` | `from` (map), `lines` {old name: new name} |
@@ -300,10 +305,25 @@ ground too.
 - Heights: `terrain` with `set` (flat plateau/basin to a height), `raise`/`lower` (add), `smooth`; `ramp` for slopes.
   Slopes steeper than ~32° are cliffs: unwalkable for ground units and the king, painted as rock. A plateau with one
   ramp is a choke point; fliers ignore it.
-- **Width matters.** Large enemies (ogres, rams, big spiders; and every spawn line with `large: true` is path-checked
-  for them) need about 12-14 m between cliffs, water or blocked cells: a 6 m-high plateau with an 8 m ramp tested
-  as closed to them, a 14 m ramp as open. Small enemies fit through narrower gaps. Make ramps and passes 14 m+ unless
-  you mean to keep large enemies out.
+- **Width matters.** The game paths ground units on two graphs: small enemies and the king keep 0.5 m from any
+  obstacle, large enemies (ogres, rams, big spiders; every spawn line with `large: true` is path-checked for them)
+  keep 4 m. Water and blocked cells, cliff faces steeper than 30° and the field's edge are obstacles, and a dug water
+  edge is a slope too, so a causeway needs more width than a ramp. Measured in game (`paths --between`), by the
+  `width` of the op's shape:
+
+  | Passage | Small enemies, king | Large enemies |
+  |---|---|---|
+  | Water causeway, straight (along x or z) | closed ≤ 3, open from 6 (4-5 depends on the grid) | closed ≤ 9, open from 12 (10-11 depends on the grid) |
+  | Water causeway, diagonal | closed ≤ 5, open from 6 | closed ≤ 11, open from 14 (12-13 depends on the grid) |
+  | Ramp between cliffs, straight | open from 4 | closed ≤ 9, open from 11 (10 depends on the grid) |
+  | Ramp between cliffs, diagonal | open from 4 | closed ≤ 8, open from 11 (9-10 depends on the grid) |
+
+  Causeways: a water ring (dug, the default), then `water` `on: false` plus `terrain` `set` height 0 along a `line`
+  of that width. Ramps: a 6 m plateau (`falloff` 1) and a `ramp` (`falloff` 1). "Depends on the grid": shapes fill
+  whole 2 m cells, so where the edges fall on the grid moves the threshold. For a lane only small enemies use, make
+  it 6-8 m wide; for one everyone uses, 14 m+. `check` and `render` model the same rules offline (they agreed with
+  the game on 140 of 144 measured passages, and erred towards "closed"); confirm with `paths` or
+  `paths --between X1 Z1 X2 Z2` in game.
 - Example (tested): `{"op": "terrain", "mode": "set", "height": 6, "circle": {"center": [-4, 1], "radius": 22},
   "falloff": 1}` then `{"op": "ramp", "from": [-4, -18], "to": [-4, -40], "width": 14, "fromHeight": 6, "toHeight": 0,
   "falloff": 1}` on a flat Nordfels: a castle mesa with one southern ramp.

@@ -2345,9 +2345,10 @@ def render(ref, data, level, path, background=None, world=None, routes=None, lab
         p = [P(a, b) for a, b in r.get("points") or []]
         for i in range(len(p) - 1):
             cv.line(p[i][0], p[i][1], p[i + 1][0], p[i + 1][1], col, 3, a=0.9, dash=8)
-        if p and r.get("line"):
-            k = min(len(p) - 1, max(1, len(p) // 3))
-            cv.text(p[k][0] + 6, p[k][1] + 4, r["line"], col, 1, bga=0.7)
+        if len(p) > 1 and r.get("line"):
+            # Named a little way along its first leg, clear of the spawn line's own label.
+            lx, ly = p[0][0] + (p[1][0] - p[0][0]) * 0.3, p[0][1] + (p[1][1] - p[0][1]) * 0.3
+            cv.text(lx + 6, ly + 4, r["line"], col, 1, bga=0.7)
         length = r.get("length")
         route_keys.append((f"{r.get('line', '?')}" + (f" {length:.0f} m" if r.get("reachable") and length else " BLOCKED" if not r.get("reachable") else "")
                            + (" OFF GRAPH" if r.get("warning") else ""), col))
