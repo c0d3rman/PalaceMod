@@ -523,8 +523,7 @@ changes applied by the overlay at load (after Awake, before Start):
    - Checked on the 9 main maps (`builder-req base cleared <map>`, screenshots): renderers hidden per map: Nordfels
      3067, Durststein 104, Frostsee 103, Uferwind 1288, Sturmklamm 3167, Wildbach 2850, Moorweg 3586, Freifort 2771,
      Totend 1046 (the desert and snow maps are mostly rock, which is ground). Every spawn line still reaches the castle
-     on all 9 (Wildbach's "Upper Level Side" needed W4's `GroundGraphs.Scan`; a plain rescan also blocks it on the map
-     as it is). Rocks and cliffs stay: they use `rockMaterial`.
+     on all 9 (Wildbach's "Upper Level Side" only once W4's `GroundGraphs.Scan` replaced the plain rescan). Rocks and cliffs stay: they use `rockMaterial`.
    - Scenery colliders under hidden renderers are disabled too. The host's `invisibleWalls` stay, so the map's
      boundary still holds.
 3. **Cleared only:** the host ground stays, so cliffs, water and paths keep working with no new geometry. The
