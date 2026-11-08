@@ -26,7 +26,7 @@ namespace PalaceMod.Builder.Agent
 
         private const string Usage =
             "agent status | slots | catalog <file> | host <file> [cell] | packs | reload | validate <pack> | " +
-            "play <pack> <level> | sandbox <pack> <level> [x z] | infinitegold on|off | spawn <unit> [count] [elite] [line <name>|at <x> <z>] | vanilla <scene> | menu | night [n] | endnight | report | build <slot|all> [level] [branch] [pay] | " +
+            "play <pack> <level> | sandbox <pack> <level> [x z] | edit <pack> <level> | infinitegold on|off | spawn <unit> [count] [elite] [line <name>|at <x> <z>] | vanilla <scene> | menu | night [n] | endnight | report | build <slot|all> [level] [branch] [pay] | " +
             "gold <n> | god on|off | invulnerable on|off | speed <x> | kill | heal | teleport <x> <z> | paths | " +
             "capture <file> [pixels] | screenshot <file>   agent bridge: JSON state, level tests, map dumps (see agent-kit/)";
 
@@ -109,6 +109,18 @@ namespace PalaceMod.Builder.Agent
                         throw new InvalidOperationException("test play didn't start (see `agent status` and the log)");
                     NightRecorder.Reset();
                     return Json(new JObject { ["loading"] = $"{entry.Id}/{level}", ["sandbox"] = true });
+                }
+                case "edit":
+                {
+                    // Opens the level in the Studio for the player to look at or edit by hand.
+                    var entry = FindPack(Arg(args, 1));
+                    string level = Arg(args, 2);
+                    if (entry.Pack.FindLevel(level) == null) throw new ArgumentException($"{entry.Id} has no level \"{level}\"");
+                    Editor.BuilderEditor.OpenPack(entry.Id);
+                    var draft = Editor.BuilderEditor.Draft ?? throw new InvalidOperationException("the Builder couldn't open the pack");
+                    if (!Studio.Studio.Open(draft, level, out string error)) throw new InvalidOperationException(error);
+                    NightRecorder.Reset();
+                    return Json(new JObject { ["loading"] = $"{entry.Id}/{level}", ["studio"] = true });
                 }
                 case "infinitegold":
                     Studio.Play.SandboxActions.InfiniteGold = OnOff(args);
@@ -205,6 +217,7 @@ namespace PalaceMod.Builder.Agent
                 ["pack"] = session.Pack?.Id, ["level"] = session.Level?.Id, ["waveSet"] = session.WaveSet?.Id, ["host"] = session.HostScene,
             };
             o["sandbox"] = Studio.Play.StudioPlay.InPlay;
+            o["studio"] = Studio.Studio.Mode.ToString();
             if (LocalGamestate.Instance != null) o["state"] = LocalGamestate.Instance.CurrentState.ToString();
             if (!DebugActions.InLevel)
             {

@@ -2720,6 +2720,17 @@ def cmd_play_quiet(g, data, level, timeout):
     time.sleep(2.5)
 
 
+def cmd_edit(env, args):
+    """Opens the level in the in-game Studio (for the player to look at or edit by hand)."""
+    g = Game(env)
+    _, data = load_pack(env, args.pack)
+    find_level(data, args.level)
+    g.agent(f"edit {data['id']} {args.level}")
+    g.wait(lambda s: not s.get("loading") and s.get("studio") == "Edit", args.timeout, "the Studio to open")
+    out({"studio": "open", "note": "the Studio edits its own copy; Ctrl+S there writes pack.json. Don't apply ops while "
+                                   "the player has unsaved Studio changes."})
+
+
 def cmd_sandbox(env, args):
     """Studio test play: unlimited gold (toggle with --no-infinite), the king at (x, z) if given."""
     g = Game(env)
@@ -2887,6 +2898,11 @@ def main(argv=None):
     p.add_argument("--timeout-load", type=float, default=120)
     p.add_argument("--no-load", action="store_true", help="continue the run already loaded")
     p.add_argument("--no-catchup", action="store_true", help="starting at night N>1: don't apply earlier days' plan")
+
+    p = sub.add_parser("edit", help="open the level in the in-game Studio")
+    p.add_argument("pack")
+    p.add_argument("level")
+    p.add_argument("--timeout", type=float, default=120)
 
     p = sub.add_parser("sandbox", help="Studio test play: unlimited gold, start anywhere")
     p.add_argument("pack")

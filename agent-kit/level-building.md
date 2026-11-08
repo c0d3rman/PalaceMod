@@ -224,6 +224,7 @@ and damage list. Use custom units sparingly; vanilla enemies are well balanced a
 | `waves <pack> [level] [--compare [Map]]` | per night: enemies, effective HP, gold, flyers; vs vanilla |
 | `play <pack> <level>` | load as a normal run (real gold); prints load warnings |
 | `sandbox <pack> <level> [--at X Z]` | Studio test play: unlimited gold, king at X,Z |
+| `edit <pack> <level>` | open the level in the in-game Studio (the player's editor: F5 there test-plays); it edits its own copy and Ctrl+S writes pack.json, so don't `apply` while the player has unsaved Studio changes |
 | `test <pack> <level> [--nights 1-3] [--plan p.json] [--build all] [--god] [--invulnerable] [--gold N] [--speed 3] [--shots dir]` | load, buy per plan each day, play nights, report each |
 | `night [N] [--speed 3]` | start the next night (or jump to night N) and wait for its report |
 | `build <slot> [level] [branch] [--pay]` | build/upgrade now (free unless --pay); `castle`, an added id, or a host name |

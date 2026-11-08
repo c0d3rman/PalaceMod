@@ -68,6 +68,10 @@ python3 scripts/dev.py cmd "ui down"         # navigate the open menu like a con
 
 Then check the result with `dev.py logs` (see Logging) and `dev.py screenshot`. With Performance debug logging on (`dev.py cmd "log debug Performance"`), `PerformanceManager` logs a frame-time summary (fps, percentiles, CPU work per frame, frame-rate cap and reason) every "Summary interval"; settings edited in `BepInEx/config/PalaceMod.cfg` are reloaded live within 2 s. Only ask the user to test what genuinely needs a human, like how motion looks.
 
+## Agent kit (players' agents)
+
+`agent-kit/` is shipped inside the DLL and written to `BepInEx/PalaceMod/Agent/` when the player turns on Settings > Mods > Builder > "Agent bridge" (`Features/Builder/Agent/`): a level-building guide, a Claude Code skill, generated `reference.md`, and `palace.py`, a stdlib CLI that edits packs with JSON ops and drives the game through the bridge (the same commands as `dev.py cmd`, through a file channel of its own). To try it on a pool instance: `dev.py run --set "Agent bridge.Enabled=true"`, then `python3 agent-kit/palace.py --game "<instance>/game" ...` (`dev.py instances list` gives the folder; never point it at the real install). When the Builder's data model or the `agent` command changes, update `palace.py` and `level-building.md` with it, and regenerate `reference.md` (`palace.py ref build --force`, then `ref doc -o agent-kit/reference.md`) after a game update.
+
 ## Adding a feature
 
 - A feature is one `BaseManager` subclass in its own file under `src/PalaceMod/Features/<Area>/`. It's found automatically; never edit `Plugin.cs`. Harmony patch classes go nested inside the manager, and only those are applied. Managers in `Experimental/` (namespace `PalaceMod.Experimental`) are never loaded.
