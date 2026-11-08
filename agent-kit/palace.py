@@ -2371,7 +2371,9 @@ def cmd_ref(env, args):
             g = m.get("grid") or {}
             ext = None
             if g:
-                ext = [g["origin"][0], g["origin"][1], round(g["origin"][0] + g["size"][0] * g["cell"]), round(g["origin"][1] + g["size"][1] * g["cell"])]
+                # The walkable area (the dump samples 12 m beyond it), as terrain_init's default grid covers it.
+                ext = {"minX": g["origin"][0] + 12, "minZ": g["origin"][1] + 12,
+                       "maxX": round(g["origin"][0] + g["size"][0] * g["cell"] - 12), "maxZ": round(g["origin"][1] + g["size"][1] * g["cell"] - 12)}
             rows.append({"map": scene, "castle": m["castle"]["pos"] if m.get("castle") else None, "extent": ext, "nights": m.get("nights"),
                          "startingGold": m.get("startingGold"), "slots": kinds,
                          "spawnLines": [f"{l['name']} ({'G' if l['smallGround'] else ''}{'L' if l['bigGround'] else ''}{'F' if l['flying'] else ''})" for l in m["spawnLines"]]})
@@ -2379,11 +2381,18 @@ def cmd_ref(env, args):
     elif args.what == "slots":
         m = ref.map(args.name)
         rows = []
+        castle_name = (m.get("castle") or {}).get("name")
+        dupes = {}
+        for s in m["slots"]:
+            dupes[s["name"]] = dupes.get(s["name"], 0) + 1
         for s in m["slots"]:
             if args.kind and s["kind"].lower() != args.kind.lower():
                 continue
+            act = "castle" if s.get("activator") == castle_name else s.get("activator")
             rows.append({"name": s["name"], "kind": s["kind"], "at": [s["pos"][0], s["pos"][2]], "y": s["pos"][1],
-                         "needs": f"{s['activator']}:{s['activatorLevel'] + 1}" if s.get("activator") and s.get("startDeactivated") else "start",
+                         "needs": f"{act}:{s['activatorLevel'] + 1}" if s.get("activator") and s.get("startDeactivated") else "start",
+                         **({"duplicateName": f"{dupes[s['name']]} slots share this name, so ops and plans can't tell them apart: avoid naming it"}
+                            if dupes[s["name"]] > 1 else {}),
                          "costs": [u["cost"] for u in s["upgrades"] if not u.get("disabled")],
                          "income": [step_income(u) for u in s["upgrades"] if not u.get("disabled")],
                          **({"castle": True} if s.get("castle") else {}), **({"followsActivator": True} if s.get("followsActivator") else {}),
@@ -2472,6 +2481,37 @@ def reference_markdown(ref):
         L.append(f"| {name} | {c[0]:.0f}, {c[1]:.1f}, {c[2]:.0f} | {ext} | {m['nights']} | {m['startingGold']} | "
                  f"{', '.join(f'{k} {v}' for k, v in sorted(kinds.items()))} | {lines} |")
     L.append("\nThe castle slot of each map is named in `palace.py ref slots <map>` (`\"castle\": true`); in ops and plans just say `castle`.\n")
+
+    L.append("### What the host decides\n")
+    L.append("Even on a `cleared` or `flat` base the host map fixes: **which building kinds you can place** (`add_slot` copies a "
+             "slot of that kind from the host, so a kind the host lacks can't be added: no Mill on Frostsee), the castle's "
+             "position, the playable rectangle (`terrain_init`'s default grid is the host's walkable extent), the sky, light and "
+             "ground palette, and the starting gold default. Terrain heights are **world** heights clamped to "
+             f"[{Terrain.MIN_Y:g}, {Terrain.MAX_Y:g}] m, so a high castle leaves little room to build up (headroom below). Pick "
+             "the host from this table before designing.\n")
+    all_kinds = sorted({s["kind"] for name in maps for s in ref.map(name)["slots"]
+                        if not s.get("followsActivator") and not s.get("castle")})
+    L.append("| Kind | " + " | ".join(maps) + " |")
+    L.append("|---|" + "---|" * len(maps))
+    for kind in all_kinds:
+        row = []
+        for name in maps:
+            row.append("yes" if any(s["kind"] == kind and not s.get("followsActivator") and not s.get("castle")
+                                    for s in ref.map(name)["slots"]) else "-")
+        L.append(f"| {kind} | " + " | ".join(row) + " |")
+    heads = []
+    for name in maps:
+        m = ref.map(name)
+        g = m["grid"]
+        c = m["castle"]["pos"]
+        x0, x1 = g["origin"][0] + 12, g["origin"][0] + g["size"][0] * g["cell"] - 12
+        z0, z1 = g["origin"][1] + 12, g["origin"][1] + g["size"][1] * g["cell"] - 12
+        heads.append(f"| {name} | {x1 - x0:.0f} x {z1 - z0:.0f} | {c[0] - x0:.0f} / {x1 - c[0]:.0f} / {c[2] - z0:.0f} / {z1 - c[2]:.0f} | "
+                     f"{c[1]:.1f} | {Terrain.MAX_Y - c[1]:+.1f} / {Terrain.MIN_Y - c[1]:+.1f} |")
+    L.append("\n| Host | Playable rectangle (m) | Castle to west / east / south / north edge (m) | Castle y | Terrain headroom up / down from the castle (m) |")
+    L.append("|---|---|---|---|---|")
+    L += heads
+    L.append("")
 
     L.append("## Buildings (slot kinds)\n")
     L.append("Per level: cost in gold, then each choice (branch) with its income change (+g per dawn), extra HP and what it adds. "
@@ -2783,11 +2823,13 @@ def cmd_play(env, args):
     out({"status": g.status(), "loadWarnings": notes})
 
 
-def wait_night(g, timeout):
+def wait_night(g, timeout, night=None):
+    """Waits for the night's report. `night` (the number the `night` command started) guards against reading the
+    previous night's finished report before the game has begun recording the new one."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         r = g.agent("report")
-        if r.get("done"):
+        if r.get("done") and (night is None or r.get("night") == night):
             return r
         time.sleep(1.0)
     r = g.agent("report")
@@ -2801,11 +2843,12 @@ def cmd_night(env, args):
     g = Game(env)
     if args.speed:
         g.agent(f"speed {args.speed}")
+    expected = args.night or g.status().get("night")
     g.agent("night" + (f" {args.night}" if args.night else ""))
     if args.no_wait:
         out(g.status())
         return
-    out(wait_night(g, args.timeout))
+    out(wait_night(g, args.timeout, expected))
 
 
 def parse_nights(spec, total):
@@ -2994,7 +3037,7 @@ def cmd_test(env, args):
         if shots and n in nights:
             time.sleep(args.shot_after)
             mid = g.screenshot(shots / f"night{n}.png")
-        rep = wait_night(g, args.timeout)
+        rep = wait_night(g, args.timeout, n)
         rep["bought"] = bought
         if mid:
             rep["screenshot"] = mid

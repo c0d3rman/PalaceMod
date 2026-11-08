@@ -700,7 +700,13 @@ def read_lease():
 
 
 def lease_idle(lease):
-    return time.time() - lease["heartbeat"]
+    """Seconds since the holder last used the game: its last dev.py call, or its last Agent bridge request (palace.py
+    touches bridge/last-request on every command), whichever is later."""
+    last = lease["heartbeat"]
+    game = INSTANCES_HOME / str(lease["instance"]) / "game" if lease.get("instance") else DEFAULT_GAME
+    with contextlib.suppress(OSError):
+        last = max(last, (game / "BepInEx/PalaceMod/Agent/bridge/last-request").stat().st_mtime)
+    return time.time() - last
 
 
 def lease_stale(lease):
