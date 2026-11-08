@@ -59,8 +59,8 @@ namespace PalaceMod.Builder.Studio.Requirements
             {
                 string r = RequirementState.Ref(slots[0]);
                 var unlocks = LevelRequirements.Dependents(RequirementState.Effective, r);
-                page.Row("Unlocks", unlocks.Count == 0 ? "Nothing" : string.Join(", ", unlocks.Select(RequirementState.Name)),
-                    tooltip: unlocks.Count == 0 ? null : "Click to select them", onClick: unlocks.Count == 0 ? null : () => Studio.Select(unlocks.Select(RequirementState.Key)));
+                page.Row("Unlocks", unlocks.Count == 0 ? "Nothing" : unlocks.Count == 1 ? "1 slot" : $"{unlocks.Count} slots",
+                    tooltip: unlocks.Count == 0 ? null : string.Join(", ", unlocks.Select(RequirementState.Name)) + "\nClick to select them", onClick: unlocks.Count == 0 ? null : () => Studio.Select(unlocks.Select(RequirementState.Key)));
                 var item = Studio.Find(slots[0]);
                 int levels = Level.LayoutScene.BuiltLevels(item?.Proxy);
                 if (levels > 0)

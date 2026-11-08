@@ -372,7 +372,7 @@ Code: `Studio/Requirements/` (`BuilderRequirementsManager` registers everything 
 - **Labels** (`SlotKinds.Provide`, a label provider): kind colour, the planner's icon, the cost chain with the level's
   overrides, and the requirement badge ("♜2" castle level, "⤳ House 6" a slot, "★" from the start).
 - Dev: `builder-req click [ctrl] [shift] [alt] <key>` (the Link tool's click), `link <key>|<key> > <key> [level]`,
-  `chain branching|nearest|order [apply|popup]` (over the selection), `label <key>`, `needs`; on a live level
+  `chain branching|nearest|order [apply|popup]` (over the selection), `select <key>|<key>`, `view links off|selection|all / built on|off / xray on|off`, `label <key>`, `needs`; on a live level
   `slots`, `upgrade <slot>`, `unlocks <slot>`, `proxy <slot> [level]`; `import <pack.json>`, `play <pack> <level>`,
   `base cleared|flat <map>`, `start <pack> [create <map> <0|1|2> <name>]`, `thumb`.
 
@@ -484,7 +484,7 @@ Non-modal dock like the Studio's. Keys in brackets (context `BuilderPlay`).
 
 ## Starting a level, and the empty map
 
-**Start popup** (`Studio/Start/StartPopup.cs`, `StartPopup.Open(draft)`; Pack › Levels › New level):
+**Start popup** (`Studio/Start/StartPopup.cs`, `StartPopup.Open(draft)`; Pack › Levels › "New level"):
 
 ```text
  New level
