@@ -191,7 +191,7 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
 - Colours: every map recolours the same materials, so a library prop takes the level's colours (a Totend tree on
   Frostsee is Frostsee-coloured). `colors: "<Map>"` on a prop keeps that map's colours (the ops' `"colors":
   "original"` picks the map the mesh comes from); `colors` on the level gives the whole level another map's scheme
-  (`{"op":"set","path":"levels[0].colors","value":"Totend"}`). Maps: Neuland and the nine main maps.
+  (`{"op":"level","colors":"Totend"}`). Maps: Neuland and the nine main maps.
 
 ### Requirements (castle level, prerequisites, house chains)
 
@@ -323,7 +323,7 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 
 | Op | Fields |
 |---|---|
-| `level` | `name`, `description`, `base` (`cleared`/`flat`/null), `waveSet`, `host` |
+| `level` | `name`, `description`, `base` (`cleared`/`flat`/null), `waveSet`, `host`, `colors` |
 | `add_slot` | `id`, `kind` (e.g. `"House"`, `"Defense Tower"`, `"Barracks"`; copies the host's slot of that kind, or places the game's standard one, base `building:<kind>`, when the host has none) or `from` (a host slot name), `at` [x,z] or `pos`, `rotY`, `requires` (shorthand), `upgradeCap`, `costs` [per level, null keeps] |
 | `move_slot` | `slot` (added id, host name, `castle` can't move), `at`/`pos`, `rotY` |
 | `set_slot` | `slot` (or `castle`), `requires` (null = back to the map's), `upgradeCap`, `costs` |
@@ -346,7 +346,7 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 | `paint` | `material` `ground`\|`high`\|`low`\|`earth`\|`sand`\|`road`\|`rock`, shape; painted per 1 m sample and drawn with smooth edges; any base |
 | `block` | `on` (true), shape: ground units and the king can't enter; works on any base |
 | `water` | `level` (m relative to y, default -1), `on`, shape; digs the ground to level-1 m. `on: false` makes the cells land again and raises the dug ground back to `height` (default 0; `fill: false` keeps it dug) |
-| `set` | `path` (e.g. `"levels[0].waveSet"`), `value` (or `delete: true`): raw edit |
+| `set` | `path`, `value` (or `delete: true`): raw edit. `level.` starts in the op's level (`"level.colors"`), `nights.` in its wave set (`"nights.startingGold"`); `levels[i]`/`waveSets[i]` index the whole pack, and in the library (every level) must be the op's own |
 
 Shapes: `"circle": {"center": [x,z], "radius": r}`, `"rect": {"min": [x,z], "max": [x,z]}`,
 `"line": {"points": [[x,z], ...], "width": w}`, `"polygon": {"points": [[x,z], ...]}`; `"falloff": m` softens edges.
