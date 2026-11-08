@@ -57,7 +57,12 @@ namespace PalaceMod.Builder.Studio
 
             var byType = items.GroupBy(i => i.TypeName).OrderByDescending(g => g.Count()).ToList();
             StudioDock.SmallHeader(page, items.Count == 1 ? Esc(items[0].Name) : string.Join(" · ", byType.Take(3).Select(g => $"{g.Count()} {Esc(Plural(g.Key, g.Count()))}")) + (byType.Count > 3 ? " …" : ""));
-            if (items.Count == 1) page.Row(Esc(items[0].TypeName), Dim(Summary(items[0]).Substring(Esc(items[0].TypeName).Length).TrimStart(' ', '·')));
+            if (items.Count == 1)
+            {
+                // The kind on one line, its costs and requirement under it: side by side they ran into each other.
+                string rest = Summary(items[0]).Substring(Esc(items[0].TypeName).Length).TrimStart(' ', '·');
+                page.Text(Esc(items[0].TypeName) + (rest.Length > 0 ? "\n" + Dim(rest) : ""));
+            }
 
             // Costs: when every selected slot has the same number of levels.
             var slots = items.Where(i => (i.Kind is StudioItemKind.Slot or StudioItemKind.Added) && i.BaseCosts.Count > 0).ToList();
@@ -200,10 +205,10 @@ namespace PalaceMod.Builder.Studio
             page.TextInput("Name", () => Studio.Level?.Name, v => Set("Rename level", l => l.Name = v), () => "Shown in the Custom runs list.").Stack();
             page.TextInput("Description", () => Studio.Level?.Description, v => Set("Set description", l => l.Description = v), () => "A sentence about the level, shown in its tooltip.", 300, multiline: true).Stack();
             var host = EditorCatalog.Host(lv.Host);
-            StudioDock.SmallHeader(page, "Map");
+            StudioDock.SmallHeader(page, "Setup");
             Compact(page, page.Row("Map", Esc(host?.DisplayName ?? lv.Host), "The map the level is built on."));
             if (lv.Base != null) Compact(page, page.Row("Base", lv.Base == LevelBases.Flat ? "Flat field" : "Cleared", "Everything but the castle is removed from the map."));
-            var sets = new List<(string Value, string Display)> { (null, "The map's own") };
+            var sets = new List<(string Value, string Display)> { (null, "Map's own") };
             sets.AddRange(draft.Pack.WaveSets.Where(w => w?.Host == lv.Host).Select(w => (w.Id, string.IsNullOrWhiteSpace(w.Name) ? w.Id : w.Name)));
             page.Choice("Nights", sets.Select(s => s.Display).ToList(), () => sets.FindIndex(s => s.Value == Studio.Level?.WaveSet),
                 i => Set("Set nights", l => l.WaveSet = sets[i].Value), tooltip: () => "Which enemies come: the map's own nights, or one of this pack's wave sets for this map.");

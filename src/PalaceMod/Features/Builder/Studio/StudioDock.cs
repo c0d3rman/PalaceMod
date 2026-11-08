@@ -516,6 +516,9 @@ namespace PalaceMod.Builder.Studio
             if (text != null)
             {
                 text.fontSize = Mathf.Min(text.fontSize, 23f);
+                // The game's menu rows grow a lot when hovered; in a list that's a jump (and room kept for nothing).
+                foreach (var style in new[] { b.selectedStyle, b.focussedStyle, b.focussedAndSelectedStyle })
+                    if (style != null && style.fontSize > text.fontSize * 1.1f) style.fontSize = text.fontSize * 1.1f;
                 text.enableWordWrapping = true;
                 text.overflowMode = TextOverflowModes.Overflow;
                 var value = b.transform.Find("Value")?.GetComponent<TextMeshProUGUI>();
@@ -529,7 +532,7 @@ namespace PalaceMod.Builder.Studio
                 if (width > 0f && le != null)
                 {
                     float room = Mathf.Max(40f, width - text.margin.x - valueRoom);
-                    le.preferredHeight = Mathf.Max(40f, text.GetPreferredValues(text.text, room, 0f).y + 10f);
+                    le.preferredHeight = Mathf.Max(40f, ModPopup.LabelWidth(b, text, room).y + 10f);
                 }
                 if (on) text.color = ModStyle.Bright;
             }

@@ -299,6 +299,9 @@ namespace PalaceMod
                 Log.Core.Caught($"ModDock panel \"{Name}\": building it failed", e);
                 Page.Text("Couldn't be shown; see the log.");
             }
+            // A narrow panel: a plain row whose label and value don't fit side by side wraps its label instead of
+            // running under the value.
+            foreach (var row in Page.Elements.OfType<TFUITextButton>()) ModPopup.WrapIfLong(row, size.x);
             LayoutRebuilder.ForceRebuildLayoutImmediate(Scroll.Content);
             Scroll.SetContentHeight(LayoutUtility.GetPreferredHeight(Scroll.Content));
             Scroll.ScrollTo(keep);

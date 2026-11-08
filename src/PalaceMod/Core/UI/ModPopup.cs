@@ -197,12 +197,39 @@ namespace PalaceMod
                 frame.Select(page.Elements.FirstOrDefault(e => e.name == selectedName) ?? page.Elements[Math.Min(selectedIndex, page.Elements.Count - 1)]);
         }
 
+        /// <summary>The label's preferred size in the largest of the row's styles: a selected row's text is bigger (and
+        /// bold), and it must fit then too.</summary>
+        internal static Vector2 LabelWidth(TFUITextButton row, TextMeshProUGUI text, float width)
+        {
+            var size = text.GetPreferredValues(text.text, width, 0f);
+            float keepSize = text.fontSize;
+            var keepFont = text.font;
+            try
+            {
+                foreach (var style in new[] { row.selectedStyle, row.focussedStyle, row.focussedAndSelectedStyle })
+                {
+                    if (style == null || style.fontSize <= 0f) continue;
+                    text.fontSize = style.fontSize;
+                    if (style.font != null) text.font = style.font;
+                    var s = text.GetPreferredValues(text.text, width, 0f);
+                    size = Vector2.Max(size, s);
+                    text.font = keepFont;
+                }
+            }
+            finally
+            {
+                text.fontSize = keepSize;
+                text.font = keepFont;
+            }
+            return size;
+        }
+
         /// <summary>The width a row's label (with its icon margin) and value need on one line.</summary>
         internal static float RowWidth(TFUITextButton row)
         {
             var text = row.GetComponent<TextMeshProUGUI>();
             if (text == null || string.IsNullOrEmpty(text.text)) return 0f;
-            float w = text.GetPreferredValues(text.text, 100000f, 100f).x + text.margin.x + Mathf.Max(0f, text.margin.z);
+            float w = LabelWidth(row, text, 100000f).x + text.margin.x + Mathf.Max(0f, text.margin.z);
             var value = row.transform.Find("Value")?.GetComponent<TextMeshProUGUI>();
             if (value != null && !string.IsNullOrEmpty(value.text)) w += value.GetPreferredValues(value.text, 100000f, 100f).x + 24f;
             return w + 8f;
@@ -214,9 +241,15 @@ namespace PalaceMod
             if (RowWidth(row) <= room + 0.5f) return;
             var text = row.GetComponent<TextMeshProUGUI>();
             if (text == null) return;
+            // Fields lay out their own value (indented beside the label); leave them be.
+            var value = row.transform.Find("Value")?.GetComponent<TextMeshProUGUI>();
+            if (value != null && value.margin.x > 0f) return;
+            // The wrapped label keeps clear of the value on the right.
+            if (value != null && !string.IsNullOrEmpty(value.text))
+                text.margin = new Vector4(text.margin.x, text.margin.y, Mathf.Max(text.margin.z, value.GetPreferredValues(value.text, 100000f, 100f).x + 16f), text.margin.w);
             text.enableWordWrapping = true;
             text.overflowMode = TextOverflowModes.Overflow;
-            float h = text.GetPreferredValues(text.text, room - text.margin.x - Mathf.Max(0f, text.margin.z), 0f).y + 12f;
+            float h = LabelWidth(row, text, room - text.margin.x - Mathf.Max(0f, text.margin.z)).y + 12f;
             var le = row.GetComponent<LayoutElement>();
             if (le != null) le.preferredHeight = Mathf.Max(le.preferredHeight, h);
         }
