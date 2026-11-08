@@ -73,31 +73,48 @@ namespace PalaceMod.Builder.Level
             });
         }
 
-        /// <summary>A ramp: heights along the segment a→b go linearly from ha to hb (relative), over its width.</summary>
+        /// <summary>A ramp: heights along the segment a→b go linearly from ha to hb (relative), cut and filled over its
+        /// width with hard sides. Corners up to half a cell diagonal past the width are set too, so the walkable incline is at
+        /// least `width` wide whatever the angle to the grid (the cells along its sides are its walls).</summary>
         public static Dirty Ramp(TerrainGrid g, float ax, float az, float ha, float bx, float bz, float hb, float width)
         {
             var dirty = Dirty.None;
             float dx = bx - ax, dz = bz - az, len2 = dx * dx + dz * dz;
             if (len2 < 0.01f) return dirty;
-            float half = width / 2f;
-            for (int cz = 0; cz <= g.H; cz++)
-                for (int cx = 0; cx <= g.W; cx++)
+            float half = width / 2f + g.Cell * 0.71f, len = (float)Math.Sqrt(len2), reach = half + g.Cell;
+            float ends = g.Cell * 0.01f / len;
+            int x0 = Math.Max(0, (int)Math.Floor((Math.Min(ax, bx) - reach - g.OriginX) / g.Cell)), x1 = Math.Min(g.W, (int)Math.Ceiling((Math.Max(ax, bx) + reach - g.OriginX) / g.Cell));
+            int z0 = Math.Max(0, (int)Math.Floor((Math.Min(az, bz) - reach - g.OriginZ) / g.Cell)), z1 = Math.Min(g.H, (int)Math.Ceiling((Math.Max(az, bz) + reach - g.OriginZ) / g.Cell));
+            for (int cz = z0; cz <= z1; cz++)
+                for (int cx = x0; cx <= x1; cx++)
                 {
                     float px = g.CornerX(cx) - ax, pz = g.CornerZ(cz) - az;
                     float t = (px * dx + pz * dz) / len2;
-                    if (t < 0f || t > 1f) continue;
+                    if (t < -ends || t > 1f + ends) continue;
+                    t = TerrainGrid.Clamp(t, 0f, 1f);
                     float ox = px - t * dx, oz = pz - t * dz;
-                    if (ox * ox + oz * oz > half * half) continue;
-                    g.Heights[g.Corner(cx, cz)] = g.ClampHeight(TerrainGrid.Lerp(ha, hb, t));
+                    if (ox * ox + oz * oz > half * half + 1e-4f) continue;
+                    float h = g.ClampHeight(TerrainGrid.Lerp(ha, hb, t));
+                    int i = g.Corner(cx, cz);
+                    if (h == g.Heights[i]) continue;
+                    g.Heights[i] = h;
                     TouchCorner(g, cx, cz, ref dirty);
                 }
             return dirty;
+        }
+
+        /// <summary>A ramp's incline in degrees.</summary>
+        public static float RampSlope(float ax, float az, float ha, float bx, float bz, float hb)
+        {
+            float len = (float)Math.Sqrt((bx - ax) * (bx - ax) + (bz - az) * (bz - az));
+            return len < 0.01f ? 90f : (float)(Math.Atan(Math.Abs(ha - hb) / len) * 180.0 / Math.PI);
         }
 
         /// <summary>Sets a cell layer for every cell whose centre is under the brush.</summary>
         public static Dirty Paint(TerrainGrid g, float x, float z, float radius, CellLayer layer, byte value)
         {
             var dirty = Dirty.None;
+            if (layer == CellLayer.Material) return PaintSamples(g, x, z, radius, value);
             Range(g, x, z, radius, out int x0, out int z0, out int x1, out int z1, cells: true);
             for (int cz = z0; cz <= z1; cz++)
                 for (int cx = x0; cx <= x1; cx++)
@@ -108,11 +125,32 @@ namespace PalaceMod.Builder.Level
                     int i = g.CellIndex(cx, cz);
                     switch (layer)
                     {
-                        case CellLayer.Material: g.Materials[i] = value; break;
                         case CellLayer.Blocked: g.Blocked[i] = value != 0; break;
                         case CellLayer.Water: g.Water[i] = value != 0; break;
                     }
                     dirty.Add(cx, cz);
+                }
+            return dirty;
+        }
+
+        /// <summary>Paints every paint sample (PaintRes per cell edge) whose centre is under the brush; the ground layer
+        /// draws the result as smooth outlines.</summary>
+        private static Dirty PaintSamples(TerrainGrid g, float x, float z, float radius, byte value)
+        {
+            var dirty = Dirty.None;
+            float s = g.PaintStep;
+            int x0 = Math.Max(0, (int)Math.Floor((x - radius - g.OriginX) / s) - 1), x1 = Math.Min(g.PaintW - 1, (int)Math.Ceiling((x + radius - g.OriginX) / s) + 1);
+            int z0 = Math.Max(0, (int)Math.Floor((z - radius - g.OriginZ) / s) - 1), z1 = Math.Min(g.PaintH - 1, (int)Math.Ceiling((z + radius - g.OriginZ) / s) + 1);
+            for (int pz = z0; pz <= z1; pz++)
+                for (int px = x0; px <= x1; px++)
+                {
+                    float dx = g.OriginX + (px + 0.5f) * s - x, dz = g.OriginZ + (pz + 0.5f) * s - z;
+                    // A brush smaller than a sample still paints the sample it's on.
+                    if (dx * dx + dz * dz > radius * radius && !(Math.Abs(dx) <= s / 2f && Math.Abs(dz) <= s / 2f)) continue;
+                    int i = g.PaintIndex(px, pz);
+                    if (g.Materials[i] == value) continue;
+                    g.Materials[i] = value;
+                    dirty.Add(px / TerrainGrid.PaintRes, pz / TerrainGrid.PaintRes);
                 }
             return dirty;
         }

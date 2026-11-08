@@ -43,6 +43,28 @@ namespace PalaceMod.Builder.Editor
             BuildActions(page, u);
         }
 
+        /// <summary>One section of this page, for the Enemy Studio's inspector tabs: "identity", "stats", "weapon",
+        /// "tags", "visuals", "behaviours", "actions".</summary>
+        internal void BuildSection(ModPage page, params string[] sections)
+        {
+            BuildInto(page, p =>
+            {
+                var u = Unit;
+                if (u == null) { p.Text("This unit no longer exists."); return; }
+                foreach (string section in sections)
+                switch (section)
+                {
+                    case "identity": BuildIdentity(p, u); break;
+                    case "stats": BuildStats(p); break;
+                    case "weapon": BuildWeapon(p, u); break;
+                    case "tags": BuildTags(p, u); break;
+                    case "visuals": BuildVisuals(p, u); break;
+                    case "behaviours": BuildBehaviours(p, u); break;
+                    case "actions": BuildActions(p, u); break;
+                }
+            });
+        }
+
         // ---- Identity ----------------------------------------------------------------------------------------------
 
         private void BuildIdentity(ModPage page, UnitDef u)
@@ -54,10 +76,11 @@ namespace PalaceMod.Builder.Editor
                 // A fresh unit's id follows its name until the id is used elsewhere.
                 string oldDerived = Ids.FromName(unit.Name ?? "");
                 unit.Name = v;
-                if (v != null && (unit.Id == oldDerived || unit.Id.StartsWith(oldDerived + "-")) && !Referenced(p, unit.Id))
+                // Library ids never change: other levels refer to the enemy by it.
+                if (v != null && !Draft.IsLibrary && (unit.Id == oldDerived || unit.Id.StartsWith(oldDerived + "-")) && !Referenced(p, unit.Id))
                     unit.Id = EditorCatalog.UniqueId(Ids.FromName(v), p.Units.Where(o => o != unit).Select(o => o.Id));
             }, "Shown in the night preview and tooltips.");
-            Text(page, "Id", P + ".id", () => Unit?.Id, (p, v) =>
+            if (!Draft.IsLibrary) Text(page, "Id", P + ".id", () => Unit?.Id, (p, v) =>
             {
                 var unit = p.Units[Index];
                 if (v == null || v == unit.Id) return;
@@ -288,7 +311,7 @@ namespace PalaceMod.Builder.Editor
         /// <summary>Tag choices. Movement tags can't be added to or removed from a unit, but damage can target them.</summary>
         private static IEnumerable<Picker.Item> TagItems(Func<string, bool> filter = null, bool unitTags = false) =>
             Enum.GetNames(typeof(TagManager.ETag)).Where(t => !(unitTags && MovementTags.Contains(t)) && (filter?.Invoke(t) ?? true)).OrderBy(t => t)
-                .Select(t => new Picker.Item { Id = t, Label = Schema.Words(t) });
+                .Select(t => new Picker.Item { Id = t, Label = Schema.Words(t), Tooltip = Descriptions.Tag(t) });
 
         private static string TagList(List<string> tags, string none) =>
             tags == null || tags.Count == 0 ? Dim(none) : string.Join(", ", tags.Select(Schema.Words));
@@ -358,9 +381,14 @@ namespace PalaceMod.Builder.Editor
             var unit = p.Units[Index];
             unit.Visuals ??= new VisualsDef();
             change(unit.Visuals);
-            var v = unit.Visuals;
-            if (v.Tint == null && v.Scale == null && v.Icon == null && v.Mesh == null && (v.Extra == null || v.Extra.Count == 0)) unit.Visuals = null;
+            if (IsEmpty(unit.Visuals)) unit.Visuals = null;
         }
+
+        /// <summary>Visuals with nothing set (they can be dropped from the unit).</summary>
+        internal static bool IsEmpty(VisualsDef v) =>
+            v.Tint == null && v.Scale == null && v.Icon == null && v.Mesh == null && v.MeshScale == null && v.MeshRotY == null && v.MeshRotX == null &&
+            v.MeshRotZ == null && v.MeshOffset == null && v.MeshLook == null && v.Motion == null && v.Texture == null &&
+            (v.Sounds == null || (v.Sounds.Attack ?? v.Sounds.Hurt ?? v.Sounds.Death) == null) && (v.Extra == null || v.Extra.Count == 0);
 
         // ---- Behaviours --------------------------------------------------------------------------------------------
 

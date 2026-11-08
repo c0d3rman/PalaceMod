@@ -185,6 +185,37 @@ namespace PalaceMod.Builder.Studio
 
         private static bool TransitionRunning => SceneTransitionManager.instance != null && SceneTransitionManager.instance.SceneTransitionIsRunning;
 
+        // ---- Suspension (the Enemy Studio takes over the edit scene in place) --------------------------------------
+
+        /// <summary>While true, the shell's per-frame loop doesn't run (no dock, keys, tools, labels or overlays); the
+        /// scene, draft, selection and view are kept. Set by the tool that takes over (EnemyStudio).</summary>
+        public static Func<bool> Suspended;
+
+        /// <summary>Hides everything the shell draws over the map (call when a suspension starts).</summary>
+        public static void HideForSuspend()
+        {
+            try { Tool?.Cancel(); } catch (Exception e) { Log.For<BuilderManager>().Caught("Studio tool Cancel failed", e); }
+            foreach (var o in Studio.Overlays)
+            {
+                try { o.Hide(); } catch (Exception e) { Log.For<BuilderManager>().Caught("Studio overlay Hide failed", e); }
+            }
+            StudioLabels.Clear();
+            StudioScene.SetMarkersVisible(false);
+            StudioSelection.SetHover(null);
+            ModTooltip.Hide(Instance);
+            StudioDock.Hide();
+        }
+
+        /// <summary>Brings the shell's drawing back after a suspension and restores a view (camera, selection, tool, tabs).</summary>
+        public static void ResumeFromSuspend(StudioViewState view)
+        {
+            StudioScene.SetMarkersVisible(true);
+            StudioScene.RefreshMarkers();
+            if (view != null) RestoreViewNow(view);
+            StudioDock.RefreshAll();
+            StudioDock.OnLevelChanged();
+        }
+
         // ---- Per frame ----------------------------------------------------------------------------------------------
 
         public static void Update()
@@ -207,6 +238,8 @@ namespace PalaceMod.Builder.Studio
             }
             if (!StudioScene.Scene.isLoaded) { ClearScene(); state = State.Waiting; return; }
             if (TransitionRunning) return;
+            // Another in-world tool (the Enemy Studio) has the screen; the level stays as it is underneath.
+            if (Suspended?.Invoke() == true) return;
 
             LocalGamestate.Instance?.SetPlayerFreezeState(true);
             StudioDock.Show();
@@ -304,6 +337,8 @@ namespace PalaceMod.Builder.Studio
             var cam = Camera.main;
             if (cam == null) return false;
             var ray = cam.ScreenPointToRay(screen);
+            // Sculpted ground: the exact hit (a ground-plane guess lands behind a cliff's top edge).
+            if (GroundLayer.TryRaycast(ray, out point)) return true;
             float height = StudioCamera.Ready ? StudioCamera.Pivot.y : 0f;
             for (int i = 0; i < 2; i++)
             {
@@ -476,7 +511,10 @@ namespace PalaceMod.Builder.Studio
                     foreach (var t in Studio.Tools)
                         if (t.Key?.Down == true) { SetTool(t.Id); return; }
                     for (int i = 0; i < 9; i++)
+                    {
+                        if (StudioKeys.Hotbar[i]?.Down == true && Tool?.Digit(i) == true) return;
                         if (StudioKeys.Hotbar[i]?.Down == true && i < recent.Count) { Arm(recent[i], recentYaw.TryGetValue(recent[i].Id, out var y) ? y : 0f); return; }
+                    }
                 }
             }
             // Arrow keys nudge the selection by the snap step (Shift x5), along the view's axes.

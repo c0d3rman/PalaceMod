@@ -777,12 +777,29 @@ class Ops:
         lid = op.get("level") if isinstance(op.get("level"), str) else self.level_id
         return find_level(self.data, lid)
 
+    def host_ground(self, level):
+        """The host's sampled ground as a function (x, z) -> world y or None, for sculpting a map's own ground."""
+        g = self.ref.map(level["host"]).get("grid")
+        if not g:
+            return None
+        grid = Grid(g)
+        return grid.height
+
+    def terrain_of(self, lv):
+        """The level's terrain with absolute heights: on a map's own ground (base not flat) the pack holds offsets from
+        the host's ground, made absolute here from the reference's sampled ground."""
+        return Terrain(lv["terrain"], host=None if lv.get("base") == "flat" else self.host_ground(lv))
+
     def ground_y(self, level, x, z):
         t = level.get("terrain")
         if t and level.get("base") == "flat":
             y = Terrain(t).height_at(x, z)
             if y is not None:
                 return round(y, 2)
+        if t and t.get("heights"):
+            T = self.terrain_of(level)
+            if T.sculpted_at(x, z):
+                return round(T.height_at(x, z), 2)
         g = self.ref.map(level["host"]).get("grid")
         if g:
             y = Grid(g).height(x, z)
@@ -1386,7 +1403,7 @@ class Ops:
         lv = self.level(op)
         if not lv.get("terrain"):
             raise Fail("no terrain grid yet: start with {\"op\":\"terrain_init\"}")
-        return lv, Terrain(lv["terrain"])
+        return lv, self.terrain_of(lv)
 
     def op_terrain_init(self, op):
         """{"op":"terrain_init","origin":[x,z],"cell":2,"size":[W,H],"y":<castle height>}: a flat grid (heights 0 = y)."""
@@ -1403,7 +1420,7 @@ class Ops:
             origin = [math.floor((g["origin"][0] + 12) / cell) * cell, math.floor((g["origin"][1] + 12) / cell) * cell]
             size = [min(400, int(math.ceil((g["size"][0] * g["cell"] - 24) / cell))), min(400, int(math.ceil((g["size"][1] * g["cell"] - 24) / cell)))]
         lv["terrain"] = {"origin": [float(origin[0]), float(origin[1])], "cell": float(op.get("cell", 2)), "size": [int(size[0]), int(size[1])],
-                         "y": float(op.get("y", castle["pos"][1] if castle else 0))}
+                         "y": float(op.get("y", castle["pos"][1] if castle else 0)), "format": Terrain.FORMAT}
         if op.get("flat", True):
             lv["base"] = "flat"
         return f"terrain {size[0]}x{size[1]} cells"
@@ -1428,16 +1445,16 @@ class Ops:
         """{"op":"paint","material":"road"|"ground"|"high"|"low"|"earth"|"sand"|"rock", shape...}"""
         lv, t = self.terrain(op)
         mat = Terrain.MATERIALS.index(op["material"]) if op["material"] in Terrain.MATERIALS else int(op["material"])
-        n = t.paint_cells(Shape.from_op(op), "materials", mat)
+        n = t.paint_samples(Shape.from_op(op), mat)
         t.store(lv)
-        return f"painted {n} cells"
+        return f"painted {n} samples ({Terrain.PAINT_RES}x{Terrain.PAINT_RES} per cell)"
 
     def op_block(self, op):
         """{"op":"block","on":true, shape...}: cells ground units (and the king) can't enter; fliers can. Any base."""
         lv = self.level(op)
         if not lv.get("terrain"):
             self.op_terrain_init({"level": lv["id"], "flat": False})
-        t = Terrain(lv["terrain"])
+        t = self.terrain_of(lv)
         n = t.paint_cells(Shape.from_op(op), "blocked", 1 if op.get("on", True) else 0)
         t.store(lv)
         return f"blocked {n} cells"
@@ -1561,12 +1578,19 @@ def b64inflate(s, n):
 
 
 class Terrain:
-    """LevelDef.terrain: (W+1)x(H+1) corner heights (cm relative to y, delta-coded int16), W*H cell materials,
-    blocked and water bitmasks; raw deflate + base64. See the guide's Terrain section."""
+    """LevelDef.terrain: (W+1)x(H+1) corner heights (cm relative to y, delta-coded int16), materials per paint sample
+    ((W*paintRes) x (H*paintRes), format 2; format 1 had one per cell), blocked and water bitmasks per cell; raw deflate
+    + base64. See the guide's Terrain section."""
     MATERIALS = ["ground", "high", "low", "earth", "sand", "road", "rock"]
-    MIN_Y, MAX_Y = -8.0, 30.0
+    # World floor (below -10 the game respawns the king); the ceiling is MAX_ABOVE over y (at least MAX_Y world).
+    MIN_Y, MAX_Y, MAX_ABOVE = -8.0, 30.0, 30.0
+    FORMAT, PAINT_RES = 2, 2
 
-    def __init__(self, t):
+    @staticmethod
+    def max_world(y):
+        return max(Terrain.MAX_Y, y + Terrain.MAX_ABOVE)
+
+    def __init__(self, t, host=None):
         self.ox, self.oz = t["origin"]
         self.cell = float(t["cell"])
         self.w, self.h = t["size"]
@@ -1580,8 +1604,30 @@ class Terrain:
                 v = ((prev + d + 32768) % 65536) - 32768
                 self.hts[i] = v
                 prev = v
+        # A map's own ground: heights are stored as offsets from the host's ground; work on absolute ones.
+        self.host = None
+        if host is not None:
+            self.host = []
+            for j in range(self.h + 1):
+                for i in range(self.w + 1):
+                    hy = host(*self.corner(i, j))
+                    self.host.append(None if hy is None else int(round((hy - self.y) * 100)))
+            self.hts = [v + (hc or 0) for v, hc in zip(self.hts, self.host)]
         n = self.w * self.h
-        self.materials = bytearray(b64inflate(t["materials"], n)) if t.get("materials") else bytearray(n)
+        fmt = int(t.get("format", 1))
+        if fmt > self.FORMAT:
+            raise Fail(f"terrain format {fmt} is newer than this palace.py ({self.FORMAT}): update the agent kit")
+        R = self.PAINT_RES
+        self.pw, self.ph = self.w * R, self.h * R
+        self.materials = bytearray(self.pw * self.ph)
+        if t.get("materials"):
+            res = 1 if fmt == 1 else int(t.get("paintRes", R))
+            raw = b64inflate(t["materials"], self.w * res * self.h * res)
+            row = self.w * res
+            for pz in range(self.ph):
+                for px in range(self.pw):
+                    v = raw[(pz * res // R) * row + px * res // R]
+                    self.materials[pz * self.pw + px] = v if v <= 6 else 0
         self.blocked = self.unbits(t.get("blocked"), n)
         w = t.get("water") or {}
         self.water_level = float(w.get("level", -1.0))
@@ -1618,7 +1664,7 @@ class Terrain:
         return self.y + v / 100.0
 
     def clamp_cm(self, rel):
-        world = max(self.MIN_Y, min(self.MAX_Y, self.y + rel))
+        world = max(self.MIN_Y, min(self.max_world(self.y), self.y + rel))
         return int(round((world - self.y) * 100))
 
     def corners_in(self, shape):
@@ -1684,6 +1730,26 @@ class Terrain:
                 if shape.weight(x, z) >= 0.5:
                     yield j * self.w + i
 
+    def paint_samples(self, shape, value):
+        """Materials: every paint sample (PAINT_RES per cell edge) whose centre is inside the shape (the game draws the
+        result with smooth edges)."""
+        step = self.cell / self.PAINT_RES
+        x0, z0, x1, z1 = shape.bounds()
+        i0, i1 = max(0, int((x0 - self.ox) / step)), min(self.pw - 1, int((x1 - self.ox) / step))
+        j0, j1 = max(0, int((z0 - self.oz) / step)), min(self.ph - 1, int((z1 - self.oz) / step))
+        n = 0
+        for j in range(j0, j1 + 1):
+            for i in range(i0, i1 + 1):
+                if shape.weight(self.ox + (i + 0.5) * step, self.oz + (j + 0.5) * step) >= 0.5:
+                    self.materials[j * self.pw + i] = value
+                    n += 1
+        return n
+
+    def material_at(self, x, z):
+        step = self.cell / self.PAINT_RES
+        i, j = int((x - self.ox) // step), int((z - self.oz) // step)
+        return self.materials[j * self.pw + i] if 0 <= i < self.pw and 0 <= j < self.ph else 0
+
     def paint_cells(self, shape, layer, value):
         arr = getattr(self, layer)
         n = 0
@@ -1726,13 +1792,28 @@ class Terrain:
         gz = ((h[2] - h[0]) + (h[3] - h[1])) / (2 * self.cell)
         return math.degrees(math.atan(math.hypot(gx, gz)))
 
+    def sculpted_at(self, x, z):
+        """Whether the point is on terrain of its own (always on a flat field; on a map's own ground, a moved cell)."""
+        if self.host is None:
+            return True
+        i, j = int((x - self.ox) // self.cell), int((z - self.oz) // self.cell)
+        if not (0 <= i < self.w and 0 <= j < self.h):
+            return False
+        W = self.w + 1
+        for c in (j * W + i, j * W + i + 1, (j + 1) * W + i, (j + 1) * W + i + 1):
+            if self.host[c] is not None and abs(self.hts[c] - self.host[c]) > 0:
+                return True
+        return False
+
     def store(self, lv):
         t = lv["terrain"]
         t["origin"], t["cell"], t["size"], t["y"] = [self.ox, self.oz], self.cell, [self.w, self.h], self.y
-        if any(self.hts):
+        t["format"] = self.FORMAT
+        rel = self.hts if self.host is None else [v - (hc or 0) for v, hc in zip(self.hts, self.host)]
+        if any(rel):
             out_ = bytearray()
             prev = 0
-            for v in self.hts:
+            for v in rel:
                 d = ((v - prev + 32768) % 65536) - 32768
                 out_ += struct.pack("<h", d)
                 prev = v
@@ -1741,8 +1822,10 @@ class Terrain:
             t.pop("heights", None)
         if any(self.materials):
             t["materials"] = b64deflate(self.materials)
+            t["paintRes"] = self.PAINT_RES
         else:
             t.pop("materials", None)
+            t.pop("paintRes", None)
         if any(self.blocked):
             t["blocked"] = b64deflate(self.bits(self.blocked))
         else:
@@ -2249,6 +2332,108 @@ def unit_world(slot):
     return [(x0 + ox * c + oz * s_, z0 - ox * s_ + oz * c) for ox, oz in slot.units]
 
 
+MODEL_LOOKS = ("own", "unit")
+MODEL_MOTIONS = ("auto", "bob", "none")
+
+
+def check_unit(ref, u):
+    """(path, message) errors for one UnitDef: its base and its visuals.mesh model (asset:, mesh: or vanilla:)."""
+    errs = []
+    base = u.get("base") or ""
+    if not base.startswith("vanilla:"):
+        errs.append((".base", "must be \"vanilla:<id>\" (`palace.py ref enemies`)"))
+    elif ref.catalog.get("units") and not ref.unit(base[8:]):
+        errs.append((".base", f"no vanilla unit {base[8:]!r} (`palace.py ref enemies`)"))
+    v = u.get("visuals") or {}
+    mesh = v.get("mesh")
+    if mesh is not None:
+        kind, _, mid = str(mesh).partition(":")
+        if kind == "mesh":
+            name = mid.split("@")[0]
+            if ref.scenery.get("meshes") and not any(x["name"] == name for x in ref.scenery["meshes"]):
+                errs.append((".visuals.mesh", f"no scenery mesh {name!r} in the library (`palace.py ref scenery`; a map's own mesh works on that map only)"))
+        elif kind == "vanilla":
+            if ref.catalog.get("units") and not ref.unit(mid):
+                errs.append((".visuals.mesh", f"no unit {mid!r} (`palace.py ref enemies`, `ref enemies --player`)"))
+        elif kind != "asset" or not mid:
+            errs.append((".visuals.mesh", "must be \"asset:<key>\", \"mesh:<scenery mesh>\" or \"vanilla:<unit id>\""))
+    for key in ("meshRotX", "meshRotY", "meshRotZ"):
+        if v.get(key) is not None and not -360 <= float(v[key]) <= 360:
+            errs.append((f".visuals.{key}", "between -360 and 360"))
+    off = v.get("meshOffset")
+    if off is not None and (not isinstance(off, list) or len(off) != 3 or any(not -50 <= float(c) <= 50 for c in off)):
+        errs.append((".visuals.meshOffset", "[x, y, z], each between -50 and 50"))
+    if v.get("meshLook") is not None and v["meshLook"] not in MODEL_LOOKS:
+        errs.append((".visuals.meshLook", f"one of {MODEL_LOOKS}"))
+    if v.get("motion") is not None and v["motion"] not in MODEL_MOTIONS:
+        errs.append((".visuals.motion", f"one of {MODEL_MOTIONS}"))
+    return errs
+
+
+# Damage targets the Enemy Studio's readout uses (the game's tags on those buildings and the king).
+ENEMY_TARGETS = {
+    "house": ["PlayerOwned", "Building", "House", "InfrastructureEconomy"],
+    "wall": ["PlayerOwned", "Building", "Wall", "WallOrTower"],
+    "tower": ["PlayerOwned", "Building", "Tower", "WallOrTower"],
+    "king": ["PlayerOwned", "Player"],
+}
+
+
+def hit_damage(mods, tags, mult=1.0):
+    """The game's damage formula (DamageModifyer.CalculateDamageOnTarget) for one hit."""
+    d = 0.0
+    for m in mods or []:
+        if all(t in tags for t in m.get("tags") or []):
+            d += float(m.get("add") or 0)
+            d *= float(m.get("mult", 1) if m.get("mult") is not None else 1)
+    return d * mult
+
+
+def time_to_kill(hp, per_hit, cooldown):
+    """(hits, seconds) or None: the first hit lands at once."""
+    if per_hit <= 0 or hp <= 0:
+        return None
+    hits = max(1, math.ceil(hp / per_hit - 1e-4))
+    return hits, round((hits - 1) * max(cooldown, 0), 2)
+
+
+def enemy_card(ref, u, difficulty=1.0, elite=False):
+    """A custom enemy's numbers as it spawns: its overrides over the base unit and weapon, damage per hit and per
+    second against buildings and the king, and how long each vanilla troop takes to kill one (as the Enemy Studio's
+    readout shows them)."""
+    base = ref.unit((u.get("base") or "")[8:]) or {}
+    st = u.get("stats") or {}
+    w = u.get("weapon") or {}
+    wbase = w.get("base") or "inherit"
+    wid = base.get("weapon") if wbase == "inherit" else wbase.replace("vanilla:", "")
+    cw = next((x for x in ref.catalog.get("weapons", []) if x["id"] == wid), None) or {}
+    mods = w.get("damage") if w.get("damage") is not None else cw.get("damage") or []
+    tags = set(base.get("tags", [])) - set((u.get("tags") or {}).get("remove") or []) | set((u.get("tags") or {}).get("add") or [])
+    hp_mult = difficulty * (4 if elite else 1)
+    dmg_mult = float(w.get("damageMult") or 1) * (1 + (difficulty - 1) * 0.5) * (3 if elite else 1)
+    hp = float(st.get("maxHp") or base.get("maxHp") or 0) * hp_mult
+    cd = float(st.get("attackCooldown") or base.get("attackCooldown") or 0)
+    card = {"id": u.get("id"), "name": u.get("name"), "base": u.get("base"), "hp": round(hp, 1),
+            "speed": st.get("moveSpeed") or base.get("moveSpeed"), "range": st.get("attackRange") or base.get("attackRange"),
+            "cooldown": cd, "flying": base.get("flying", False), "large": base.get("large", False),
+            "tags": sorted(t for t in tags if t not in ("EnemyOwned", "AUTO_Alive")), "model": (u.get("visuals") or {}).get("mesh") or "base",
+            "deals": {}, "killedBy": {}}
+    for name, ttags in ENEMY_TARGETS.items():
+        per = hit_damage(mods, ttags, dmg_mult)
+        card["deals"][name] = {"perHit": round(per, 2), "perSecond": round(per / cd, 2) if cd > 0 else 0}
+    for p in ref.catalog.get("units", []):
+        if p.get("side") != "player":
+            continue
+        pw = next((x for x in ref.catalog.get("weapons", []) if x["id"] == p.get("weapon")), None)
+        if not pw or not pw.get("damage"):
+            continue  # its damage isn't in the catalog (projectile or spell effects)
+        ttk = time_to_kill(hp, hit_damage(pw.get("damage"), tags), float(p.get("attackCooldown") or 0))
+        card["killedBy"][p["id"]] = {"hits": ttk[0], "seconds": ttk[1]} if ttk else "never"
+        per = hit_damage(mods, set(p.get("tags", [])), dmg_mult)
+        card["deals"][p["id"]] = {"perHit": round(per, 2), "perSecond": round(per / cd, 2) if cd > 0 else 0}
+    return card
+
+
 def check_pack(ref, data):
     issues = []
 
@@ -2263,6 +2448,9 @@ def check_pack(ref, data):
     if not ID_RE.match(str(data.get("id", ""))):
         err("id", "1-64 of a-z 0-9 . _ -")
     unit_ids = {u.get("id") for u in data.get("units") or []}
+    for ui, u in enumerate(data.get("units") or []):
+        for path, msg in check_unit(ref, u):
+            err(f"units[{ui}]" + path, msg)
     for wi, ws in enumerate(data.get("waveSets") or []):
         p = f"waveSets[{wi}]"
         host = ws.get("host")
@@ -2966,8 +3154,9 @@ def reference_markdown(ref):
              "has is a copy of its most complete slot of that kind; a kind it lacks, like a Mill on Frostsee, is the game's "
              "standard building of that kind, `building:<kind>`, the same tree as the table below), the castle's "
              "position, the playable rectangle (`terrain_init`'s default grid is the host's walkable extent), the sky, light and "
-             "ground palette, and the starting gold default. Terrain heights are **world** heights clamped to "
-             f"[{Terrain.MIN_Y:g}, {Terrain.MAX_Y:g}] m, so a high castle leaves little room to build up (headroom below). Pick "
+             "ground palette, and the starting gold default. Terrain heights go from world y "
+             f"{Terrain.MIN_Y:g} m (the king respawns below -10) up to {Terrain.MAX_ABOVE:g} m above the terrain's `y` (the castle's "
+             f"height; at least world {Terrain.MAX_Y:g} m), so every host has room to build up (headroom below). Pick "
              "the host from this table before designing.\n")
     all_kinds = sorted({s["kind"] for name in maps for s in ref.map(name)["slots"]
                         if not s.get("followsActivator") and not s.get("castle")})
@@ -2987,7 +3176,7 @@ def reference_markdown(ref):
         x0, x1 = g["origin"][0] + 12, g["origin"][0] + g["size"][0] * g["cell"] - 12
         z0, z1 = g["origin"][1] + 12, g["origin"][1] + g["size"][1] * g["cell"] - 12
         heads.append(f"| {name} | {x1 - x0:.0f} x {z1 - z0:.0f} | {c[0] - x0:.0f} / {x1 - c[0]:.0f} / {c[2] - z0:.0f} / {z1 - c[2]:.0f} | "
-                     f"{c[1]:.1f} | {Terrain.MAX_Y - c[1]:+.1f} / {Terrain.MIN_Y - c[1]:+.1f} |")
+                     f"{c[1]:.1f} | {Terrain.max_world(c[1]) - c[1]:+.1f} / {Terrain.MIN_Y - c[1]:+.1f} |")
     L.append("\n| Host | Playable rectangle (m) | Castle to west / east / south / north edge (m) | Castle y | Terrain headroom up / down from the castle (m) |")
     L.append("|---|---|---|---|---|")
     L += heads
@@ -3671,6 +3860,38 @@ def cmd_sandbox(env, args):
     out({"status": g.status(), "loadWarnings": g.log_since(mark, features=["Builder"], min_level="warn")})
 
 
+def cmd_enemy(env, args):
+    """A library enemy's numbers (offline), or the in-game Enemy Studio: open it on the enemy, fight it in the arena,
+    take its portrait."""
+    ref = Ref(env)
+    lib = LibraryRef(env.library)
+    data = load_library(lib)
+    u = next((x for x in data.get("units") or [] if x.get("id") == args.id), None)
+    if not u:
+        raise Fail(f"no enemy {args.id!r} in the library (`palace.py list`; make one with an `unit` op)")
+    result = {"card": enemy_card(ref, u, args.difficulty, args.elite),
+              "problems": [{"path": p, "message": m} for p, m in check_unit(ref, u)]}
+    if args.studio or args.fight is not None or args.portrait:
+        g = Game(env)
+        g.raw("builder-enemy library " + args.id)
+        deadline = time.time() + args.timeout
+        while time.time() < deadline and not g.raw("builder-enemy state").startswith("enemy studio"):
+            time.sleep(0.5)
+        state = g.raw("builder-enemy state")
+        if not state.startswith("enemy studio"):
+            raise Fail("the Enemy Studio didn't open: " + state)
+        result["studio"] = state
+        if args.fight is not None:
+            g.raw(f"builder-enemy fight {max(1, args.fight)}")
+            end = time.time() + 100
+            while time.time() < end and g.raw("builder-enemy readout").startswith("running"):
+                time.sleep(1)
+            result["fight"] = g.raw("builder-enemy readout")
+        if args.portrait:
+            result["portrait"] = g.raw("builder-enemy portrait")
+    out(result)
+
+
 def cmd_spawn(env, args):
     g = Game(env)
     u = Ref(env).unit(args.unit) if not args.unit.startswith("vanilla:") else None
@@ -3869,6 +4090,15 @@ def main(argv=None):
     p.add_argument("--at", nargs=2, type=float, metavar=("X", "Z"), help="king's start")
     p.add_argument("--no-infinite", action="store_true", help="normal gold")
     p.add_argument("--timeout", type=float, default=120)
+
+    p = sub.add_parser("enemy", help="a library enemy's numbers (offline); --studio/--fight N/--portrait: the in-game Enemy Studio")
+    p.add_argument("id")
+    p.add_argument("--difficulty", type=float, default=1.0, help="a night's difficulty for the numbers (default 1)")
+    p.add_argument("--elite", action="store_true")
+    p.add_argument("--studio", action="store_true", help="open it in the game's Enemy Studio (an arena on Nordfels)")
+    p.add_argument("--fight", type=int, metavar="N", help="fight N copies against the default defenders and report")
+    p.add_argument("--portrait", action="store_true", help="take its library portrait (library/enemies/<id>.png)")
+    p.add_argument("--timeout", type=float, default=60)
 
     p = sub.add_parser("spawn", help="spawn enemies now (they attack like a wave's)")
     p.add_argument("unit", help="vanilla id (E Melee) or a pack unit id")
