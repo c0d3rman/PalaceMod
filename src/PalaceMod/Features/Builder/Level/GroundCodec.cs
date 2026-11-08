@@ -179,9 +179,30 @@ namespace PalaceMod.Builder.Level
         public bool AnyBlocked => Array.IndexOf(Blocked, true) >= 0;
         public bool AnyWater => Array.IndexOf(Water, true) >= 0;
 
+        /// <summary>On a map's own ground: the host's ground height at each corner (relative to Y, NaN where it has none),
+        /// sampled when the terrain is shown. Heights stay absolute in memory; the pack stores them as offsets from this, and
+        /// only cells that differ from it (Sculpted) replace the host's ground. Null on a flat field.</summary>
+        public float[] Host;
+
+        /// <summary>Whether a cell is the terrain's own ground: always on a flat field; on a map's own ground, where a corner
+        /// was moved off the host's height (and the host has ground under all four).</summary>
+        public bool Sculpted(int x, int z)
+        {
+            if (Host == null) return true;
+            bool moved = false;
+            for (int k = 0; k < 4; k++)
+            {
+                int i = Corner(x + (k & 1), z + (k >> 1));
+                if (float.IsNaN(Host[i])) return false;
+                if (Math.Abs(Heights[i] - Host[i]) > 0.005f) moved = true;
+            }
+            return moved;
+        }
+
         public TerrainGrid Clone()
         {
             var g = new TerrainGrid(W, H, Cell, OriginX, OriginZ, Y) { WaterLevel = WaterLevel };
+            if (Host != null) g.Host = (float[])Host.Clone();
             Array.Copy(Heights, g.Heights, Heights.Length);
             Array.Copy(Materials, g.Materials, Materials.Length);
             Array.Copy(Blocked, g.Blocked, Blocked.Length);
@@ -254,7 +275,9 @@ namespace PalaceMod.Builder.Level
             short prev = 0;
             for (int i = 0; i < g.Heights.Length; i++)
             {
-                short v = (short)Math.Round(TerrainGrid.Clamp(g.Heights[i], -327f, 327f) * 100f);
+                // On a map's own ground the pack holds offsets from the host's ground (0 where untouched).
+                float rel = g.Host == null ? g.Heights[i] : float.IsNaN(g.Host[i]) ? 0f : g.Heights[i] - g.Host[i];
+                short v = (short)Math.Round(TerrainGrid.Clamp(rel, -327f, 327f) * 100f);
                 if (v != 0) any = true;
                 short d = (short)(v - prev);
                 hb[2 * i] = (byte)d;

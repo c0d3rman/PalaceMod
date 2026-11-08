@@ -99,8 +99,8 @@ namespace PalaceMod.Builder.Level
             if (grid == null) return;
             Show(scene, grid, IsFlat(level));
             SourceKey = KeyOf(level.Base, level.Terrain);
-            if (Flat) SnapToGround(scene);
-            Log.For<BuilderManager>().Info($"terrain on {scene.name}: {grid.W}x{grid.H} cells of {grid.Cell} m, {(Flat ? "flat base" : "host ground")}, {grid.Blocked.Count(b => b)} blocked, {grid.Water.Count(b => b)} water");
+            SnapToGround(scene);
+            Log.For<BuilderManager>().Info($"terrain on {scene.name}: {grid.W}x{grid.H} cells of {grid.Cell} m, {(Flat ? "flat base" : $"host ground, {SculptedCount(grid)} cells sculpted, {HostCut.Describe()}")}, {grid.Blocked.Count(b => b)} blocked, {grid.Water.Count(b => b)} water");
         }
 
         /// <summary>Reads the level's terrain (null without one). Throws FormatException on a malformed one.</summary>
@@ -132,6 +132,13 @@ namespace PalaceMod.Builder.Level
                 HideHost(scene);
                 WidenGraphs(grid);
             }
+            else
+            {
+                // A map's own ground: the pack holds offsets from it; sample it, then make the heights absolute.
+                SampleHost(grid);
+                HostCut.Collect(scene, Owned);
+                if (SculptedCount(grid) > 0) WidenHeights(grid);
+            }
             var gb = GraphBounds();
             walkSlope = WalkSlope();
             blockBottom = Mathf.Min(gb.min.y, TerrainGrid.MinHeight) - 2f;
@@ -160,6 +167,65 @@ namespace PalaceMod.Builder.Level
                 for (int z = z0; z <= z1; z++)
                     BuildChunk(chunks[x, z]);
             if (air != null) BuildAir();
+            if (!flat) HostCut.Apply(Grid);
+        }
+
+        private static int SculptedCount(TerrainGrid g)
+        {
+            if (g.Host == null) return g.W * g.H;
+            int n = 0;
+            for (int z = 0; z < g.H; z++)
+                for (int x = 0; x < g.W; x++)
+                    if (g.Sculpted(x, z)) n++;
+            return n;
+        }
+
+        /// <summary>The host's ground height at every corner (its Ground-layer colliders, raycast from above), and the
+        /// grid's heights from offsets to absolute.</summary>
+        private static void SampleHost(TerrainGrid g)
+        {
+            var host = new float[g.Heights.Length];
+            var hits = new RaycastHit[16];
+            float top = g.MaxWorld + 60f;
+            for (int z = 0; z <= g.H; z++)
+                for (int x = 0; x <= g.W; x++)
+                {
+                    float best = float.NaN;
+                    int n = Physics.RaycastNonAlloc(new Vector3(g.CornerX(x), top, g.CornerZ(z)), Vector3.down, hits, top + 40f, 1 << GroundLayerIndex, QueryTriggerInteraction.Ignore);
+                    for (int i = 0; i < n; i++)
+                        if (!Owned(hits[i].collider.transform) && (float.IsNaN(best) || hits[i].point.y > best)) best = hits[i].point.y;
+                    host[g.Corner(x, z)] = float.IsNaN(best) ? float.NaN : best - g.Y;
+                }
+            g.Host = host;
+            for (int i = 0; i < host.Length; i++)
+                if (!float.IsNaN(host[i])) g.Heights[i] = g.ClampHeight(host[i] + g.Heights[i]);
+        }
+
+        /// <summary>A map's own ground: the graphs' height range has to hold the sculpted ground.</summary>
+        private static void WidenHeights(TerrainGrid g)
+        {
+            if (AstarPath.active == null) return;
+            float lo = float.MaxValue, hi = float.MinValue;
+            for (int z = 0; z < g.H; z++)
+                for (int x = 0; x < g.W; x++)
+                {
+                    if (!g.Sculpted(x, z)) continue;
+                    for (int k = 0; k < 4; k++)
+                    {
+                        float h = g.Y + g.Heights[g.Corner(x + (k & 1), z + (k >> 1))];
+                        lo = Mathf.Min(lo, h);
+                        hi = Mathf.Max(hi, h);
+                    }
+                }
+            foreach (var r in AstarPath.active.data.graphs.OfType<RecastGraph>())
+            {
+                if (r.name == "Enemy Units Air") continue;
+                var c = r.forcedBoundsCenter;
+                var size = r.forcedBoundsSize;
+                float y0 = Mathf.Min(c.y - size.y / 2f, lo - 2f), y1 = Mathf.Max(c.y + size.y / 2f, hi + 3f);
+                r.forcedBoundsCenter = new Vector3(c.x, (y0 + y1) / 2f, c.z);
+                r.forcedBoundsSize = new Vector3(size.x, y1 - y0, size.z);
+            }
         }
 
         /// <summary>Removes the terrain and gives the host back what it hid.</summary>
@@ -173,9 +239,14 @@ namespace PalaceMod.Builder.Level
                 if (go != null) go.SetActive(true);
             }
             hidden.Clear();
+            HostCut.Restore();
             DropPaints();
             GroundGraphs.Extra.Clear();
-            if (root != null) UnityEngine.Object.Destroy(root);
+            if (root != null)
+            {
+                root.SetActive(false);   // its colliders go now (Destroy waits for the frame's end; a re-Show samples the host)
+                UnityEngine.Object.Destroy(root);
+            }
             root = null;
             Grid = null;
             chunks = null;
@@ -188,7 +259,8 @@ namespace PalaceMod.Builder.Level
         public static bool TryHeight(Vector3 p, out float y)
         {
             y = p.y;
-            if (!Flat || !Grid.Contains(p.x, p.z)) return false;
+            if (!Active || !Grid.Contains(p.x, p.z)) return false;
+            if (!flat && !(Grid.CellAt(p.x, p.z, out int cx, out int cz) && Grid.Sculpted(cx, cz))) return false;
             y = Grid.SurfaceAt(p.x, p.z);
             return true;
         }
@@ -198,7 +270,14 @@ namespace PalaceMod.Builder.Level
         public static bool TryRaycast(Ray ray, out Vector3 point)
         {
             point = default;
-            if (!Flat) return false;
+            if (!Active) return false;
+            if (!flat)
+            {
+                // A map's own ground (cut where sculpted) and the sculpted cells are all on the Ground layer.
+                if (!Physics.Raycast(ray, out var hit, 3000f, 1 << GroundLayerIndex, QueryTriggerInteraction.Ignore)) return false;
+                point = hit.point;
+                return true;
+            }
             if (!Grid.Raycast(ray.origin.x, ray.origin.y, ray.origin.z, ray.direction.x, ray.direction.y, ray.direction.z, out float x, out float y, out float z)) return false;
             point = new Vector3(x, y, z);
             return true;
@@ -265,7 +344,7 @@ namespace PalaceMod.Builder.Level
         }
 
         /// <summary>Whether something belongs to a slot, unit, spawner or the mod, not to the map's ground.</summary>
-        private static bool Owned(Transform t) =>
+        internal static bool Owned(Transform t) =>
             t.GetComponentInParent<BuildSlot>(true) != null || t.GetComponentInParent<Hp>(true) != null ||
             t.GetComponentInParent<EnemySpawner>(true) != null || t.GetComponentInParent<PlayerMovement>(true) != null ||
             t.root.name.StartsWith(LayoutScene.AddedPrefix);
@@ -387,7 +466,6 @@ namespace PalaceMod.Builder.Level
         private static Chunk MakeChunk(int x0, int z0, int x1, int z1)
         {
             var c = new Chunk { X0 = x0, Z0 = z0, X1 = x1, Z1 = z1 };
-            if (flat)
             {
                 var go = Part($"chunk {x0 / ChunkCells},{z0 / ChunkCells}", GroundLayerIndex);
                 c.Ground = NewMesh(go.name);
@@ -454,7 +532,7 @@ namespace PalaceMod.Builder.Level
         private static void BuildChunk(Chunk c)
         {
             var g = Grid;
-            if (c.Ground != null) BuildGround(g, c);
+            BuildGround(g, c);
             BuildBlocks(g, c);
         }
 
@@ -477,8 +555,11 @@ namespace PalaceMod.Builder.Level
             for (int z = c.Z0; z < c.Z1; z++)
                 for (int x = c.X0; x < c.X1; x++)
                 {
+                    // On a map's own ground only the sculpted cells are ours (HostCut leaves a hole for them).
+                    if (!g.Sculpted(x, z)) continue;
                     float h00 = g.Heights[g.Corner(x, z)], h10 = g.Heights[g.Corner(x + 1, z)];
                     float h01 = g.Heights[g.Corner(x, z + 1)], h11 = g.Heights[g.Corner(x + 1, z + 1)];
+                    if (g.Host != null) Skirts(g, x, z, verts, normals, uvs, tris[(int)GroundMaterial.Ground]);
                     int b = verts.Count;
                     AddCorner(g, x, z, h00, verts, normals, uvs);
                     AddCorner(g, x + 1, z, h10, verts, normals, uvs);
@@ -528,7 +609,8 @@ namespace PalaceMod.Builder.Level
             for (int i = 0; i < tris.Length; i++) mesh.SetTriangles(tris[i], i, false);
             mesh.RecalculateBounds();
             c.GroundCollider.sharedMesh = null;
-            c.GroundCollider.sharedMesh = mesh;
+            if (verts.Count > 0) c.GroundCollider.sharedMesh = mesh;
+            c.GroundCollider.enabled = verts.Count > 0;
 
             c.Water.Clear();
             c.Water.SetVertices(wverts);
@@ -571,7 +653,7 @@ namespace PalaceMod.Builder.Level
                 {
                     float x = xz[k], z = xz[k + 1];
                     t.Add(verts.Count);
-                    verts.Add(new Vector3(x, g.SurfaceAt(x, z) + lift, z));
+                    verts.Add(new Vector3(x, PaintY(g, x, z) + lift, z));
                     normals.Add(NormalAt(g, x, z));
                     uvs.Add(new Vector2(x, z) * 0.05f);
                 }
@@ -587,6 +669,38 @@ namespace PalaceMod.Builder.Level
         }
 
         private const float PaintLift = 0.03f, PaintStepUp = 0.012f;
+
+        /// <summary>Where paint lies: the terrain's surface, or on a map's own ground outside the sculpted cells, the
+        /// host's (raycast: the grid's samples of it are only a 2 m approximation).</summary>
+        private static float PaintY(TerrainGrid g, float x, float z)
+        {
+            if (g.Host == null || (g.CellAt(x, z, out int cx, out int cz) && g.Sculpted(cx, cz))) return g.SurfaceAt(x, z);
+            return Physics.Raycast(new Vector3(x, g.MaxWorld + 60f, z), Vector3.down, out var hit, g.MaxWorld + 100f, 1 << GroundLayerIndex, QueryTriggerInteraction.Ignore)
+                ? hit.point.y : g.SurfaceAt(x, z);
+        }
+
+        /// <summary>A sculpted cell's edges that meet the host's ground get a short skirt down (both faces), so the
+        /// seam where the cut host ground and the patch differ by a few cm shows no gap.</summary>
+        private static void Skirts(TerrainGrid g, int x, int z, List<Vector3> verts, List<Vector3> normals, List<Vector2> uvs, List<int> tris)
+        {
+            const float depth = 1f;
+            for (int e = 0; e < 4; e++)
+            {
+                int nx = x + (e == 0 ? -1 : e == 1 ? 1 : 0), nz = z + (e == 2 ? -1 : e == 3 ? 1 : 0);
+                if (nx >= 0 && nz >= 0 && nx < g.W && nz < g.H && g.Sculpted(nx, nz)) continue;
+                // The edge's two corners.
+                int ax = e == 1 ? x + 1 : x, az = e == 3 ? z + 1 : z;
+                int bx = e == 0 ? x : x + 1, bz = e == 2 ? z : z + 1;
+                var a = new Vector3(g.CornerX(ax), g.Y + g.Heights[g.Corner(ax, az)], g.CornerZ(az));
+                var b = new Vector3(g.CornerX(bx), g.Y + g.Heights[g.Corner(bx, bz)], g.CornerZ(bz));
+                var n = new Vector3(nx - x, 0f, nz - z);
+                int i = verts.Count;
+                verts.AddRange([a, b, a + Vector3.down * depth, b + Vector3.down * depth]);
+                normals.AddRange([n, n, n, n]);
+                uvs.AddRange([new Vector2(a.x, a.z) * 0.05f, new Vector2(b.x, b.z) * 0.05f, new Vector2(a.x, a.z) * 0.05f, new Vector2(b.x, b.z) * 0.05f]);
+                tris.AddRange([i, i + 1, i + 3, i, i + 3, i + 2, i, i + 3, i + 1, i, i + 2, i + 3]);
+            }
+        }
 
         private static Vector3 CornerNormal(TerrainGrid g, int x, int z)
         {
@@ -734,7 +848,7 @@ namespace PalaceMod.Builder.Level
         private static bool IsBlocked(TerrainGrid g, int x, int z)
         {
             int i = g.CellIndex(x, z);
-            return g.Blocked[i] || (flat && g.Water[i]);
+            return g.Blocked[i] || g.Water[i];
         }
 
         private static void AddBox(List<Vector3> v, List<int> t, Vector3 min, Vector3 max)

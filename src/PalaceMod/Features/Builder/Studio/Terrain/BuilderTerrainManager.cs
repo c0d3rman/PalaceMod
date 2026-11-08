@@ -38,6 +38,37 @@ namespace PalaceMod
                             GroundLayer.Show(scene, grid, true);
                             return $"flat field {grid.W}x{grid.H} cells of {grid.Cell} m at y {grid.Y}, origin {grid.OriginX},{grid.OriginZ}";
                         }
+                        case "host":
+                        {
+                            // A sculptable grid over the map's own ground (no flat field).
+                            var scene = SceneManager.GetActiveScene();
+                            var grid = GroundLayer.NewFlat(scene, args.Length > 1 ? F(args, 1) : 2f);
+                            var clock = System.Diagnostics.Stopwatch.StartNew();
+                            GroundLayer.Show(scene, grid, false);
+                            return $"host-ground grid {grid.W}x{grid.H} in {clock.ElapsedMilliseconds} ms, {HostCut.Describe()}, host heights {grid.Host.Where(h => !float.IsNaN(h)).DefaultIfEmpty().Min():0.0}..{grid.Host.Where(h => !float.IsNaN(h)).DefaultIfEmpty().Max():0.0} ({grid.Host.Count(float.IsNaN)} corners without ground)";
+                        }
+                        case "walk":
+                        {
+                            // Walks the king with his own CharacterController: walk <dirX> <dirZ> <seconds> (6 m/s).
+                            var pm = PlayerMovement.instance ?? throw new InvalidOperationException("no king");
+                            var dir = new Vector3(F(args, 1), 0f, F(args, 2)).normalized;
+                            float secs = args.Length > 3 ? F(args, 3) : 2f;
+                            var start = pm.transform.position;
+                            KingWalker.Begin(pm, dir, secs);
+                            return $"walking from {start.x:0.0} {start.y:0.00} {start.z:0.0} towards {dir.x:0.00},{dir.z:0.00} for {secs} s; `builder-terrain king` afterwards";
+                        }
+                        case "probe":
+                        {
+                            // What stops the king around a point: colliders his layer meets within r.
+                            var p = new Vector3(F(args, 1), args.Length > 3 ? F(args, 3) : 0f, F(args, 2));
+                            if (args.Length <= 3) p.y = GroundLayer.TryHeight(p, out float py) ? py + 1f : (PlayerMovement.instance?.transform.position.y ?? 0f) + 1f;
+                            float r = args.Length > 4 ? F(args, 4) : 1.5f;
+                            int layer = PlayerMovement.instance != null ? PlayerMovement.instance.gameObject.layer : 11;
+                            int mask = 0;
+                            for (int l = 0; l < 32; l++) if (!Physics.GetIgnoreLayerCollision(layer, l)) mask |= 1 << l;
+                            var hits = Physics.OverlapSphere(p, r, mask, QueryTriggerInteraction.Ignore);
+                            return $"at {p} r {r}: " + string.Join("; ", hits.Select(h => $"{h.name} ({h.GetType().Name}, layer {LayerMask.LayerToName(h.gameObject.layer)}, root {h.transform.root.name}, {(h.attachedRigidbody != null ? "rigidbody" : "static")})"));
+                        }
                         case "grid":
                             return g == null ? "no terrain" : $"{g.W}x{g.H} cells of {g.Cell} m at y {g.Y}, origin {g.OriginX},{g.OriginZ}, flat={GroundLayer.Flat}, blocked {g.Blocked.Count(b => b)}, water {g.Water.Count(b => b)} at {g.WaterLevel}, heights {g.Heights.Min()}..{g.Heights.Max()}";
                         case "raise": Need(g); d = TerrainBrushes.Raise(g, F(args, 1), F(args, 2), F(args, 3), args.Length > 5 ? F(args, 5) : 0.5f, F(args, 4)); break;
@@ -154,5 +185,33 @@ namespace PalaceMod
 
         private static float F(string[] args, int i) =>
             args.Length > i ? float.Parse(args[i], CultureInfo.InvariantCulture) : throw new ArgumentException("missing argument");
+    }
+}
+
+namespace PalaceMod.Builder.Level
+{
+    /// <summary>Dev: moves the king through his CharacterController for a while (slope limit, step offset and walls
+    /// apply as when the player walks), to test what he can climb.</summary>
+    internal sealed class KingWalker : MonoBehaviour
+    {
+        private PlayerMovement king;
+        private CharacterController cc;
+        private Vector3 dir;
+        private float until;
+
+        public static void Begin(PlayerMovement king, Vector3 dir, float seconds)
+        {
+            var w = king.GetComponent<KingWalker>() ?? king.gameObject.AddComponent<KingWalker>();
+            w.king = king;
+            w.cc = king.GetComponent<CharacterController>();
+            w.dir = dir;
+            w.until = Time.time + seconds;
+        }
+
+        private void Update()
+        {
+            if (king == null || cc == null || Time.time > until) { Destroy(this); return; }
+            cc.Move((dir * 6f + Vector3.down * 9f) * Time.deltaTime);
+        }
     }
 }

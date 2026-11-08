@@ -80,10 +80,9 @@ namespace PalaceMod.Builder.Studio.Terrain
             _ => null,
         };
 
-        private static bool Flat => Studio.Level != null ? GroundLayer.IsFlat(Studio.Level) : GroundLayer.Flat;
-
-        /// <summary>The brushes this level's base allows.</summary>
-        public IReadOnlyList<TerrainBrush> Available => Flat ? (TerrainBrush[])Enum.GetValues(typeof(TerrainBrush)) : [TerrainBrush.Block];
+        /// <summary>The brushes this level's base allows: all of them (on a map's own ground the sculpted cells replace
+        /// the host's ground, see HostCut).</summary>
+        public IReadOnlyList<TerrainBrush> Available => (TerrainBrush[])Enum.GetValues(typeof(TerrainBrush));
 
         // ---- StudioTool -----------------------------------------------------------------------------------------
 
@@ -379,7 +378,7 @@ namespace PalaceMod.Builder.Studio.Terrain
             {
                 GroundLayer.Show(scene, GroundLayer.Decode(level) ?? GroundLayer.NewFlat(scene), GroundLayer.IsFlat(level));
                 GroundLayer.ShowMarks = true;
-                if (GroundLayer.Flat) GroundLayer.SnapToGround(scene);
+                GroundLayer.SnapToGround(scene);
             }
             catch (Exception e) when (e is FormatException || e is ArgumentException)
             {
