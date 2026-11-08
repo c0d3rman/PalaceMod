@@ -224,6 +224,13 @@ While `Current != null`:
 - Restart and retry keep the session (same host). The session ends when any other scene loads (the game loads scenes additively, so only `_UI` is ignored). `End()` with the host still loaded first takes the player to level select and keeps isolation until the map has unloaded. At the end the match-save context is left on "overwrite" and GameplayImpact's level is cleared, so the next vanilla run on the host starts clean.
 - Perks are allowed: they're the game's own difficulty and score system and apply to custom waves; the result records them.
 
+**Studio sessions** (`docs/builder-ux.md`, "Play mode"): `LaunchStudio(request, StudioSessionKind.Edit | Play)` starts a
+session marked as the Studio's (`StudioKind`), or, on the same host, swaps the running one's pack, level and wave set in
+place and reloads the host, so edit and play are one session that never ends in between. Studio sessions show no
+"Custom run" notice and record nothing in `ScoreStore`; the isolation above applies as for any session. Test play
+itself (the swap, sandbox, unlimited gold, music, the way back) is `Features/Builder/Studio/Play/` (`builder-play` dev
+command).
+
 ### Dev commands
 
 `python3 scripts/dev.py cmd "builder <sub>"`:
