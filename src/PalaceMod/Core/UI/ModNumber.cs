@@ -143,7 +143,7 @@ namespace PalaceMod
             }
 
             var row = page.Row(label, "", tooltip, Type);
-            field = new ModField(row, label, () => Show(Read()), arrows: false);
+            field = new ModField(row, label, () => Show(Read()), arrows: false, page.FieldIndent);
             row.Button.onEmptyNavigate.AddListener(direction =>
             {
                 if (direction == ThronefallUIElement.NavigationDirection.Right) Step(1);

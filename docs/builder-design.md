@@ -461,7 +461,12 @@ Behaviour worth knowing:
 - **Share codes.** "Copy share code" and "Import share code" call `BuilderServices.Share` (WP6) and `Packs.InstallNew`; with WP6's stub they explain that codes aren't available yet.
 - **Not built:** the live 3D preview model (planned: a preview camera rendering a stripped `Instantiate` of the template into a `RawImage`; components other than renderers removed before activation so no game script runs); editing `warning` text is stored but not yet shown in play.
 
-### Levels and the layout editor (stage 2, as built)
+### Levels and the layout editor (stage 2, as built; superseded by the Studio)
+
+The layout editor below was replaced by the Builder Studio (`Features/Builder/Studio/`, docs/builder-ux.md):
+`LayoutEditor.cs`, `LayoutMenus.cs`, `LayoutHud.cs` and the level screen are gone, the Levels tab opens a level
+straight in the Studio, and `builder-level` forwards its editing subcommands to `builder-studio`. The data and
+applying sections still hold.
 
 A level is a host map with layout edits and optionally one of the pack's wave sets (null = the map's own nights). Files in `Features/Builder/Level/` (namespace `PalaceMod.Builder.Level`, plus `LevelPage` in `PalaceMod.Builder.Editor`):
 
