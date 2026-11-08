@@ -304,6 +304,9 @@ namespace PalaceMod.Builder.Studio
             var copy = PackSerializer.Clone(pack);
             var only = copy.FindLevel(levelId) ?? throw new ArgumentException("no such level", nameof(levelId));
             only.WaveSet = null;
+            // Without its wave set the level would play the map's own nights, which may spawn from a line the level
+            // removes (a validation error). An edit load never applies the overlay, so the copy can keep them all.
+            if (only.SpawnLines != null) only.SpawnLines.Remove = null;
             copy.Units.Clear();
             copy.WaveSets.Clear();
             copy.Levels = [only];

@@ -128,7 +128,7 @@ namespace PalaceMod.Builder.Studio
             Act(0, "Duplicate", StudioShell.DuplicateAndGrab);
             if (groups.Any(g => g != null)) Act(1, "Ungroup", () => StudioEdits.Ungroup(StudioSelection.Keys));
             else Act(1, "Group", () => { if (StudioEdits.Group(StudioSelection.Keys) is string k) StudioSelection.Select([k], SelectOp.Replace); });
-            bool restore = items.All(i => i.Kind == StudioItemKind.Slot && i.Removed);
+            bool restore = StudioEdits.WouldRestore(items);
             Act(2, restore ? "Restore" : "Delete", () => StudioEdits.Delete(StudioSelection.Keys.ToList()));
 
             Sections(page, keys);
@@ -229,6 +229,7 @@ namespace PalaceMod.Builder.Studio
             Add(priced, "repriced");
             Add(lv.Props?.Count ?? 0, "scenery");
             Add(lv.SpawnLines?.Edit?.Count ?? 0, "lines moved");
+            Add(lv.SpawnLines?.Remove?.Count ?? 0, "lines removed");
             return parts.Count == 0 ? "none yet" : string.Join(", ", parts);
         }
     }

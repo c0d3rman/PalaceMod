@@ -122,6 +122,19 @@ namespace PalaceMod.Builder.Level
                 lines++;
             }
             int newLines = AddLines(level, hostLines, issues);
+            // Removed host lines are switched off after the copies are made (a copy of an inactive line would be
+            // inactive too). LayoutScene.Lines skips inactive lines, so the path check, routes and pictures drop them;
+            // the validator refuses waves that still spawn from one.
+            int gone = 0;
+            var removedLines = new HashSet<string>(level.SpawnLines?.Remove ?? [], StringComparer.Ordinal);
+            foreach (var name in removedLines)
+            {
+                if (name == null) continue;
+                if (!hostLines.TryGetValue(name, out var line) || (level.SpawnLines?.Add ?? []).Any(a => a?.Id == name))
+                { issues.Add(Warn($"no spawn line \"{name}\" on {level.Host} to remove")); continue; }
+                line.gameObject.SetActive(false);
+                gone++;
+            }
 
             // Props.
             var bases = (level.Props?.Count ?? 0) > 0 ? LayoutScene.Props(scene).GroupBy(p => p.Id).ToDictionary(g => g.Key, g => g.First()) : [];
@@ -141,7 +154,7 @@ namespace PalaceMod.Builder.Level
             ScanAfterFrame = Time.frameCount + 2;
             ScanHost = level.Host;
             Log.For<BuilderManager>().Info($"level {pack.Id}/{level.Id} on {level.Host}{(level.Base != null ? $" ({level.Base})" : "")}: {moved} slots moved, {added} added, {removed} removed, " +
-                $"{wired} requirements set, {lines} spawn lines moved, {newLines} added, {props} props{(hidden > 0 ? $", {hidden} scenery renderers hidden" : "")}");
+                $"{wired} requirements set, {lines} spawn lines moved, {newLines} added, {gone} removed, {props} props{(hidden > 0 ? $", {hidden} scenery renderers hidden" : "")}");
         }
 
         /// <summary>The empty base's look: the scenery hidden (and, for a flat field, the ground replaced).</summary>
@@ -155,7 +168,8 @@ namespace PalaceMod.Builder.Level
         public static bool HasEdits(LevelDef level) =>
             level.Base != null ||
             (level.BuildSlots?.Edit?.Count ?? 0) + (level.BuildSlots?.Add?.Count ?? 0) + (level.BuildSlots?.Remove?.Count ?? 0) +
-            (level.SpawnLines?.Edit?.Count ?? 0) + (level.SpawnLines?.Add?.Count ?? 0) + (level.Props?.Count ?? 0) > 0 || GroundLayer.Wants(level);
+            (level.SpawnLines?.Edit?.Count ?? 0) + (level.SpawnLines?.Add?.Count ?? 0) + (level.SpawnLines?.Remove?.Count ?? 0) +
+            (level.Props?.Count ?? 0) > 0 || GroundLayer.Wants(level);
 
         // ---- Requirements -----------------------------------------------------------------------------------------
 

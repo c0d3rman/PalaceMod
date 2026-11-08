@@ -37,7 +37,7 @@ Everything below was worked out from the code (no game was run). Line numbers ar
 | 3. Castle and slots | Place build slots from the palette, move, rotate, duplicate, delete | Studio, Select/Move/Place |
 | 4. Economy | Costs per level, castle-level requirements, prerequisite links, house chains | Studio, Inspector + Link tool |
 | 5. Decorate | Scenery from the palette and the asset browser | Studio, Place + palette |
-| 6. Enemies | Spawn lines (move, add), nights (wave set) | Studio (lines), Nights popup → wave page |
+| 6. Enemies | Spawn lines (move, add, remove), nights (wave set) | Studio (lines), Nights popup → wave page |
 | 7. Test | F5 in at the cursor, sandbox (gold, nights, spawn, teleport), F5 out | Studio play mode |
 | 8. Share | Save, share code, export | Studio menu → existing `SharingUI` |
 
@@ -92,7 +92,7 @@ or the edge.
 - **Palette** (300 px, collapsible with Tab). Tabs:
   - **Slots:** every slot kind on the host. Shows the icon, the cost chain and the count on the map.
   - **Scenery:** the host's scenery meshes, with a text filter.
-  - **Spawns:** spawn lines, both moving the host's and adding new ones.
+  - **Spawns:** spawn lines: moving the host's, adding new ones, and removing the host's (`spawnLines.remove`: deactivated at load, so no enemies, routes or markers; Studio Delete toggles it, undoable).
   - **Library:** the asset browser slot (see "Asset browser slot").
 
   Clicking a tile arms the Place tool with that kind. Keys 1 to 9 recall the last nine kinds placed (a hotbar).

@@ -33,6 +33,13 @@ namespace PalaceMod.Builder.Model
         bool HasPackUnit(string packId, string unitId);
     }
 
+    /// <summary>Optional game context: the spawn lines a host's own (vanilla) nights use; ICatalog implements it.</summary>
+    public interface IHostWavesContext
+    {
+        /// <summary>Spawn line names the host's vanilla nights spawn from, or null if unknown.</summary>
+        IReadOnlyCollection<string> VanillaWaveLines(string scene);
+    }
+
     /// <summary>Optional extra game context for troop replacements; ICatalog implements it.</summary>
     public interface ITroopValidationContext
     {
@@ -269,10 +276,44 @@ namespace PalaceMod.Builder.Model
                     Range(a.Width, 1f, 200f, lp + ".width");
                     if (!a.Ground && !a.Large && !a.Flying) Error(lp, "spawns nothing: turn on ground, large or flying");
                 }
+                CheckRemovedLines(l, p, hostLines);
                 if (!LevelBases.IsKnown(l.Base)) Error(p + ".base", $"must be \"{LevelBases.Cleared}\", \"{LevelBases.Flat}\" or absent");
                 CheckLevelRequirements(l, p);
             }
             return issues;
+
+            // spawnLines.remove: host lines only, and no night of the level may spawn from one.
+            void CheckRemovedLines(LevelDef l, string p, IReadOnlyCollection<string> hostLines)
+            {
+                var removed = l.SpawnLines?.Remove;
+                if (removed == null) return;
+                var added = new HashSet<string>((l.SpawnLines.Add ?? []).Select(a => a?.Id).Where(id => id != null), StringComparer.Ordinal);
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                for (int j = 0; j < removed.Count; j++)
+                {
+                    string rp = $"{p}.spawnLines.remove[{j}]";
+                    string name = removed[j];
+                    if (string.IsNullOrEmpty(name)) { Error(rp, "needs the name of a spawn line on the map"); continue; }
+                    if (!seen.Add(name)) Warn(rp, $"\"{name}\" is listed twice");
+                    else if (added.Contains(name)) Error(rp, $"\"{name}\" is one of this level's added lines: delete it from spawnLines.add instead");
+                    else if (hostLines != null && !hostLines.Contains(name)) Error(rp, $"no spawn line \"{name}\" on {l.Host} (has: {string.Join(", ", hostLines)})");
+                }
+                if (seen.Count == 0) return;
+                var ws = l.WaveSet != null ? pack.FindWaveSet(l.WaveSet) : null;
+                if (ws != null)
+                {
+                    int wi = pack.WaveSets.IndexOf(ws);
+                    for (int n = 0; n < (ws.Nights?.Count ?? 0); n++)
+                        for (int s = 0; s < (ws.Nights[n]?.Spawns?.Count ?? 0); s++)
+                            if (ws.Nights[n].Spawns[s]?.Line is string line && seen.Contains(line) && !added.Contains(line))
+                                Error($"waveSets[{wi}].nights[{n}].spawns[{s}].line", $"spawn line \"{line}\" is removed in level \"{l.Id}\" ({p}.spawnLines.remove)");
+                }
+                else if (l.WaveSet == null && game is IHostWavesContext waves && !string.IsNullOrEmpty(l.Host) && waves.VanillaWaveLines(l.Host) is { } used)
+                {
+                    foreach (var name in seen.Where(used.Contains))
+                        Error($"{p}.spawnLines.remove", $"the map's own nights spawn from \"{name}\": give the level a wave set that doesn't, or keep the line");
+                }
+            }
 
             void CheckRequirement(SlotRequirement r, int? cap, string path, string self)
             {

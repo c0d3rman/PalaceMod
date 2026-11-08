@@ -912,12 +912,7 @@ class Ops:
         return f"scattered {added} props"
 
     def lines(self, lv):
-        out_ = []
-        for l in self.ref.map(lv["host"])["spawnLines"]:
-            out_.append({"name": l["name"], "center": l["center"]})
-        for a in ((lv.get("spawnLines") or {}).get("add") or []):
-            out_.append({"name": a["id"], "center": a["pos"]})
-        return out_
+        return level_lines(self.ref, lv)
 
     # ---- spawn lines -------------------------------------------------------------------------------------------------
 
@@ -949,6 +944,8 @@ class Ops:
                 return f"moved {op['line']}"
         if not any(l["name"] == op["line"] for l in self.ref.map(lv["host"])["spawnLines"]):
             raise Fail(f"no spawn line {op['line']!r}")
+        if op["line"] in (sl.get("remove") or []):
+            raise Fail(f"{op['line']!r} is removed; restore it first ({{\"op\": \"remove_spawn_line\", \"line\": \"{op['line']}\", \"restore\": true}})")
         edits = ensure(sl, "edit", [])
         e = next((x for x in edits if x.get("ref") == op["line"]), None)
         if e is None:
@@ -961,13 +958,45 @@ class Ops:
         return f"moved host line {op['line']}"
 
     def op_remove_spawn_line(self, op):
+        """{"op":"remove_spawn_line","line":"north"}: deletes an added line, or takes a host line off the map
+        (spawnLines.remove: no enemies, routes or markers). "restore": true puts a removed host line back."""
         lv = self.level(op)
-        sl = lv.get("spawnLines") or {}
-        before = len(sl.get("add") or [])
-        sl["add"] = [a for a in sl.get("add") or [] if a.get("id") != op["line"]]
-        if len(sl["add"]) == before:
-            raise Fail("only added spawn lines can be removed (move a host line out of the way instead, or don't spawn from it)")
-        return f"removed {op['line']}"
+        name = op["line"]
+        sl = ensure(lv, "spawnLines", {})
+        adds = sl.get("add") or []
+        if any(a.get("id") == name for a in adds):
+            if op.get("restore"):
+                raise Fail(f"{name!r} is an added line; restore only applies to the map's own lines")
+            sl["add"] = [a for a in adds if a.get("id") != name]
+            if not sl["add"]:
+                del sl["add"]
+            result = f"removed {name}"
+        else:
+            host = [l["name"] for l in self.ref.map(lv["host"])["spawnLines"]]
+            if name not in host:
+                raise Fail(f"no spawn line {name!r}; the map's lines: {host}, added: {[a.get('id') for a in adds]}")
+            removed = sl.get("remove") or []
+            if op.get("restore"):
+                if name not in removed:
+                    raise Fail(f"{name!r} isn't removed")
+                removed = [r for r in removed if r != name]
+                result = f"restored host line {name}"
+            else:
+                if name not in removed:
+                    removed.append(name)
+                result = f"removed host line {name}"
+            if removed:
+                sl["remove"] = removed
+            else:
+                sl.pop("remove", None)
+        if not sl:
+            lv.pop("spawnLines", None)
+        if not op.get("restore"):
+            ws = find_waveset(self.data, lv.get("waveSet")) if lv.get("waveSet") else None
+            n = sum(1 for night in (ws or {}).get("nights", []) for s in night.get("spawns", []) if s.get("line") == name)
+            if n:
+                result += f" (warning: {n} spawn group(s) in wave set {ws['id']!r} still use it; move them to another line)"
+        return result
 
     # ---- waves -------------------------------------------------------------------------------------------------------
 
@@ -1412,6 +1441,12 @@ class Terrain:
 # =====================================================================================================================
 
 SLOPE_LIMIT = 32.0
+# The game's ground graphs (`dev.py cmd "builder-level graphs"`): recast, 0.2 m voxels, max slope 30 degrees, agent
+# radius 0.5 m on the small-enemy and king graphs and 4 m on the large-enemy graph. The clearances are what the offline
+# model needs to reproduce the widths measured in game (level-building.md section 7).
+WALK_SLOPE = 30.0
+SMALL_CLEARANCE = 0.5
+LARGE_CLEARANCE = 4.0
 
 
 def prop_radius(ref, level, p):
@@ -1437,34 +1472,13 @@ class LevelGround:
         m = ref.map(level["host"])
         t = level.get("terrain")
         self.flat = level.get("base") == "flat"
+        # Fine model (flat terrain): clearance per half-cell quad, see clearance(). corner_ok refines diagonal steps.
+        self.clear = None
         if self.flat and t:
             T = Terrain(t)
             self.ox, self.oz, self.cell, self.w, self.h = T.ox, T.oz, T.cell, T.w, T.h
-            self.kind = []
-            self.height = []
-            for j in range(T.h):
-                row = []
-                for i in range(T.w):
-                    k = j * T.w + i
-                    if T.water[k] or T.blocked[k]:
-                        row.append(".")
-                    elif T.slope_deg(i, j) > SLOPE_LIMIT:
-                        row.append(".")
-                    else:
-                        row.append("w")
-                    self.height.append(T.height_at(T.ox + (i + 0.5) * T.cell, T.oz + (j + 0.5) * T.cell))
-                self.kind.append(row)
-            # Large enemies need room: within ~4 m of a cliff, water or a blocked cell only small ones fit (measured:
-            # an 8 m ramp between cliffs is closed to the large graph, a 14 m one is open).
-            n = max(1, int(round(4.0 / T.cell)))
-            edge = [[k == "." for k in r] for r in self.kind]
-            for j in range(T.h):
-                for i in range(T.w):
-                    if self.kind[j][i] != "w":
-                        continue
-                    if any(edge[jj][ii] for jj in range(max(0, j - n), min(T.h, j + n + 1))
-                           for ii in range(max(0, i - n), min(T.w, i + n + 1))):
-                        self.kind[j][i] = "s"
+            self.height = [T.height_at(T.ox + (i + 0.5) * T.cell, T.oz + (j + 0.5) * T.cell) for j in range(T.h) for i in range(T.w)]
+            self.clearance(T, level, ref)
         else:
             g = Grid(m["grid"])
             self.ox, self.oz, self.cell, self.w, self.h = g.ox, g.oz, g.cell, g.w, g.h
@@ -1478,11 +1492,114 @@ class LevelGround:
                         ij = self.index(x, z)
                         if ij and self.kind[ij[1]][ij[0]] in "sw":
                             self.kind[ij[1]][ij[0]] = "."
-        # Solid props block, over most of their footprint.
-        for p in level.get("props") or []:
-            if p.get("solid", True):
-                self.stamp(p["pos"][0], p["pos"][2], prop_radius(ref, level, p) * 0.8, ".")
+        # Solid props block, over most of their footprint (the fine model has them already).
+        if self.clear is None:
+            for p in level.get("props") or []:
+                if p.get("solid", True):
+                    self.stamp(p["pos"][0], p["pos"][2], prop_radius(ref, level, p) * 0.8, ".")
         # Buildings aren't obstacles here: enemies break through walls and buildings in their way.
+
+    def clearance(self, T, level, ref):
+        """Flat terrain, modelled the way the game's recast graphs see it: the ground mesh's triangles (split as
+        GroundLayer splits each cell) steeper than WALK_SLOPE, water/blocked columns, solid props and the field's edge
+        are obstacles; every half-cell quad gets its distance to the nearest obstacle (its clearance), and a 2 m cell is
+        open to an enemy size when one of its quads has that size's clearance. Steps between cells need clearance where
+        the cells meet, so a diagonal causeway one quad wide still connects."""
+        Q = 2
+        QW, QH, qs = T.w * Q, T.h * Q, T.cell / Q
+        W1 = T.w + 1
+        lim = math.tan(math.radians(WALK_SLOPE)) * T.cell
+        blocked = bytearray(QW * QH)
+
+        def mark(i, j, qi, qj):
+            blocked[(j * Q + qj) * QW + i * Q + qi] = 1
+
+        for j in range(T.h):
+            for i in range(T.w):
+                k = j * T.w + i
+                if T.water[k] or T.blocked[k]:
+                    for qj in range(Q):
+                        for qi in range(Q):
+                            mark(i, j, qi, qj)
+                    continue
+                h00, h10 = T.hts[j * W1 + i] / 100.0, T.hts[j * W1 + i + 1] / 100.0
+                h01, h11 = T.hts[(j + 1) * W1 + i] / 100.0, T.hts[(j + 1) * W1 + i + 1] / 100.0
+                if abs(h00 - h11) <= abs(h10 - h01):
+                    # Split 00-11: triangle (00,01,11) above the diagonal, (00,11,10) below it.
+                    a = math.hypot(h11 - h01, h01 - h00) > lim
+                    b = math.hypot(h10 - h00, h11 - h10) > lim
+                    steep = {(0, 1): a, (1, 0): b, (0, 0): a and b, (1, 1): a and b}
+                else:
+                    # Split 10-01: triangle (00,01,10) below the anti-diagonal, (10,01,11) above it.
+                    c = math.hypot(h10 - h00, h01 - h00) > lim
+                    d = math.hypot(h11 - h01, h11 - h10) > lim
+                    steep = {(0, 0): c, (1, 1): d, (0, 1): c and d, (1, 0): c and d}
+                for (qi, qj), s in steep.items():
+                    if s:
+                        mark(i, j, qi, qj)
+        for p in level.get("props") or []:
+            if not p.get("solid", True):
+                continue
+            r = prop_radius(ref, level, p) * 0.8
+            x, z = p["pos"][0], p["pos"][2]
+            i0, i1 = max(0, int((x - r - T.ox) / qs)), min(QW - 1, int((x + r - T.ox) / qs))
+            j0, j1 = max(0, int((z - r - T.oz) / qs)), min(QH - 1, int((z + r - T.oz) / qs))
+            for qj in range(j0, j1 + 1):
+                for qi in range(i0, i1 + 1):
+                    if math.hypot(T.ox + (qi + 0.5) * qs - x, T.oz + (qj + 0.5) * qs - z) <= r:
+                        blocked[qj * QW + qi] = 1
+        # Chamfer distance transform (1, sqrt 2) in quads; outside the field counts as an obstacle (its edge is a wall).
+        big = 1e9
+        d = [0.0 if b else big for b in blocked]
+        r2 = math.sqrt(2)
+        for j in range(QH):
+            row, up = j * QW, (j - 1) * QW
+            for i in range(QW):
+                v = d[row + i]
+                if v == 0.0:
+                    continue
+                v = min(v, d[row + i - 1] + 1 if i > 0 else 1, d[up + i] + 1 if j > 0 else 1,
+                        d[up + i - 1] + r2 if i > 0 and j > 0 else 1, d[up + i + 1] + r2 if j > 0 and i < QW - 1 else 1)
+                d[row + i] = v
+        for j in range(QH - 1, -1, -1):
+            row, dn = j * QW, (j + 1) * QW
+            for i in range(QW - 1, -1, -1):
+                v = d[row + i]
+                if v == 0.0:
+                    continue
+                v = min(v, d[row + i + 1] + 1 if i < QW - 1 else 1, d[dn + i] + 1 if j < QH - 1 else 1,
+                        d[dn + i + 1] + r2 if i < QW - 1 and j < QH - 1 else 1, d[dn + i - 1] + r2 if j < QH - 1 and i > 0 else 1)
+                d[row + i] = v
+        # Quad centre to the nearest obstacle quad's edge, metres.
+        self.clear = [max(0.0, v * qs - qs / 2) for v in d]
+        self.QW = QW
+        self.kind = []
+        for j in range(T.h):
+            row = []
+            for i in range(T.w):
+                best = max(self.qclear(i, j, qi, qj) for qi in range(Q) for qj in range(Q))
+                row.append("w" if best >= LARGE_CLEARANCE else "s" if best >= SMALL_CLEARANCE else ".")
+            self.kind.append(row)
+
+    def qclear(self, i, j, qi, qj):
+        return self.clear[(j * 2 + qj) * self.QW + i * 2 + qi]
+
+    def step_ok(self, i, j, di, dj, large):
+        """Whether a unit can step from cell (i, j) to its neighbour (i+di, j+dj): in the fine model, the quads on
+        each side of the shared edge (or corner) need the clearance; otherwise no corner-cutting past closed cells."""
+        ni, nj = i + di, j + dj
+        if not (0 <= ni < self.w and 0 <= nj < self.h) or not self.ok(ni, nj, large):
+            return False
+        if self.clear is None:
+            return not (di and dj) or (self.ok(i + di, j, large) and self.ok(i, j + dj, large))
+        r = LARGE_CLEARANCE if large else SMALL_CLEARANCE
+        a = 1 if di > 0 else 0   # this cell's quad column (row) facing the neighbour
+        b = 1 if dj > 0 else 0
+        if di and dj:
+            return self.qclear(i, j, a, b) >= r and self.qclear(ni, nj, 1 - a, 1 - b) >= r
+        if di:
+            return any(self.qclear(i, j, a, q) >= r and self.qclear(ni, nj, 1 - a, q) >= r for q in (0, 1))
+        return any(self.qclear(i, j, q, b) >= r and self.qclear(ni, nj, q, 1 - b) >= r for q in (0, 1))
 
     def index(self, x, z):
         i, j = int((x - self.ox) // self.cell), int((z - self.oz) // self.cell)
@@ -1504,7 +1621,7 @@ class LevelGround:
         k = self.kind[j][i]
         if k == "w" or (k == "s" and not large):
             return True
-        if k != "s":
+        if k != "s" or self.clear is not None:
             return False
         # The large graph is sampled at cell centres, so a narrow passage can drop out: an 's' cell next to a 'w'
         # cell counts for large enemies too.
@@ -1528,8 +1645,36 @@ class LevelGround:
                         best = (d, i, j)
         return (best[1], best[2]) if best else None
 
+    # 16 directions: the 8 neighbours plus knight moves, so costs are within ~3% of straight-line distances (8 alone
+    # are up to 8% off, enough to pick the wrong one of two fords).
+    STEPS = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1),
+             (2, 1), (1, 2), (-1, 2), (-2, 1), (-2, -1), (-1, -2), (1, -2), (2, -1)]
+
+    def move_ok(self, i, j, di, dj, large):
+        if abs(di) <= 1 and abs(dj) <= 1:
+            return self.step_ok(i, j, di, dj, large)
+        # A knight move needs both ways round through the cells it passes.
+        sx, sz = (1 if di > 0 else -1), (1 if dj > 0 else -1)
+        a, b = ((sx, 0), (sx, sz)) if abs(di) == 2 else ((0, sz), (sx, sz))
+        return all(self.step_ok(i, j, p[0], p[1], large) and self.step_ok(i + p[0], j + p[1], di - p[0], dj - p[1], large) for p in (a, b))
+
+    def sight(self, a, b, large):
+        """Whether a unit walks straight from cell a to cell b (every cell on the way open, every step allowed)."""
+        (i0, j0), (i1, j1) = a, b
+        n = max(abs(i1 - i0), abs(j1 - j0)) * 2
+        if n == 0:
+            return True
+        prev = a
+        for k in range(1, n + 1):
+            c = (int(round(i0 + (i1 - i0) * k / n)), int(round(j0 + (j1 - j0) * k / n)))
+            if c != prev:
+                if not self.step_ok(prev[0], prev[1], c[0] - prev[0], c[1] - prev[1], large):
+                    return False
+                prev = c
+        return True
+
     def route(self, start, goal_xz, large):
-        """A* over 8-neighbour cells. Returns (reachable, length m, polyline [[x,z],...])."""
+        """A* over cells (16 directions), then pulled taut. Returns (reachable, length m, polyline [[x,z],...], why)."""
         s = self.nearest_ok(start[0], start[1], large)
         g = self.nearest_ok(goal_xz[0], goal_xz[1], large, radius=14.0)
         if s is None:
@@ -1545,44 +1690,67 @@ class LevelGround:
             if cur == g:
                 break
             ci, cj = cur
-            for di, dj, c in ((1, 0, 1), (-1, 0, 1), (0, 1, 1), (0, -1, 1), (1, 1, 1.414), (1, -1, 1.414), (-1, 1, 1.414), (-1, -1, 1.414)):
+            for di, dj in self.STEPS:
                 ni, nj = ci + di, cj + dj
-                if not (0 <= ni < self.w and 0 <= nj < self.h) or not self.ok(ni, nj, large):
+                if not (0 <= ni < self.w and 0 <= nj < self.h):
                     continue
-                if di and dj and not (self.ok(ci + di, cj, large) and self.ok(ci, cj + dj, large)):
-                    continue
-                nd = dist[cur] + c
-                if nd < dist.get((ni, nj), 1e18):
+                nd = dist[cur] + math.hypot(di, dj)
+                if nd < dist.get((ni, nj), 1e18) and self.move_ok(ci, cj, di, dj, large):
                     dist[(ni, nj)] = nd
                     prev[(ni, nj)] = cur
                     heapq.heappush(pq, (nd + math.hypot(ni - gx, nj - gz), (ni, nj)))
         if g not in dist:
             return False, None, [], "no walkable route"
-        pts = []
-        cur = g
-        while cur in prev or cur == s:
-            pts.append([round(self.ox + (cur[0] + 0.5) * self.cell, 1), round(self.oz + (cur[1] + 0.5) * self.cell, 1)])
-            if cur == s:
-                break
-            cur = prev[cur]
-        pts.reverse()
-        return True, round(dist[g] * self.cell, 1), pts[::3] + [pts[-1]], None
+        cells = [g]
+        while cells[-1] != s:
+            cells.append(prev[cells[-1]])
+        cells.reverse()
+        # Pull the path taut (as the game's funnel does): keep only the corners it has to turn at.
+        taut = [cells[0]]
+        k = 0
+        while k < len(cells) - 1:
+            far = k + 1
+            while far + 1 < len(cells) and self.sight(cells[k], cells[far + 1], large):
+                far += 1
+            taut.append(cells[far])
+            k = far
+        pts = [[round(self.ox + (c[0] + 0.5) * self.cell, 1), round(self.oz + (c[1] + 0.5) * self.cell, 1)] for c in taut]
+        length = sum(math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]) for i in range(len(pts) - 1))
+        return True, round(length, 1), pts, None
 
 
-def level_lines(ref, level):
-    """Spawn lines of the level: host lines (moved by edits) + added ones. [{name, center, points, ground, large, flying, added}]"""
+def removed_lines(level):
+    """Names of the host's spawn lines the level takes off the map (spawnLines.remove)."""
+    return list((level.get("spawnLines") or {}).get("remove") or [])
+
+
+def level_lines(ref, level, include_removed=False):
+    """Spawn lines of the level: host lines (moved by edits, minus removed ones) + added ones.
+    [{name, center, points, ground, large, flying, added}] (+ "removed": true with include_removed)."""
     m = ref.map(level["host"])
     sl = level.get("spawnLines") or {}
     edits = {e["ref"]: e for e in sl.get("edit") or [] if e.get("ref")}
+    removed = set(removed_lines(level))
     lines = []
     for l in m["spawnLines"]:
+        if l["name"] in removed and not include_removed:
+            continue
         c = list(l["center"])
         pts = [list(p) for p in l["points"]]
         e = edits.get(l["name"])
+        if e and e.get("rotY"):
+            # As the game turns it (Transform.RotateAround the middle, clockwise seen from above for positive yaw).
+            yaw = math.radians(e["rotY"])
+            cs, sn = math.cos(yaw), math.sin(yaw)
+            pts = [[c[0] + (p[0] - c[0]) * cs + (p[2] - c[2]) * sn, p[1], c[2] - (p[0] - c[0]) * sn + (p[2] - c[2]) * cs] for p in pts]
         if e and e.get("pos"):
             dx, dz = e["pos"][0] - c[0], e["pos"][2] - c[2]
             pts = [[p[0] + dx, p[1], p[2] + dz] for p in pts]
             c = list(e["pos"])
+        if l["name"] in removed:
+            lines.append({"name": l["name"], "center": c, "points": pts, "ground": l["smallGround"], "large": l["bigGround"], "flying": l["flying"],
+                          "added": False, "removed": True})
+            continue
         lines.append({"name": l["name"], "center": c, "points": pts, "ground": l["smallGround"], "large": l["bigGround"], "flying": l["flying"], "added": False})
     for a in sl.get("add") or []:
         yaw = math.radians(a.get("rotY", 0))
@@ -1613,10 +1781,16 @@ def offline_routes(ref, data, level, slots, castle):
             continue
         start, goal = (l["center"][0], l["center"][2]), (cpos[0], cpos[2])
         ok, length, pts, why = ground.route(start, goal, False)
-        r = {"line": l["name"], "reachable": ok, "length": length, "why": why, "points": pts}
-        if l["large"]:
-            # Large enemies (ogres, rams...) need wider passages; vanilla maps sometimes keep them off a plateau on purpose.
-            r["largeReachable"] = ground.route(start, goal, True)[0] if ok else False
+        r = {"line": l["name"], "graph": "small", "reachable": ok, "length": length, "why": why, "points": pts}
+        if l["large"] and ok:
+            # Large enemies (ogres, rams...) need wider passages; vanilla maps sometimes keep them off a plateau on
+            # purpose. Like the game's `paths`, a line that spawns them shows their route when they have one.
+            lok, llength, lpts, _ = ground.route(start, goal, True)
+            r["largeReachable"] = lok
+            if lok:
+                r.update({"graph": "large", "length": llength, "points": lpts, "smallLength": length})
+        elif l["large"]:
+            r["largeReachable"] = False
         routes.append(r)
     return routes
 
@@ -1847,8 +2021,11 @@ def check_pack(ref, data):
                 continue
             if abs(gy - y) > 1.0:
                 warn(f"{p}.buildSlots", f"{label}: y={y:.2f} but the ground there is {gy:.2f} (use \"at\" to set it automatically)")
+            # The footprint, not just the centre cell: on a narrow or diagonal causeway the centre cell can be the
+            # sloped edge while the king walks right next to it.
             ij = ground.index(x, z)
-            if ij and ground.kind[ij[1]][ij[0]] in "#.":
+            if ij and not any(ground.kind[j][i] in "sw" for j in range(max(0, ij[1] - 1), min(ground.h, ij[1] + 2))
+                              for i in range(max(0, ij[0] - 1), min(ground.w, ij[0] + 2))):
                 warn(f"{p}.buildSlots", f"{label} at ({x:.0f}, {z:.0f}) isn't on walkable ground (cliff, water or blocked): the king may not reach it")
         allp = list(slots.values())
         for i in range(len(allp)):
@@ -1872,6 +2049,20 @@ def check_pack(ref, data):
         # Lines and routes.
         lines = level_lines(ref, lv)
         used = used_lines(data, lv)
+        host_lines = [l["name"] for l in m["spawnLines"]]
+        added_ids = {a.get("id") for a in ((lv.get("spawnLines") or {}).get("add") or [])}
+        for ri, name in enumerate(removed_lines(lv)):
+            rp = f"{p}.spawnLines.remove[{ri}]"
+            if name in added_ids:
+                err(rp, f"{name!r} is an added line: delete it from spawnLines.add instead (remove_spawn_line does)")
+            elif name not in host_lines:
+                err(rp, f"no spawn line {name!r} on {lv['host']}; its lines: {host_lines}")
+            elif used is not None and name in used:
+                err(rp, f"spawn line {name!r} is removed, but wave set {lv['waveSet']!r} spawns from it: move those spawns to another line")
+            elif used is None and not lv.get("waveSet"):
+                h = ref.host(lv["host"])
+                if h and any(s.get("line") == name for n in h["vanillaWaves"].get("nights", []) for s in n.get("spawns", [])):
+                    err(rp, f"spawn line {name!r} is removed, but the map's own nights spawn from it: give the level a wave set")
         for l in lines:
             if l["added"]:
                 k = ground.index(l["center"][0], l["center"][2])
@@ -2076,7 +2267,12 @@ def kind_color(kind, castle=False):
     return (170, 120, 230)
 
 
-def render(ref, data, level, path, background=None, world=None, routes=None, labels="names", px=1400):
+# Route colours, one per spawn line (none of them the blocked-route red).
+ROUTE_COLORS = [(255, 140, 30), (60, 220, 255), (255, 90, 220), (160, 255, 60), (255, 240, 80), (140, 150, 255), (255, 255, 255),
+                (60, 255, 170), (255, 170, 170), (200, 120, 60)]
+
+
+def render(ref, data, level, path, background=None, world=None, routes=None, labels="names", px=1400, route_source="offline"):
     m = ref.map(level["host"])
     slots, castle, _ = effective_slots(ref, level)
     lines = level_lines(ref, level)
@@ -2142,12 +2338,20 @@ def render(ref, data, level, path, background=None, world=None, routes=None, lab
         cv.line(0, y, W, y, (255, 255, 255), 1, a=0.12)
         if gz % 40 == 0:
             cv.text(2, y + 2, str(gz), (220, 220, 220), 1, bga=0.4)
-    # Routes.
-    for r in routes or []:
-        col = (255, 120, 40) if r.get("reachable") else (255, 0, 0)
+    # Routes: one colour per line, named where they start and in the legend (blocked ones red).
+    route_keys = []
+    for ri, r in enumerate(routes or []):
+        col = ROUTE_COLORS[ri % len(ROUTE_COLORS)] if r.get("reachable") else (255, 0, 0)
         p = [P(a, b) for a, b in r.get("points") or []]
         for i in range(len(p) - 1):
-            cv.line(p[i][0], p[i][1], p[i + 1][0], p[i + 1][1], col, 2, a=0.8, dash=6)
+            cv.line(p[i][0], p[i][1], p[i + 1][0], p[i + 1][1], col, 3, a=0.9, dash=8)
+        if len(p) > 1 and r.get("line"):
+            # Named a little way along its first leg, clear of the spawn line's own label.
+            lx, ly = p[0][0] + (p[1][0] - p[0][0]) * 0.3, p[0][1] + (p[1][1] - p[0][1]) * 0.3
+            cv.text(lx + 6, ly + 4, r["line"], col, 1, bga=0.7)
+        length = r.get("length")
+        route_keys.append((f"{r.get('line', '?')}" + (f" {length:.0f} m" if r.get("reachable") and length else " BLOCKED" if not r.get("reachable") else "")
+                           + (" OFF GRAPH" if r.get("warning") else ""), col))
     # Spawn lines.
     for l in lines:
         p = [P(q[0], q[2]) for q in l["points"]]
@@ -2199,11 +2403,24 @@ def render(ref, data, level, path, background=None, world=None, routes=None, lab
     # Legend.
     yy = 8
     for name, col in (("castle", KIND_COLORS[0][1]), ("economy", KIND_COLORS[1][1]), ("military", KIND_COLORS[2][1]), ("walls", KIND_COLORS[3][1]),
-                      ("special", (170, 120, 230)), ("spawn line", (200, 40, 60)), ("route", (255, 120, 40)), ("needs castle", (240, 196, 60)),
+                      ("special", (170, 120, 230)), ("spawn line", (200, 40, 60)), ("needs castle", (240, 196, 60)),
                       ("needs slot", (80, 200, 180))):
         cv.rect(W - 170, yy, W - 156, yy + 14, col)
         cv.text(W - 150, yy, name, (255, 255, 255), 2, bga=0.5)
         yy += 20
+    if route_keys:
+        # Bottom right: each route's colour, line and length.
+        tw = max(len(t) for t, _ in route_keys) * 6 + 30
+        yy = H - 18 * len(route_keys) - 30
+        cv.text(W - tw, yy, "routes" + (" (offline estimate)" if route_source == "offline" else " (game)"), (255, 255, 255), 1, bga=0.6)
+        yy += 16
+        for t, col in route_keys:
+            cv.rect(W - tw, yy + 2, W - tw + 14, yy + 9, col)
+            cv.text(W - tw + 20, yy, t, (255, 255, 255), 1, bga=0.6)
+            yy += 18
+    if routes and route_source == "offline":
+        cv.text(8, H - 28, "routes are an offline estimate: the game may pick another gap. check with: palace.py paths / render --live",
+                (255, 230, 160), 1, bga=0.7)
     cv.text(8, 8, f"{level.get('id')} on {level['host']}  x ->  z ^  (m)", (255, 255, 255), 2)
     cv.save(path)
     return {"written": str(Path(path).resolve()), "pixels": [W, H], "world": {"minX": round(x0, 1), "maxX": round(x1, 1), "minZ": round(z0, 1), "maxZ": round(z1, 1)}}
@@ -2539,6 +2756,7 @@ def cmd_show(env, args):
                      **({"upgradeCap": s.cap} if s.cap is not None else {}), **({"followsActivator": True} if s.follows else {})})
     ws, vanilla = level_waveset(ref, data, lv)
     out({"level": lv["id"], "host": lv["host"], "base": lv.get("base", "map"), "slots": rows, "spawnLines": level_lines(ref, lv),
+         **({"removedSpawnLines": removed_lines(lv)} if removed_lines(lv) else {}),
          "props": len(lv.get("props") or []), "terrain": bool(lv.get("terrain")), "waveSet": lv.get("waveSet") or "(vanilla)",
          "nights": len(ws.get("nights", [])), "warnings": warns})
 
@@ -2596,8 +2814,8 @@ def cmd_render(env, args):
         cap = g.agent(f"capture {raw} {args.pixels}", timeout=60)
         bg = read_png(raw)
         paths = g.agent("paths")
-        routes = [{"reachable": r["reachable"], "points": r["points"]} for r in paths.get("routes", [])]
-        out(render(ref, data, lv, o, background=bg, world=cap["world"], routes=routes, labels=args.labels))
+        routes = [{k: r.get(k) for k in ("line", "reachable", "points", "length", "warning")} for r in paths.get("routes", [])]
+        out(render(ref, data, lv, o, background=bg, world=cap["world"], routes=routes, labels=args.labels, route_source="game"))
     else:
         routes = offline_routes(ref, data, lv, slots, castle) if castle in slots and not args.no_routes else []
         out(render(ref, data, lv, o, routes=routes, labels=args.labels, px=args.pixels))
@@ -2605,10 +2823,17 @@ def cmd_render(env, args):
 
 def cmd_paths(env, args):
     g = Game(env)
+    if args.between:
+        x1, z1, x2, z2 = args.between
+        out(g.agent(f"reach {x1} {z1} {x2} {z2}", timeout=60))
+        return
     r = g.agent("paths rescan" if args.rescan else "paths", timeout=60)
     for route in r.get("routes", []):
         if not args.points:
             route.pop("points", None)
+    warnings = [f"{route['line']}: {route['warning']}" for route in r.get("routes", []) if route.get("warning")]
+    if warnings:
+        r["warnings"] = warnings
     out(r)
 
 
@@ -2896,9 +3121,11 @@ def main(argv=None):
     p.add_argument("--pixels", type=int, default=1400)
     p.add_argument("--no-routes", action="store_true")
 
-    p = sub.add_parser("paths", help="the game's own path check (level loaded)")
+    p = sub.add_parser("paths", help="the game's own path check (level loaded): each ground line's route to the castle")
     p.add_argument("--rescan", action="store_true")
-    p.add_argument("--points", action="store_true")
+    p.add_argument("--points", action="store_true", help="include each route's waypoints [[x, z], ...]")
+    p.add_argument("--between", nargs=4, type=float, metavar=("X1", "Z1", "X2", "Z2"),
+                   help="instead: whether each ground graph (small/large enemies, the king's) connects two points")
 
     p = sub.add_parser("play", help="load the level in the game (a custom run: real gold)")
     p.add_argument("pack")

@@ -66,7 +66,8 @@ namespace PalaceMod.Builder.Studio
             {
                 if (lv.SpawnLines.Edit?.Count == 0) lv.SpawnLines.Edit = null;
                 if (lv.SpawnLines.Add?.Count == 0) lv.SpawnLines.Add = null;
-                if (lv.SpawnLines.Edit == null && lv.SpawnLines.Add == null && (lv.SpawnLines.Extra?.Count ?? 0) == 0) lv.SpawnLines = null;
+                if (lv.SpawnLines.Remove?.Count == 0) lv.SpawnLines.Remove = null;
+                if (lv.SpawnLines.Edit == null && lv.SpawnLines.Add == null && lv.SpawnLines.Remove == null && (lv.SpawnLines.Extra?.Count ?? 0) == 0) lv.SpawnLines = null;
             }
             if (lv.Props?.Count == 0) lv.Props = null;
             if (lv.Groups != null)

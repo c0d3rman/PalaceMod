@@ -581,7 +581,8 @@ namespace PalaceMod.Builder.Studio
             long ms = PathCheck.Rescan();
             var lineItems = StudioScene.Items.Where(i => i.Kind == StudioItemKind.Line).ToDictionary(i => i.Id);
             List<PathCheck.Route> routes;
-            try { routes = PathCheck.Check(StudioScene.Scene, l => lineItems.TryGetValue(l.name, out var it) ? it.Pos : LayoutScene.LineCenter(l.transform), withPoints: true); }
+            try { routes = PathCheck.Check(StudioScene.Scene, l => lineItems.TryGetValue(l.name, out var it) ? it.Pos : LayoutScene.LineCenter(l.transform), withPoints: true,
+                include: l => !(lineItems.TryGetValue(l.name, out var it) && it.Removed)); }
             finally { foreach (var go in solid) LayoutScene.SetSolid(go, false); }
             StudioScene.ShowRoutes(routes);
             Log.For<BuilderManager>().Info($"Studio path check (rescan {ms} ms): {PathCheck.Describe(routes)}");

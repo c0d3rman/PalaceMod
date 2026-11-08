@@ -110,8 +110,8 @@ namespace PalaceMod.Builder.Studio
 
         // ---- Delete -------------------------------------------------------------------------------------------------
 
-        /// <summary>Deletes items in one undo step: added slots and props go, host slots are removed from the map (or
-        /// restored if they all were), spawn lines go back to the map's place. Runs the delete guards first.</summary>
+        /// <summary>Deletes items in one undo step: added slots and props go, host slots and spawn lines are removed from
+        /// the map (or restored if they all were). Runs the delete guards first.</summary>
         public static void Delete(IReadOnlyList<string> keys)
         {
             var items = StudioSelection.Expand(keys).Distinct().Select(StudioScene.Find).Where(i => i != null).ToList();
@@ -121,16 +121,23 @@ namespace PalaceMod.Builder.Studio
             DeleteNow(items);
         }
 
+        /// <summary>A host slot or spawn line: deleting it removes it from the map (buildSlots/spawnLines.remove).</summary>
+        public static bool IsHostItem(StudioItem i) => i.Kind is StudioItemKind.Slot or StudioItemKind.Line;
+
+        /// <summary>Whether Delete on these would restore them (all host items, all removed).</summary>
+        public static bool WouldRestore(IReadOnlyCollection<StudioItem> items) => items.Count > 0 && items.All(i => IsHostItem(i) && i.Removed);
+
         private static void DeleteNow(List<StudioItem> items)
         {
             bool castle = items.Any(i => i.IsCastle);
             var targets = items.Where(i => !i.IsCastle && !(i.Kind == StudioItemKind.Slot && i.Locked)).ToList();
             if (castle) Notify.Show("The castle can't be removed", NotifyKind.Info, 2f, "builder-studio");
             if (targets.Count == 0) return;
-            var hostSlots = targets.Where(i => i.Kind == StudioItemKind.Slot).ToList();
-            bool restore = hostSlots.Count > 0 && hostSlots.All(i => i.Removed) && targets.All(i => i.Kind != StudioItemKind.Added && i.Kind != StudioItemKind.Prop);
+            // The host's own slots and spawn lines are removed from the map (or restored if they all were).
+            var hostItems = targets.Where(IsHostItem).ToList();
+            bool restore = hostItems.Count > 0 && hostItems.All(i => i.Removed) && targets.All(i => i.Kind != StudioItemKind.Added && i.Kind != StudioItemKind.Prop);
             string label = targets.Count == 1
-                ? (targets[0].Kind == StudioItemKind.Slot ? (restore ? "Restore " : "Remove ") : targets[0].Kind == StudioItemKind.Line ? "Reset " : "Delete ") + targets[0].Name
+                ? (IsHostItem(targets[0]) ? (restore ? "Restore " : "Remove ") : "Delete ") + targets[0].Name
                 : $"{(restore ? "Restore" : "Delete")} {targets.Count} objects";
             Studio.Edit(label, lv =>
             {
@@ -152,7 +159,11 @@ namespace PalaceMod.Builder.Studio
                             lv.Props?.RemoveAll(x => x?.Id == item.Id);
                             break;
                         case StudioItemKind.Line:
-                            lv.SpawnLines?.Edit?.RemoveAll(e => e?.Ref == item.Id);
+                            // Its move (if any) stays, so a restore puts it back where it was.
+                            lv.SpawnLines ??= new SpawnLineOverlay();
+                            lv.SpawnLines.Remove ??= [];
+                            if (restore) lv.SpawnLines.Remove.Remove(item.Id);
+                            else if (!lv.SpawnLines.Remove.Contains(item.Id)) lv.SpawnLines.Remove.Add(item.Id);
                             break;
                     }
                 }
