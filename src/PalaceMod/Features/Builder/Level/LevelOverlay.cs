@@ -110,7 +110,9 @@ namespace PalaceMod.Builder.Level
             foreach (var prop in level.Props ?? [])
             {
                 if (prop?.Id == null) continue;
-                if (prop.Base == null || !bases.TryGetValue(prop.Base, out var b)) { issues.Add(Warn($"prop \"{prop.Id}\": no scenery \"{prop.Base}\" on {level.Host}")); continue; }
+                // The host's own scenery first, then the cross-map library (Library/SceneryLibrary).
+                if (prop.Base == null || !bases.TryGetValue(prop.Base, out var b)) b = Library.SceneryLibrary.Resolve(scene, prop.Base);
+                if (b == null) { issues.Add(Warn($"prop \"{prop.Id}\": no scenery \"{prop.Base}\" on {level.Host} or in the library")); continue; }
                 LayoutScene.MakeProp(scene, b, prop.Id, LayoutScene.ToVector(prop.Pos), prop.RotY, Mathf.Clamp(prop.Scale, 0.1f, 10f), prop.Solid);
                 props++;
             }

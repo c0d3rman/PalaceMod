@@ -236,7 +236,8 @@ namespace PalaceMod.Builder.Model
                     if (pr == null) { Error(pp, "is empty"); continue; }
                     if (!Ids.IsValid(pr.Id)) Error(pp + ".id", "must be 1-64 characters of a-z, 0-9, '.', '_' or '-'");
                     else if (!placed.Add(pr.Id)) Error(pp + ".id", $"\"{pr.Id}\" is used twice in this level");
-                    if (pr.Base == null || !pr.Base.StartsWith("mesh:")) Error(pp + ".base", "must be \"mesh:<scenery mesh on the map>\"");
+                    if (pr.Base == null || !pr.Base.StartsWith("mesh:") || pr.Base.Length == 5 || pr.Base[5] == '@')
+                        Error(pp + ".base", "must be \"mesh:<scenery mesh>\" (the map's or the scenery library's), optionally ending \"@<Map>\"");
                     CheckPos(pr.Pos, pp + ".pos", optional: false);
                     Range(pr.Scale, 0.1f, 10f, pp + ".scale");
                 }
