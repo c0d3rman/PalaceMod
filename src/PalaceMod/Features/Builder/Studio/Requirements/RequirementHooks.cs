@@ -57,20 +57,23 @@ namespace PalaceMod.Builder.Studio.Requirements
             yield return ("From the start", () => RequirementEdits.Apply(deps, LevelRequirements.FromStart, null));
         }
 
-        /// <summary>Inside the edit that placed a slot: gives it its auto-link requirement (unless it has one).</summary>
+        /// <summary>Inside the edit that placed, pasted or duplicated a slot (Studio.AddPlaceHook): gives a new added
+        /// slot its auto-link requirement, unless it already has one other than the default castle level 1. The item
+        /// isn't reconciled yet here, so everything is read from the level.</summary>
         public static void OnPlaced(LevelDef lv, string key)
         {
             if (!AutoLink || lv == null) return;
-            string r = SlotRefs.FromKey(key);
-            if (r == null || LevelRequirements.Explicit(lv, r) != null) return;
-            var item = Studio.Find(key);
-            string type = item?.TypeName ?? LevelRequirements.FindAdd(lv, r)?.Base;
+            var add = LevelRequirements.FindAdd(lv, SlotRefs.FromKey(key));
+            if (add == null) return;
+            if (add.Requires != null && !(add.Requires.Slot == SlotRefs.Castle && add.Requires.Level == 0)) return;
+            string baseName = ContentRef.Parse(add.Base ?? "").Id;
+            string type = Studio.Find(SlotRefs.ToKey(baseName))?.TypeName ?? baseName;
             bool house = (type ?? "").ToLowerInvariant().Contains("house");
-            var pos = item?.Pos ?? Level.LayoutScene.ToVector(LevelRequirements.FindAdd(lv, r)?.Pos);
+            var pos = Level.LayoutScene.ToVector(add.Pos);
             var houses = Studio.Items.Where(i => i.Key != key && !i.Removed && (i.Kind is StudioItemKind.Slot or StudioItemKind.Added)
                     && (i.TypeName ?? "").ToLowerInvariant().Contains("house"))
                 .Select(i => new ChainNode(RequirementState.Ref(i.Key), i.Pos.x, i.Pos.z));
-            LevelRequirements.Set(lv, r, ChainPreset.AutoLink(house, pos.x, pos.z, houses));
+            add.Requires = ChainPreset.AutoLink(house, pos.x, pos.z, houses);
         }
     }
 }

@@ -42,6 +42,27 @@ namespace PalaceMod.Builder.Studio.Start
             }
         }
 
+        /// <summary>A CPU-readable copy of a (GPU-only) texture.</summary>
+        private static Texture2D Readable(Texture2D source)
+        {
+            var rt = RenderTexture.GetTemporary(source.width, source.height, 0, RenderTextureFormat.ARGB32);
+            var previous = RenderTexture.active;
+            try
+            {
+                Graphics.Blit(source, rt);
+                RenderTexture.active = rt;
+                var copy = new Texture2D(source.width, source.height, TextureFormat.RGB24, false);
+                copy.ReadPixels(new Rect(0, 0, source.width, source.height), 0, 0);
+                copy.Apply();
+                return copy;
+            }
+            finally
+            {
+                RenderTexture.active = previous;
+                RenderTexture.ReleaseTemporary(rt);
+            }
+        }
+
         public static bool Has(string scene) => scene != null && File.Exists(FileFor(scene));
 
         /// <summary>Pictures the loaded map around its castle and caches it (once per map unless forced).</summary>
@@ -58,7 +79,7 @@ namespace PalaceMod.Builder.Studio.Start
                 shot = LevelCapture.Take(castle.transform.position, 70f, 46f, 384);
                 if (shot?.Texture == null) return false;
                 Directory.CreateDirectory(Folder);
-                File.WriteAllBytes(FileFor(scene), shot.Texture.EncodeToPNG());
+                File.WriteAllBytes(FileFor(scene), Readable(shot.Texture).EncodeToPNG());
                 loaded.Remove(scene);
                 Log.For<BuilderManager>().Info($"thumbnail of {scene} cached");
                 return true;

@@ -62,6 +62,9 @@ namespace PalaceMod.Builder.Studio.Start
                 page.AddElementRow(row);
             }
 
+            var chosen = maps.FirstOrDefault(h => h.Scene == map);
+            if (chosen != null)
+                page.Row(chosen.DisplayName ?? chosen.Scene, $"{chosen.VanillaWaves?.Nights?.Count ?? 0} nights · {chosen.SpawnLines.Count} spawn lines · {chosen.StartingGold}◉");
             int shown = FlatFieldAvailable ? 3 : 2;
             page.Choice("Start from", BaseLabels.Take(shown).ToList(), () => Math.Min(baseIndex, shown - 1), i => { baseIndex = i; ModPopup.Current?.Refresh(); },
                 tooltip: () => baseIndex switch
@@ -113,8 +116,6 @@ namespace PalaceMod.Builder.Studio.Start
                 waveSet = null;
                 ModPopup.Current?.Refresh();
             };
-            tile.Shown += _ => ModTooltip.Show(host.DisplayName ?? host.Scene,
-                $"{host.VanillaWaves?.Nights?.Count ?? 0} nights · {host.SpawnLines.Count} spawn lines · starts with {host.StartingGold} gold", tile.Rect, tile);
             return tile;
         }
 
