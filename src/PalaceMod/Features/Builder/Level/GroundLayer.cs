@@ -33,16 +33,15 @@ namespace PalaceMod.Builder.Level
         public const int ChunkCells = 32;
         public const float AirHeight = 5f;     // fliers spawn 5 m up (Spawn.cs) and fly on a surface that high
         private const string RootName = LayoutScene.AddedPrefix + "ground";
-        private const float SteepSlope = 32f;  // the graphs' maxSlope is 30: steeper reads as a cliff
         private const int GroundLayerIndex = 6, ObstacleLayerIndex = 7, FlyerLayerIndex = 9, WaterLayerIndex = 4;
 
         private sealed class Chunk
         {
             public int X0, Z0, X1, Z1;   // cells, exclusive end
-            public Mesh Ground, Blocks, Water, Marks;
+            public Mesh Ground, Blocks, Water, Marks, Paint, Walls;
             public MeshFilter GroundFilter, BlocksFilter, WaterFilter;
             public MeshRenderer MarksRenderer;
-            public MeshCollider GroundCollider, BlocksCollider;
+            public MeshCollider GroundCollider, BlocksCollider, WallsCollider;
         }
 
         private static GameObject root;
@@ -50,6 +49,9 @@ namespace PalaceMod.Builder.Level
         private static Mesh airMesh;
         private static MeshRenderer air;
         private static float blockBottom, blockTop;
+        /// <summary>The ground graphs' max slope: steeper triangles are rock faces and walls for the king.</summary>
+        private static float walkSlope = 30f;
+        public static float WalkSlopeDegrees => walkSlope;
         private static Material[] materials, sources;
         private static ColorAndLightManager listening;
         private static Material water;
@@ -63,7 +65,7 @@ namespace PalaceMod.Builder.Level
 
         /// <summary>A comparable digest of a level's base and terrain.</summary>
         public static string KeyOf(string levelBase, TerrainDef t) => t == null ? $"{levelBase}|-" :
-            $"{levelBase}|{string.Join(",", t.Origin ?? [])}|{t.Cell}|{string.Join(",", t.Size ?? [])}|{t.Y}|{t.Heights}|{t.Materials}|{t.Blocked}|{t.Water?.Level}|{t.Water?.Cells}";
+            $"{levelBase}|{t.Format}|{t.PaintRes}|{string.Join(",", t.Origin ?? [])}|{t.Cell}|{string.Join(",", t.Size ?? [])}|{t.Y}|{t.Heights}|{t.Materials}|{t.Blocked}|{t.Water?.Level}|{t.Water?.Cells}";
         public static bool Active => root != null && Grid != null;
         /// <summary>Whether the host's ground is replaced (a flat base).</summary>
         public static bool Flat => Active && flat;
@@ -97,8 +99,8 @@ namespace PalaceMod.Builder.Level
             if (grid == null) return;
             Show(scene, grid, IsFlat(level));
             SourceKey = KeyOf(level.Base, level.Terrain);
-            if (Flat) SnapToGround(scene);
-            Log.For<BuilderManager>().Info($"terrain on {scene.name}: {grid.W}x{grid.H} cells of {grid.Cell} m, {(Flat ? "flat base" : "host ground")}, {grid.Blocked.Count(b => b)} blocked, {grid.Water.Count(b => b)} water");
+            SnapToGround(scene);
+            Log.For<BuilderManager>().Info($"terrain on {scene.name}: {grid.W}x{grid.H} cells of {grid.Cell} m, {(Flat ? "flat base" : $"host ground, {SculptedCount(grid)} cells sculpted, {HostCut.Describe()}")}, {grid.Blocked.Count(b => b)} blocked, {grid.Water.Count(b => b)} water");
         }
 
         /// <summary>Reads the level's terrain (null without one). Throws FormatException on a malformed one.</summary>
@@ -130,7 +132,15 @@ namespace PalaceMod.Builder.Level
                 HideHost(scene);
                 WidenGraphs(grid);
             }
+            else
+            {
+                // A map's own ground: the pack holds offsets from it; sample it, then make the heights absolute.
+                SampleHost(grid);
+                HostCut.Collect(scene, Owned);
+                if (SculptedCount(grid) > 0) WidenHeights(grid);
+            }
             var gb = GraphBounds();
+            walkSlope = WalkSlope();
             blockBottom = Mathf.Min(gb.min.y, TerrainGrid.MinHeight) - 2f;
             blockTop = gb.max.y + 2f;
             int cw = (grid.W + ChunkCells - 1) / ChunkCells, ch = (grid.H + ChunkCells - 1) / ChunkCells;
@@ -157,6 +167,65 @@ namespace PalaceMod.Builder.Level
                 for (int z = z0; z <= z1; z++)
                     BuildChunk(chunks[x, z]);
             if (air != null) BuildAir();
+            if (!flat) HostCut.Apply(Grid);
+        }
+
+        private static int SculptedCount(TerrainGrid g)
+        {
+            if (g.Host == null) return g.W * g.H;
+            int n = 0;
+            for (int z = 0; z < g.H; z++)
+                for (int x = 0; x < g.W; x++)
+                    if (g.Sculpted(x, z)) n++;
+            return n;
+        }
+
+        /// <summary>The host's ground height at every corner (its Ground-layer colliders, raycast from above), and the
+        /// grid's heights from offsets to absolute.</summary>
+        private static void SampleHost(TerrainGrid g)
+        {
+            var host = new float[g.Heights.Length];
+            var hits = new RaycastHit[16];
+            float top = g.MaxWorld + 60f;
+            for (int z = 0; z <= g.H; z++)
+                for (int x = 0; x <= g.W; x++)
+                {
+                    float best = float.NaN;
+                    int n = Physics.RaycastNonAlloc(new Vector3(g.CornerX(x), top, g.CornerZ(z)), Vector3.down, hits, top + 40f, 1 << GroundLayerIndex, QueryTriggerInteraction.Ignore);
+                    for (int i = 0; i < n; i++)
+                        if (!Owned(hits[i].collider.transform) && (float.IsNaN(best) || hits[i].point.y > best)) best = hits[i].point.y;
+                    host[g.Corner(x, z)] = float.IsNaN(best) ? float.NaN : best - g.Y;
+                }
+            g.Host = host;
+            for (int i = 0; i < host.Length; i++)
+                if (!float.IsNaN(host[i])) g.Heights[i] = g.ClampHeight(host[i] + g.Heights[i]);
+        }
+
+        /// <summary>A map's own ground: the graphs' height range has to hold the sculpted ground.</summary>
+        private static void WidenHeights(TerrainGrid g)
+        {
+            if (AstarPath.active == null) return;
+            float lo = float.MaxValue, hi = float.MinValue;
+            for (int z = 0; z < g.H; z++)
+                for (int x = 0; x < g.W; x++)
+                {
+                    if (!g.Sculpted(x, z)) continue;
+                    for (int k = 0; k < 4; k++)
+                    {
+                        float h = g.Y + g.Heights[g.Corner(x + (k & 1), z + (k >> 1))];
+                        lo = Mathf.Min(lo, h);
+                        hi = Mathf.Max(hi, h);
+                    }
+                }
+            foreach (var r in AstarPath.active.data.graphs.OfType<RecastGraph>())
+            {
+                if (r.name == "Enemy Units Air") continue;
+                var c = r.forcedBoundsCenter;
+                var size = r.forcedBoundsSize;
+                float y0 = Mathf.Min(c.y - size.y / 2f, lo - 2f), y1 = Mathf.Max(c.y + size.y / 2f, hi + 3f);
+                r.forcedBoundsCenter = new Vector3(c.x, (y0 + y1) / 2f, c.z);
+                r.forcedBoundsSize = new Vector3(size.x, y1 - y0, size.z);
+            }
         }
 
         /// <summary>Removes the terrain and gives the host back what it hid.</summary>
@@ -170,9 +239,14 @@ namespace PalaceMod.Builder.Level
                 if (go != null) go.SetActive(true);
             }
             hidden.Clear();
+            HostCut.Restore();
             DropPaints();
             GroundGraphs.Extra.Clear();
-            if (root != null) UnityEngine.Object.Destroy(root);
+            if (root != null)
+            {
+                root.SetActive(false);   // its colliders go now (Destroy waits for the frame's end; a re-Show samples the host)
+                UnityEngine.Object.Destroy(root);
+            }
             root = null;
             Grid = null;
             chunks = null;
@@ -185,9 +259,35 @@ namespace PalaceMod.Builder.Level
         public static bool TryHeight(Vector3 p, out float y)
         {
             y = p.y;
-            if (!Flat || !Grid.Contains(p.x, p.z)) return false;
-            y = Grid.HeightAt(p.x, p.z);
+            if (!Active || !Grid.Contains(p.x, p.z)) return false;
+            if (!flat && !(Grid.CellAt(p.x, p.z, out int cx, out int cz) && Grid.Sculpted(cx, cz))) return false;
+            y = Grid.SurfaceAt(p.x, p.z);
             return true;
+        }
+
+        /// <summary>Where a ray from the camera meets the terrain's own ground (exact over cliffs, unlike a ground-plane
+        /// guess), when it does.</summary>
+        public static bool TryRaycast(Ray ray, out Vector3 point)
+        {
+            point = default;
+            if (!Active) return false;
+            if (!flat)
+            {
+                // A map's own ground (cut where sculpted) and the sculpted cells are all on the Ground layer.
+                if (!Physics.Raycast(ray, out var hit, 3000f, 1 << GroundLayerIndex, QueryTriggerInteraction.Ignore)) return false;
+                point = hit.point;
+                return true;
+            }
+            if (!Grid.Raycast(ray.origin.x, ray.origin.y, ray.origin.z, ray.direction.x, ray.direction.y, ray.direction.z, out float x, out float y, out float z)) return false;
+            point = new Vector3(x, y, z);
+            return true;
+        }
+
+        /// <summary>The ground graphs' max slope (the strictest), 30 if there are none.</summary>
+        private static float WalkSlope()
+        {
+            var graphs = AstarPath.active?.data.graphs.OfType<RecastGraph>().Where(r => r.name != "Enemy Units Air").ToList();
+            return graphs == null || graphs.Count == 0 ? 30f : graphs.Min(r => r.maxSlope);
         }
 
         // ---- Flat base: the host's ground goes --------------------------------------------------------------------
@@ -222,6 +322,13 @@ namespace PalaceMod.Builder.Level
             }
             foreach (var c in Resources.FindObjectsOfTypeAll<Collider>())
                 if (c != null && c.gameObject.scene == scene && c.enabled && c.gameObject.layer == GroundLayerIndex && !Owned(c.transform)) Hide(c);
+            // The map's own invisible walls along its rivers and cliffs (PathMesher strips such as Nordfels'
+            // "InvisiWall (3)", outside NavmeshBakeHelper.invisibleWalls): the ground they fenced is gone, and they'd
+            // stop the king in the middle of the new field (the Far Bank's "invisible warrior").
+            foreach (var pm in Resources.FindObjectsOfTypeAll<PathMesher>())
+                if (pm != null && pm.gameObject.scene == scene && !Owned(pm.transform))
+                    foreach (var c in pm.GetComponentsInChildren<Collider>(true))
+                        if (!c.isTrigger) Hide(c);
             foreach (var helper in UnityEngine.Object.FindObjectsOfType<NavmeshBakeHelper>())
             {
                 var walls = HarmonyLib.Traverse.Create(helper).Field("invisibleWalls").GetValue<GameObject>();
@@ -244,7 +351,7 @@ namespace PalaceMod.Builder.Level
         }
 
         /// <summary>Whether something belongs to a slot, unit, spawner or the mod, not to the map's ground.</summary>
-        private static bool Owned(Transform t) =>
+        internal static bool Owned(Transform t) =>
             t.GetComponentInParent<BuildSlot>(true) != null || t.GetComponentInParent<Hp>(true) != null ||
             t.GetComponentInParent<EnemySpawner>(true) != null || t.GetComponentInParent<PlayerMovement>(true) != null ||
             t.root.name.StartsWith(LayoutScene.AddedPrefix);
@@ -267,7 +374,7 @@ namespace PalaceMod.Builder.Level
         private static void WidenGraphs(TerrainGrid g)
         {
             if (AstarPath.active == null) return;
-            float lo = TerrainGrid.MinHeight - 2f, hi = TerrainGrid.MaxHeight + AirHeight + 3f;
+            float lo = TerrainGrid.MinHeight - 2f, hi = g.MaxWorld + AirHeight + 3f;
             foreach (var r in AstarPath.active.data.graphs.OfType<RecastGraph>())
             {
                 var c = r.forcedBoundsCenter;
@@ -330,6 +437,22 @@ namespace PalaceMod.Builder.Level
                     materials[i].SetColor("_BaseColor", new Color(paint[i].R, paint[i].G, paint[i].B, 1f));
         }
 
+        /// <summary>A paint's colour as the field draws it (the brush strip's swatches), also with no field shown.</summary>
+        public static Color PaintColour(GroundMaterial m)
+        {
+            if (materials != null && materials[(int)m] is Material mat && mat.HasProperty("_BaseColor")) return mat.GetColor("_BaseColor");
+            var all = GroundMaterials.All();
+            string[] fields = ["groundMaterial", "groundHigh", "groundLow", "earthMaterial", "sandMaterial", "roadMaterial", "rockMaterial"];
+            var host = fields.Select(f =>
+            {
+                var src = all.TryGetValue(f, out var x) && x != null ? x : all.TryGetValue("groundMaterial", out var g) ? g : null;
+                var c = src != null && src.HasProperty("_BaseColor") ? src.GetColor("_BaseColor") : Color.gray;
+                return new Rgb(c.r, c.g, c.b);
+            }).ToArray();
+            var p = GroundPalette.Resolve(host)[(int)m];
+            return new Color(p.R, p.G, p.B, 1f);
+        }
+
         /// <summary>Each paint's colour now and the scheme's colour it came from (dev tools).</summary>
         public static string PaintColours() => materials == null ? "no paints" : string.Join("\n", materials.Select((m, i) =>
             $"{(GroundMaterial)i}: {Describe(m)} from {sources[i]?.name} {Describe(sources[i])}"));
@@ -350,7 +473,6 @@ namespace PalaceMod.Builder.Level
         private static Chunk MakeChunk(int x0, int z0, int x1, int z1)
         {
             var c = new Chunk { X0 = x0, Z0 = z0, X1 = x1, Z1 = z1 };
-            if (flat)
             {
                 var go = Part($"chunk {x0 / ChunkCells},{z0 / ChunkCells}", GroundLayerIndex);
                 c.Ground = NewMesh(go.name);
@@ -361,6 +483,21 @@ namespace PalaceMod.Builder.Level
                 r.shadowCastingMode = ShadowCastingMode.On;
                 r.receiveShadows = true;
                 c.GroundCollider = go.AddComponent<MeshCollider>();
+
+                // Paint outlines: drawn only (layer Default: the graphs don't rasterize it, nothing collides with it).
+                var p = Part($"paint {x0 / ChunkCells},{z0 / ChunkCells}", 0);
+                c.Paint = NewMesh(p.name);
+                p.AddComponent<MeshFilter>().sharedMesh = c.Paint;
+                var pr = p.AddComponent<MeshRenderer>();
+                pr.sharedMaterials = materials;
+                pr.shadowCastingMode = ShadowCastingMode.Off;
+                pr.receiveShadows = true;
+
+                // Walls over faces too steep to walk: the king's collider only (no renderer, so the graphs don't see
+                // them; they already leave steep ground out).
+                var k = Part($"cliff walls {x0 / ChunkCells},{z0 / ChunkCells}", ObstacleLayerIndex);
+                c.Walls = NewMesh(k.name);
+                c.WallsCollider = k.AddComponent<MeshCollider>();
 
                 var w = Part($"water {x0 / ChunkCells},{z0 / ChunkCells}", WaterLayerIndex);
                 c.Water = NewMesh(w.name);
@@ -402,7 +539,7 @@ namespace PalaceMod.Builder.Level
         private static void BuildChunk(Chunk c)
         {
             var g = Grid;
-            if (c.Ground != null) BuildGround(g, c);
+            BuildGround(g, c);
             BuildBlocks(g, c);
         }
 
@@ -417,31 +554,54 @@ namespace PalaceMod.Builder.Level
             var wverts = new List<Vector3>();
             var wtris = new List<int>();
             var wuvs = new List<Vector2>();
+            var kv = new List<Vector3>();
+            var kt = new List<int>();
             float wy = g.Y + g.WaterLevel;
-            float steep = Mathf.Tan(SteepSlope * Mathf.Deg2Rad) * g.Cell;
+            bool anyWater = g.AnyWater;
+            var steepCells = new bool[n];
             for (int z = c.Z0; z < c.Z1; z++)
                 for (int x = c.X0; x < c.X1; x++)
                 {
+                    // On a map's own ground only the sculpted cells are ours (HostCut leaves a hole for them).
+                    if (!g.Sculpted(x, z)) continue;
                     float h00 = g.Heights[g.Corner(x, z)], h10 = g.Heights[g.Corner(x + 1, z)];
                     float h01 = g.Heights[g.Corner(x, z + 1)], h11 = g.Heights[g.Corner(x + 1, z + 1)];
+                    if (g.Host != null) Skirts(g, x, z, verts, normals, uvs, tris[(int)GroundMaterial.Ground]);
                     int b = verts.Count;
                     AddCorner(g, x, z, h00, verts, normals, uvs);
                     AddCorner(g, x + 1, z, h10, verts, normals, uvs);
                     AddCorner(g, x, z + 1, h01, verts, normals, uvs);
                     AddCorner(g, x + 1, z + 1, h11, verts, normals, uvs);
-                    float rise = Mathf.Max(Mathf.Abs(h00 - h10), Mathf.Abs(h01 - h11), Mathf.Abs(h00 - h01), Mathf.Abs(h10 - h11));
+                    // Each triangle is plain ground or, too steep to walk (the graphs' max slope), a rock face that the
+                    // king can't walk either (a wall): what he can walk down he can walk up, as for every enemy.
+                    g.CellSlope(x, z, out float s1, out float s2);
+                    bool steep1 = s1 > walkSlope, steep2 = s2 > walkSlope;
+                    steepCells[(z - c.Z0) * (c.X1 - c.X0) + x - c.X0] = steep1 || steep2;
+                    var t1 = tris[(int)(steep1 ? GroundMaterial.Rock : GroundMaterial.Ground)];
+                    var t2 = tris[(int)(steep2 ? GroundMaterial.Rock : GroundMaterial.Ground)];
+                    float x0 = g.CornerX(x), z0 = g.CornerZ(z), x1 = x0 + g.Cell, z1 = z0 + g.Cell;
+                    if (g.SplitsMain(x, z))
+                    {
+                        t1.AddRange([b, b + 2, b + 3]);
+                        t2.AddRange([b, b + 3, b + 1]);
+                        if (steep1 && steep2) AddBox(kv, kt, new Vector3(x0, blockBottom, z0), new Vector3(x1, blockTop, z1));
+                        else if (steep1) AddPrism(kv, kt, x0, z0, x0, z1, x1, z1);
+                        else if (steep2) AddPrism(kv, kt, x0, z0, x1, z1, x1, z0);
+                    }
+                    else
+                    {
+                        t1.AddRange([b, b + 2, b + 1]);
+                        t2.AddRange([b + 1, b + 2, b + 3]);
+                        if (steep1 && steep2) AddBox(kv, kt, new Vector3(x0, blockBottom, z0), new Vector3(x1, blockTop, z1));
+                        else if (steep1) AddPrism(kv, kt, x0, z0, x0, z1, x1, z0);
+                        else if (steep2) AddPrism(kv, kt, x1, z0, x0, z1, x1, z1);
+                    }
+                    // Water: its cells, and the cells round them that rise out of it (the bank hides the plane's edge,
+                    // so the shore is where the slope meets the water, not a cell edge).
                     int ci = g.CellIndex(x, z);
-                    var m = (GroundMaterial)g.Materials[ci];
-                    if (rise > steep) m = GroundMaterial.Rock;
-                    else if (m == GroundMaterial.Ground && !g.Water[ci] && NextToWater(g, x, z)) m = GroundMaterial.Sand;
-                    var t = tris[(int)m];
-                    // Split along the diagonal that keeps the surface convex-looking.
-                    if (Mathf.Abs(h00 - h11) <= Mathf.Abs(h10 - h01)) t.AddRange([b, b + 2, b + 3, b, b + 3, b + 1]);
-                    else t.AddRange([b, b + 2, b + 1, b + 1, b + 2, b + 3]);
-                    if (g.Water[ci])
+                    if (anyWater && (g.Water[ci] || (Mathf.Max(h00, h10, h01, h11) > g.WaterLevel && Mathf.Min(h00, h10, h01, h11) < g.WaterLevel && NextToWater(g, x, z))))
                     {
                         int wb = wverts.Count;
-                        float x0 = g.CornerX(x), z0 = g.CornerZ(z), x1 = x0 + g.Cell, z1 = z0 + g.Cell;
                         wverts.AddRange([new Vector3(x0, wy, z0), new Vector3(x1, wy, z0), new Vector3(x0, wy, z1), new Vector3(x1, wy, z1)]);
                         wuvs.AddRange([new Vector2(x0, z0) * 0.05f, new Vector2(x1, z0) * 0.05f, new Vector2(x0, z1) * 0.05f, new Vector2(x1, z1) * 0.05f]);
                         wtris.AddRange([wb, wb + 2, wb + 3, wb, wb + 3, wb + 1]);
@@ -456,7 +616,8 @@ namespace PalaceMod.Builder.Level
             for (int i = 0; i < tris.Length; i++) mesh.SetTriangles(tris[i], i, false);
             mesh.RecalculateBounds();
             c.GroundCollider.sharedMesh = null;
-            c.GroundCollider.sharedMesh = mesh;
+            if (verts.Count > 0) c.GroundCollider.sharedMesh = mesh;
+            c.GroundCollider.enabled = verts.Count > 0;
 
             c.Water.Clear();
             c.Water.SetVertices(wverts);
@@ -464,16 +625,131 @@ namespace PalaceMod.Builder.Level
             c.Water.SetTriangles(wtris, 0);
             c.Water.RecalculateNormals();
             c.Water.RecalculateBounds();
+
+            c.Walls.Clear();
+            c.Walls.SetVertices(kv);
+            c.Walls.SetTriangles(kt, 0);
+            c.Walls.RecalculateBounds();
+            c.WallsCollider.sharedMesh = null;
+            if (kv.Count > 0) c.WallsCollider.sharedMesh = c.Walls;
+            c.WallsCollider.enabled = kv.Count > 0;
+
+            BuildPaint(g, c, steepCells);
+        }
+
+        /// <summary>Painted materials as smooth outlines a few cm over the ground (PaintOutline), one submesh each,
+        /// later materials on top. Cliffs keep their rock.</summary>
+        private static void BuildPaint(TerrainGrid g, Chunk c, bool[] steepCells)
+        {
+            var verts = new List<Vector3>();
+            var normals = new List<Vector3>();
+            var uvs = new List<Vector2>();
+            var tris = new List<int>[materials.Length];
+            for (int i = 0; i < tris.Length; i++) tris[i] = [];
+            var present = PaintOutline.Present(g, c.X0, c.Z0, c.X1 - 1, c.Z1 - 1);
+            var xz = new List<float>();
+            int cw = c.X1 - c.X0;
+            for (int m = 1; m < present.Length; m++)
+            {
+                if (!present[m] || materials[m] == null) continue;
+                xz.Clear();
+                PaintOutline.Build(g, c.X0, c.Z0, c.X1, c.Z1, (byte)m, (x, z) => steepCells[(z - c.Z0) * cw + x - c.X0], xz);
+                float lift = PaintLift + PaintStepUp * m;
+                var t = tris[m];
+                for (int k = 0; k + 1 < xz.Count; k += 2)
+                {
+                    float x = xz[k], z = xz[k + 1];
+                    t.Add(verts.Count);
+                    verts.Add(new Vector3(x, PaintY(g, x, z) + lift, z));
+                    normals.Add(NormalAt(g, x, z));
+                    uvs.Add(new Vector2(x, z) * 0.05f);
+                }
+            }
+            var mesh = c.Paint;
+            mesh.Clear();
+            mesh.SetVertices(verts);
+            mesh.SetNormals(normals);
+            mesh.SetUVs(0, uvs);
+            mesh.subMeshCount = tris.Length;
+            for (int i = 0; i < tris.Length; i++) mesh.SetTriangles(tris[i], i, false);
+            mesh.RecalculateBounds();
+        }
+
+        private const float PaintLift = 0.03f, PaintStepUp = 0.012f;
+
+        /// <summary>Where paint lies: the terrain's surface, or on a map's own ground outside the sculpted cells, the
+        /// host's (raycast: the grid's samples of it are only a 2 m approximation).</summary>
+        private static float PaintY(TerrainGrid g, float x, float z)
+        {
+            if (g.Host == null || (g.CellAt(x, z, out int cx, out int cz) && g.Sculpted(cx, cz))) return g.SurfaceAt(x, z);
+            return Physics.Raycast(new Vector3(x, g.MaxWorld + 60f, z), Vector3.down, out var hit, g.MaxWorld + 100f, 1 << GroundLayerIndex, QueryTriggerInteraction.Ignore)
+                ? hit.point.y : g.SurfaceAt(x, z);
+        }
+
+        /// <summary>A sculpted cell's edges that meet the host's ground get a short skirt down (both faces), so the
+        /// seam where the cut host ground and the patch differ by a few cm shows no gap.</summary>
+        private static void Skirts(TerrainGrid g, int x, int z, List<Vector3> verts, List<Vector3> normals, List<Vector2> uvs, List<int> tris)
+        {
+            const float depth = 1f;
+            for (int e = 0; e < 4; e++)
+            {
+                int nx = x + (e == 0 ? -1 : e == 1 ? 1 : 0), nz = z + (e == 2 ? -1 : e == 3 ? 1 : 0);
+                if (nx >= 0 && nz >= 0 && nx < g.W && nz < g.H && g.Sculpted(nx, nz)) continue;
+                // The edge's two corners.
+                int ax = e == 1 ? x + 1 : x, az = e == 3 ? z + 1 : z;
+                int bx = e == 0 ? x : x + 1, bz = e == 2 ? z : z + 1;
+                var a = new Vector3(g.CornerX(ax), g.Y + g.Heights[g.Corner(ax, az)], g.CornerZ(az));
+                var b = new Vector3(g.CornerX(bx), g.Y + g.Heights[g.Corner(bx, bz)], g.CornerZ(bz));
+                var n = new Vector3(nx - x, 0f, nz - z);
+                int i = verts.Count;
+                verts.AddRange([a, b, a + Vector3.down * depth, b + Vector3.down * depth]);
+                normals.AddRange([n, n, n, n]);
+                uvs.AddRange([new Vector2(a.x, a.z) * 0.05f, new Vector2(b.x, b.z) * 0.05f, new Vector2(a.x, a.z) * 0.05f, new Vector2(b.x, b.z) * 0.05f]);
+                tris.AddRange([i, i + 1, i + 3, i, i + 3, i + 2, i, i + 3, i + 1, i, i + 2, i + 3]);
+            }
+        }
+
+        private static Vector3 CornerNormal(TerrainGrid g, int x, int z)
+        {
+            float l = g.Heights[g.Corner(Math.Max(0, x - 1), z)], r = g.Heights[g.Corner(Math.Min(g.W, x + 1), z)];
+            float d = g.Heights[g.Corner(x, Math.Max(0, z - 1))], u = g.Heights[g.Corner(x, Math.Min(g.H, z + 1))];
+            return new Vector3(l - r, 2f * g.Cell, d - u).normalized;
+        }
+
+        /// <summary>The ground's shading normal at a point (its corners' normals, blended).</summary>
+        private static Vector3 NormalAt(TerrainGrid g, float x, float z)
+        {
+            float fx = Mathf.Clamp((x - g.OriginX) / g.Cell, 0f, g.W), fz = Mathf.Clamp((z - g.OriginZ) / g.Cell, 0f, g.H);
+            int ix = Math.Min((int)fx, g.W - 1), iz = Math.Min((int)fz, g.H - 1);
+            float tx = fx - ix, tz = fz - iz;
+            var a = Vector3.Lerp(CornerNormal(g, ix, iz), CornerNormal(g, ix + 1, iz), tx);
+            var b = Vector3.Lerp(CornerNormal(g, ix, iz + 1), CornerNormal(g, ix + 1, iz + 1), tx);
+            return Vector3.Lerp(a, b, tz).normalized;
         }
 
         private static void AddCorner(TerrainGrid g, int x, int z, float h, List<Vector3> verts, List<Vector3> normals, List<Vector2> uvs)
         {
             float wx = g.CornerX(x), wz = g.CornerZ(z);
             verts.Add(new Vector3(wx, g.Y + h, wz));
-            float l = g.Heights[g.Corner(Math.Max(0, x - 1), z)], r = g.Heights[g.Corner(Math.Min(g.W, x + 1), z)];
-            float d = g.Heights[g.Corner(x, Math.Max(0, z - 1))], u = g.Heights[g.Corner(x, Math.Min(g.H, z + 1))];
-            normals.Add(new Vector3(l - r, 2f * g.Cell, d - u).normalized);
+            normals.Add(CornerNormal(g, x, z));
             uvs.Add(new Vector2(wx, wz) * 0.05f);
+        }
+
+        /// <summary>A wall the king can't pass over one steep triangle, from below the ground to above the graphs.</summary>
+        private static void AddPrism(List<Vector3> v, List<int> t, float ax, float az, float bx, float bz, float cx, float cz)
+        {
+            int b0 = v.Count;
+            v.AddRange([new Vector3(ax, blockBottom, az), new Vector3(bx, blockBottom, bz), new Vector3(cx, blockBottom, cz),
+                        new Vector3(ax, blockTop, az), new Vector3(bx, blockTop, bz), new Vector3(cx, blockTop, cz)]);
+            // Caps and three sides, both windings (whichever way the triangle runs, the capsule meets a front face).
+            int s = t.Count;
+            t.AddRange([b0, b0 + 2, b0 + 1, b0 + 3, b0 + 4, b0 + 5]);
+            for (int i = 0; i < 3; i++)
+            {
+                int j = (i + 1) % 3;
+                t.AddRange([b0 + i, b0 + j, b0 + 3 + j, b0 + i, b0 + 3 + j, b0 + 3 + i]);
+            }
+            for (int k = s, e = t.Count; k < e; k += 3) t.AddRange([t[k], t[k + 2], t[k + 1]]);
         }
 
         private static bool NextToWater(TerrainGrid g, int x, int z)
@@ -519,6 +795,16 @@ namespace PalaceMod.Builder.Level
         private static bool showMarks;
 
         /// <summary>Whether blocked cells are drawn (the Studio's edit mode).</summary>
+        /// <summary>Dev: switches the king's cliff walls off (to see what he does without them) or back on.</summary>
+        public static int SetCliffWalls(bool on)
+        {
+            int n = 0;
+            if (chunks == null) return 0;
+            foreach (var c in chunks)
+                if (c.WallsCollider != null && c.WallsCollider.sharedMesh != null) { c.WallsCollider.enabled = on; n++; }
+            return n;
+        }
+
         public static bool ShowMarks
         {
             get => showMarks;
@@ -571,7 +857,7 @@ namespace PalaceMod.Builder.Level
 
         private static float SurfaceY(TerrainGrid g, float x, float z)
         {
-            if (flat) return g.HeightAt(x, z);
+            if (flat) return g.SurfaceAt(x, z);
             return Physics.Raycast(new Vector3(x, 80f, z), Vector3.down, out var hit, 200f, 1 << GroundLayerIndex, QueryTriggerInteraction.Ignore)
                 ? hit.point.y : LayoutScene.Ground(new Vector3(x, 0f, z)).y;
         }
@@ -579,7 +865,7 @@ namespace PalaceMod.Builder.Level
         private static bool IsBlocked(TerrainGrid g, int x, int z)
         {
             int i = g.CellIndex(x, z);
-            return g.Blocked[i] || (flat && g.Water[i]);
+            return g.Blocked[i] || g.Water[i];
         }
 
         private static void AddBox(List<Vector3> v, List<int> t, Vector3 min, Vector3 max)
@@ -599,7 +885,7 @@ namespace PalaceMod.Builder.Level
         private static void MakeWalls(TerrainGrid g)
         {
             var go = Part("walls", ObstacleLayerIndex);
-            float y0 = TerrainGrid.MinHeight - 4f, y1 = TerrainGrid.MaxHeight + 10f, t = 2f;
+            float y0 = TerrainGrid.MinHeight - 4f, y1 = g.MaxWorld + 10f, t = 2f;
             float x0 = g.OriginX, z0 = g.OriginZ, x1 = g.OriginX + g.SizeX, z1 = g.OriginZ + g.SizeZ;
             var mesh = NewMesh(go.name);
             var v = new List<Vector3>();

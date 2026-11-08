@@ -122,6 +122,8 @@ namespace PalaceMod.Builder.Studio
         /// <summary>A panel shown in the palette's place while the tool is active (W4's brush strip), or false.</summary>
         public virtual bool HasPanel => false;
         public virtual void BuildPanel(ModPage page) { }
+        /// <summary>Number key n (0-8 for 1-9) while active; true takes it (else it arms the Place hotbar).</summary>
+        public virtual bool Digit(int index) => false;
     }
 
     /// <summary>Something the Place tool can put down: a palette or library tile.</summary>
