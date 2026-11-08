@@ -31,7 +31,7 @@ namespace PalaceMod
         private static void RegisterDevCommands()
         {
             DevCommands.Register("builder-library",
-                "builder-library status | query [here|all|kind:<Kind>|-] [text] | place <mesh> [x z] | gallery [spacing] | clear | thumb <mesh> | thumbs [reset]   scenery library", args =>
+                "builder-library status | query [here|all|kind:<Kind>|-] [text] | place <mesh> [x z] | gallery [spacing] | walkable <x> <z> | clear | thumb <mesh> | thumbs [reset]   scenery library", args =>
             {
                 string sub = args.Length > 0 ? args[0].ToLowerInvariant() : "status";
                 string rest = string.Join(" ", args.Skip(1));
@@ -63,7 +63,7 @@ namespace PalaceMod
                         var scene = SceneManager.GetActiveScene();
                         var b = SceneryLibrary.Resolve(scene, "mesh:" + name, out var why) ?? throw new ArgumentException($"\"{name}\": {why}");
                         var pos = at ? new Vector3(x, 0f, z) : King() + new Vector3(8f, 0f, 0f);
-                        pos = LayoutScene.Ground(pos + Vector3.up * 50f);
+                        pos = LayoutScene.Ground(pos);
                         var go = LayoutScene.MakeProp(scene, b, "library " + name, pos, 0f, 1f, true);
                         placed.Add(go);
                         return $"placed {name} at {pos} (mesh readable={b.Mesh.isReadable}, from {(b.Mesh.isReadable ? "library" : "host")})";
@@ -80,13 +80,25 @@ namespace PalaceMod
                         {
                             var b = SceneryLibrary.BaseOf(e, out _);
                             if (b == null) continue;
-                            var pos = king + new Vector3((n % cols - cols / 2f) * spacing, 0f, (n / cols + 1) * spacing);
+                            LevelCapture.Orientation(out var right, out var up);
+                            var pos = king + right * ((n % cols - (cols - 1) / 2f) * spacing) + up * ((n / cols - (cols - 1) / 2f) * spacing);
                             var size = Vector3.Scale(b.Mesh.bounds.size, b.Scale);
                             float fit = Mathf.Min(1f, (spacing * 0.8f) / Mathf.Max(0.01f, Mathf.Max(size.x, size.y, size.z)));
                             placed.Add(LayoutScene.MakeProp(scene, b, "library " + e.Name, LayoutScene.Ground(pos), 0f, fit, false));
                             n++;
                         }
-                        return $"placed {n} library meshes north of the king";
+                        return $"placed {n} library meshes around the king";
+                    }
+                    case "walkable":
+                    {
+                        // Whether the enemy ground graph's node under a point is walkable (solid props block it).
+                        var parts = rest.Split(' ');
+                        var p = new Vector3(float.Parse(parts[0]), 0f, float.Parse(parts[1]));
+                        var astar = AstarPath.active ?? throw new InvalidOperationException("no pathfinding here");
+                        var nn = Pathfinding.NearestNodeConstraint.None;
+                        nn.graphMask = Pathfinding.GraphMask.FromGraphName("Enemy Units S");
+                        var hit = astar.GetNearest(LayoutScene.Ground(p) + Vector3.up, nn);
+                        return hit.node == null ? "no node" : $"node at {hit.position} walkable={hit.node.Walkable} ({Vector3.Distance(new Vector3(p.x, 0, p.z), new Vector3(hit.position.x, 0, hit.position.z)):0.0} m away)";
                     }
                     case "clear":
                     {

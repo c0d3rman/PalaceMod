@@ -75,7 +75,7 @@ namespace PalaceMod.Builder.Library
             var cat = Catalog;
             foreach (var group in cat.Meshes.GroupBy(m => m.File))
             {
-                string path = Path.Combine(Application.dataPath, group.Key);
+                string path = Path.Combine(DataFolder, group.Key);
                 try
                 {
                     using var file = new AssetFileReader(path);
@@ -98,6 +98,18 @@ namespace PalaceMod.Builder.Library
                 }
             }
             Log.Info($"Scenery library: {meshes.Count} of {cat.Meshes.Count} meshes read from the game in {watch.ElapsedMilliseconds} ms");
+        }
+
+        /// <summary>Where the player's game keeps its asset files: Thronefall_Data on Windows and Linux
+        /// (Application.dataPath), Contents/Resources/Data inside the app on a Mac (dataPath is Contents there).</summary>
+        private static string DataFolder
+        {
+            get
+            {
+                string data = Application.dataPath;
+                string mac = Path.Combine(data, "Resources", "Data");
+                return File.Exists(Path.Combine(data, "globalgamemanagers")) || !Directory.Exists(mac) ? data : mac;
+            }
         }
 
         private static void Fail(SceneryEntry entry, string why)
