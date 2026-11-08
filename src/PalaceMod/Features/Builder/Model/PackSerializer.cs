@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -77,8 +78,31 @@ namespace PalaceMod.Builder.Model
     {
         private static readonly Dictionary<int, Action<JObject>> Steps = new()
         {
-            // [1] = root => { ... }   // version 1 -> 2, when it exists
+            [1] = MoveActivatorsToRequires,
         };
+
+        /// <summary>1 -> 2: an added slot's "activator" (a host slot name or another added slot's id) and
+        /// "activatorLevel" become "requires": { "slot": name | "add:&lt;id&gt;", "level" }.</summary>
+        internal static void MoveActivatorsToRequires(JObject root)
+        {
+            if (root["levels"] is not JArray levels) return;
+            foreach (var level in levels.OfType<JObject>())
+            {
+                if (level["buildSlots"]?["add"] is not JArray adds) continue;
+                var ids = new HashSet<string>(adds.OfType<JObject>().Select(a => (string)a["id"]).Where(id => id != null), StringComparer.Ordinal);
+                foreach (var add in adds.OfType<JObject>())
+                {
+                    var activator = add["activator"];
+                    var activatorLevel = add["activatorLevel"];
+                    add.Remove("activator");
+                    add.Remove("activatorLevel");
+                    if (activator?.Type != JTokenType.String || add["requires"] != null) continue;
+                    string name = (string)activator;
+                    int lv = activatorLevel?.Type == JTokenType.Integer ? (int)activatorLevel : 0;
+                    add["requires"] = new JObject { ["slot"] = ids.Contains(name) ? SlotRefs.Added(name) : name, ["level"] = lv };
+                }
+            }
+        }
 
         public static bool Upgrade(JObject root, out string error)
         {
