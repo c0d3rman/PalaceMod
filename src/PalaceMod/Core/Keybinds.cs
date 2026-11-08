@@ -94,7 +94,7 @@ namespace PalaceMod
             Entry = entry;
         }
 
-        private bool Active => Keybinds.FeatureEnabled(Section) && Keybinds.InputAllowed((Flags & KeybindFlags.AllowInMenus) != 0);
+        private bool Active => Keybinds.FeatureEnabled(Section) && Keybinds.InputAllowed((Flags & KeybindFlags.AllowInMenus) != 0) && !Keybinds.Excluded(this);
     }
 
     public static class Keybinds
@@ -151,6 +151,48 @@ namespace PalaceMod
         {
             if (string.IsNullOrEmpty(context)) throw new ArgumentException("context is required", nameof(context));
             claims[context] = whileActive ?? throw new ArgumentNullException(nameof(whileActive));
+        }
+
+        private static readonly Dictionary<string, Func<bool>> exclusive = [];
+
+        /// <summary>Like ClaimContext, and more: while <paramref name="whileActive"/> returns true, every keybind outside
+        /// <paramref name="context"/> is inert (mod keys included, not just those on the same input), and game actions
+        /// on the context's inputs are blocked. For a mode that owns the keyboard (the Builder Studio). Call once, in
+        /// Awake.</summary>
+        public static void ClaimExclusive(string context, Func<bool> whileActive)
+        {
+            ClaimContext(context, whileActive);
+            exclusive[context] = whileActive;
+        }
+
+        private static int exclusiveFrame = -1;
+        private static string exclusiveNow;
+
+        /// <summary>The exclusive context claimed this frame, or null.</summary>
+        internal static string ExclusiveContext()
+        {
+            if (exclusiveFrame == Time.frameCount) return exclusiveNow;
+            exclusiveFrame = Time.frameCount;
+            exclusiveNow = null;
+            foreach (var claim in exclusive)
+            {
+                bool on;
+                try { on = claim.Value(); }
+                catch (Exception e)
+                {
+                    Log.For<KeybindsManager>().Caught($"Exclusive claim check for keybind context '{claim.Key}' failed", e);
+                    on = false;
+                }
+                if (on) { exclusiveNow = claim.Key; break; }
+            }
+            return exclusiveNow;
+        }
+
+        internal static bool Excluded(Keybind keybind)
+        {
+            if (exclusive.Count == 0) return false;
+            string owner = ExclusiveContext();
+            return owner != null && keybind.Context != owner;
         }
 
         private static readonly HashSet<string> claimed = [];
