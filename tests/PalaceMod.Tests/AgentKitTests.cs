@@ -74,7 +74,7 @@ namespace PalaceMod.Tests
                 Assert.True(Math.Abs(grid.HeightAt(-40f, 30f)) < 0.01f, "untouched ground stays at 0");
                 Assert.True(grid.CellAt(25f, -10f, out int wx, out int wz) && grid.Water[grid.CellIndex(wx, wz)], "water cell");
                 Assert.True(grid.CellAt(-30f, -30f, out int bx, out int bz) && grid.Blocked[grid.CellIndex(bx, bz)], "blocked cell");
-                Assert.True(grid.CellAt(0f, -30f, out int rx, out int rz) && grid.Materials[grid.CellIndex(rx, rz)] == (byte)GroundMaterial.Road, "road cell");
+                Assert.True(grid.MaterialAt(0f, -30f) == GroundMaterial.Road, "road cell");
                 Assert.Equal(9, pack.FindWaveSet(level.WaveSet).StartingGold, "starting gold");
             }
             finally

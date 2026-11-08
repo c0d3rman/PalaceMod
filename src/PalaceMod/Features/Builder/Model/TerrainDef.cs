@@ -12,6 +12,10 @@ namespace PalaceMod.Builder.Model
 {
     public sealed class TerrainDef
     {
+        /// <summary>Data format: absent or 1 = one material per cell; 2 = materials per paint sample (paintRes).</summary>
+        [JsonProperty("format")] public int? Format { get; set; }
+        /// <summary>Format 2: paint samples per cell edge in materials.</summary>
+        [JsonProperty("paintRes")] public int? PaintRes { get; set; }
         /// <summary>World [x, z] of the grid's corner (cell 0, 0).</summary>
         [JsonProperty("origin")] public float[] Origin { get; set; }
         /// <summary>Cell edge in metres.</summary>
@@ -22,7 +26,8 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("y")] public float Y { get; set; }
         /// <summary>(w+1)*(h+1) corner heights in cm relative to y, row-major: base64 deflate of int16 row deltas.</summary>
         [JsonProperty("heights")] public string Heights { get; set; }
-        /// <summary>A material per cell (GroundMaterial), base64 deflate.</summary>
+        /// <summary>A material (GroundMaterial) per paint sample, row-major over (w*paintRes) x (h*paintRes), base64 deflate
+        /// (format 1: one per cell).</summary>
         [JsonProperty("materials")] public string Materials { get; set; }
         /// <summary>Cells ground units and the king can't enter (fliers can): base64 deflate bitmask.</summary>
         [JsonProperty("blocked")] public string Blocked { get; set; }

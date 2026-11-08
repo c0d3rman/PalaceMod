@@ -1175,7 +1175,7 @@ class Ops:
             origin = [math.floor((g["origin"][0] + 12) / cell) * cell, math.floor((g["origin"][1] + 12) / cell) * cell]
             size = [min(400, int(math.ceil((g["size"][0] * g["cell"] - 24) / cell))), min(400, int(math.ceil((g["size"][1] * g["cell"] - 24) / cell)))]
         lv["terrain"] = {"origin": [float(origin[0]), float(origin[1])], "cell": float(op.get("cell", 2)), "size": [int(size[0]), int(size[1])],
-                         "y": float(op.get("y", castle["pos"][1] if castle else 0))}
+                         "y": float(op.get("y", castle["pos"][1] if castle else 0)), "format": Terrain.FORMAT}
         if op.get("flat", True):
             lv["base"] = "flat"
         return f"terrain {size[0]}x{size[1]} cells"
@@ -1200,9 +1200,9 @@ class Ops:
         """{"op":"paint","material":"road"|"ground"|"high"|"low"|"earth"|"sand"|"rock", shape...}"""
         lv, t = self.terrain(op)
         mat = Terrain.MATERIALS.index(op["material"]) if op["material"] in Terrain.MATERIALS else int(op["material"])
-        n = t.paint_cells(Shape.from_op(op), "materials", mat)
+        n = t.paint_samples(Shape.from_op(op), mat)
         t.store(lv)
-        return f"painted {n} cells"
+        return f"painted {n} samples ({Terrain.PAINT_RES}x{Terrain.PAINT_RES} per cell)"
 
     def op_block(self, op):
         """{"op":"block","on":true, shape...}: cells ground units (and the king) can't enter; fliers can. Any base."""
@@ -1333,10 +1333,17 @@ def b64inflate(s, n):
 
 
 class Terrain:
-    """LevelDef.terrain: (W+1)x(H+1) corner heights (cm relative to y, delta-coded int16), W*H cell materials,
-    blocked and water bitmasks; raw deflate + base64. See the guide's Terrain section."""
+    """LevelDef.terrain: (W+1)x(H+1) corner heights (cm relative to y, delta-coded int16), materials per paint sample
+    ((W*paintRes) x (H*paintRes), format 2; format 1 had one per cell), blocked and water bitmasks per cell; raw deflate
+    + base64. See the guide's Terrain section."""
     MATERIALS = ["ground", "high", "low", "earth", "sand", "road", "rock"]
-    MIN_Y, MAX_Y = -8.0, 30.0
+    # World floor (below -10 the game respawns the king); the ceiling is MAX_ABOVE over y (at least MAX_Y world).
+    MIN_Y, MAX_Y, MAX_ABOVE = -8.0, 30.0, 30.0
+    FORMAT, PAINT_RES = 2, 2
+
+    @staticmethod
+    def max_world(y):
+        return max(Terrain.MAX_Y, y + Terrain.MAX_ABOVE)
 
     def __init__(self, t):
         self.ox, self.oz = t["origin"]
@@ -1353,7 +1360,20 @@ class Terrain:
                 self.hts[i] = v
                 prev = v
         n = self.w * self.h
-        self.materials = bytearray(b64inflate(t["materials"], n)) if t.get("materials") else bytearray(n)
+        fmt = int(t.get("format", 1))
+        if fmt > self.FORMAT:
+            raise Fail(f"terrain format {fmt} is newer than this palace.py ({self.FORMAT}): update the agent kit")
+        R = self.PAINT_RES
+        self.pw, self.ph = self.w * R, self.h * R
+        self.materials = bytearray(self.pw * self.ph)
+        if t.get("materials"):
+            res = 1 if fmt == 1 else int(t.get("paintRes", R))
+            raw = b64inflate(t["materials"], self.w * res * self.h * res)
+            row = self.w * res
+            for pz in range(self.ph):
+                for px in range(self.pw):
+                    v = raw[(pz * res // R) * row + px * res // R]
+                    self.materials[pz * self.pw + px] = v if v <= 6 else 0
         self.blocked = self.unbits(t.get("blocked"), n)
         w = t.get("water") or {}
         self.water_level = float(w.get("level", -1.0))
@@ -1390,7 +1410,7 @@ class Terrain:
         return self.y + v / 100.0
 
     def clamp_cm(self, rel):
-        world = max(self.MIN_Y, min(self.MAX_Y, self.y + rel))
+        world = max(self.MIN_Y, min(self.max_world(self.y), self.y + rel))
         return int(round((world - self.y) * 100))
 
     def corners_in(self, shape):
@@ -1456,6 +1476,26 @@ class Terrain:
                 if shape.weight(x, z) >= 0.5:
                     yield j * self.w + i
 
+    def paint_samples(self, shape, value):
+        """Materials: every paint sample (PAINT_RES per cell edge) whose centre is inside the shape (the game draws the
+        result with smooth edges)."""
+        step = self.cell / self.PAINT_RES
+        x0, z0, x1, z1 = shape.bounds()
+        i0, i1 = max(0, int((x0 - self.ox) / step)), min(self.pw - 1, int((x1 - self.ox) / step))
+        j0, j1 = max(0, int((z0 - self.oz) / step)), min(self.ph - 1, int((z1 - self.oz) / step))
+        n = 0
+        for j in range(j0, j1 + 1):
+            for i in range(i0, i1 + 1):
+                if shape.weight(self.ox + (i + 0.5) * step, self.oz + (j + 0.5) * step) >= 0.5:
+                    self.materials[j * self.pw + i] = value
+                    n += 1
+        return n
+
+    def material_at(self, x, z):
+        step = self.cell / self.PAINT_RES
+        i, j = int((x - self.ox) // step), int((z - self.oz) // step)
+        return self.materials[j * self.pw + i] if 0 <= i < self.pw and 0 <= j < self.ph else 0
+
     def paint_cells(self, shape, layer, value):
         arr = getattr(self, layer)
         n = 0
@@ -1501,6 +1541,7 @@ class Terrain:
     def store(self, lv):
         t = lv["terrain"]
         t["origin"], t["cell"], t["size"], t["y"] = [self.ox, self.oz], self.cell, [self.w, self.h], self.y
+        t["format"] = self.FORMAT
         if any(self.hts):
             out_ = bytearray()
             prev = 0
@@ -1513,8 +1554,10 @@ class Terrain:
             t.pop("heights", None)
         if any(self.materials):
             t["materials"] = b64deflate(self.materials)
+            t["paintRes"] = self.PAINT_RES
         else:
             t.pop("materials", None)
+            t.pop("paintRes", None)
         if any(self.blocked):
             t["blocked"] = b64deflate(self.bits(self.blocked))
         else:
@@ -2711,8 +2754,9 @@ def reference_markdown(ref):
     L.append("Even on a `cleared` or `flat` base the host map fixes: **which building kinds you can place** (`add_slot` copies a "
              "slot of that kind from the host, so a kind the host lacks can't be added: no Mill on Frostsee), the castle's "
              "position, the playable rectangle (`terrain_init`'s default grid is the host's walkable extent), the sky, light and "
-             "ground palette, and the starting gold default. Terrain heights are **world** heights clamped to "
-             f"[{Terrain.MIN_Y:g}, {Terrain.MAX_Y:g}] m, so a high castle leaves little room to build up (headroom below). Pick "
+             "ground palette, and the starting gold default. Terrain heights go from world y "
+             f"{Terrain.MIN_Y:g} m (the king respawns below -10) up to {Terrain.MAX_ABOVE:g} m above the terrain's `y` (the castle's "
+             f"height; at least world {Terrain.MAX_Y:g} m), so every host has room to build up (headroom below). Pick "
              "the host from this table before designing.\n")
     all_kinds = sorted({s["kind"] for name in maps for s in ref.map(name)["slots"]
                         if not s.get("followsActivator") and not s.get("castle")})
@@ -2732,7 +2776,7 @@ def reference_markdown(ref):
         x0, x1 = g["origin"][0] + 12, g["origin"][0] + g["size"][0] * g["cell"] - 12
         z0, z1 = g["origin"][1] + 12, g["origin"][1] + g["size"][1] * g["cell"] - 12
         heads.append(f"| {name} | {x1 - x0:.0f} x {z1 - z0:.0f} | {c[0] - x0:.0f} / {x1 - c[0]:.0f} / {c[2] - z0:.0f} / {z1 - c[2]:.0f} | "
-                     f"{c[1]:.1f} | {Terrain.MAX_Y - c[1]:+.1f} / {Terrain.MIN_Y - c[1]:+.1f} |")
+                     f"{c[1]:.1f} | {Terrain.max_world(c[1]) - c[1]:+.1f} / {Terrain.MIN_Y - c[1]:+.1f} |")
     L.append("\n| Host | Playable rectangle (m) | Castle to west / east / south / north edge (m) | Castle y | Terrain headroom up / down from the castle (m) |")
     L.append("|---|---|---|---|---|")
     L += heads

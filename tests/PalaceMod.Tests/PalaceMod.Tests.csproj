@@ -49,6 +49,7 @@
     <Compile Include="../../src/PalaceMod/Core/UI/NumberMath.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/TerrainDef.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Level/GroundCodec.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Level/PaintOutline.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Level/GroundPalette.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Terrain/TerrainBrushes.cs" />
     <EmbeddedResource Include="../../src/PalaceMod/Assets/builder-sample.json" LogicalName="builder-sample.json" />
