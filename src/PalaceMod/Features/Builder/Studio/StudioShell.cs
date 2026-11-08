@@ -578,6 +578,18 @@ namespace PalaceMod.Builder.Studio
             StudioDock.OnLevelChanged();
         }
 
+        /// <summary>The path check's result in a few words, for a row's value.</summary>
+        public static string PathShort
+        {
+            get
+            {
+                var routes = StudioScene.Routes;
+                if (routes.Count == 0) return "";
+                int blocked = routes.Count(r => !r.Reachable);
+                return blocked == 0 ? "all reach" : $"{blocked} blocked";
+            }
+        }
+
         public static string PathSummary
         {
             get

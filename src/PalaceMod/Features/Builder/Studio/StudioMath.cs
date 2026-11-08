@@ -28,12 +28,15 @@ namespace PalaceMod.Builder.Studio
         }
 
         /// <summary>Even-odd test of a point against a closed polygon.</summary>
-        public static bool InPolygon(Vector2 p, IReadOnlyList<Vector2> poly)
+        public static bool InPolygon(Vector2 p, IReadOnlyList<Vector2> poly) => InPolygon(p.x, p.y, poly.Count, i => poly[i].x, i => poly[i].y);
+
+        public static bool InPolygon(float px, float py, int count, Func<int, float> xs, Func<int, float> ys)
         {
             bool inside = false;
-            for (int i = 0, j = poly.Count - 1; i < poly.Count; j = i++)
+            for (int i = 0, j = count - 1; i < count; j = i++)
             {
-                if ((poly[i].y > p.y) != (poly[j].y > p.y) && p.x < (poly[j].x - poly[i].x) * (p.y - poly[i].y) / (poly[j].y - poly[i].y) + poly[i].x)
+                float yi = ys(i), yj = ys(j), xi = xs(i), xj = xs(j);
+                if ((yi > py) != (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi)
                     inside = !inside;
             }
             return inside;

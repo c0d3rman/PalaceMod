@@ -219,6 +219,15 @@ namespace PalaceMod.Builder.Studio
             marquee.gameObject.SetActive(true);
         }
 
+        /// <summary>The screen point just under the ≡ tile (where the Studio menu opens).</summary>
+        public static Vector2? BelowMenu()
+        {
+            if (menuTile == null) return null;
+            var c = new Vector3[4];
+            menuTile.Rect.GetWorldCorners(c);
+            return new Vector2(c[0].x, c[0].y - 12f);
+        }
+
         /// <summary>A small rect at a screen point, for a tooltip beside the pointer.</summary>
         public static RectTransform PointAnchor(Vector2 screen)
         {

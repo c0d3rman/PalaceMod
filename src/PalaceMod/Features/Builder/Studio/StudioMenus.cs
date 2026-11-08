@@ -101,7 +101,7 @@ namespace PalaceMod.Builder.Studio
                 page.Row("Pack editor", "", "The pack's units, wave sets and levels. Close it to come back.", Then(() => BuilderEditor.OpenPack(draft.SourceId ?? draft.Pack.Id)));
                 page.Row("Studio settings", "", (string)null, Then(OpenSettings));
                 page.Row("Leave", "", "Back to the pack screen. Unsaved changes stay until the game quits.", Then(() => Studio.Leave()));
-            }, near: StudioDock.Dock?.Panels.FirstOrDefault()?.Rect, width: 380f);
+            }, screenPoint: StudioDock.BelowMenu(), width: 380f);
         }
 
         private static void OpenSettings()

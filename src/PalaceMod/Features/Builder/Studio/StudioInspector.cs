@@ -183,7 +183,7 @@ namespace PalaceMod.Builder.Studio
             if (moved > 0) page.Row("Moved", moved.ToString(), (string)null, () => StudioSelection.Select(StudioScene.Items.Where(i => i.Moved).Select(i => i.Key), SelectOp.Replace));
             page.Row("Scenery", Count(StudioItemKind.Prop).ToString());
             page.Row("Spawn lines", Count(StudioItemKind.Line).ToString());
-            if (StudioShell.PathSummary is string paths) page.Row("Paths", Dim(Esc(paths)));
+            if (StudioShell.PathSummary is string paths) page.Row("Paths", Dim(StudioShell.PathShort), paths);
         }
 
         // ---- Level tab --------------------------------------------------------------------------------------------
@@ -210,7 +210,7 @@ namespace PalaceMod.Builder.Studio
                 if (ws >= 0) page.Row("Edit nights", "▸", "Opens the wave set; Back returns here.", () => BuilderEditor.OpenWaveSet(ws));
             }
             page.Header("Paths");
-            page.Row("Check enemy paths", Dim(Esc(StudioShell.PathSummary ?? "not checked")), "Rescans pathfinding with your changes and draws each spawn line's route: red is blocked.", StudioShell.CheckPaths);
+            page.Row("Check paths", Dim(StudioShell.PathShort), "Rescans pathfinding with your changes and draws each spawn line's route: red is blocked.", StudioShell.CheckPaths);
             page.Header("Layout");
             page.Row("Changes", Dim(Esc(LevelSummary(lv))));
             if (LevelOverlay.HasEdits(lv))
