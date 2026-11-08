@@ -218,13 +218,17 @@ namespace PalaceMod
             }
 
             private int solidMask;
+            private string lastOverlap;
 
             // The king's capsule at p overlaps something he collides with: he's inside geometry, not standing free.
             private bool Overlaps(Vector3 p)
             {
                 var c = p + cc.center;
                 float half = Mathf.Max(0, cc.height * 0.5f - cc.radius);
-                return Physics.CheckCapsule(c + Vector3.up * half, c - Vector3.up * half, cc.radius * 0.9f, solidMask, QueryTriggerInteraction.Ignore);
+                // The king's own colliders (his controller, hitboxes) travel with him: never count those.
+                foreach (var hit in Physics.OverlapCapsule(c + Vector3.up * half, c - Vector3.up * half, cc.radius * 0.9f, solidMask, QueryTriggerInteraction.Ignore))
+                    if (!hit.transform.IsChildOf(king)) { lastOverlap = hit.name; return true; }
+                return false;
             }
 
             private IEnumerable<float> Flood(Reach r, IEnumerable<Vector3> frontier)
@@ -450,7 +454,7 @@ namespace PalaceMod
                     log.AppendLine($"bound={bb.min.x:0},{bb.min.z:0}..{bb.max.x:0},{bb.max.z:0}");
                     // Sanity check for the pushed/walked split: standing nodes should almost never overlap anything.
                     int overlapping = root.R.Nodes.Values.Count(Overlaps);
-                    log.AppendLine($"baseline nodes={root.R.Nodes.Count} overlapping={overlapping} pushed={root.R.Pushed.Count} escaped={escapedPushed + escapedWalked} probes={probes} t={sw.Elapsed.TotalSeconds:0.0}s");
+                    log.AppendLine($"baseline nodes={root.R.Nodes.Count} overlapping={overlapping} (e.g. {lastOverlap}) pushed={root.R.Pushed.Count} escaped={escapedPushed + escapedWalked} probes={probes} t={sw.Elapsed.TotalSeconds:0.0}s");
                     escapedPushed = escapedWalked = 0;
                     pushedExamples.Clear(); walkedExamples.Clear();
 
