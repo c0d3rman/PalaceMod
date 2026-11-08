@@ -1441,6 +1441,12 @@ class Terrain:
 # =====================================================================================================================
 
 SLOPE_LIMIT = 32.0
+# The game's ground graphs (`dev.py cmd "builder-level graphs"`): recast, 0.2 m voxels, max slope 30 degrees, agent
+# radius 0.5 m on the small-enemy and king graphs and 4 m on the large-enemy graph. The clearances are what the offline
+# model needs to reproduce the widths measured in game (level-building.md section 7).
+WALK_SLOPE = 30.0
+SMALL_CLEARANCE = 0.5
+LARGE_CLEARANCE = 4.0
 
 
 def prop_radius(ref, level, p):
@@ -1466,34 +1472,13 @@ class LevelGround:
         m = ref.map(level["host"])
         t = level.get("terrain")
         self.flat = level.get("base") == "flat"
+        # Fine model (flat terrain): clearance per half-cell quad, see clearance(). corner_ok refines diagonal steps.
+        self.clear = None
         if self.flat and t:
             T = Terrain(t)
             self.ox, self.oz, self.cell, self.w, self.h = T.ox, T.oz, T.cell, T.w, T.h
-            self.kind = []
-            self.height = []
-            for j in range(T.h):
-                row = []
-                for i in range(T.w):
-                    k = j * T.w + i
-                    if T.water[k] or T.blocked[k]:
-                        row.append(".")
-                    elif T.slope_deg(i, j) > SLOPE_LIMIT:
-                        row.append(".")
-                    else:
-                        row.append("w")
-                    self.height.append(T.height_at(T.ox + (i + 0.5) * T.cell, T.oz + (j + 0.5) * T.cell))
-                self.kind.append(row)
-            # Large enemies need room: within ~4 m of a cliff, water or a blocked cell only small ones fit (measured:
-            # an 8 m ramp between cliffs is closed to the large graph, a 14 m one is open).
-            n = max(1, int(round(4.0 / T.cell)))
-            edge = [[k == "." for k in r] for r in self.kind]
-            for j in range(T.h):
-                for i in range(T.w):
-                    if self.kind[j][i] != "w":
-                        continue
-                    if any(edge[jj][ii] for jj in range(max(0, j - n), min(T.h, j + n + 1))
-                           for ii in range(max(0, i - n), min(T.w, i + n + 1))):
-                        self.kind[j][i] = "s"
+            self.height = [T.height_at(T.ox + (i + 0.5) * T.cell, T.oz + (j + 0.5) * T.cell) for j in range(T.h) for i in range(T.w)]
+            self.clearance(T, level, ref)
         else:
             g = Grid(m["grid"])
             self.ox, self.oz, self.cell, self.w, self.h = g.ox, g.oz, g.cell, g.w, g.h
@@ -1507,11 +1492,114 @@ class LevelGround:
                         ij = self.index(x, z)
                         if ij and self.kind[ij[1]][ij[0]] in "sw":
                             self.kind[ij[1]][ij[0]] = "."
-        # Solid props block, over most of their footprint.
-        for p in level.get("props") or []:
-            if p.get("solid", True):
-                self.stamp(p["pos"][0], p["pos"][2], prop_radius(ref, level, p) * 0.8, ".")
+        # Solid props block, over most of their footprint (the fine model has them already).
+        if self.clear is None:
+            for p in level.get("props") or []:
+                if p.get("solid", True):
+                    self.stamp(p["pos"][0], p["pos"][2], prop_radius(ref, level, p) * 0.8, ".")
         # Buildings aren't obstacles here: enemies break through walls and buildings in their way.
+
+    def clearance(self, T, level, ref):
+        """Flat terrain, modelled the way the game's recast graphs see it: the ground mesh's triangles (split as
+        GroundLayer splits each cell) steeper than WALK_SLOPE, water/blocked columns, solid props and the field's edge
+        are obstacles; every half-cell quad gets its distance to the nearest obstacle (its clearance), and a 2 m cell is
+        open to an enemy size when one of its quads has that size's clearance. Steps between cells need clearance where
+        the cells meet, so a diagonal causeway one quad wide still connects."""
+        Q = 2
+        QW, QH, qs = T.w * Q, T.h * Q, T.cell / Q
+        W1 = T.w + 1
+        lim = math.tan(math.radians(WALK_SLOPE)) * T.cell
+        blocked = bytearray(QW * QH)
+
+        def mark(i, j, qi, qj):
+            blocked[(j * Q + qj) * QW + i * Q + qi] = 1
+
+        for j in range(T.h):
+            for i in range(T.w):
+                k = j * T.w + i
+                if T.water[k] or T.blocked[k]:
+                    for qj in range(Q):
+                        for qi in range(Q):
+                            mark(i, j, qi, qj)
+                    continue
+                h00, h10 = T.hts[j * W1 + i] / 100.0, T.hts[j * W1 + i + 1] / 100.0
+                h01, h11 = T.hts[(j + 1) * W1 + i] / 100.0, T.hts[(j + 1) * W1 + i + 1] / 100.0
+                if abs(h00 - h11) <= abs(h10 - h01):
+                    # Split 00-11: triangle (00,01,11) above the diagonal, (00,11,10) below it.
+                    a = math.hypot(h11 - h01, h01 - h00) > lim
+                    b = math.hypot(h10 - h00, h11 - h10) > lim
+                    steep = {(0, 1): a, (1, 0): b, (0, 0): a and b, (1, 1): a and b}
+                else:
+                    # Split 10-01: triangle (00,01,10) below the anti-diagonal, (10,01,11) above it.
+                    c = math.hypot(h10 - h00, h01 - h00) > lim
+                    d = math.hypot(h11 - h01, h11 - h10) > lim
+                    steep = {(0, 0): c, (1, 1): d, (0, 1): c and d, (1, 0): c and d}
+                for (qi, qj), s in steep.items():
+                    if s:
+                        mark(i, j, qi, qj)
+        for p in level.get("props") or []:
+            if not p.get("solid", True):
+                continue
+            r = prop_radius(ref, level, p) * 0.8
+            x, z = p["pos"][0], p["pos"][2]
+            i0, i1 = max(0, int((x - r - T.ox) / qs)), min(QW - 1, int((x + r - T.ox) / qs))
+            j0, j1 = max(0, int((z - r - T.oz) / qs)), min(QH - 1, int((z + r - T.oz) / qs))
+            for qj in range(j0, j1 + 1):
+                for qi in range(i0, i1 + 1):
+                    if math.hypot(T.ox + (qi + 0.5) * qs - x, T.oz + (qj + 0.5) * qs - z) <= r:
+                        blocked[qj * QW + qi] = 1
+        # Chamfer distance transform (1, sqrt 2) in quads; outside the field counts as an obstacle (its edge is a wall).
+        big = 1e9
+        d = [0.0 if b else big for b in blocked]
+        r2 = math.sqrt(2)
+        for j in range(QH):
+            row, up = j * QW, (j - 1) * QW
+            for i in range(QW):
+                v = d[row + i]
+                if v == 0.0:
+                    continue
+                v = min(v, d[row + i - 1] + 1 if i > 0 else 1, d[up + i] + 1 if j > 0 else 1,
+                        d[up + i - 1] + r2 if i > 0 and j > 0 else 1, d[up + i + 1] + r2 if j > 0 and i < QW - 1 else 1)
+                d[row + i] = v
+        for j in range(QH - 1, -1, -1):
+            row, dn = j * QW, (j + 1) * QW
+            for i in range(QW - 1, -1, -1):
+                v = d[row + i]
+                if v == 0.0:
+                    continue
+                v = min(v, d[row + i + 1] + 1 if i < QW - 1 else 1, d[dn + i] + 1 if j < QH - 1 else 1,
+                        d[dn + i + 1] + r2 if i < QW - 1 and j < QH - 1 else 1, d[dn + i - 1] + r2 if j < QH - 1 and i > 0 else 1)
+                d[row + i] = v
+        # Quad centre to the nearest obstacle quad's edge, metres.
+        self.clear = [max(0.0, v * qs - qs / 2) for v in d]
+        self.QW = QW
+        self.kind = []
+        for j in range(T.h):
+            row = []
+            for i in range(T.w):
+                best = max(self.qclear(i, j, qi, qj) for qi in range(Q) for qj in range(Q))
+                row.append("w" if best >= LARGE_CLEARANCE else "s" if best >= SMALL_CLEARANCE else ".")
+            self.kind.append(row)
+
+    def qclear(self, i, j, qi, qj):
+        return self.clear[(j * 2 + qj) * self.QW + i * 2 + qi]
+
+    def step_ok(self, i, j, di, dj, large):
+        """Whether a unit can step from cell (i, j) to its neighbour (i+di, j+dj): in the fine model, the quads on
+        each side of the shared edge (or corner) need the clearance; otherwise no corner-cutting past closed cells."""
+        ni, nj = i + di, j + dj
+        if not (0 <= ni < self.w and 0 <= nj < self.h) or not self.ok(ni, nj, large):
+            return False
+        if self.clear is None:
+            return not (di and dj) or (self.ok(i + di, j, large) and self.ok(i, j + dj, large))
+        r = LARGE_CLEARANCE if large else SMALL_CLEARANCE
+        a = 1 if di > 0 else 0   # this cell's quad column (row) facing the neighbour
+        b = 1 if dj > 0 else 0
+        if di and dj:
+            return self.qclear(i, j, a, b) >= r and self.qclear(ni, nj, 1 - a, 1 - b) >= r
+        if di:
+            return any(self.qclear(i, j, a, q) >= r and self.qclear(ni, nj, 1 - a, q) >= r for q in (0, 1))
+        return any(self.qclear(i, j, q, b) >= r and self.qclear(ni, nj, q, 1 - b) >= r for q in (0, 1))
 
     def index(self, x, z):
         i, j = int((x - self.ox) // self.cell), int((z - self.oz) // self.cell)
@@ -1533,7 +1621,7 @@ class LevelGround:
         k = self.kind[j][i]
         if k == "w" or (k == "s" and not large):
             return True
-        if k != "s":
+        if k != "s" or self.clear is not None:
             return False
         # The large graph is sampled at cell centres, so a narrow passage can drop out: an 's' cell next to a 'w'
         # cell counts for large enemies too.
@@ -1557,8 +1645,36 @@ class LevelGround:
                         best = (d, i, j)
         return (best[1], best[2]) if best else None
 
+    # 16 directions: the 8 neighbours plus knight moves, so costs are within ~3% of straight-line distances (8 alone
+    # are up to 8% off, enough to pick the wrong one of two fords).
+    STEPS = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1),
+             (2, 1), (1, 2), (-1, 2), (-2, 1), (-2, -1), (-1, -2), (1, -2), (2, -1)]
+
+    def move_ok(self, i, j, di, dj, large):
+        if abs(di) <= 1 and abs(dj) <= 1:
+            return self.step_ok(i, j, di, dj, large)
+        # A knight move needs both ways round through the cells it passes.
+        sx, sz = (1 if di > 0 else -1), (1 if dj > 0 else -1)
+        a, b = ((sx, 0), (sx, sz)) if abs(di) == 2 else ((0, sz), (sx, sz))
+        return all(self.step_ok(i, j, p[0], p[1], large) and self.step_ok(i + p[0], j + p[1], di - p[0], dj - p[1], large) for p in (a, b))
+
+    def sight(self, a, b, large):
+        """Whether a unit walks straight from cell a to cell b (every cell on the way open, every step allowed)."""
+        (i0, j0), (i1, j1) = a, b
+        n = max(abs(i1 - i0), abs(j1 - j0)) * 2
+        if n == 0:
+            return True
+        prev = a
+        for k in range(1, n + 1):
+            c = (int(round(i0 + (i1 - i0) * k / n)), int(round(j0 + (j1 - j0) * k / n)))
+            if c != prev:
+                if not self.step_ok(prev[0], prev[1], c[0] - prev[0], c[1] - prev[1], large):
+                    return False
+                prev = c
+        return True
+
     def route(self, start, goal_xz, large):
-        """A* over 8-neighbour cells. Returns (reachable, length m, polyline [[x,z],...])."""
+        """A* over cells (16 directions), then pulled taut. Returns (reachable, length m, polyline [[x,z],...], why)."""
         s = self.nearest_ok(start[0], start[1], large)
         g = self.nearest_ok(goal_xz[0], goal_xz[1], large, radius=14.0)
         if s is None:
@@ -1574,28 +1690,33 @@ class LevelGround:
             if cur == g:
                 break
             ci, cj = cur
-            for di, dj, c in ((1, 0, 1), (-1, 0, 1), (0, 1, 1), (0, -1, 1), (1, 1, 1.414), (1, -1, 1.414), (-1, 1, 1.414), (-1, -1, 1.414)):
+            for di, dj in self.STEPS:
                 ni, nj = ci + di, cj + dj
-                if not (0 <= ni < self.w and 0 <= nj < self.h) or not self.ok(ni, nj, large):
+                if not (0 <= ni < self.w and 0 <= nj < self.h):
                     continue
-                if di and dj and not (self.ok(ci + di, cj, large) and self.ok(ci, cj + dj, large)):
-                    continue
-                nd = dist[cur] + c
-                if nd < dist.get((ni, nj), 1e18):
+                nd = dist[cur] + math.hypot(di, dj)
+                if nd < dist.get((ni, nj), 1e18) and self.move_ok(ci, cj, di, dj, large):
                     dist[(ni, nj)] = nd
                     prev[(ni, nj)] = cur
                     heapq.heappush(pq, (nd + math.hypot(ni - gx, nj - gz), (ni, nj)))
         if g not in dist:
             return False, None, [], "no walkable route"
-        pts = []
-        cur = g
-        while cur in prev or cur == s:
-            pts.append([round(self.ox + (cur[0] + 0.5) * self.cell, 1), round(self.oz + (cur[1] + 0.5) * self.cell, 1)])
-            if cur == s:
-                break
-            cur = prev[cur]
-        pts.reverse()
-        return True, round(dist[g] * self.cell, 1), pts[::3] + [pts[-1]], None
+        cells = [g]
+        while cells[-1] != s:
+            cells.append(prev[cells[-1]])
+        cells.reverse()
+        # Pull the path taut (as the game's funnel does): keep only the corners it has to turn at.
+        taut = [cells[0]]
+        k = 0
+        while k < len(cells) - 1:
+            far = k + 1
+            while far + 1 < len(cells) and self.sight(cells[k], cells[far + 1], large):
+                far += 1
+            taut.append(cells[far])
+            k = far
+        pts = [[round(self.ox + (c[0] + 0.5) * self.cell, 1), round(self.oz + (c[1] + 0.5) * self.cell, 1)] for c in taut]
+        length = sum(math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]) for i in range(len(pts) - 1))
+        return True, round(length, 1), pts, None
 
 
 def removed_lines(level):
@@ -1660,10 +1781,16 @@ def offline_routes(ref, data, level, slots, castle):
             continue
         start, goal = (l["center"][0], l["center"][2]), (cpos[0], cpos[2])
         ok, length, pts, why = ground.route(start, goal, False)
-        r = {"line": l["name"], "reachable": ok, "length": length, "why": why, "points": pts}
-        if l["large"]:
-            # Large enemies (ogres, rams...) need wider passages; vanilla maps sometimes keep them off a plateau on purpose.
-            r["largeReachable"] = ground.route(start, goal, True)[0] if ok else False
+        r = {"line": l["name"], "graph": "small", "reachable": ok, "length": length, "why": why, "points": pts}
+        if l["large"] and ok:
+            # Large enemies (ogres, rams...) need wider passages; vanilla maps sometimes keep them off a plateau on
+            # purpose. Like the game's `paths`, a line that spawns them shows their route when they have one.
+            lok, llength, lpts, _ = ground.route(start, goal, True)
+            r["largeReachable"] = lok
+            if lok:
+                r.update({"graph": "large", "length": llength, "points": lpts, "smallLength": length})
+        elif l["large"]:
+            r["largeReachable"] = False
         routes.append(r)
     return routes
 
@@ -1894,8 +2021,11 @@ def check_pack(ref, data):
                 continue
             if abs(gy - y) > 1.0:
                 warn(f"{p}.buildSlots", f"{label}: y={y:.2f} but the ground there is {gy:.2f} (use \"at\" to set it automatically)")
+            # The footprint, not just the centre cell: on a narrow or diagonal causeway the centre cell can be the
+            # sloped edge while the king walks right next to it.
             ij = ground.index(x, z)
-            if ij and ground.kind[ij[1]][ij[0]] in "#.":
+            if ij and not any(ground.kind[j][i] in "sw" for j in range(max(0, ij[1] - 1), min(ground.h, ij[1] + 2))
+                              for i in range(max(0, ij[0] - 1), min(ground.w, ij[0] + 2))):
                 warn(f"{p}.buildSlots", f"{label} at ({x:.0f}, {z:.0f}) isn't on walkable ground (cliff, water or blocked): the king may not reach it")
         allp = list(slots.values())
         for i in range(len(allp)):
