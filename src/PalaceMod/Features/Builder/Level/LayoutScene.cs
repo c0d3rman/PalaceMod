@@ -107,6 +107,8 @@ namespace PalaceMod.Builder.Level
                 if (mf == null || mf.gameObject.scene != scene || mf.sharedMesh == null || string.IsNullOrEmpty(mf.sharedMesh.name)) continue;
                 if (NonPropLayers.Contains(mf.gameObject.layer) || mf.name.StartsWith(AddedPrefix)) continue;
                 if (mf.GetComponentInParent<BuildSlot>(true) != null || mf.GetComponentInParent<Hp>(true) != null) continue;
+                // Units and their gear (the king's weapons, troops waiting in the scene) aren't scenery.
+                if (mf.GetComponentInParent<Animator>(true) != null || mf.GetComponentInParent<TaggedObject>(true) != null) continue;
                 if (mf.GetComponentInParent<EnemySpawner>(true) != null || mf.GetComponent<Collider>() != null) continue;
                 var renderer = mf.GetComponent<MeshRenderer>();
                 if (renderer == null || renderer.sharedMaterials.Length == 0 || renderer.sharedMaterials.Any(m => m == null)) continue;
