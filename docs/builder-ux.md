@@ -196,6 +196,13 @@ the other stays put, and undoes everything. Root causes it caught: `LayoutScene.
 copies (renamed to their item keys) as host scenery, so a resized copy set the host base's scale for every copy of
 that mesh; and the library ghost was drawn at scale 1 while placing used the start scale.
 
+"Placing X made Y" was the click, not the placement: hovering a tile selects it, and `ModScroll` scrolled the
+selection into view, so a tile near the palette's edge scrolled up under the still pointer, the tile now under it was
+selected and scrolled to in turn, and the click landed one or two rows further on (Defense Tower lvl 1 → Stepping
+Stone, Rock A Alternate: the tiles 3 and 6 after it, three per row). Hover selection no longer scrolls. The library
+tiles' click path is checked with the simulated mouse (`uikit mouse <tile>`, `uikit click`, then `builder-studio
+state`); `builder-studio focus` shows the active frame's selection, focus and last applied element.
+
 ### Selection and multi-edit
 
 - The selection is an ordered list of item keys (`slot:<name>`, `add:<id>`, `prop:<id>`, `line:<name>`,
