@@ -156,6 +156,19 @@ namespace PalaceMod.Builder.Level
                     }
                     break;
                 }
+                case "enemies":
+                {
+                    // Where the enemies are (and whether they fly).
+                    var list = new List<TaggedObject>();
+                    TagManager.instance?.FindAllTaggedObjectsWithTag(list, TagManager.ETag.EnemyOwned);
+                    foreach (var e in list.Where(e => e != null && e.GetComponent<Hp>() != null).Take(40))
+                    {
+                        var p = e.transform.position;
+                        sb.AppendLine($"{e.name} ({p.x:0},{p.y:0.0},{p.z:0}) fly={e.Tags.Contains(TagManager.ETag.Flying)}");
+                    }
+                    sb.AppendLine($"{list.Count} enemy-owned");
+                    break;
+                }
                 case "scan":
                 {
                     if (astar == null) return "no AstarPath";
