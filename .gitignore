@@ -12,3 +12,7 @@ lib/
 *.suo
 install.cfg
 .claude/worktrees/
+
+# Agent kit: reference data palace.py caches from the game
+agent-kit/reference/
+agent-kit/__pycache__/
