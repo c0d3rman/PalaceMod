@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /*
-    Ground markers for the layout editor: a flat ring per editable object (coloured by what it is and whether it's
+    Ground markers for the Builder Studio: a flat ring per editable object (coloured by what it is and whether it's
     selected), a direction tick for its facing, and polylines for spawn lines and checked enemy routes. Everything
     lives under one root in the host scene, so it goes away with the map.
 */
@@ -20,6 +20,24 @@ namespace PalaceMod.Builder.Level
         public static readonly Color RouteOk = new(0.42f, 0.78f, 0.69f, 0.9f);
         public static readonly Color RouteBlocked = new(0.95f, 0.35f, 0.3f, 0.95f);
 
+        // Colour by kind (docs/builder-ux.md, "What's what"); a Studio label provider may override it.
+        public static readonly Color CastleColor = new(0.95f, 0.76f, 0.30f, 0.98f);
+        public static readonly Color IncomeColor = new(0.96f, 0.86f, 0.45f, 0.95f);
+        public static readonly Color MilitaryColor = new(0.90f, 0.40f, 0.34f, 0.95f);
+        public static readonly Color WallColor = new(0.66f, 0.66f, 0.68f, 0.95f);
+        public static readonly Color SpecialColor = new(0.70f, 0.52f, 0.92f, 0.95f);
+
+        /// <summary>The ring colour for a building kind, from words in its type name.</summary>
+        public static Color KindColor(string typeName)
+        {
+            string t = (typeName ?? "").ToLowerInvariant();
+            if (t.Contains("castle")) return CastleColor;
+            if (t.Contains("wall") || t.Contains("gate") || t.Contains("barricade") || t.Contains("bridge")) return WallColor;
+            if (t.Contains("tower") || t.Contains("barrack") || t.Contains("archer") || t.Contains("hero") || t.Contains("knight")) return MilitaryColor;
+            if (t.Contains("house") || t.Contains("mill") || t.Contains("mine") || t.Contains("harb") || t.Contains("field") || t.Contains("farm") || t.Contains("treasur")) return IncomeColor;
+            return SpecialColor;
+        }
+
         private const float Lift = 0.12f;
         private readonly Transform root;
         private readonly Mesh quad;
@@ -31,7 +49,7 @@ namespace PalaceMod.Builder.Level
 
         private sealed class Marker
         {
-            public GameObject Ring, Tick, Cross;
+            public GameObject Ring, Tick, Cross, Outline;
             public LineRenderer Line;
         }
 
@@ -40,7 +58,7 @@ namespace PalaceMod.Builder.Level
             root = new GameObject("PalaceBuilder markers").transform;
             root.SetParent(parent, false);
             quad = FlatQuad();
-            shader = Shader.Find("Sprites/Default");
+            shader = Shader.Find("UI/Default") ?? Shader.Find("Sprites/Default");
             ringTexture = Paint((x, y) =>
             {
                 float d = new Vector2(x - 0.5f, y - 0.5f).magnitude * 2f;
@@ -62,8 +80,14 @@ namespace PalaceMod.Builder.Level
         }
 
         /// <summary>Shows or updates the marker of one object.</summary>
-        public void Set(string key, Vector3 pos, float yaw, float size, Color color, bool removed, List<Vector3> polyline = null)
+        public void Set(string key, Vector3 pos, float yaw, float size, Color color, bool removed, List<Vector3> polyline = null, bool selected = false, bool onTop = false)
         {
+            if (onTop != this.onTop)
+            {
+                this.onTop = onTop;
+                foreach (var dict in new[] { ringMaterials, tickMaterials, crossMaterials, lineMaterials })
+                    foreach (var mat in dict.Values) ApplyTop(mat);
+            }
             if (!markers.TryGetValue(key, out var m))
             {
                 m = new Marker
@@ -71,6 +95,7 @@ namespace PalaceMod.Builder.Level
                     Ring = Quad("ring " + key),
                     Tick = Quad("tick " + key),
                     Cross = Quad("cross " + key),
+                    Outline = Quad("outline " + key),
                 };
                 markers[key] = m;
             }
@@ -86,6 +111,11 @@ namespace PalaceMod.Builder.Level
             m.Cross.transform.SetPositionAndRotation(p + Vector3.up * 0.02f, Quaternion.identity);
             m.Cross.transform.localScale = Vector3.one * size;
             m.Cross.SetActive(removed);
+            // The selection gets a second, outer ring.
+            m.Outline.GetComponent<MeshRenderer>().sharedMaterial = Material(ringMaterials, ringTexture, SelectedColor);
+            m.Outline.transform.SetPositionAndRotation(p - Vector3.up * 0.01f, Quaternion.identity);
+            m.Outline.transform.localScale = Vector3.one * (size * 1.22f);
+            m.Outline.SetActive(selected);
             if (polyline != null && polyline.Count > 1)
             {
                 m.Line ??= NewLine("line " + key);
@@ -104,9 +134,21 @@ namespace PalaceMod.Builder.Level
             Object.Destroy(m.Ring);
             Object.Destroy(m.Tick);
             Object.Destroy(m.Cross);
+            Object.Destroy(m.Outline);
             if (m.Line != null) Object.Destroy(m.Line.gameObject);
             markers.Remove(key);
         }
+
+        public void SetVisible(bool visible)
+        {
+            if (root != null) root.gameObject.SetActive(visible);
+        }
+
+        private bool onTop;
+
+        // X-ray: markers drawn over scenery (UI/Default reads its depth test from unity_GUIZTestMode).
+        private void ApplyTop(Material m) =>
+            m.SetInt("unity_GUIZTestMode", (int)(onTop ? UnityEngine.Rendering.CompareFunction.Always : UnityEngine.Rendering.CompareFunction.LessEqual));
 
         public IEnumerable<string> Keys => new List<string>(markers.Keys);
 
@@ -146,6 +188,7 @@ namespace PalaceMod.Builder.Level
             if (cache.TryGetValue(color, out var m)) return m;
             m = new Material(shader) { color = color, renderQueue = 3100 };
             if (texture != null) m.mainTexture = texture;
+            ApplyTop(m);
             return cache[color] = m;
         }
 
