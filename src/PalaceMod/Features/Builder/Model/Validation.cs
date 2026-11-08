@@ -103,11 +103,28 @@ namespace PalaceMod.Builder.Model
                     if (v.Tint != null && !TryParseColor(v.Tint, out _)) Error(p + ".visuals.tint", "must be \"#rrggbb\"");
                     if (v.Scale is float s && (s < 0.1f || s > 10f)) Error(p + ".visuals.scale", "must be between 0.1 and 10");
                     CheckAsset(v.Icon, p + ".visuals.icon", ImageExtensions);
-                    CheckAsset(v.Mesh, p + ".visuals.mesh", MeshExtensions);
+                    switch (ModelRef.Kind(v.Mesh, out string modelId))
+                    {
+                        case ModelKind.Asset: CheckAsset(v.Mesh, p + ".visuals.mesh", MeshExtensions); break;
+                        case ModelKind.Unit:
+                            if (game != null && !game.HasVanillaUnit(modelId, null)) Error(p + ".visuals.mesh", $"no vanilla unit \"{modelId}\"");
+                            break;
+                        case ModelKind.Scenery: break; // resolved against the map and the scenery library when the unit is built
+                        default:
+                            if (v.Mesh != null) Error(p + ".visuals.mesh", "must be \"asset:<key>\", \"mesh:<scenery mesh>\" or \"vanilla:<unit id>\"");
+                            break;
+                    }
+                    foreach (var (rot, key) in new[] { (v.MeshRotX, "meshRotX"), (v.MeshRotZ, "meshRotZ") })
+                        if (rot is float r && (float.IsNaN(r) || r < -360f || r > 360f)) Error(p + ".visuals." + key, "must be between -360 and 360");
+                    if (v.MeshOffset != null && (v.MeshOffset.Length != 3 || v.MeshOffset.Any(o => float.IsNaN(o) || o < -50f || o > 50f)))
+                        Error(p + ".visuals.meshOffset", "must be [x, y, z], each between -50 and 50");
+                    if (v.MeshLook != null && !ModelRef.Looks.Contains(v.MeshLook)) Error(p + ".visuals.meshLook", "must be \"own\" or \"unit\"");
+                    if (v.Motion != null && !ModelRef.Motions.Contains(v.Motion)) Error(p + ".visuals.motion", "must be \"auto\", \"bob\" or \"none\"");
                     CheckAsset(v.Texture, p + ".visuals.texture", ImageExtensions);
                     if (v.MeshScale is float ms && (float.IsNaN(ms) || ms < 0.001f || ms > 1000f)) Error(p + ".visuals.meshScale", "must be between 0.001 and 1000");
                     if (v.MeshRotY is float mr && (float.IsNaN(mr) || mr < -360f || mr > 360f)) Error(p + ".visuals.meshRotY", "must be between -360 and 360");
-                    if ((v.MeshScale != null || v.MeshRotY != null) && v.Mesh == null) Warn(p + ".visuals.mesh", "meshScale and meshRotY only apply with a mesh");
+                    if ((v.MeshScale != null || v.MeshRotY != null || v.MeshRotX != null || v.MeshRotZ != null || v.MeshOffset != null || v.MeshLook != null) && v.Mesh == null)
+                        Warn(p + ".visuals.mesh", "meshScale, meshRot*, meshOffset and meshLook only apply with a mesh");
                     if (v.Sounds != null)
                     {
                         CheckAsset(v.Sounds.Attack, p + ".visuals.sounds.attack", AudioExtensions);

@@ -43,6 +43,27 @@ namespace PalaceMod.Builder.Editor
             BuildActions(page, u);
         }
 
+        /// <summary>One section of this page, for the Enemy Studio's inspector tabs: "identity", "stats", "weapon",
+        /// "tags", "visuals", "behaviours", "actions".</summary>
+        internal void BuildSection(ModPage page, string section)
+        {
+            BuildInto(page, p =>
+            {
+                var u = Unit;
+                if (u == null) { p.Text("This unit no longer exists."); return; }
+                switch (section)
+                {
+                    case "identity": BuildIdentity(p, u); break;
+                    case "stats": BuildStats(p); break;
+                    case "weapon": BuildWeapon(p, u); break;
+                    case "tags": BuildTags(p, u); break;
+                    case "visuals": BuildVisuals(p, u); break;
+                    case "behaviours": BuildBehaviours(p, u); break;
+                    case "actions": BuildActions(p, u); break;
+                }
+            });
+        }
+
         // ---- Identity ----------------------------------------------------------------------------------------------
 
         private void BuildIdentity(ModPage page, UnitDef u)
@@ -358,9 +379,14 @@ namespace PalaceMod.Builder.Editor
             var unit = p.Units[Index];
             unit.Visuals ??= new VisualsDef();
             change(unit.Visuals);
-            var v = unit.Visuals;
-            if (v.Tint == null && v.Scale == null && v.Icon == null && v.Mesh == null && (v.Extra == null || v.Extra.Count == 0)) unit.Visuals = null;
+            if (IsEmpty(unit.Visuals)) unit.Visuals = null;
         }
+
+        /// <summary>Visuals with nothing set (they can be dropped from the unit).</summary>
+        internal static bool IsEmpty(VisualsDef v) =>
+            v.Tint == null && v.Scale == null && v.Icon == null && v.Mesh == null && v.MeshScale == null && v.MeshRotY == null && v.MeshRotX == null &&
+            v.MeshRotZ == null && v.MeshOffset == null && v.MeshLook == null && v.Motion == null && v.Texture == null &&
+            (v.Sounds == null || (v.Sounds.Attack ?? v.Sounds.Hurt ?? v.Sounds.Death) == null) && (v.Extra == null || v.Extra.Count == 0);
 
         // ---- Behaviours --------------------------------------------------------------------------------------------
 
