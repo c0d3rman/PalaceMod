@@ -521,15 +521,16 @@ semantics. Flat field is M on top of W4's ground layer.
   - Graphs ship pre-baked. The game never rescans, apart from `NavmeshCut`s on slots and units.
   - The mod already rescans at runtime: `PathCheck.Rescan`, 120-220 ms warm on Nordfels, 0.4-1 s the first time.
   - Local updates (`GraphUpdateObject` with `updatePhysics`) rebuild only the touched tiles of a tiled recast graph.
-    The cost is unmeasured.
+    The shipped graphs are one tile each, so a local update costs a full scan (see "T0 results").
 - **Units and enemies take their height from the navmesh**, snapping to it every frame
   (`PathfindMovementEnemy.cs:321-343`, `PathfindMovementPlayerunit.cs:399-401`). Raised ground carries them as soon as
   the graphs are rescanned.
   - **The king** is a `CharacterController` with gravity, so he needs a real collider. Below y = -10 he's teleported
     back to the start (`PlayerMovement.cs:32, 261-266`).
   - Coins and lobbed projectiles raycast a `groundLayer`.
-- **Fliers** use `Enemy Units Air`, spawning 5 m up (`Spawn.cs:276`). Whether that graph is recast or mesh-sourced
-  (the `flyerSurface`) isn't recorded. Falkenpass generated an 8 m grid surface 5 m above its terrain.
+- **Fliers** use `Enemy Units Air`, spawning 5 m up (`Spawn.cs:276`). It is a recast graph over the "Flyer Surface"
+  layer (9): the `flyerSurface` meshes, which are inactive in play. Falkenpass generated an 8 m grid surface 5 m above
+  its terrain.
 - **Water** has no gameplay script. It is a scrolling material, and is blocked by having no walkable ground plus
   invisible walls.
 - **Map bounds** are `PathMesher` meshes and colliders under `NavmeshBakeHelper.invisibleWalls`.
@@ -540,6 +541,37 @@ semantics. Flat field is M on top of W4's ground layer.
   and the daylight. Generated ground that reuses them looks native and follows the day cycle for free.
 - Falkenpass did all of this for one hand-coded map: a floor collider, cliffs, its own Air surface and the four
   native graph names in order. It proves the approach works, not the cost of an editor.
+
+### T0 results (measured in a pool instance)
+
+| | Nordfels | Uferwind |
+|---|---|---|
+| Graphs | 4 × `RecastGraph`, one tile each (`useTiles` off), cell 0.2 m | same |
+| Ground graphs | layers Ground (6) + Obstacle (7), meshes only, maxSlope 30°, climb 0.5 m, radius 0.5 (L: 4) | maxSlope 40°, radius 0.5 (L: 2) |
+| Air graph | layer Flyer Surface (9), radius 0.5 | layers Obstacle + Flyer Surface, maxSlope 90° |
+| Bounds | centre (0, 0, -31.3), size 206 × 15 × 134 | centre (-15.5, 27.9, -78.2), size 236 × 39 × 320 |
+| Full scan (warm) | 100-140 ms (400-800 ms with the ground layer and pruning) | 0.7-1.4 s |
+| Local 20 m `GraphUpdateObject` | 106-127 ms: the same as a full scan (one tile) | 1 s |
+| King | `CharacterController` on layer Player (11), slope 45°, step 0.3 m; collides with Ground, Obstacle, Flyer Surface (9) and Default | same |
+
+**Two bugs in every runtime rescan (plain `AstarPath.Scan()`, which `PathCheck.Rescan` was), fixed by
+`Level/GroundGraphs.Scan`:**
+
+1. **The Air graph comes back empty.** `NavmeshBakeHelper.flyerSurface` is inactive in play, so the scanner finds no
+   flier surface and fliers have no graph. `GroundGraphs.Scan` activates it (invisibly) for the duration of the scan.
+   It can't stay active: its box colliders are on a layer the king collides with.
+2. **The walkable area grows past the map.** The bake kept only the areas the map uses; a rescan also turns the tops
+   of cliffs, rocks and walls into walkable islands (Nordfels: 541 nodes instead of 132; enemies snap onto them and
+   the minimap draws them). The invisible walls hide most of their renderers on Start (`PathMesher._hideOnStart`; no
+   map uses `HideMeshRendOnPlay`). `GroundGraphs.Scan` shows the walls' renderers to the scanner, then **prunes
+   islands**: on each ground graph, it makes unwalkable every area that holds none of the baked graph's nodes (taken
+   before the first rescan in the scene), the castle, or (on a flat field) a ground spawn line. Nordfels after a
+   rescan: 133 walkable nodes in one area, as baked.
+
+Known gap: on Uferwind the bake has two small southern areas (89 of 444 nodes) that no runtime rescan reproduces,
+with or without the fixes; whatever geometry the bake saw there isn't in the scene at runtime. Custom Uferwind levels
+with edits have always lost them. Whether any of its spawn lines lead there is unverified (they're inactive until a
+night starts).
 
 ### Feasibility
 
@@ -559,7 +591,7 @@ semantics. Flat field is M on top of W4's ground layer.
 
 | Stage | Cost | Delivers |
 |---|---|---|
-| T0 spike | S | Run `builder-level spike graphs` on Nordfels and Uferwind: the Ground layer number, cell size, tiles and bounds, and the Air graph's type and source. Time a `GraphUpdateObject` over a 20 m box. Check that the invisible walls survive a rescan (they might use `HideMeshRendOnPlay`, which disables renderers the scanner then skips). Write the numbers into this doc. |
+| T0 spike | S | Done: "T0 results" above (`builder-terrain spike graphs\|helper\|king\|ground\|update\|scan`). |
 | T1 ground layer + Flat field | M | A generated heightfield ground. All of these are needed for the Flat field: chunks, readable meshes, a `MeshCollider` on the ground layer, the host's materials, boundary walls (a mesh and collider around the field, on the invisible-wall layer), an Air surface (if T0 shows it's mesh-sourced: a grid 5 m above the max height, as Falkenpass did), and the minimap rebuild (`MinimapRenderer` private `GenerateGroundMesh` + `RenderBackground` after the rescan). |
 | T2 brushes | L | Raise/lower, flatten, smooth, set height, material paint; live re-mesh in the editor. |
 | T3 walkable paint + pieces | S-M | Blocked/walkable paint on any base, and cliff/ramp/rock pieces in the palette. |

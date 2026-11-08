@@ -27,6 +27,8 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("spawnLines")] public SpawnLineOverlay SpawnLines { get; set; }
         /// <summary>Decoration placed on the map (copies of the host's own scenery meshes).</summary>
         [JsonProperty("props")] public List<PropDef> Props { get; set; }
+        /// <summary>Generated or edited ground (Model/TerrainDef.cs); null keeps the host's.</summary>
+        [JsonProperty("terrain")] public TerrainDef Terrain { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
