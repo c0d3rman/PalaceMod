@@ -48,13 +48,15 @@ namespace PalaceMod.Builder.Studio.Enemies
             public Hp Hp;
             public bool Enemy;
             public float LastHp;
-            public bool Down;
+            public bool Down, Started;
         }
 
         private static readonly List<Tracked> tracked = [];
         private static HashSet<Hp> before = [];
         public static bool Running { get; private set; }
         public static bool HasResult { get; private set; }
+        /// <summary>Bumped when a fight starts, ends or is cleared (the readout redraws).</summary>
+        public static int Version { get; private set; }
         public static float Elapsed { get; private set; }
         public static float DamageToDefenders, DamageToEnemies;
         public static float? FirstKill, LastKill;
@@ -131,6 +133,7 @@ namespace PalaceMod.Builder.Studio.Enemies
                 Track(go, enemy: true);
             }
             Running = true;
+            Version++;
             EnemyStage.FrameArea(center + away * (Distance * 0.5f), Distance * 0.9f);
             GameplayImpact.Mark("Builder: enemy studio arena");
             return $"fight: {EnemiesTotal}x {unitRef} vs {DefendersTotal} defenders";
@@ -182,6 +185,14 @@ namespace PalaceMod.Builder.Studio.Enemies
             foreach (var t in tracked)
             {
                 if (t.Down) continue;
+                // Hit points are 0 until the unit's Start has run: count it from the first frame it's alive.
+                if (!t.Started)
+                {
+                    if (t.Hp == null) { t.Down = true; continue; }
+                    if (t.Hp.HpValue <= 0f) continue;
+                    t.Started = true;
+                    t.LastHp = t.Hp.HpValue;
+                }
                 float now = t.Hp == null ? 0f : Mathf.Max(0f, t.Hp.HpValue);
                 float lost = t.LastHp - now;
                 if (lost > 0f) { if (t.Enemy) DamageToEnemies += lost; else DamageToDefenders += lost; }
@@ -200,6 +211,7 @@ namespace PalaceMod.Builder.Studio.Enemies
         {
             Running = false;
             HasResult = true;
+            Version++;
             Result = EnemiesAlive == 0 && DefendersStanding == 0 ? "Both sides down"
                 : EnemiesAlive == 0 ? $"Defenders won ({DefendersStanding}/{DefendersTotal} standing)"
                 : DefendersStanding == 0 ? $"Enemies won ({EnemiesAlive}/{EnemiesTotal} left)"
@@ -214,6 +226,7 @@ namespace PalaceMod.Builder.Studio.Enemies
             foreach (var marker in Object.FindObjectsOfType<BuilderArenaUnit>(true))
                 if (marker != null) Object.Destroy(marker.gameObject);
             tracked.Clear();
+            Version++;
             HasResult = false;
             Result = "";
         }

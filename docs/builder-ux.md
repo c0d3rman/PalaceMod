@@ -882,7 +882,7 @@ settings-shaped page. Code: `Features/Builder/Studio/Enemies/`. An enemy is stil
    that is never saved); Back leaves the Studio.
 2. **The model is live, in the world.** A stage at a clear ground point (the Level Studio's camera pivot, or the arena's
    castle square): a turntable disc with the enemy standing on it at its real size, lit by the level, seen by the
-   Studio's own orbit camera (drawn over the game camera, which is switched off meanwhile). Every edit rebuilds the
+   Studio's orbit camera (the game camera, turned to perspective while the Enemy Studio is up). Every edit rebuilds the
    model from the same template the game spawns (`IUnitFactory.Resolve`), so what the stage shows is what a wave
    spawns, scripts stripped.
 3. **Any asset as the body** (`visuals.mesh`), each with offset, rotation, scale and a material choice:
@@ -940,16 +940,18 @@ settings-shaped page. Code: `Features/Builder/Studio/Enemies/`. An enemy is stil
 
 ### Stage and camera
 
-- Orbit: left-drag turns (yaw and pitch, 5-70°), wheel zooms (1.5-30 m), right/middle-drag pans the pivot, F frames
-  the model, Home resets. A click on empty ground with the Fight panel open moves the arena point.
-- The stage camera copies the main camera's clear flags, culling mask and post-processing settings, so the level looks
-  the same. The game camera and the Level Studio's labels are switched off while the Enemy Studio is up and restored
-  on Back.
+- Orbit: left-drag turns (yaw and pitch, 3-75°), wheel zooms (1.5-60 m), right/middle-drag pans the focus, F frames
+  the model, Home resets.
+- As built, the game's own camera is used: the `CameraRig` is paused and the rig itself is moved so its main camera sits
+  on the orbit, and every camera of the rig switches from orthographic to a 30° perspective (stacked cameras stay
+  aligned, post-processing and outlines unchanged). Back restores the projection, the rig's pose and the rig; the Level
+  Studio's markers, labels and overlays are hidden meanwhile (`StudioShell.HideForSuspend`).
 - The model is an instance of the template with every `MonoBehaviour` removed except the visual ones (`Animator`
   stays): the base's idle animation plays; a `BuilderVisualMotion` component (also on spawned enemies) adds the
   procedural walk to a body without a rig.
-- **Portrait:** the stage camera renders 256×256 into a RenderTexture with a transparent clear, framed on the model's
-  bounds at 20° pitch from the front-left; written as PNG via R2-C1's API on Save.
+- **Portrait:** an offscreen camera renders the model alone (moved far below the map for the shot) at 256×256 on a
+  transparent background, framed on its bounds at 20° pitch from the front-left; Save writes it with
+  `DesignLibrary.SavePreview` (a library draft) or to `PalaceBuilder/cache/portraits/<pack>/<unit>.png` (any other).
 
 ### Any-asset visuals (data, additive)
 
@@ -981,25 +983,33 @@ settings-shaped page. Code: `Features/Builder/Studio/Enemies/`. An enemy is stil
 
 ### Arena fight
 
-- Fight (F5, or the button) spawns `count` (1-50) copies around the stage at 18 m from the defenders, through the
-  game's `Spawn` like the sandbox (elite and the arena difficulty, default 1), and the chosen defenders: catalog player
-  units (`P Knight`, `P Archer`, `P Melee`, …) in a ring at the stage. Every arena unit gets a `BuilderArenaUnit`
-  marker. Attack scripts of marked units run as at night; unmarked ones don't.
-- Defenders hold their spot (no king to follow); enemies target what their priorities find nearest, which is the
-  defenders. The fight ends when one side is down or after 90 s; the arena is cleared on Reset, on Back, on any edit
-  that rebuilds the template, and when the Enemy Studio closes. Coins aren't dropped (`coinCount` 0 on arena copies).
-- Measured: time to the first and last kill, damage dealt each way (from `Hp.OnReceiveDamageDetailed` and the HP lost),
-  defenders knocked out.
+- Fight (F5, or the button) spawns `count` (1-50) copies 16 m from the stage, made like the game's `Spawn` makes them
+  (the arena difficulty on hit points and damage, the elite material; no coins), and the chosen defenders (catalog
+  player units, default 3 swordsmen and 3 archers) in an arc on the stage. Every arena unit gets a `BuilderArenaUnit`
+  marker; enemies an arena enemy spawns on death are marked too. Attack scripts of marked units run as at night;
+  unmarked ones don't.
+- Defenders hold their spot (their home is where they stand); enemies target what their priorities find nearest, which
+  is the defenders. The fight ends when one side is down or after 90 s; the units stay until the next fight, Stop (the
+  Fight button again), an edit that rebuilds the template, or Back.
+- Measured by polling hit points (from each unit's first frame alive): damage each way, the first and last kill, who is
+  left. Checked in a pool instance: 4 Iron Brutes (120 HP) beat 3 swordsmen and 3 archers in 33.8 s; 4 Goblin Runners
+  (8 HP) lose in 3.1 s without landing a hit.
 
 ### Level Studio hooks
 
-- `StudioServices.Enemies` (`IStudioEnemyEditor.Open(draft, unitId, onReturn)`, R2-C1's interface): the Level Studio's
-  spawn-group "Edit enemy…" / "New enemy…" and the Studio menu's "Enemies…" call it; the Enemy Studio implements it.
-  `onReturn(unitId)` lets the caller pick the new enemy.
-- Keys: context `BuilderEnemyStudio`, claimed exclusive while it's up: Esc (cancel, else Back), Ctrl/Cmd+Z/Y, Ctrl/Cmd+S,
-  F5 Fight, Space turntable, F frame, Home reset view.
-- Dev: `builder-enemy open [unit] | new <base> | state | set <json path> <value> | look <ref> | fight [n] [defenders] |
-  reset | readout | portrait | orbit <yaw> <pitch> <dist> | back`.
+- `StudioServices.Enemies` (`IStudioEnemyEditor.Open(draft, unitId, returnToLevelStudio, onReturn, out error)`, R2-C1's
+  interface) is `EnemyStudioService`. Callers: the wave page's spawn-group rows, the library's Enemies tiles, and the
+  Level Studio's right-click on empty ground ("Enemy Studio…"). With a Level Studio up it opens in place whatever the
+  flag says (the scene is there); menus over the Studio (the wave page) are closed first.
+- Checked: Level Studio (lasso tool, camera at (10, -20) zoom 1.2 yaw 30) → Enemy Studio → an edit → Back gives the
+  same camera, tool and selection, the dock back, and the edit as the undo step "Set maxHp" of the level's draft.
+- Keys: context `BuilderEnemyStudio`, claimed exclusive while its dock is the active menu: Esc Back, Cmd/Ctrl+Z, redo,
+  Cmd/Ctrl+S, F5 Fight, Space turntable, W walk preview, F frame, Home reset view.
+- Dev: `builder-enemy level [unit] | library [unit] | new [base] | state | dock | press <tile> | select <unit> | tab
+  <palette> [panel] [look source] | set <field> <value> | look <ref|base> | fit <scale|-> | offset x y z | rot x y z |
+  material own|unit | motion auto|bob|none | walk on|off | fight [n] | stop | readout | portrait | orbit <yaw> <pitch>
+  <dist> | spin <deg> | undo | redo | save | back`.
+- Not built: a building (a slot's built look) as the body; towers and walls are in the scenery library already.
 
 ## Data-model changes (summary)
 

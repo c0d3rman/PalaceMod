@@ -16,7 +16,7 @@ namespace PalaceMod.Builder.Studio.Enemies
 {
     internal static class EnemyDock
     {
-        private const float G = ModDock.Gutter, TopH = 64f, PaletteW = 300f, RightW = 360f, ArenaW = 440f, BottomH = 250f, TabH = 40f;
+        private const float G = ModDock.Gutter, TopH = 64f, PaletteW = 300f, RightW = 460f, ArenaW = 400f, BottomH = 250f, TabH = 40f;
 
         private static ModDock dock;
         private static ModDockPanel top, palette, right, arena, readout;
@@ -24,6 +24,7 @@ namespace PalaceMod.Builder.Studio.Enemies
         private static ModTile undoTile, redoTile, turnTile, walkTile, problemsTile, saveTile, fightTile;
         private static bool dirtyTop, dirtyPalette, dirtyRight, dirtyArena, dirtyReadout;
         private static float readoutAt;
+        private static int arenaVersion;
 
         public static string PaletteTab = "enemies", PanelTab = "stats", LookSource = "scenery", LookFilter = "";
         public static bool PointerOverPanel => dock?.Over(StudioInput.Mouse) == true;
@@ -90,7 +91,7 @@ namespace PalaceMod.Builder.Studio.Enemies
             if (!dock.Show()) return;
             if (fresh || title == null) BuildAll();
             if (ModTextInput.Active) return;
-            if (EnemyArena.Running && Time.unscaledTime >= readoutAt) dirtyReadout = true;
+            if ((EnemyArena.Running && Time.unscaledTime >= readoutAt) || EnemyArena.Version != arenaVersion) { arenaVersion = EnemyArena.Version; dirtyReadout = dirtyTop = true; }
             if (dirtyTop) { dirtyTop = false; UpdateTop(); }
             if (dirtyPalette) { dirtyPalette = false; BuildPalette(); }
             if (dirtyRight) { dirtyRight = false; BuildRight(); }
@@ -325,7 +326,7 @@ namespace PalaceMod.Builder.Studio.Enemies
             page.TextInput("Filter", () => LookFilter, v => { LookFilter = v ?? ""; dirtyPalette = true; });
             string f = LookFilter?.Trim() ?? "";
             bool Match(params string[] s) => f.Length == 0 || s.Any(x => x != null && x.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0);
-            var items = new List<LookItem> { new() { Ref = null, Name = "Base model", Body = "The base unit's own model." } };
+            var items = new List<LookItem> { new() { Ref = null, Name = "Base", Body = "The base unit's own model." } };
             switch (LookSource)
             {
                 case "units":
@@ -376,7 +377,7 @@ namespace PalaceMod.Builder.Studio.Enemies
                 Tabs(page, RightTabs, () => PanelTab, id => { PanelTab = id; dirtyRight = true; }, 3);
                 var unitPage = EnemyStudio.Page;
                 unitPage.Index = EnemyStudio.UnitIndex;
-                page.FieldIndent = 150f;
+                page.FieldIndent = 235f;
                 try
                 {
                     switch (PanelTab)
@@ -441,7 +442,7 @@ namespace PalaceMod.Builder.Studio.Enemies
                     }, coalesce: "meshRot" + k), -360f, 360f, 5f, x => x.ToString("0.#") + "°",
                     () => k switch { 0 => "Tilts it forward or back.", 1 => "Turns it to face forward (the way it walks).", _ => "Tilts it sideways." });
             }
-            var looks = new[] { (ModelRef.LookOwn, "Its own colours"), (ModelRef.LookUnit, "Enemy material") };
+            var looks = new[] { (ModelRef.LookOwn, "Own"), (ModelRef.LookUnit, "Enemy") };
             page.Choice("Materials", looks.Select(l => l.Item2).ToList(), () => Array.FindIndex(looks, l => l.Item1 == ModelRef.Look(EnemyStudio.Unit?.Visuals)),
                 i => EnemyStudio.EditVisuals("Set model materials", vis => vis.MeshLook = looks[i].Item1, coalesce: "meshLook"),
                 tooltip: () => "Its own colours: as the model is drawn on the map. Enemy material: the enemy colour, which takes the tint and the elite look.");

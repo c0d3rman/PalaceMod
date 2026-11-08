@@ -2247,8 +2247,8 @@ def enemy_card(ref, u, difficulty=1.0, elite=False):
         if p.get("side") != "player":
             continue
         pw = next((x for x in ref.catalog.get("weapons", []) if x["id"] == p.get("weapon")), None)
-        if not pw:
-            continue
+        if not pw or not pw.get("damage"):
+            continue  # its damage isn't in the catalog (projectile or spell effects)
         ttk = time_to_kill(hp, hit_damage(pw.get("damage"), tags), float(p.get("attackCooldown") or 0))
         card["killedBy"][p["id"]] = {"hits": ttk[0], "seconds": ttk[1]} if ttk else "never"
         per = hit_damage(mods, set(p.get("tags", [])), dmg_mult)
