@@ -661,11 +661,19 @@ night starts).
 **Runtime (play and the Studio's edit load):** `LevelOverlay` calls `GroundLayer.Apply(scene, pack, level, issues)`
 after the empty base's scenery hide, before Start.
 
-- Flat base: the host's renderers drawn only with ground, rock, river, road and shadow-shape materials are hidden
-  (and MeshFusion is kept off them; the ocean stays, so the field reads as an island), with the Ground-layer colliders,
-  the invisible walls and the flier surface. The generated ground replaces them. Steep faces (> 32°: the graphs' max
-  slope is 30°) are drawn with the rock material, so cliffs read as cliffs; grass next to water is drawn as sand.
-  Slots and the king are put on the new ground.
+- Flat base: the host's renderers drawn only with ground, rock, river, waterfall, road and shadow-shape materials are
+  hidden (and MeshFusion is kept off them), with the Ground-layer colliders, the invisible walls and the flier surface.
+  Ocean-material planes go too unless they reach past both opposite edges of the field (a sea, e.g. Frostsee's,
+  stays so the field reads as an island): Moorweg draws its ponds with the ocean material. The generated ground
+  replaces them. Steep faces (> 32°: the graphs' max slope is 30°) are drawn with the rock material, so cliffs read
+  as cliffs; grass next to water is drawn as sand. Slots and the king are put on the new ground.
+- The field draws with copies of the host's seven ground materials (`GroundLayer.Recolour`, re-run on
+  `ColorAndLightManager.OnColorChange`): the scheme's colours are copied over, then `GroundPalette.Resolve` moves
+  paints apart where the scheme gives several one colour (every scheme has ground = high = low; Moorweg, Nordfels and
+  Frostsee have road = earth). Ground keeps the host's grass colour; the others step lighter or darker in the same
+  hue (earth may lean towards the sand) until they are a set distance from each other, the road further from the
+  grass. The field's base colour is the host's real ground colour: Moorweg's is dark blue, Wildbach's pink, Totend's
+  near-black.
 - Every base: blocked and water cells become invisible readable columns on the Obstacle layer that reach above the
   graphs' bounds (no walkable top) with a `MeshCollider` (the king). They're named like the props' blockers, so the
   path check sees a spawn walled in by them.

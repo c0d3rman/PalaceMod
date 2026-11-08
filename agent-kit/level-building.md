@@ -327,8 +327,16 @@ ground too.
 - Example (tested): `{"op": "terrain", "mode": "set", "height": 6, "circle": {"center": [-4, 1], "radius": 22},
   "falloff": 1}` then `{"op": "ramp", "from": [-4, -18], "to": [-4, -40], "width": 14, "fromHeight": 6, "toHeight": 0,
   "falloff": 1}` on a flat Nordfels: a castle mesa with one southern ramp.
-- `paint`: looks only (road, sand, earth, grass shades, rock). `block`: invisible no-walk cells (works on any base, also
-  on vanilla ground). `water`: unwalkable cells drawn as water, the ground dug under it.
+- The field is drawn in the host's own ground palette, which is not always green: teal on Nordfels, dark blue on
+  Moorweg, pink on Wildbach, near-black on Totend, orange on Freifort, white on Frostsee (the vanilla maps look the
+  same). Look at the host first if colour matters.
+- `paint`: looks only. All seven are distinct on every host: `ground` the host's grass (the unpainted field), `high` a
+  lighter and `low` a darker grass shade, `earth` a bank colour, `sand` the host's sand, `road` a path that stands out
+  from the grass, `rock` the host's pale cliff colour. `block`: invisible no-walk cells (works on any base, also on
+  vanilla ground). `water`: unwalkable cells drawn as water, the ground dug under it to `level` - 1 m; `on: false`
+  removes the water but leaves the ground dug (raise it back with `terrain`).
+- On a flat base the host's own rivers, lakes and ponds are hidden (only the field's `water` cells show); a sea all
+  round the map (Frostsee) stays round the field. On `cleared` the host's water stays.
 - Each level stores terrain compressed in the pack (a few KB); big terrain levels share as `.tfpack` files rather
   than chat codes.
 - Check routes after every terrain change (`check`, then `paths` in game): a ramp too steep or a missed gap in a
