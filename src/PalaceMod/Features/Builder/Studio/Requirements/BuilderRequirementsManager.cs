@@ -6,6 +6,8 @@ using HarmonyLib;
 using PalaceMod.Builder;
 using PalaceMod.Builder.Level;
 using PalaceMod.Builder.Model;
+using PalaceMod.Builder.Studio;
+using PalaceMod.Builder.Studio.Requirements;
 using UnityEngine.SceneManagement;
 
 /*
@@ -20,7 +22,28 @@ namespace PalaceMod
         public override void Awake(Plugin plugin)
         {
             base.Awake(plugin);
+            RegisterStudio();
             RegisterDevCommand();
+        }
+
+        private static LinkTool link;
+
+        private static void RegisterStudio()
+        {
+            RequirementState.Init();
+            var key = Keybinds.Register("Builder", "studio-link", "Studio: link", new BepInEx.Configuration.KeyboardShortcut(UnityEngine.KeyCode.K),
+                "In the Studio: the Link tool (what needs what).", KeybindFlags.AllowInMenus, StudioContexts.Edit);
+            BuiltPreview.HoldKey = Keybinds.Register("Builder", "studio-built-preview", "Studio: built preview (hold)", new BepInEx.Configuration.KeyboardShortcut(UnityEngine.KeyCode.LeftAlt),
+                "In the Studio: while held, slots show their buildings.", KeybindFlags.AllowInMenus, StudioContexts.Edit);
+            Studio.AddTool(link = new LinkTool(key));
+            Studio.AddOverlay(RequirementArrows.Instance);
+            Studio.AddOverlay(BuiltPreview.Instance);
+            Studio.AddInspectorSection("requirements", 200, RequirementInspector.AppliesTo, RequirementInspector.Build);
+            Studio.AddLabelProvider(SlotKinds.Provide);
+            Studio.AddContextItems(RequirementHooks.ContextItems);
+            Studio.AddDeleteGuard(RequirementHooks.GuardDelete);
+            Studio.AddViewToggle("built", "Built preview", () => BuiltPreview.On, on => BuiltPreview.On = on);
+            Studio.AddViewToggle("autolink", "Auto-link new slots", () => RequirementHooks.AutoLink, on => RequirementHooks.AutoLink = on);
         }
 
         private static void RegisterDevCommand()
@@ -48,6 +71,61 @@ namespace PalaceMod
                         if (!BuilderServices.Sessions.Launch(new SessionRequest { Pack = entry.Pack, LevelId = level }, out string error)) throw new InvalidOperationException(error);
                         return $"launching {entry.Id}/{level}";
                     }
+                    case "base":
+                    {
+                        // An unsaved one-level pack on a map with an empty base (vanilla waves), played at once.
+                        string kind = args.ElementAtOrDefault(1) ?? throw new ArgumentException("usage: builder-req base cleared|flat <map>");
+                        string scene = string.Join(" ", args.Skip(2));
+                        var pack = new DesignPack { Id = "dev.w3base", Name = "Base test", Author = "dev" };
+                        pack.Levels.Add(new LevelDef { Id = "base", Name = $"{kind} {scene}", Host = scene, Base = kind });
+                        if (!BuilderServices.Sessions.Launch(new SessionRequest { Pack = pack, LevelId = "base" }, out string error)) throw new InvalidOperationException(error);
+                        return $"launching {kind} {scene}";
+                    }
+                    case "link":
+                    {
+                        // Studio: link <dep key>|<dep key>... > <prereq key> [level]
+                        int gt = rest.LastIndexOf('>');
+                        if (gt < 0) throw new ArgumentException("usage: builder-req link <key>|<key> > <key> [level]");
+                        var deps = rest.Substring(0, gt).Split('|').Select(s => s.Trim()).Where(s => s.Length > 0).ToList();
+                        var right = rest.Substring(gt + 1).Trim();
+                        int lvl = 0;
+                        int sp = right.LastIndexOf(' ');
+                        if (sp > 0 && int.TryParse(right.Substring(sp + 1), out int parsed) && !right.EndsWith(")")) { lvl = parsed; right = right.Substring(0, sp).Trim(); }
+                        string target = RequirementState.Ref(right) ?? throw new ArgumentException($"not a slot key: {right}");
+                        bool castle = target == RequirementState.Castle;
+                        int n = RequirementEdits.Apply(deps, new SlotRequirement { Slot = castle ? SlotRefs.Castle : target, Level = lvl }, null);
+                        return $"{n} linked; {string.Join("; ", deps.Select(d => $"{d}: {RequirementState.DescribeFor(d)}"))}";
+                    }
+                    case "click":
+                    {
+                        // Studio: the Link tool's click on a key (ctrl/shift/alt flags first): click [ctrl] [shift] [alt] <key>
+                        bool ctrl = false, shift = false, alt = false;
+                        var words = args.Skip(1).ToList();
+                        while (words.Count > 0 && words[0] is "ctrl" or "shift" or "alt")
+                        {
+                            if (words[0] == "ctrl") ctrl = true; else if (words[0] == "shift") shift = true; else alt = true;
+                            words.RemoveAt(0);
+                        }
+                        Studio.SetTool(LinkTool.ToolId);
+                        link.Click(string.Join(" ", words), ctrl, shift, alt, new UnityEngine.Vector2(UnityEngine.Screen.width / 2f, UnityEngine.Screen.height / 2f));
+                        return $"pending: {string.Join(", ", link.Pending)}; tool {Studio.ToolId}";
+                    }
+                    case "chain":
+                    {
+                        // Studio: chain <branching|nearest|order> [apply] (over the selection)
+                        var mode = args.ElementAtOrDefault(1) switch { "nearest" => ChainMode.NearestNeighbour, "order" => ChainMode.SelectionOrder, _ => ChainMode.Branching };
+                        var plan = ChainPopup.Plan(Studio.Selection, mode, 1, 0);
+                        if (args.Contains("apply")) ChainPopup.Apply();
+                        else if (args.Contains("popup")) ChainPopup.Open(Studio.Selection);
+                        return "\n" + string.Join("\n", plan.Select(p => $"{RequirementState.Name(p.slot)} needs {RequirementState.Describe(p.requires)}"));
+                    }
+                    case "label":
+                    {
+                        var l = Studio.LabelFor(rest);
+                        return $"color={l.Color} icon={l.Icon?.name} costs={l.Costs} badge={l.Badge}\n{l.Card}";
+                    }
+                    case "needs":
+                        return string.Join("\n", Studio.Items.Where(i => RequirementState.Ref(i.Key) != null && !i.Removed).Select(i => $"{i.Key}: {RequirementState.DescribeFor(i.Key)}"));
                     case "slots":
                     {
                         var sb = new StringBuilder();
