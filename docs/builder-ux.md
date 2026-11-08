@@ -745,7 +745,7 @@ A separate effort is designing a cross-map asset library. The Studio leaves it o
 
 ### The cross-map scenery library (W5, `Features/Builder/Library/`)
 
-Every scenery mesh of the ten main maps (45 today: trees, rocks, ruins and walls, towers, graveyard pieces) can be
+Every scenery mesh of the ten main maps (45 today: trees, rocks, walls, towers, graveyard pieces) can be
 placed on any map.
 
 - **No game assets are shipped or copied.** The repo holds only a metadata catalog,
@@ -773,17 +773,20 @@ placed on any map.
 - **Solid props block with their real shape.** Library meshes are readable, so `LayoutScene.SetSolid` gives them a
   blocker child that uses the mesh itself (and a `MeshCollider`) instead of the bounding box; host meshes, which
   aren't readable, keep the box. A curved ruin wall blocks only along the wall.
-- **Library tab** (`LibraryBrowser`, registered as `StudioServices.AssetBrowser`): chips "This map" (the Studio's
-  `HostSceneryBrowser`, passed through: this map's scenery and the pack's `asset:` meshes), "All maps", then one per
-  kind (Trees, Rocks, Ruins and walls, Buildings, Graveyard). Tiles are ordered by home map, then kind; the badge is
-  the home map's first three letters, and the tooltip lists the kind and the maps that use it. The text filter matches
-  name, kind and map names ("Moorweg" lists Moorweg's). A mesh the host also has is listed once. New props start at
-  most about 6 m across, like host scenery.
-- **Tile pictures** (`LibraryThumbs`): rendered on demand by an offscreen camera (three-quarter view, transparent
-  background, the level's own materials and sun), four per frame, cached as PNGs in
+- **Library tab** (`LibraryBrowser`, registered as `StudioServices.AssetBrowser` in `SceneryLibraryManager.Awake`,
+  wrapping a `HostSceneryBrowser`). The palette's chips are narrow (three to a row), so each is one short word: the
+  palette's own "All" (every map: the host browser's items, then every library mesh), "Here" (the host browser's items
+  plus the library meshes this map uses, which the live scene mostly no longer shows as separate objects because the
+  game merges scenery into combined meshes at load), then one per kind: Trees, Rocks, Walls, Towers, Graves, Other.
+  Library tiles are ordered by home map, then kind; the badge is the home map's first three letters, and the tooltip
+  lists the kind and the maps that use it with counts. The text filter matches name, kind and map names ("Moorweg"
+  lists Moorweg's). A mesh the host also has is listed once. New props start at most about 6 m across, like host
+  scenery.
+- **Tile pictures** (`LibraryThumbs`): rendered on demand by an offscreen camera (from above on the level sun's lit
+  side, transparent background, the level's own materials), four per frame, cached as PNGs in
   `BepInEx/PalaceBuilder/cache/thumbs/<map>/<mesh>.png` (per host map, since colours differ) and in memory. The
   browser raises `Changed` once the queue drains.
-- Dev: `dev.py cmd "builder-library status | query [here|all|kind:<Kind>|-] [text] | place <mesh> [x z] | gallery
+- Dev: `dev.py cmd "builder-library status | query [here|kind:<Kind>|-] [text] | place <mesh> [x z] | gallery
   [spacing] | walkable <x> <z> | clear | thumb <mesh> | thumbs [reset]"`. Unit tests (`SceneryLibraryTests`) cover
   the reader on a synthetic file, ref parsing, the catalog, and, where the game is installed, read every catalog mesh.
 

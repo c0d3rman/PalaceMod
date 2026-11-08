@@ -31,20 +31,22 @@ PRIMITIVES = {"Plane", "Cube", "Quad", "Cylinder", "Sphere", "Capsule"}
 EXCLUDE = {"Humanoid Unit Base Hand L", "Humanoid Unit Base Hand R", "sphere_0", "Totend Stairs Collider",
            "Elder Axe", "Mole Drill"}
 
-# Palette categories. Curated by hand from the mesh list; anything new lands in "Other" until it's added here.
+# Palette categories (chip labels in a narrow palette, so one short word each). Curated by hand from the mesh list;
+# anything new lands in "Other" until it's added here.
 CATEGORIES = {
     "Trees": ["Agave Tree", "Blob Tree", "Cone Tree", "Cone Tree High Waist", "Cone Tree Slim High",
               "Dead Classic Conetree", "Freifort Tree 02", "Jungle Tree Trunk", "Mediteranean Tree", "Totend Tree",
               "Twisted Tree", "sphere_shape_24_16"],
     "Rocks": ["Rock A", "Rock A Alternate", "Rock B", "Rock B Alternate", "Rectangular Rock", "Square Rock",
               "SpikyRock", "SpikyRock2", "SpikyRock3", "Icicle Sharp", "Stepping Stone"],
-    "Ruins and walls": ["Ruin Wall", "Ruin Wall .001", "Ruin Wall.001", "Ruin Wall.002", "Ruin Wall.003",
-                        "Ruin Wall.004", "Ruin Wall.005", "Ruin Wall.006", "Ruin Wall.007", "Wall Segment lvl2",
-                        "Broken Down Wall", "Totendwall", "Totend Gate Segment", "Totend Small Stair Wall",
-                        "Totend Small Wall Straight", "Totend Castle Column"],
-    "Buildings": ["Defense Tower lvl 1", "Defense Tower lvl 2", "Totend Tower", "Bridge", "Totend Insignia",
-                  "Broken Graveyard Tower", "Graveyard Tower"],
-    "Graveyard": ["GraveBot", "GraveTop", "Gravestone", "Gravewall", "Graveyard Wall Post"],
+    "Walls": ["Ruin Wall", "Ruin Wall .001", "Ruin Wall.001", "Ruin Wall.002", "Ruin Wall.003",
+              "Ruin Wall.004", "Ruin Wall.005", "Ruin Wall.006", "Ruin Wall.007", "Wall Segment lvl2",
+              "Broken Down Wall", "Totendwall", "Totend Gate Segment", "Totend Small Stair Wall",
+              "Totend Small Wall Straight", "Totend Castle Column"],
+    "Towers": ["Defense Tower lvl 1", "Defense Tower lvl 2", "Totend Tower", "Broken Graveyard Tower",
+               "Graveyard Tower"],
+    "Graves": ["GraveBot", "GraveTop", "Gravestone", "Gravewall", "Graveyard Wall Post"],
+    "Other": ["Bridge", "Totend Insignia"],
 }
 CATEGORY_OF = {name: cat for cat, names in CATEGORIES.items() for name in names}
 
