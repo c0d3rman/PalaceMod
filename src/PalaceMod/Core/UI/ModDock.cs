@@ -34,6 +34,10 @@ namespace PalaceMod
         private UIFrame frame;
         private readonly List<ModDockPanel> panels = [];
 
+        /// <summary>Set before the first Show: whether the player is frozen while the dock is the active menu (an editor),
+        /// or not (a panel over live play, which the owner activates only while the pointer is on it: ShowPassive).</summary>
+        public bool FreezePlayer = true;
+
         public ModDock(string name)
         {
             this.name = name;
@@ -74,6 +78,34 @@ namespace PalaceMod
             if (manager.ActiveFrame != null) return false; // another menu is up; the owner waits for it
             manager.ChangeActiveFrame(frame);
             return true;
+        }
+
+        /// <summary>Shows the dock without making it the active menu (over live play). Activate while the pointer is on a
+        /// panel, so its tiles and rows take the mouse; Release when it leaves, so the game gets its input back.</summary>
+        public bool ShowPassive()
+        {
+            var manager = UIFrameManager.instance;
+            if (manager == null || GameWidgets.Canvas == null) return false;
+            if (root == null) Build();
+            if (root == null) return false;
+            if (manager.ActiveFrame != null && manager.ActiveFrame != frame) { root.SetActive(false); return false; }
+            root.SetActive(true);
+            return true;
+        }
+
+        public void Activate()
+        {
+            var manager = UIFrameManager.instance;
+            if (manager == null || root == null || manager.ActiveFrame != null) return;
+            manager.ChangeActiveFrame(frame);
+        }
+
+        public void Release()
+        {
+            var manager = UIFrameManager.instance;
+            if (manager == null || manager.ActiveFrame != frame) return;
+            manager.CloseActiveFrame();
+            if (root != null) root.SetActive(true);
         }
 
         /// <summary>Takes the dock off screen (closing it if it's the active menu).</summary>
@@ -117,7 +149,7 @@ namespace PalaceMod
             rect.offsetMin = rect.offsetMax = Vector2.zero;
             frame = root.AddComponent<UIFrame>();
             frame.freezeTime = false;
-            frame.freezePlayer = true;
+            frame.freezePlayer = FreezePlayer;
             frame.canNotBeEscaped = true;
             frame.storeLastSelectedElementInFrameStack = false;
             foreach (var p in panels) p.Attach(root.transform);

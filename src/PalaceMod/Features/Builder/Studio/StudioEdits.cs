@@ -13,37 +13,7 @@ namespace PalaceMod.Builder.Studio
 {
     internal static class StudioEdits
     {
-        /// <summary>Drops empty edit entries and lists, so the JSON stays as small as the change.</summary>
-        public static void Prune(LevelDef lv)
-        {
-            if (lv.BuildSlots != null)
-            {
-                lv.BuildSlots.Edit?.RemoveAll(e => e == null || (e.Pos == null && e.RotY == null && (e.Upgrades == null || e.Upgrades.All(u => u?.Cost == null && (u?.Extra?.Count ?? 0) == 0)) && (e.Extra?.Count ?? 0) == 0));
-                foreach (var e in lv.BuildSlots.Edit ?? []) if (e.Upgrades != null && e.Upgrades.All(u => u?.Cost == null && (u?.Extra?.Count ?? 0) == 0)) e.Upgrades = null;
-                foreach (var a in lv.BuildSlots.Add ?? []) if (a?.Upgrades != null && a.Upgrades.All(u => u?.Cost == null && (u?.Extra?.Count ?? 0) == 0)) a.Upgrades = null;
-                if (lv.BuildSlots.Edit?.Count == 0) lv.BuildSlots.Edit = null;
-                if (lv.BuildSlots.Add?.Count == 0) lv.BuildSlots.Add = null;
-                if (lv.BuildSlots.Remove?.Count == 0) lv.BuildSlots.Remove = null;
-                if (lv.BuildSlots.Edit == null && lv.BuildSlots.Add == null && lv.BuildSlots.Remove == null && (lv.BuildSlots.Extra?.Count ?? 0) == 0) lv.BuildSlots = null;
-            }
-            if (lv.SpawnLines != null)
-            {
-                if (lv.SpawnLines.Edit?.Count == 0) lv.SpawnLines.Edit = null;
-                if (lv.SpawnLines.Add?.Count == 0) lv.SpawnLines.Add = null;
-                if (lv.SpawnLines.Edit == null && lv.SpawnLines.Add == null && (lv.SpawnLines.Extra?.Count ?? 0) == 0) lv.SpawnLines = null;
-            }
-            if (lv.Props?.Count == 0) lv.Props = null;
-            if (lv.Groups != null)
-            {
-                var present = new HashSet<string>(StringComparer.Ordinal);
-                foreach (var a in lv.BuildSlots?.Add ?? []) if (a?.Id != null) present.Add("add:" + a.Id);
-                foreach (var p in lv.Props ?? []) if (p?.Id != null) present.Add("prop:" + p.Id);
-                foreach (var g in lv.Groups)
-                    g?.Members?.RemoveAll(m => m == null || ((m.StartsWith("add:") || m.StartsWith("prop:")) && !present.Contains(m)));
-                lv.Groups.RemoveAll(g => g?.Id == null || (g.Members?.Count ?? 0) < 2);
-                if (lv.Groups.Count == 0) lv.Groups = null;
-            }
-        }
+        public static void Prune(LevelDef lv) => StudioMath.Prune(lv);
 
         private static BuildSlotEdit SlotEdit(LevelDef lv, string name)
         {
@@ -175,8 +145,8 @@ namespace PalaceMod.Builder.Studio
                             else if (!lv.BuildSlots.Remove.Contains(item.Id)) lv.BuildSlots.Remove.Add(item.Id);
                             break;
                         case StudioItemKind.Added:
+                            LevelRequirements.ForgetSlot(lv, StudioScene.HostSlots, SlotRefs.Added(item.Id), ForgetMode.CloseUp);
                             lv.BuildSlots?.Add?.RemoveAll(a => a?.Id == item.Id);
-                            foreach (var a in lv.BuildSlots?.Add ?? []) if (a.Activator == item.Id) a.Activator = null;
                             break;
                         case StudioItemKind.Prop:
                             lv.Props?.RemoveAll(x => x?.Id == item.Id);
@@ -208,8 +178,13 @@ namespace PalaceMod.Builder.Studio
                 lv.BuildSlots ??= new BuildSlotOverlay();
                 lv.BuildSlots.Add ??= [];
                 id = UniqueId("slot", lv);
-                lv.BuildSlots.Add.Add(new BuildSlotAdd { Id = id, Base = "scene:" + baseName, Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(yaw, 360f)) });
+                var add = new BuildSlotAdd { Id = id, Base = "scene:" + baseName, Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(yaw, 360f)) };
+                // On an empty base the slot it copies is gone, so it would never unlock: it needs the castle instead.
+                if (LevelBases.IsEmpty(lv)) add.Requires = LevelRequirements.CastleLevel(1);
+                lv.BuildSlots.Add.Add(add);
+                Studio.RunPlaceHooks(lv, "add:" + id);
             });
+            if (id != null) Studio.RaiseItemPlaced("add:" + id);
             return id == null ? null : "add:" + id;
         }
 
@@ -221,7 +196,9 @@ namespace PalaceMod.Builder.Studio
                 lv.Props ??= [];
                 id = UniqueId("prop", lv);
                 lv.Props.Add(new PropDef { Id = id, Base = baseRef, Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(yaw, 360f)), Scale = scale });
+                Studio.RunPlaceHooks(lv, "prop:" + id);
             });
+            if (id != null) Studio.RaiseItemPlaced("prop:" + id);
             return id == null ? null : "prop:" + id;
         }
 
@@ -248,6 +225,8 @@ namespace PalaceMod.Builder.Studio
             public float Yaw, Scale = 1f;
             public bool Solid = true;
             public List<UpgradeEdit> Upgrades;
+            public SlotRequirement Requires;
+            public int? UpgradeCap;
         }
 
         private static List<Clip> clipboard = [];
@@ -272,8 +251,16 @@ namespace PalaceMod.Builder.Studio
                 {
                     var n = StudioScene.NativeFor(i);
                     if (n == null || !n.CanBase) continue;
-                    var ups = i.Kind == StudioItemKind.Slot ? lv?.BuildSlots?.Edit?.FirstOrDefault(e => e?.Ref == i.Id)?.Upgrades : lv?.BuildSlots?.Add?.FirstOrDefault(a => a?.Id == i.Id)?.Upgrades;
-                    clips.Add(new Clip { Base = n.Name, Offset = i.Pos - center, Yaw = i.Yaw, Upgrades = ups?.Select(u => u == null ? null : new UpgradeEdit { Cost = u.Cost }).ToList() });
+                    var edit = i.Kind == StudioItemKind.Slot ? lv?.BuildSlots?.Edit?.FirstOrDefault(e => e?.Ref == i.Id) : null;
+                    var add = i.Kind == StudioItemKind.Added ? lv?.BuildSlots?.Add?.FirstOrDefault(a => a?.Id == i.Id) : null;
+                    var ups = edit?.Upgrades ?? add?.Upgrades;
+                    clips.Add(new Clip
+                    {
+                        Base = n.Name, Offset = i.Pos - center, Yaw = i.Yaw,
+                        Upgrades = ups?.Select(u => u == null ? null : new UpgradeEdit { Cost = u.Cost }).ToList(),
+                        Requires = (edit?.Requires ?? add?.Requires)?.Copy(),
+                        UpgradeCap = edit?.UpgradeCap ?? add?.UpgradeCap,
+                    });
                 }
             }
             return clips;
@@ -308,17 +295,20 @@ namespace PalaceMod.Builder.Studio
                         lv.Props.Add(new PropDef { Id = id, Base = c.Base, Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(c.Yaw, 360f)), Scale = c.Scale, Solid = c.Solid });
                         keys.Add("prop:" + id);
                     }
+                    Studio.RunPlaceHooks(lv, keys[keys.Count - 1]);
                     else
                     {
                         lv.BuildSlots ??= new BuildSlotOverlay();
                         lv.BuildSlots.Add ??= [];
                         string id = UniqueId("slot", lv, made);
                         made.Add(id);
-                        lv.BuildSlots.Add.Add(new BuildSlotAdd { Id = id, Base = "scene:" + c.Base, Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(c.Yaw, 360f)), Upgrades = c.Upgrades });
+                        var requires = c.Requires?.Copy() ?? (LevelBases.IsEmpty(lv) ? LevelRequirements.CastleLevel(1) : null);
+                        lv.BuildSlots.Add.Add(new BuildSlotAdd { Id = id, Base = "scene:" + c.Base, Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(c.Yaw, 360f)), Upgrades = c.Upgrades, Requires = requires, UpgradeCap = c.UpgradeCap });
                         keys.Add("add:" + id);
                     }
                 }
             });
+            foreach (var k in keys) Studio.RaiseItemPlaced(k);
             return keys;
         }
 
@@ -389,11 +379,7 @@ namespace PalaceMod.Builder.Studio
             string id = null;
             Studio.Edit($"Group {members.Count} objects", lv =>
             {
-                lv.Groups ??= [];
-                // An object is in one group at a time.
-                foreach (var g in lv.Groups) g.Members?.RemoveAll(members.Contains);
-                id = UniqueId("g", lv);
-                lv.Groups.Add(new GroupDef { Id = id, Name = $"Group {lv.Groups.Count + 1}", Members = members });
+                id = StudioMath.Group(lv, members, UniqueId("g", lv));
             });
             return id == null ? null : "group:" + id;
         }

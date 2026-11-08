@@ -46,16 +46,7 @@ namespace PalaceMod.Builder.Studio
             else StudioSelection.Select(keys, op == SelectOp.Toggle ? SelectOp.Toggle : SelectOp.Add);
         }
 
-        public static bool InPolygon(Vector2 p, IReadOnlyList<Vector2> poly)
-        {
-            bool inside = false;
-            for (int i = 0, j = poly.Count - 1; i < poly.Count; j = i++)
-            {
-                if ((poly[i].y > p.y) != (poly[j].y > p.y) && p.x < (poly[j].x - poly[i].x) * (p.y - poly[i].y) / (poly[j].y - poly[i].y) + poly[i].x)
-                    inside = !inside;
-            }
-            return inside;
-        }
+        public static bool InPolygon(Vector2 p, IReadOnlyList<Vector2> poly) => StudioMath.InPolygon(p, poly);
     }
 
     internal sealed class SelectTool : BuiltinTool
@@ -350,6 +341,7 @@ namespace PalaceMod.Builder.Studio
         public StudioPlaceable Armed { get; private set; }
         public float GhostYaw;
         private GameObject ghost;
+        private Quaternion ghostRot = Quaternion.identity;
 
         public void Arm(StudioPlaceable placeable)
         {
@@ -360,7 +352,7 @@ namespace PalaceMod.Builder.Studio
             {
                 try { ghost = placeable.MakeGhost(StudioScene.Root); }
                 catch (Exception e) { Log.For<BuilderManager>().Caught($"Studio: ghost for {placeable.Id} failed", e); }
-                if (ghost != null) { ghost.SetActive(false); ghost.name = "PalaceBuilder ghost"; }
+                if (ghost != null) { ghost.SetActive(false); ghost.name = "PalaceBuilder ghost"; ghostRot = ghost.transform.rotation; }
             }
         }
 
@@ -392,11 +384,8 @@ namespace PalaceMod.Builder.Studio
                 ghost.SetActive(show);
                 if (show)
                 {
-                    var t = ghost.transform;
-                    // Ghosts are made at yaw 0; keep their own tilt.
-                    var e = t.rotation.eulerAngles;
-                    t.position = p.Snapped.Value;
-                    t.rotation = Quaternion.Euler(e.x, GhostYaw + GhostBaseYaw, e.z);
+                    // Ghosts are made in their kind's own pose; turning adds yaw on top.
+                    ghost.transform.SetPositionAndRotation(p.Snapped.Value, Quaternion.Euler(0f, GhostYaw, 0f) * ghostRot);
                 }
             }
             if (p.Click && show)
@@ -410,7 +399,7 @@ namespace PalaceMod.Builder.Studio
             }
         }
 
-        /// <summary>The armed kind's own starting yaw (a host slot's), set by the palette.</summary>
+        /// <summary>The armed kind's own yaw (a host slot's), added to the turn when placing.</summary>
         public float GhostBaseYaw;
     }
 

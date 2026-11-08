@@ -105,6 +105,12 @@ namespace PalaceMod.Builder.Studio
                     if (Input.GetKey(KeyCode.RightArrow)) move.x += 1f;
                     if (Input.GetKey(KeyCode.LeftArrow)) move.x -= 1f;
                 }
+                if (StudioLabels.EdgePan && pointerFree)
+                {
+                    var m = StudioInput.Mouse;
+                    if (m.x <= 6f) move.x -= 1f; else if (m.x >= Screen.width - 6f) move.x += 1f;
+                    if (m.y <= 6f) move.y -= 1f; else if (m.y >= Screen.height - 6f) move.y += 1f;
+                }
                 if (move.sqrMagnitude > 0.01f)
                 {
                     move = Vector2.ClampMagnitude(move, 1f);

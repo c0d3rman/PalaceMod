@@ -35,6 +35,8 @@ namespace PalaceMod.Builder.Studio
     internal static class StudioScene
     {
         public static Scene Scene { get; private set; }
+        /// <summary>The host's slots as the requirements model sees them (castle, native prerequisites, levels).</summary>
+        public static HostSlots HostSlots { get; private set; } = new();
         public static Transform Root { get; private set; }
         private static Transform looks;
         private static LayoutMarkers markers;
@@ -77,7 +79,9 @@ namespace PalaceMod.Builder.Studio
             looks.gameObject.SetActive(false);
             markers = new LayoutMarkers(Root);
 
-            foreach (var slot in LayoutScene.Slots(s))
+            var all = LayoutScene.Slots(s);
+            HostSlots = LayoutScene.HostSlots(all);
+            foreach (var slot in all)
             {
                 if (natives.ContainsKey(slot.name)) continue; // the overlay also only knows the first of a name
                 var info = new NativeSlot
@@ -121,6 +125,7 @@ namespace PalaceMod.Builder.Studio
             natives.Clear();
             lines.Clear();
             hidden.Clear();
+            HostSlots = new();
             propBases = [];
             routes = [];
         }
@@ -133,11 +138,13 @@ namespace PalaceMod.Builder.Studio
         {
             if (lv == null || Root == null) return;
             var seen = new HashSet<string>(StringComparer.Ordinal);
-            var removed = new HashSet<string>(lv.BuildSlots?.Remove ?? [], StringComparer.Ordinal);
+            bool empty = LevelBases.IsEmpty(lv);
             ordered.Clear();
 
             foreach (var n in natives.Values.OrderBy(n => n.Castle ? 0 : 1).ThenBy(n => n.Name, StringComparer.Ordinal))
             {
+                // An empty base removes every slot but the castle; they stay palette bases, not objects on the map.
+                if (empty && !n.Castle) continue;
                 var edit = lv.BuildSlots?.Edit?.FirstOrDefault(e => e?.Ref == n.Name);
                 var item = Get("slot:" + n.Name, StudioItemKind.Slot, n.Name);
                 nativeOf[item.Key] = n;
@@ -149,7 +156,7 @@ namespace PalaceMod.Builder.Studio
                 item.Pos = edit?.Pos != null && n.CanMove ? LayoutScene.ToVector(edit.Pos) : n.Pos;
                 item.Yaw = edit?.RotY is float y && n.CanMove ? y : n.Rot.eulerAngles.y;
                 item.Moved = n.CanMove && (edit?.Pos != null || edit?.RotY != null);
-                item.Removed = removed.Contains(n.Name);
+                item.Removed = LevelRequirements.IsRemoved(lv, HostSlots, n.Name);
                 item.BaseCosts = n.Costs;
                 if (n.Look != null)
                 {

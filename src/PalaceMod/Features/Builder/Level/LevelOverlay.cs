@@ -33,7 +33,7 @@ namespace PalaceMod.Builder.Level
 
         public void Apply(DesignPack pack, LevelDef level, List<ValidationIssue> issues)
         {
-            bool editing = LayoutEditor.ClaimSession(pack, level);
+            bool editing = Studio.StudioShell.ClaimSession(pack, level);
             var scene = LayoutScene.Host(level.Host);
             if (!scene.IsValid() || !scene.isLoaded)
             {

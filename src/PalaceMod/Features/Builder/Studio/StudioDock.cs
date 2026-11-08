@@ -92,7 +92,55 @@ namespace PalaceMod.Builder.Studio
         public static void OnLevelChanged() { dirtyInspector = dirtyLevel = dirtyTop = dirtyPalette = true; }
         public static void OnToolChanged() { dirtyTools = true; if (StudioShell.Tool?.HasPanel == true || lastToolPanel) dirtyPalette = true; }
         public static void OnRecentChanged() => dirtyPalette = true;
-        public static void RefreshAll() { dirtyInspector = dirtyLevel = dirtyTools = dirtyPalette = dirtyTop = true; }
+        public static void RefreshAll() { dirtyInspector = dirtyLevel = dirtyTools = dirtyPalette = dirtyTop = dirtyPlay = true; }
+
+        // ---- Play mode: the panels other workstreams add for play (W2's sandbox) --------------------------------
+
+        private static ModDock playDock;
+        private static ModDockPanel playPanel;
+        private static bool dirtyPlay;
+        public static string PlayTab;
+
+        public static bool PointerOverPlayPanel => playDock?.PointerOverPanel == true;
+
+        /// <summary>Per frame in play mode: shows the play panels without taking the game's input, except while the
+        /// pointer is on them (then their rows and tiles take the mouse).</summary>
+        public static void PlayTick()
+        {
+            var panels = Studio.Panels.Where(p => p.Mode == StudioMode.Play && SafeVisible(p)).ToList();
+            if (panels.Count == 0 || SceneTransitionManager.instance == null || SceneTransitionManager.instance.SceneTransitionIsRunning) { HidePlay(); return; }
+            if (playDock == null)
+            {
+                playDock = new ModDock("Studio play") { FreezePlayer = false };
+                playPanel = playDock.AddPanel("Play", new Vector2(1, 0), new Vector2(1, 1), new Vector2(-G - RightW, G), new Vector2(-G, -G));
+                dirtyPlay = true;
+            }
+            bool fresh = playDock.Root == null;
+            if (!playDock.ShowPassive()) return;
+            if (fresh) dirtyPlay = true;
+            bool over = playPanel.Rect != null && RectTransformUtility.RectangleContainsScreenPoint(playPanel.Rect, StudioInput.Mouse, null);
+            bool held = Input.GetMouseButton(0) || Input.GetMouseButton(1);
+            if (over && !playDock.IsActive && !held) playDock.Activate();
+            else if (!over && playDock.IsActive && !held && !ModTextInput.Active && (ModPopup.Current == null || !ModPopup.Current.IsOpen)) playDock.Release();
+            if (dirtyPlay && !ModTextInput.Active && !held)
+            {
+                dirtyPlay = false;
+                if (panels.All(p => p.Id != PlayTab)) PlayTab = panels[0].Id;
+                playPanel.Fill(page =>
+                {
+                    if (panels.Count > 1) Tabs(page, panels.Select(p => (p.Id, p.Id)).ToList(), () => PlayTab, id => { PlayTab = id; dirtyPlay = true; }, 3);
+                    var panel = panels.First(p => p.Id == PlayTab);
+                    try { panel.Build(page); } catch (Exception e) { Log.For<BuilderManager>().Caught($"Studio panel {panel.Id} failed", e); }
+                });
+            }
+        }
+
+        public static void HidePlay()
+        {
+            if (playDock?.Root == null) return;
+            playDock.Release();
+            playDock.Hide();
+        }
 
         private static bool lastToolPanel;
 
@@ -241,7 +289,7 @@ namespace PalaceMod.Builder.Studio
             var list = d.Issues.Where(i => i.Path != null && (i.Path == prefix || i.Path.StartsWith(prefix + "."))).ToList();
             var blocked = StudioScene.Routes.Where(r => !r.Reachable).Select(r => r.Line).ToList();
             if (blocked.Count > 0) list.Add(new Model.ValidationIssue(Model.Severity.Warning, prefix, "Blocked: " + string.Join(", ", blocked)));
-            if (StudioServices.Terrain?.PathsStale == true) list.Add(new Model.ValidationIssue(Model.Severity.Info, prefix, "Paths out of date"));
+            if (StudioServices.Terrain?.PathsStale == true) list.Add(new Model.ValidationIssue(Model.Severity.Warning, prefix, "Paths out of date"));
             return list;
         }
 
@@ -435,7 +483,7 @@ namespace PalaceMod.Builder.Studio
                 if (string.Equals(tile.name, name, StringComparison.OrdinalIgnoreCase) || string.Equals(tile.Key, name, StringComparison.OrdinalIgnoreCase) || tile.name.EndsWith(" " + name, StringComparison.OrdinalIgnoreCase))
                 { tile.Press(); return "pressed " + tile.name; }
             foreach (var b in dock.Root.GetComponentsInChildren<TFUITextButton>())
-                if (b.name.Equals("Row " + name, StringComparison.OrdinalIgnoreCase)) { b.onClick?.Invoke(); return "pressed " + b.name; }
+                if (b.name.Equals("Row " + name, StringComparison.OrdinalIgnoreCase)) { b.onApply?.Invoke(); return "pressed " + b.name; }
             throw new ArgumentException($"no tile or row \"{name}\"");
         }
 

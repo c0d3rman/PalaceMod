@@ -99,11 +99,7 @@ namespace PalaceMod.Builder.Studio
             return StudioScene.Ground(new Vector3(Mathf.Round(p.x / SnapStep) * SnapStep, p.y, Mathf.Round(p.z / SnapStep) * SnapStep));
         }
 
-        public static Vector3 SnapDelta(Vector3 d, bool free)
-        {
-            if (free || SnapStep <= 0f) return new Vector3(d.x, 0f, d.z);
-            return new Vector3(Mathf.Round(d.x / SnapStep) * SnapStep, 0f, Mathf.Round(d.z / SnapStep) * SnapStep);
-        }
+        public static Vector3 SnapDelta(Vector3 d, bool free) => StudioMath.SnapDelta(d, free ? 0f : SnapStep);
 
         // ---- Launch -----------------------------------------------------------------------------------------------
 
@@ -153,6 +149,7 @@ namespace PalaceMod.Builder.Studio
         {
             ClearScene();
             StudioDock.Destroy();
+            StudioDock.HidePlay();
             state = State.Off;
             session = null;
             draft = null;
@@ -192,8 +189,9 @@ namespace PalaceMod.Builder.Studio
             var current = BuilderServices.Sessions.Current;
             if (session != null && current != session) { Stop(); return; }
             if (!Feature<BuilderManager>.On) { BuilderServices.Sessions.End(); Stop(); return; }
-            // Test play owns the scene meanwhile; the Studio waits for the next edit load.
-            if (Studio.Mode is StudioMode.Play) return;
+            // Test play owns the scene meanwhile (the Studio only hosts its panels); the Studio waits for the next edit load.
+            if (Studio.Mode is StudioMode.Play) { StudioInput.Tick(); StudioDock.PlayTick(); return; }
+            StudioDock.HidePlay();
             if (state == State.Waiting)
             {
                 if (session == null) session = current;
@@ -606,7 +604,7 @@ namespace PalaceMod.Builder.Studio
         public StudioItem Find(string key) => StudioScene.Find(key);
         public StudioItem ItemAt(Vector3 ground) => StudioScene.ItemAt(ground);
         void IStudioShell.Select(IEnumerable<string> keys, SelectOp op) => StudioSelection.Select(keys, op);
-        public bool PointerOverUI => StudioDock.PointerOverPanel;
+        public bool PointerOverUI => StudioDock.PointerOverPanel || StudioDock.PointerOverPlayPanel;
         public float Ground(Vector3 point) => StudioScene.GroundY(point);
         public string ToolId => Tool?.Id;
         void IStudioShell.SetTool(string id) => SetTool(id);

@@ -503,6 +503,34 @@ namespace PalaceMod.Builder.Studio
             return rows;
         }
 
+        private static readonly List<Action<LevelDef, string>> placeHooks = [];
+
+        /// <summary>Runs inside the edit that places a slot or prop (Place tool, paste, duplicate), with the level and the
+        /// new item's key, so a change it makes (W3: auto-link) is part of the same undo step.</summary>
+        public static void AddPlaceHook(Action<LevelDef, string> hook) => placeHooks.Add(hook);
+
+        /// <summary>After a slot or prop was placed (its edit is done).</summary>
+        public static event Action<string> ItemPlaced;
+
+        internal static void RunPlaceHooks(LevelDef level, string key)
+        {
+            foreach (var hook in placeHooks)
+            {
+                try { hook(level, key); }
+                catch (Exception e) { Log.For<BuilderManager>().Caught("Studio place hook failed", e); }
+            }
+        }
+
+        internal static void RaiseItemPlaced(string key)
+        {
+            if (ItemPlaced == null) return;
+            foreach (Action<string> h in ItemPlaced.GetInvocationList())
+            {
+                try { h(key); }
+                catch (Exception e) { Log.For<BuilderManager>().Caught("Studio.ItemPlaced handler failed", e); }
+            }
+        }
+
         /// <summary>Runs the delete guards; true if one took over.</summary>
         internal static bool GuardDelete(IReadOnlyList<string> keys, Action proceed)
         {
