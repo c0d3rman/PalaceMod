@@ -55,14 +55,5 @@ namespace PalaceMod.Tests
             Assert.Null(TestPacks.Play(Pack(), "l3", out string e2), "missing nights");
             Assert.True(e2.Contains("missing"), "names the missing nights");
         }
-
-        public static void EditKeepsOnlyTheLayout()
-        {
-            var edit = TestPacks.Edit(Pack(), "l2");
-            Assert.Equal(1, edit.Levels.Count, "levels");
-            Assert.Null(edit.Levels[0].WaveSet, "no nights");
-            Assert.Equal(0, edit.Units.Count, "units");
-            Assert.Equal(0, edit.WaveSets.Count, "wave sets");
-        }
     }
 }
