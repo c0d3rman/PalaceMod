@@ -20,10 +20,10 @@ Install: copy this folder (the one the mod writes to `<Thronefall>/BepInEx/Palac
    with the game running. If no reference maps are listed: `python3 palace.py ref build`.
 2. Study the base map: `ref maps`, `ref slots <Map>`, `ref render <Map> -o base.png` (read the PNG).
 3. Plan the level (lanes, choke points, castle rings, economy, night curve), then create it:
-   `new <pack>`, `level <pack> <level> --host <Map> --base cleared|flat|map`.
-4. Edit only through ops files: `apply <pack> ops.json`. Fix every `errors` entry it prints.
-5. Inspect: `render <pack> -o map.png --labels reqs`, `show`, `economy --compare`, `waves --compare`.
-6. Test in the game: `play` then `paths`; `test <pack> <level> --plan plan.json --shots shots/`; read each night's
+   `new <level> --host <Map> --base cleared|flat|map` (a level in the player's library; `list` shows the library).
+4. Edit only through ops files: `apply library ops.json --level <level>`. Fix every `errors` entry it prints.
+5. Inspect: `render library <level> -o map.png --labels reqs`, `show`, `economy --compare`, `waves --compare`.
+6. Test in the game: `play` then `paths`; `test library <level> --plan plan.json --shots shots/`; read each night's
    report (outcome, castle min HP, buildings knocked out). `render --live` for the real map with game routes.
 7. Iterate until early nights are survivable with half the gold, late nights are close, and every lane reaches the
    castle.
@@ -41,4 +41,6 @@ Install: copy this folder (the one the mod writes to `<Thronefall>/BepInEx/Palac
 - In `test` reports a refused purchase is `"ok": false` with an `error`; read `summary[].refused`. Use plan options
   `carry`/`save` so a refused castle upgrade isn't silently lost.
 - Enemies hit the nearest building on their lane every night; `economy --report test.json` shows what was really paid.
-- Never hand-edit packs in other folders or the game's saves; packs live in `BepInEx/PalaceBuilder/packs/<id>/`.
+- Never hand-edit other folders or the game's saves; the library lives in `BepInEx/PalaceBuilder/library/` (one
+  file per level and per enemy). Any level can spawn any library enemy by its id. Packs are only for sharing:
+  `export "<name>" <level,...>` writes a .tfpack with the enemies and assets those levels use.
