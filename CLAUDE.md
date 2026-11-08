@@ -161,6 +161,7 @@ log.Caught("Click handler failed", e);                 // a callback you called 
 - To read game code: `python3 scripts/dev.py decompile --type <TypeName>` writes `.decompiled/<TypeName>.decompiled.cs`. Leave out `--type` to decompile everything into a project, which is the way to grep for things like PlayerPrefs keys.
 - The main menu is the scene `_StartMenu` (`SceneTransitionManager.mainMenuScene`). Use `SceneManager.GetActiveScene().name` to tell which screen you're on.
 - Never commit `lib/`, `.decompiled/` or anything else copied from the game; they're in `.gitignore`.
+- Rescanning pathfinding at runtime: call `Builder.Level.GroundGraphs.Scan()`, never `AstarPath.active.Scan()`. A plain scan empties the fliers' graph (their surface is inactive in play) and turns cliff and wall tops into walkable islands; `GroundGraphs.Scan` handles both and redraws the minimap (docs/builder-ux.md, "T0 results").
 - Builds target `netstandard2.1`. The 18 existing Harmony003 analyzer warnings predate this guide and aren't regressions.
 
 ## Keybinds and the Controls screen

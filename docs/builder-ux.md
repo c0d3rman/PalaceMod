@@ -609,96 +609,111 @@ night starts).
 
 | Feature | Feasible | Cost | Main risk |
 |---|---|---|---|
-| Walkable/blocked paint (ground units) | yes, now | S-M | Fliers ignore it (by design). Uses the solid-prop blocker pattern (`LayoutScene.SetSolid`). |
+| Walkable/blocked paint (ground units) | built | S-M | Fliers ignore it (by design). Readable obstacle columns, as the solid-prop blockers. |
 | Cliff, rock and wall pieces as solid props | yes, now (blocking) | S | Host scenery meshes may be unreadable. Blocking already works through blocker boxes. |
 | Walkable ramps and plateaus as pieces | yes | M | Needs a generated readable mesh plus a `MeshCollider` (the king) on the Ground layer. |
 | Water planes and shorelines | yes | M | Visual: the ocean or water material. Blocking: a footprint cut from the heightfield, or a layer-7 blocker. |
-| Sculpting on a **Flat field** (heightfield replaces the ground) | yes | L | Air surface (unknown graph type), minimap rebuild, rescan time, boundary walls, y ≥ -8. |
+| Sculpting on a **Flat field** (heightfield replaces the ground) | built | L | Air surface (recast on layer 9: generated), minimap rebuild, rescan time, boundary walls, y ≥ -8. |
 | Sculpting **on a vanilla map's ground** | partly | L+ | The host ground is one combined mesh with hand-made walls and colliders. Raising is possible (heightfield patches on top); lowering and digging aren't, without replacing the ground. Later. |
 | Removing parts of a vanilla map piecemeal | partly | M-L | MeshFusion can cut sources from combined meshes (`CombinedObject.cs:109-112`), but whether the scenes keep their sources is unverified. v1 only does all-or-nothing (Cleared). |
 
-### Design (W4)
+### Design (W4, as built)
 
 **Stages:**
 
-| Stage | Cost | Delivers |
+| Stage | State | Delivers |
 |---|---|---|
-| T0 spike | S | Done: "T0 results" above (`builder-terrain spike graphs\|helper\|king\|ground\|update\|scan`). |
-| T1 ground layer + Flat field | M | A generated heightfield ground. All of these are needed for the Flat field: chunks, readable meshes, a `MeshCollider` on the ground layer, the host's materials, boundary walls (a mesh and collider around the field, on the invisible-wall layer), an Air surface (if T0 shows it's mesh-sourced: a grid 5 m above the max height, as Falkenpass did), and the minimap rebuild (`MinimapRenderer` private `GenerateGroundMesh` + `RenderBackground` after the rescan). |
-| T2 brushes | L | Raise/lower, flatten, smooth, set height, material paint; live re-mesh in the editor. |
-| T3 walkable paint + pieces | S-M | Blocked/walkable paint on any base, and cliff/ramp/rock pieces in the palette. |
-| T4 water | M | A water level and water paint on the Flat field, with shoreline material. |
-| Later | | Patches on vanilla ground (raise only), piecemeal scenery removal on vanilla maps. |
+| T0 spike | done | "T0 results" above (`builder-terrain spike graphs\|helper\|king\|ground\|update\|scan\|region`). |
+| T1 ground layer + Flat field | done | `Level/GroundLayer.cs`: chunked readable meshes on the Ground layer with `MeshCollider`s, the level's own ground materials, walls round the field, a flier surface, the graphs' height range widened, the host's ground hidden; `Level/MinimapRefresh.cs`; `Level/GroundGraphs.cs` (the rescan). |
+| T2 brushes | done | Raise/lower, flatten, set height, smooth, material paint; live re-mesh while dragging. |
+| T3 walkable paint + pieces | paint done; pieces not built | Block/unblock on any base. Cliffs, plateaus and ramps are brush work on a flat field (a hard-edged Set height makes a plateau with cliff sides; the Ramp brush cuts a walkable slope). Blocking rock and cliff *pieces* on a map's own ground are the existing solid props (`LayoutScene.SetSolid`); walkable ramp pieces on a map's own ground are deferred (see "Not built"). |
+| T4 water | done (flat field) | Water brush and water level; the bed is dug 1 m below the surface, banks turn to sand, water cells are blocked for ground units and the king. |
+| Later | | Raise-only patches on a map's own ground, piecemeal scenery removal on vanilla maps. |
 
-**Data** (`LevelDef.terrain`, additive):
+**Data** (`LevelDef.terrain`, `Model/TerrainDef.cs`; encoded by `Level/GroundCodec.cs`, unit-tested):
 
 ```jsonc
 "terrain": {
-  "origin": [x, z], "cell": 2.0, "size": [w, h],          // grid in world space; 2 m cells by default
-  "heights": "<base64 deflate of int16 cm, row-major>",   // (w+1)*(h+1) samples; absent = flat at the castle's height
-  "materials": "<base64 deflate of byte per cell>",       // 0 ground, 1 high, 2 low, 3 earth, 4 sand, 5 road, 6 rock
-  "blocked": "<base64 deflate bitmask per cell>",         // ground units can't walk; fliers can
-  "water": { "level": -1.5, "cells": "<base64 bitmask>" } // water surface; water cells are unwalkable
+  "origin": [x, z],           // world corner of cell (0, 0) (min x, min z)
+  "cell": 2.0,                // cell edge in m (0.5-16)
+  "size": [w, h],             // cells along +x and +z (1-400 each)
+  "y": 0.0,                   // world height of 0 (the castle's height for a new field)
+  "heights": "<b64>",         // (w+1)*(h+1) corners, row-major (z*(w+1)+x): int16 cm relative to y, delta-coded along
+                              // that order, little-endian, raw deflate
+  "materials": "<b64>",       // byte per cell (z*w+x), raw deflate: 0 grass, 1 high grass, 2 low grass, 3 earth,
+                              // 4 sand, 5 road, 6 rock
+  "blocked": "<b64>",         // bit per cell (LSB first), raw deflate: ground units and the king can't enter; fliers can
+  "water": { "level": -1.0, "cells": "<b64 bitmask>" }   // level relative to y; water cells are unwalkable
 }
 ```
 
-- Size: a 200 × 200 m field at 2 m is 10k samples (20 KB raw), and mostly-flat fields deflate to a few KB.
-  - That is too big for chat-sized share codes. `SharingUI.CopyCode` already suggests a `.tfpack` above 2,000
-    characters, and terrain levels will usually take that path.
-  - Alternative (open question): store terrain in an asset file (`assets/terrain.bin`) referenced from the level, so
-    codes stay small, at the cost of a code not carrying the terrain.
-- Heights are clamped to [-8, +30] m. Below -10 the game respawns the king.
+- Every array is optional and left out when all zero. A flat level with no `terrain` gets a field over the host's
+  graph bounds at the castle's height (Nordfels: origin [-104, -100], 104 × 68 cells).
+- Measured sizes: a plain field ~100 characters; the acceptance field (plateau, ramp, hill, pond, road patch, blocked
+  strip) ~800. Share codes stay under the 2,000-character chat size for typical sculpting; heavy sculpting goes
+  through `.tfpack` as `SharingUI` already suggests.
+- Heights are clamped to [-8, +30] m world. Below -10 the game respawns the king.
+- `heights`, `materials` and `water` only show on `"base": "flat"`; `blocked` works on every base.
 
-**Brushes** (Terrain tool, T; a brush strip in the palette area while active):
+**Runtime (play and the Studio's edit load):** `LevelOverlay` calls `GroundLayer.Apply(scene, pack, level, issues)`
+after the empty base's scenery hide, before Start.
 
-| Brush | Click/drag | Modifiers |
-|---|---|---|
-| Raise / lower | Adds height under the brush (falloff) | Shift = the other way |
-| Flatten | Sets the height to the height under the press | Alt-click samples a height |
-| Smooth | Averages | |
-| Set height | To the number in the brush strip | |
-| Paint material | The chosen material | |
-| Block / unblock | The walkable mask (ground units) | Shift = unblock |
-| Water | Marks cells as water, at the water level | Shift = remove |
+- Flat base: the host's renderers drawn only with ground, rock, river, road and shadow-shape materials are hidden
+  (and MeshFusion is kept off them; the ocean stays, so the field reads as an island), with the Ground-layer colliders,
+  the invisible walls and the flier surface. The generated ground replaces them. Steep faces (> 32°: the graphs' max
+  slope is 30°) are drawn with the rock material, so cliffs read as cliffs; grass next to water is drawn as sand.
+  Slots and the king are put on the new ground.
+- Every base: blocked and water cells become invisible readable columns on the Obstacle layer that reach above the
+  graphs' bounds (no walkable top) with a `MeshCollider` (the king). They're named like the props' blockers, so the
+  path check sees a spawn walled in by them.
+- The flier surface is a mesh 5 m above the highest ground around each corner, on layer Flyer Surface, inactive except
+  while `GroundGraphs.Scan` runs (as the game's); the Air graph's max slope and climb are raised so fliers cross cliffs.
+- The level-start rescan (`GroundGraphs.Scan`) then builds the graphs, prunes islands and redraws the minimap.
 
-- Brush size: `[` `]` or Alt+wheel. Strength is in the brush strip. A ring cursor (an `IStudioOverlay`) shows size
-  and falloff.
-- Each stroke is one undo step (coalesced through `PackDraft.Edit` with a stroke id).
-- Slopes over the recast graph's max slope become unwalkable on their own (cliffs). The mesh paints faces steeper than
-  that with `rockMaterial`, so cliffs read as cliffs.
+**Brushes** (Terrain tool, T, `Studio/Terrain/TerrainTool.cs`; its strip in the palette's place while active):
 
-**Editing performance:**
+| Brush | Drag | Modifiers | Strip |
+|---|---|---|---|
+| Raise | Adds height (m/s at the centre, falloff) | Shift lowers | Size, Strength, Softness |
+| Flatten | Levels to the height under the press | | Size, Softness |
+| Set height | Levels to the strip's height (Softness 0: a plateau with cliff sides) | Alt-click samples | Size, Height, Softness |
+| Smooth | Averages with neighbours | | Size, Strength |
+| Ramp | From the press (top) to the release (bottom): a straight slope between the two heights | | Width |
+| Material | Paints the chosen material | | Size, Material |
+| Block | The walkable mask | Shift unblocks | Size |
+| Water | Water cells (the bed is dug to 1 m below the level) | Shift dries | Size, Water level |
 
-- Re-mesh only the touched chunks (32×32 cells) during a stroke: no graph work, and markers snap to the new height
-  through `LayoutScene.Ground`. That falls back to a raycast on the ground layer when the stroke leaves the graph
-  stale, because `Ground` reads `Enemy Units S`.
-- On stroke end, mark the graphs **stale**. "Routes" (path check) and F5 rescan: a local `GraphUpdateObject` over the
-  touched bounds if T0 shows it's cheap, else a full `Scan()`.
-- A "paths out of date" chip shows in the top bar while stale.
+- On a map's own ground only Block is offered; the others need a Flat field (chosen in the Start popup).
+- `[` and `]` size the brush. A ring on the ground (an `IStudioOverlay`) shows it; the ramp shows its line while
+  dragging. Blocked cells are drawn as a red wash in edit mode only.
+- Each stroke is one undo step (`Studio.Edit` writing `LevelDef.terrain`). Undo, redo and other edits rebuild the
+  shown ground from the level when it differs (`Studio.ItemsChanged`, compared by `GroundLayer.KeyOf`).
+- Esc during a stroke drops it.
 
-**At play:**
+**Editing performance:** a stroke re-meshes only the touched 32 × 32-cell chunks (and their colliders) every frame,
+with no graph work; `LayoutScene.Ground` and `IStudioTerrain.Height` read the terrain's own height, so markers follow
+at once. On release the graphs are **stale** (`IStudioTerrain.PathsStale`; the strip's "Paths" row says "Out of date"
+and updates them on click). A local `GraphUpdateObject` costs a full scan (one-tile graphs), so `UpdatePaths` is a
+full `GroundGraphs.Scan`: 400-800 ms on a Nordfels field. Play reloads the map, so F5 needs no rescan of its own.
 
-1. The overlay builds the ground layer before Start (meshes, collider, walls, Air surface).
-2. The existing full rescan runs at Start+2.
-3. Rebuild the minimap.
-4. Check reachability (already done).
+**Dev:** `builder-terrain flat [cell] | brush <name> [size] | stroke [shift] <x> <z> ... | raise/flatten/smooth/ramp/
+paint/block/water ... | waterlevel | marks | king <x> <z> | snap | scan | grid | encode | save <pack> | clear`.
+`save` writes the shown terrain into a one-level pack; `builder-req play <pack>` plays it.
 
-**Owns:**
+**Not built (and why):**
 
-- New `Features/Builder/Studio/Terrain/`:
-  - `TerrainTool.cs`, `TerrainBrushes.cs` (pure C#, unit-tested: brush maths on a height grid), `TerrainStrip.cs`
-- New `Features/Builder/Level/`:
-  - `GroundLayer.cs` (heightfield → chunked meshes, colliders, materials, Air surface, walls)
-  - `GroundCodec.cs` (pack encoding, unit-tested)
-  - `MinimapRefresh.cs`
-- An additive `LevelOverlay.ApplyTerrain` call, and `LevelDef.TerrainDef`.
+- **Sculpting a map's own ground** (raise, lower, ramps as pieces on vanilla maps): the host ground is one combined
+  mesh with hand-placed walls and colliders. Raising would need heightfield patches drawn over it that blend at their
+  edges and cut the host's ground for the king's collider; lowering needs the host ground replaced. Flat field covers
+  sculpting; on vanilla maps, Block paint plus solid scenery props shape the walkable area.
+- **Water on a map's own ground:** the water plane needs ground below it, which only the flat field controls.
 
-**Acceptance (T1 + T2):**
+**Acceptance (T1 + T2), verified in a pool instance on Nordfels** (a flat field with a 4 m plateau round the castle,
+a ramp, a hill, a pond and a blocked strip, saved as a pack and played):
 
-- A Flat field with a sculpted hill and a cliff ring around the castle with one ramp: ground enemies take the ramp,
-  fliers cross the cliff, and the king walks up the ramp and can't walk up the cliff.
-- The minimap shows the new shape.
-- Path check, rescan and swap times are logged.
+- The king walks up the ramp onto the plateau (y 0 → 4) and is stopped by the cliff.
+- All three ground lines reach the castle; with a 6 m ramp the large-enemy graph (radius 4) is correctly cut off.
+- The minimap shows the new shape. Level-start rescan 639 ms.
 
 ## Asset browser slot
 
@@ -947,15 +962,15 @@ the Place tool), `PickOnMap`, `AddViewToggle`, `AddDeleteGuard` (W3's "this slot
 
 ### W4: terrain
 
-**Owns:** see "Terrain, Design (W4)". It is a separate workstream because it touches the ground, the graphs and
-play-time rescans, none of which the others need.
+**Owns:** `Studio/Terrain/` (`TerrainTool.cs`: tool, strip, ring, `IStudioTerrain`; `TerrainBrushes.cs`;
+`TerrainSpike.cs`; `BuilderTerrainManager.cs`: registration and the `builder-terrain` command), `Level/GroundLayer.cs`,
+`Level/GroundCodec.cs`, `Level/GroundGraphs.cs`, `Level/MinimapRefresh.cs`, `Model/TerrainDef.cs`.
 
-- It starts with the T0 spike, which needs a pool game instance.
-- The Flat field base uses W3's base plumbing (`LevelDef.Base`, the scenery hide). The contract between them is
-  `LevelDef.terrain` and one call, `GroundLayer.Apply(scene, level)`, that W3's overlay makes when `base == "flat"` or
-  `terrain != null`.
-- W4 can be staffed after W1-W3 if only three agents are available. Its T3 (walkable paint) is the cheapest
-  user-visible part if the plan has to be cut.
+- Hooks in others' files (additive): `LevelOverlay` calls `GroundLayer.Apply(scene, pack, level, issues)` after the
+  empty base's look, in play and in the edit load, and `HasEdits` counts terrain; `PathCheck.Rescan` is
+  `GroundGraphs.Scan`; `LayoutScene.Ground` reads the terrain first; `LevelDef.terrain`; the Start popup's Flat field
+  is switched on by `StartPopup.FlatFieldAvailable`.
+- Anything that rescans the graphs must use `GroundGraphs.Scan`, never `AstarPath.Scan` (see "T0 results").
 
 ### File-overlap table
 
