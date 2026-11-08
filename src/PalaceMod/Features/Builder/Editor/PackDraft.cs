@@ -38,6 +38,23 @@ namespace PalaceMod.Builder.Editor
             savedJson = Json;
         }
 
+        /// <summary>A library workspace (DesignLibrary.OpenLevel / OpenEnemies): saves write only the items that changed.</summary>
+        public static PackDraft Workspace(DesignPack workspace)
+        {
+            var draft = new PackDraft(workspace) { SourceId = LibraryStore.PackId };
+            draft.savedJson = draft.Json;
+            return draft;
+        }
+
+        /// <summary>Whether this draft is a library workspace (pack id "library").</summary>
+        public bool IsLibrary => SourceId == LibraryStore.PackId;
+
+        /// <summary>The level a library workspace edits; null for the enemy workspace or a plain pack.</summary>
+        public string WorkspaceLevel => IsLibrary ? LibraryStore.WorkspaceLevel(Pack) : null;
+
+        /// <summary>Raised after any draft saved successfully (the Studio captures a level preview then).</summary>
+        public static event Action<PackDraft> Saved;
+
         public PackDraft(DesignPack fresh)
         {
             Source = PackSource.User;
@@ -147,6 +164,7 @@ namespace PalaceMod.Builder.Editor
         {
             var repo = BuilderServices.Packs;
             var pack = Pack;
+            if (IsLibrary) return SaveWorkspace(out message);
             try
             {
                 if (!Ids.IsValid(pack.Id)) { message = "The pack id isn't valid (Pack tab)"; return false; }
@@ -156,7 +174,8 @@ namespace PalaceMod.Builder.Editor
                     // A copy of an installed pack gets a name of its own, so the two are told apart in lists.
                     if (ReadOnly && !string.IsNullOrWhiteSpace(pack.Name) && !pack.Name.EndsWith(" (copy)")) pack.Name += " (copy)";
                     // Asset files come along from the source pack's folder (plugin packs have one; built-in packs don't).
-                    var installed = repo.InstallNew(pack, SourceId == null ? null : repo.Find(SourceId)?.Folder);
+                    string from = SourceId == null ? null : repo.Find(SourceId)?.Folder;
+                    var installed = repo is PackRepository real ? real.InstallPack(pack, from) : repo.InstallNew(pack, from);
                     if (installed == null) { message = "Couldn't save the pack"; return false; }
                     bool renamed = installed.Id != pack.Id;
                     message = ReadOnly ? $"Saved a copy as \"{installed.Id}\"" : renamed ? $"Saved as \"{installed.Id}\" (the id was taken)" : "Saved";
@@ -183,6 +202,7 @@ namespace PalaceMod.Builder.Editor
                 json = null;
                 savedJson = Json;
                 Revalidate();
+                RaiseSaved();
                 return true;
             }
             catch (Exception e)
@@ -192,6 +212,78 @@ namespace PalaceMod.Builder.Editor
                 return false;
             }
         }
+
+        private bool SaveWorkspace(out string message)
+        {
+            if (BuilderServices.Packs is not PackRepository repo) { message = "The library isn't available"; return false; }
+            try
+            {
+                var baseline = savedJson == null ? null : PackSerializer.Read(savedJson, null);
+                repo.Library.Load();
+                int written = repo.Library.SaveWorkspace(Pack, baseline);
+                if (written > 0) repo.RefreshLibrary();
+                json = null;
+                savedJson = Json;
+                message = "Saved";
+                Revalidate();
+                RaiseSaved();
+                return true;
+            }
+            catch (Exception e)
+            {
+                Log.For<BuilderManager>().Error($"Saving the library ({WorkspaceLevel ?? "enemies"}) failed", e);
+                message = "Couldn't save: " + e.Message;
+                return false;
+            }
+        }
+
+        private void RaiseSaved()
+        {
+            if (Saved == null) return;
+            foreach (Action<PackDraft> h in Saved.GetInvocationList())
+            {
+                try { h(this); }
+                catch (Exception e) { Log.For<BuilderManager>().Caught("PackDraft.Saved handler failed", e); }
+            }
+        }
+
+        /// <summary>
+        /// Brings a library workspace's untouched units up to date with the library (another workspace may have saved
+        /// them): every unit whose JSON still equals the baseline's is replaced by the library's version, units added
+        /// to the library since are added, ones deleted from it are dropped. Not an undo step; edited units are kept.
+        /// </summary>
+        public void RebaseLibrary()
+        {
+            if (!IsLibrary || BuilderServices.Packs is not PackRepository repo) return;
+            var baseline = savedJson == null ? null : PackSerializer.Read(savedJson, null);
+            var lib = repo.Library;
+            lib.Load();
+            string J(UnitDef u) => PackSerializer.WriteCompact(new DesignPack { Units = [u] });
+            var baseUnits = (baseline?.Units ?? []).Where(u => u?.Id != null).GroupBy(u => u.Id).ToDictionary(g => g.Key, g => J(g.First()));
+            var units = new List<UnitDef>();
+            foreach (var u in Pack.Units ?? [])
+            {
+                bool untouched = u?.Id != null && baseUnits.TryGetValue(u.Id, out var b) && b == J(u);
+                if (!untouched) units.Add(u);
+                else if (lib.Unit(u.Id) is { } fresh) units.Add(Fresh(fresh));
+            }
+            var added = lib.UnitIds.Where(id => !baseUnits.ContainsKey(id) && units.All(u => u?.Id != id)).Select(id => Fresh(lib.Unit(id))).ToList();
+            units.AddRange(added);
+            bool changed = J2(units) != J2(Pack.Units);
+            Pack.Units = units;
+            if (baseline != null)
+            {
+                var edited = new HashSet<string>(units.Where(u => u?.Id != null && baseUnits.TryGetValue(u.Id, out var b) && b != J(u)).Select(u => u.Id));
+                baseline.Units = (baseline.Units ?? []).Where(u => u?.Id != null && (edited.Contains(u.Id) || lib.HasUnit(u.Id)))
+                    .Select(u => edited.Contains(u.Id) ? u : Fresh(lib.Unit(u.Id))).Concat(added.Select(Fresh)).ToList();
+                savedJson = PackSerializer.WriteCompact(baseline);
+            }
+            if (changed) Invalidate(true);
+        }
+
+        private static string J2(List<UnitDef> units) => PackSerializer.WriteCompact(new DesignPack { Units = units ?? [] });
+
+        private static UnitDef Fresh(UnitDef u) => PackSerializer.Clone(new DesignPack { Id = "x", Units = [u] }).Units[0];
 
         private static void CopyDirectory(string from, string to)
         {

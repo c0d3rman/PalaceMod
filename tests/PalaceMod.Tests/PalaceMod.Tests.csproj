@@ -33,6 +33,7 @@
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/ContentRef.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/Validation.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/PackSerializer.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Model/LibraryStore.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/Requirements.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Requirements/ChainPreset.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Studio/StudioMath.cs" />

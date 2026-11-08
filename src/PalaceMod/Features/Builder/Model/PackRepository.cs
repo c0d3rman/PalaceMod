@@ -10,7 +10,10 @@ using PalaceMod.Builder.Model;
     Packs folder layout (docs/builder-design.md, "Packs on disk"):
 
         BepInEx/PalaceBuilder/
-          packs/<packId>/pack.json         one pack per folder; folder name = pack id
+          library/...                      the player's levels and enemies, one file each (Model/LibraryStore.cs);
+                                           listed as the pack "library"
+          packs/<packId>/pack.json         installed packs, one per folder; folder name = pack id. Packs here before
+                                           the library existed are moved into it once (then kept in migrated-packs/)
           packs/<packId>/assets/...        files the pack's "assets" point at
           trash/<packId>-<timestamp>/      deleted packs (never removed outright)
           cache/<sha256>                   downloaded assets (WP5)
@@ -28,6 +31,11 @@ namespace PalaceMod.Builder
 
         public string Root { get; }
         public string PacksDir => Path.Combine(Root, "packs");
+        public string LibraryDir => Path.Combine(Root, "library");
+        private const string MigratedMarker = ".migrated";
+
+        /// <summary>The player's design library (levels and enemies); listed as the pack LibraryStore.PackId.</summary>
+        public LibraryStore Library { get; }
 
         private List<PackEntry> packs = [];
         public IReadOnlyList<PackEntry> Packs => packs;
@@ -41,6 +49,7 @@ namespace PalaceMod.Builder
         {
             this.context = context;
             Root = root ?? Path.Combine(Paths.BepInExRootPath, "PalaceBuilder");
+            Library = new LibraryStore(LibraryDir);
         }
 
         public PackEntry Find(string packId) => packs.FirstOrDefault(p => p.Pack != null && p.Pack.Id == packId);
@@ -55,8 +64,11 @@ namespace PalaceMod.Builder
 
         public void Refresh()
         {
+            MigrateOnce();
             lastFingerprint = Fingerprint();
             var found = new List<PackEntry>();
+            Library.Load();
+            found.Add(LibraryEntry());
             foreach (var (name, json) in BuiltInPacks())
                 found.Add(Load(json, null, PackSource.BuiltIn, name));
             foreach (var folder in PluginPackFolders())
@@ -82,6 +94,46 @@ namespace PalaceMod.Builder
             Changed?.Invoke();
         }
 
+        /// <summary>The library as a pack entry (its folder is the library root, so its assets resolve).</summary>
+        private PackEntry LibraryEntry()
+        {
+            var pack = Library.Compose();
+            var issues = new List<ValidationIssue>(Library.Issues);
+            issues.AddRange(Validate(pack));
+            return new PackEntry { Pack = pack, Folder = LibraryDir, Source = PackSource.User, Issues = issues };
+        }
+
+        /// <summary>Re-reads the library alone (after a library write) and raises Changed.</summary>
+        public void RefreshLibrary()
+        {
+            Library.Load();
+            int i = packs.FindIndex(p => p.Pack?.Id == LibraryStore.PackId);
+            var entry = LibraryEntry();
+            if (i >= 0) packs[i] = entry; else packs.Insert(0, entry);
+            lastFingerprint = Fingerprint();
+            Changed?.Invoke();
+        }
+
+        // The packs the player had before the library existed (their own and installed demo packs) move into it once;
+        // each folder is kept in migrated-packs/. Later packs in packs/ stay installed packs (and can be imported).
+        private void MigrateOnce()
+        {
+            string marker = Path.Combine(LibraryDir, MigratedMarker);
+            if (File.Exists(marker)) return;
+            try
+            {
+                Library.Load();
+                var log = Library.MigratePacks(PacksDir, Path.Combine(Root, "migrated-packs"));
+                Directory.CreateDirectory(LibraryDir);
+                File.WriteAllText(marker, $"Packs moved into the library on {DateTime.Now:yyyy-MM-dd HH:mm}:\n" + string.Join("\n", log) + "\n");
+                foreach (var line in log) Log.For<BuilderManager>().Info("Library migration: " + line);
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException || e is ArgumentException)
+            {
+                Log.For<BuilderManager>().Error("Moving packs into the library failed; they stay where they are", e);
+            }
+        }
+
         /// <summary>Re-validates loaded packs (e.g. once the catalog is available) without rereading files.</summary>
         public void Revalidate()
         {
@@ -93,6 +145,7 @@ namespace PalaceMod.Builder
         public string Save(DesignPack pack)
         {
             if (!Ids.IsValid(pack.Id)) throw new ArgumentException($"invalid pack id \"{pack.Id}\"");
+            if (pack.Id == LibraryStore.PackId) throw new InvalidOperationException("the library is saved through its workspaces (PackDraft.Save)");
             var existing = Find(pack.Id);
             if (existing != null && existing.ReadOnly) throw new InvalidOperationException($"pack \"{pack.Id}\" is read-only ({existing.Source}); save a copy under a new id");
             string folder = Path.Combine(PacksDir, pack.Id);
@@ -108,7 +161,28 @@ namespace PalaceMod.Builder
             return path;
         }
 
-        public PackEntry InstallNew(DesignPack pack, string sourceFolder = null)
+        /// <summary>Imports a received pack into the library (its levels and enemies become library items). Returns an
+        /// entry for the pack as imported (ids after collision handling), whose folder is the library's.</summary>
+        public PackEntry InstallNew(DesignPack pack, string sourceFolder = null) => Import(pack, sourceFolder, out _);
+
+        public PackEntry Import(DesignPack pack, string sourceFolder, out LibraryImportResult result)
+        {
+            Library.Load();
+            result = Library.Import(pack, sourceFolder);
+            RefreshLibrary();
+            var imported = Library.Compose();
+            var levelIds = new HashSet<string>(result.Levels);
+            var unitIds = new HashSet<string>(result.Units.Concat(result.Reused));
+            imported.Levels = imported.Levels.Where(l => levelIds.Contains(l.Id)).ToList();
+            imported.Units = imported.Units.Where(u => unitIds.Contains(u.Id)).ToList();
+            imported.WaveSets = imported.WaveSets.Where(w => imported.Levels.Any(l => l.WaveSet == w.Id)).ToList();
+            imported.Name = pack.Name;
+            imported.Author = pack.Author;
+            return new PackEntry { Pack = imported, Folder = LibraryDir, Source = PackSource.User, Issues = result.Issues };
+        }
+
+        /// <summary>Installs a pack as its own folder under packs/ (the pre-library behaviour: dev and test packs).</summary>
+        public PackEntry InstallPack(DesignPack pack, string sourceFolder = null)
         {
             pack = PackSerializer.Clone(pack) ?? throw new ArgumentException("pack can't be serialised");
             string baseId = Ids.IsValid(pack.Id) ? pack.Id : Ids.FromName(pack.Name);
@@ -183,6 +257,11 @@ namespace PalaceMod.Builder
         private string Fingerprint()
         {
             var parts = new List<string>();
+            foreach (var dir in new[] { Library.LevelsDir, Library.EnemiesDir })
+                if (Directory.Exists(dir))
+                    foreach (var file in Directory.GetFiles(dir, "*.json")) parts.Add(file + "|" + File.GetLastWriteTimeUtc(file).Ticks);
+            string assetsFile = Path.Combine(LibraryDir, "assets.json");
+            if (File.Exists(assetsFile)) parts.Add(assetsFile + "|" + File.GetLastWriteTimeUtc(assetsFile).Ticks);
             foreach (var folder in PluginPackFolders().Concat(Directory.Exists(PacksDir) ? Directory.GetDirectories(PacksDir) : []))
             {
                 string file = Path.Combine(folder, PackFile);
