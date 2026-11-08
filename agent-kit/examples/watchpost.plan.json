@@ -1,0 +1,8 @@
+{
+ "1": ["castle", "h2", "t-pass"],
+ "2": ["h4", "mill", "f1"],
+ "3": [{"slot": "castle", "level": 2, "branch": 0}, "barracks", "h1"],
+ "4": ["t-gate", "f2", "h5", {"slot": "mill", "level": 2}],
+ "5": ["t-forest", "range", "h3", {"slot": "t-pass", "level": 2, "branch": 0}],
+ "6": [{"slot": "barracks", "level": 2}, {"slot": "t-gate", "level": 2, "branch": 2}, "h6", "f3"]
+}

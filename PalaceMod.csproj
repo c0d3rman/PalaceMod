@@ -35,6 +35,10 @@
     <EmbeddedResource Include="src/PalaceMod/Assets/**/*">
       <LogicalName>PalaceMod.Assets.%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
+    <!-- The agent kit (guide, skill, palace.py); the Agent bridge writes it to BepInEx/PalaceMod/Agent. -->
+    <EmbeddedResource Include="agent-kit/**/*" Exclude="agent-kit/**/__pycache__/**;agent-kit/**/*.pyc">
+      <LogicalName>PalaceMod.AgentKit.%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <ItemGroup>

@@ -71,6 +71,7 @@ Evidence comes from the decompiled `Assembly-CSharp`, `AstarPathfindingProject.d
 | WP4a Editor UI | **Landed** (stage 1): `Editor/`, see "Editor (WP4a, as built)". Troops section added by stage 2 (see there). |
 | WP4b / WP4c Level overlay, placement editor | **Landed** (feat/builder-level-editor): `Level/`, see "Levels and the layout editor (stage 2, as built)". |
 | WP5 Asset import | **Landed.** `Assets/`: PNG icons and skins, WAV/OGG sounds, OBJ meshes, url assets with sha256 cache. glTF/GLB landed in the follow-up (feat/builder-gltf, see "glTF import"). |
+| Agent integration | **Landed.** `Agent/` + `agent-kit/`: opt-in Agent bridge, `agent` command, guide, skill, `palace.py` (docs/builder-ux.md, "W6"). |
 | WP6 Sharing | **Landed.** `Sharing/`: `ShareCodec`, `PackArchive` (`.tfpack` and Thunderstore zips), import folder watcher, `SharingUI`, `builder-share` dev command, `tests/PalaceMod.Tests`. |
 
 ## Architecture (as built, WP1 and WP2)

@@ -1010,6 +1010,29 @@ the Place tool), `PickOnMap`, `AddViewToggle`, `AddDeleteGuard` (W3's "this slot
   is switched on by `StartPopup.FlatFieldAvailable`.
 - Anything that rescans the graphs must use `GroundGraphs.Scan`, never `AstarPath.Scan` (see "T0 results").
 
+### W6: agent integration (as built)
+
+Players' own coding agents (Claude Code and the like) build, check, picture and play-test levels from a normal install.
+
+- **Agent bridge** (`Features/Builder/Agent/AgentBridgeManager.cs`, Settings > Mods > Builder > "Agent bridge", off by
+  default): reads one-line commands from `BepInEx/PalaceMod/Agent/bridge/command.request` and answers in
+  `command-<id>.response`, the same protocol and command set as `dev.py cmd` (`DevToolsManager.Execute`), plus
+  `status.json` every 2 s. File-only, nothing on the network. While on, the game keeps running unfocused ("Run in
+  background"). Commands that change a vanilla run mark its gameplay impact.
+- **`agent` command** (`AgentCommands.cs`; JSON results): `status`, `slots`, `catalog`, `host <file>` (`MapDump`: slots
+  with upgrade trees, spawn lines, scenery with sizes, and a 2 m ground grid: heights plus walkability rasterised from the
+  enemy navmeshes), `packs`/`reload`/`validate`, `play`, `sandbox` (W2's test play), `edit` (W1's Studio), `vanilla`,
+  `menu`, `night`, `report` (`NightRecorder`: outcome, castle low, buildings knocked out, units, enemies), `build`
+  (`pay` charges gold), cheats, `spawn`, `teleport`, `paths`, `capture` (`MapCapture`: north-up world picture),
+  `screenshot`.
+- **The agent kit** (`agent-kit/`, embedded in the DLL, written to `BepInEx/PalaceMod/Agent/` when the bridge turns on):
+  `level-building.md` (the guide), `SKILL.md` (Claude Code skill), `reference.md` (generated tables), `palace.py`
+  (stdlib Python CLI: JSON edit ops, offline checks, PNG renders, economy and wave summaries, in-game tests with
+  purchase plans), `examples/` (a worked level). `palace.py ref build` caches the catalog and every map's dump from the
+  running game; `ref doc` regenerates `reference.md`.
+- Offline path checks run on the cached grid (props and terrain applied; large enemies need ~4 m clearance on
+  terrain, measured: an 8 m ramp is closed to the large graph, 14 m open); the game's `paths` is the authority.
+
 ### File-overlap table
 
 | File | W1 | W2 | W3 | W4 |
