@@ -224,6 +224,13 @@ While `Current != null`:
 - Restart and retry keep the session (same host). The session ends when any other scene loads (the game loads scenes additively, so only `_UI` is ignored). `End()` with the host still loaded first takes the player to level select and keeps isolation until the map has unloaded. At the end the match-save context is left on "overwrite" and GameplayImpact's level is cleared, so the next vanilla run on the host starts clean.
 - Perks are allowed: they're the game's own difficulty and score system and apply to custom waves; the result records them.
 
+**Studio sessions** (`docs/builder-ux.md`, "Play mode"): `LaunchStudio(request, StudioSessionKind.Edit | Play)` starts a
+session marked as the Studio's (`StudioKind`), or, on the same host, swaps the running one's pack, level and wave set in
+place and reloads the host, so edit and play are one session that never ends in between. Studio sessions show no
+"Custom run" notice and record nothing in `ScoreStore`; the isolation above applies as for any session. Test play
+itself (the swap, sandbox, unlimited gold, music, the way back) is `Features/Builder/Studio/Play/` (`builder-play` dev
+command).
+
 ### Dev commands
 
 `python3 scripts/dev.py cmd "builder <sub>"`:
@@ -468,7 +475,7 @@ A level is a host map with layout edits and optionally one of the pack's wave se
 | `PathCheck.cs` | rescan and spawn-line-to-castle reachability (`PathUtilities.IsPathPossible` on `Enemy Units L`/`S`) |
 | `LevelPage.cs` | the pack screen's Levels tab and the level screen |
 
-**Data** (additive to v1, no version bump): `buildSlots.edit[]` gained `pos`/`rotY` (move a host slot); `buildSlots.add[]` gained `upgrades` (cost changes); `props` is now `PropDef {id, base: "mesh:<scenery mesh>", pos, rotY, scale, solid}`; `spawnLines.edit[] {ref, pos, rotY}` moves a host spawn line (pos = its new middle, rotY turns it about the middle). `spawnLines.add` is still not applied (validator warning).
+**Data** (additive to v1, no version bump): `buildSlots.edit[]` gained `pos`/`rotY` (move a host slot); `buildSlots.add[]` gained `upgrades` (cost changes); `props` is now `PropDef {id, base: "mesh:<scenery mesh>", pos, rotY, scale, solid}` (the host's scenery, or any main map's through the scenery library: builder-ux.md, "The cross-map scenery library"); `spawnLines.edit[] {ref, pos, rotY}` moves a host spawn line (pos = its new middle, rotY turns it about the middle). `spawnLines.add` is still not applied (validator warning).
 
 **Applying (play).** In order: host slot moves and costs; clones (`base: "scene:<slot>"`, inactive under a holder, deterministic save GUID from `<pack>/<level>/<id>`, costs, optional `activator`/`activatorLevel`, then reparented active so Awake/Start run and register it; with no activator it unlocks like its base); removals (deactivated before Start, so slots they unlock never appear; the castle can't be removed or moved); spawn line moves; props (plain mesh objects, layer Obstacle when solid, which the host's recast graphs rasterize: layers Ground and Obstacle, meshes on, colliders off). Two frames later, one `AstarPath.Scan()` and a reachability check from each ground spawn line to the castle; blocked lines get a warning notice and a log line. Restart and retry reapply it. Custom Runs lists levels next to wave sets; picking one arms the pre-level menu as for wave sets.
 
