@@ -140,7 +140,12 @@ namespace PalaceMod.Builder.Level
                 var homes = units.Select((u, i) => Started(movers[i]) ? OriginalRef(movers[i]) : u.transform.position).ToList();
                 var masks = units.Select(MaskOf).ToList();
                 (float, float)? Near(int i, float x, float z) => Nearest(new Vector3(x, homes[i].y, z), masks[i]) is Vector3 v ? (v.x, v.z) : null;
-                var placed = UnitSpread.Place(homes.Select(h => (h.x, h.z)).ToList(), Near, out bool[] changed);
+                // New homes stay on the building's side of any water (one flood per graph, only when a unit has to move).
+                var floods = new Dictionary<GraphMask, UnitSpread.Reach>();
+                var sp = slot.transform.position;
+                UnitSpread.Reach Reach(int i) => floods.TryGetValue(masks[i], out var r) ? r : floods[masks[i]] =
+                    UnitSpread.Flood(sp.x, sp.z, (x, z) => UnitSpread.IsOnGround(Near, i, x, z));
+                var placed = UnitSpread.Place(homes.Select(h => (h.x, h.z)).ToList(), Near, out bool[] changed, reach: Reach);
                 int here = 0;
                 for (int i = 0; i < units.Count; i++)
                 {
