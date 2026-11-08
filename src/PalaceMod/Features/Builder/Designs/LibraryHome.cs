@@ -56,7 +56,7 @@ namespace PalaceMod.Builder
                 page.Text("The Builder is still loading. Try again in a moment.");
                 return;
             }
-            float width = page.Size.x;
+            float width = page.Size.x - 24f;   // room for the page's scroll bar
             bool levels = kind == DesignKind.Level;
 
             // Toolbar: New · Import · Export · search · sort.
@@ -159,7 +159,8 @@ namespace PalaceMod.Builder
             string facts = level
                 ? $"{MapName(item.Host)} · {(item.Nights == 0 ? "map's nights" : item.Nights == 1 ? "1 night" : item.Nights + " nights")}"
                 : $"{BaseName(item.Base)} · {(item.Nights == 0 ? "unused" : item.Nights == 1 ? "in 1 level" : $"in {item.Nights} levels")}";
-            var tile = Card(parent, "item " + item.Id, at, size, item.Name, facts, DesignLibrary.Preview(item.Kind, item.Id) ?? Fallback(item.Kind, item.Host, item.Base));
+            var preview = DesignLibrary.Preview(item.Kind, item.Id);
+            var tile = Card(parent, "item " + item.Id, at, size, item.Name, facts, preview ?? Fallback(item.Kind, item.Host, item.Base), icon: preview == null && !level);
             tile.Key = item.Id;
             if (DesignLibrary.HasUnsaved(item.Kind, item.Id)) tile.SetBadge("unsaved", ModStyle.Accent);
             else if (!level && item.Side == UnitSide.Player) tile.SetBadge("ally");
@@ -189,7 +190,7 @@ namespace PalaceMod.Builder
             : EditorCatalog.Catalog?.FindUnit(ContentRef.Parse(baseRef).Id)?.Icon;
 
         /// <summary>A tile with a picture filling its top and a name plus a line of facts at the bottom.</summary>
-        private static ModTile Card(RectTransform parent, string name, Vector2 at, Vector2 size, string title, string facts, Sprite picture)
+        private static ModTile Card(RectTransform parent, string name, Vector2 at, Vector2 size, string title, string facts, Sprite picture, bool icon = false)
         {
             string text = $"{ModFields.TMPEscape(title)}\n<size=78%><color=#{ModStyle.Hex(ModStyle.Dim)}>{ModFields.TMPEscape(facts)}</color></size>";
             var tile = ModTile.Create(parent, name, size, null, text, 19f);
@@ -209,8 +210,11 @@ namespace PalaceMod.Builder
             var rt = img.rectTransform;
             rt.anchorMin = Vector2.zero;
             rt.anchorMax = Vector2.one;
-            rt.offsetMin = new Vector2(10f, 60f);
-            rt.offsetMax = new Vector2(-10f, -10f);
+            // A game icon (no portrait yet) is drawn smaller and in the menus' gold, like the game's own tiles.
+            float inset = icon ? 30f : 10f;
+            rt.offsetMin = new Vector2(inset, 60f + (icon ? 10f : 0f));
+            rt.offsetMax = new Vector2(-inset, -inset);
+            if (icon) img.color = ModStyle.Gold;
             if (picture != null) img.sprite = picture;
             else
             {
@@ -340,7 +344,7 @@ namespace PalaceMod.Builder
 
         private static ModTile InstalledTile(RectTransform parent, InstalledItem item, DesignKind kind, Vector2 at, Vector2 size)
         {
-            var tile = Card(parent, "installed " + item.Entry.Id + "/" + item.Id, at, size, item.name, item.detail, Fallback(kind, item.Host, item.Base));
+            var tile = Card(parent, "installed " + item.Entry.Id + "/" + item.Id, at, size, item.name, item.detail, Fallback(kind, item.Host, item.Base), icon: kind == DesignKind.Enemy);
             tile.SetBadge(item.Entry.Source == PackSource.BuiltIn ? "built in" : item.Entry.Source == PackSource.Plugin ? "mod" : "pack");
             tile.SetDim(true, 0.75f);
             tile.Applied += () => CopyIn(item, kind);

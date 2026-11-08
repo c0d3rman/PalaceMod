@@ -251,6 +251,24 @@ namespace PalaceMod.Builder
             }
         }
 
+        // ---------------------------------------------------------------- playing
+
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<PackEntry, Dictionary<string, List<ValidationIssue>>> playIssues = new();
+
+        /// <summary>What stops a design from playing: for a library level only that level, its nights and the enemies
+        /// they use (a problem in another level doesn't matter); for a pack (or no level), the pack's own issues.</summary>
+        public static IReadOnlyList<ValidationIssue> PlayIssues(PackEntry entry, string levelId)
+        {
+            if (entry?.Pack == null || entry.Id != PackId || levelId == null) return entry?.Issues ?? [];
+            var cache = playIssues.GetOrCreateValue(entry);
+            if (cache.TryGetValue(levelId, out var list)) return list;
+            var play = Studio.Play.TestPacks.Play(entry.Pack, levelId, out string error);
+            list = play == null ? [new ValidationIssue(Severity.Error, "levels", error)] : BuilderServices.Packs.Validate(play);
+            return cache[levelId] = list;
+        }
+
+        public static bool CanPlay(PackEntry entry, string levelId) => !PlayIssues(entry, levelId).Any(i => i.Severity == Severity.Error);
+
         // ---------------------------------------------------------------- export
 
         /// <summary>
