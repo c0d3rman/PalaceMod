@@ -487,6 +487,66 @@ Non-modal dock like the Studio's. Keys in brackets (context `BuilderPlay`).
      `EditorReturn.OnTransition` whenever it redirects.
 3. **Del deletes nothing and says "Nothing to undo today."** See "Input ownership".
 
+## Library: levels and enemies (R2-C1)
+
+The Builder is centred on two libraries, **My Levels** and **My Enemies**; packs exist only at export and import.
+
+**Storage** (`Model/LibraryStore.cs`, pure C#, tested in `tests/PalaceMod.Tests/LibraryTests.cs`):
+
+```text
+BepInEx/PalaceBuilder/library/
+  levels/<id>.json  levels/<id>.png      a level and the wave set(s) it owns; its saved preview
+  enemies/<id>.json enemies/<id>.png     one unit (enemy or custom troop); its saved portrait
+  assets.json  assets/                   the shared asset map and files
+  trash/                                 deleted and replaced items
+  .migrated                              written once the old packs were moved in (lists what moved)
+```
+
+- Item files are ordinary pack files (`palace-builder`, same version and migrations) holding one level or one unit,
+  plus `"library": {kind, created, origin}`. The file name is the id; ids never change (Rename sets the name).
+- **Wave sets belong to their level** (nights are per map: lines and gold are the host's). Their ids are unique across
+  the library; SaveWorkspace renames a clash in the workspace too.
+- **Enemies are shared**: any level spawns any library enemy by its plain unit id. Custom player troops live in the same
+  library (shown with an "ally" badge).
+- At runtime the library is one composed pack, id `library` (`LibraryStore.PackId`), registered in `PackRepository`
+  with the library root as its folder, so sessions, the unit factory, assets and validation are unchanged. Playing a
+  library level validates only that level, its nights and the units they use (`TestPacks.Play`).
+
+**Editing = workspaces** (`Designs/DesignLibrary.cs`). `DesignLibrary.OpenLevel(id)` gives a `PackDraft` holding that
+level, its nights and every enemy and asset; `OpenEnemies()` every enemy and no level. Both have pack id `library`
+(`draft.IsLibrary`). `draft.Save` writes only items that differ from the workspace's baseline (an untouched stale enemy
+never overwrites another workspace's save); enemies removed in the workspace go to trash. A dirty cached workspace is
+rebased on reopen (`PackDraft.RebaseLibrary`: untouched enemies follow the library). Level and enemy edits made from
+the Level Studio share its undo history and its save.
+
+**Previews** are saved snapshots, never live renders: `PackDraft.Saved` → `DesignLibraryManager` pictures the open
+Studio level from above (framing its items) into `levels/<id>.png` on every save; the Enemy Studio saves a portrait
+with `DesignLibrary.SavePreview(DesignKind.Enemy, id, texture)`. `DesignLibrary.Preview(kind, id)` loads a sprite,
+cached until the file changes.
+
+**Enemy Studio hook** (`StudioServices.Enemies`, `IStudioEnemyEditor.Open(draft, unitId | null, returnToLevelStudio,
+onReturn, out error)`): R2-C2 implements it; the Level Studio's spawn-group picker ("Edit enemy…", "New enemy…") and
+the home's enemy tiles call it. `DesignLibrary.NewEnemy(draft, baseRef, name)` adds a unit with a free id (one undo
+step).
+
+**Export / import.** `DesignLibrary.ExportFile/ShareCode(levels, enemies, name)` build a pack of the chosen levels, the
+chosen enemies, every enemy they use (spawns, troops, behaviours, transitively) and every asset named, in a staging
+folder, then write it with the existing `.tfpack`/share-code code. Every import (`IPackRepository.InstallNew`: share
+codes, `.tfpack` files, the import folder) adds the pack's levels and enemies to the library: an identical item is
+reused, an item from the same pack (`origin`) is replaced (old file to trash), any other clash gets a new id
+(`goblin-2`) and every reference (spawns, troops, behaviour params, `asset:` keys) is rewritten. Wave sets no level uses
+aren't imported (a warning says so).
+
+**Migration.** On the first scan, every pack folder in `packs/` (the player's own, e.g. `my-designs`, and installed
+demo packs) is imported with origin = its pack id and moved to `PalaceBuilder/migrated-packs/` (kept, never deleted).
+Unreadable packs stay where they are. Later folders in `packs/`, plugin and built-in packs stay installed packs: the
+home lists their levels read-only and copies one into the library to edit it. An old pack id still resolves (agent
+bridge `FindPack`, `palace.py`) to the levels that came from it.
+
+**Agent kit.** `palace.py` treats `library` as a pack (load composes the files, save writes changed items);
+`new <level> --host` makes a library level, `list` shows the library, `export` writes a `.tfpack` through the game
+(`agent library export ...`). `apply` checks only the levels its ops touched.
+
 ## Starting a level, and the empty map
 
 **Start popup** (`Studio/Start/StartPopup.cs`, `StartPopup.Open(draft)`; Pack › Levels › "New level"):
