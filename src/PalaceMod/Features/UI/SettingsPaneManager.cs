@@ -67,7 +67,7 @@ namespace PalaceMod
                 ("Stat details", ["Stat details"]),
             ]),
             ("Runs & saves", [
-                ("Practice", ["Savestates", "Retry earlier day"]),
+                ("Practice", ["Savestates", "Retry night", "Retry earlier day"]),
                 ("Scores", ["Unranked runs", "Bonus-safe saves"]),
                 ("Loadout randomizer", ["Loadout randomizer"]),
             ]),
@@ -102,7 +102,7 @@ namespace PalaceMod
             ["Build previews & income"] = "What the build previews show, and gold income above buildings and in the pause menu.",
             ["Upgrades"] = "See, undo and extend building and unit upgrades.",
             ["Pause menu"] = "Extra panels in the pause menu: the run's score and the night's enemies, and recording each night for Run Analytics.",
-            ["Practice"] = "Tools for practising a level: automatic savestates and their keys, and going back to an earlier day. Pause > Savestates and Pause > Debug are always there. They make the run unranked.",
+            ["Practice"] = "Tools for practising a level: automatic savestates and their keys, retrying a night with its purchases kept, and going back to an earlier day. Pause > Savestates and Pause > Debug are always there. They make the run unranked.",
             ["Scores"] = "How mod features affect high scores, and keeping the no-restart bonus.",
             ["About & logs"] = "PalaceMod's version badge, its log, and a bundle of logs and settings to attach to bug reports.",
             ["Fixes"] = "Fixes for small bugs in the base game. Turn one off to restore vanilla behavior.",
