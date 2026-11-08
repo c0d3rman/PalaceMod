@@ -243,7 +243,7 @@ and damage list. Use custom units sparingly; vanilla enemies are well balanced a
 | `check <pack> [--live]` | offline checks; `--live` adds the game's validator (exit 1 on errors) |
 | `show <pack> [level]` | the level as it will play: every slot, what it needs, costs, income, lines |
 | `render <pack> [level] -o f.png [--labels names\|costs\|reqs\|none] [--live]` | top-down picture; routes in one colour per line, named, lengths in the legend; offline they're an estimate, `--live` = real game render + the game's routes (level loaded) |
-| `economy <pack> [level] [--compare] [--report test.json]` | gold curve of a greedy all-economy player (assumes nothing is ever knocked out); vs the base map's vanilla; `--report`: what a saved `test` run actually received per dawn and which buildings were knocked out most |
+| `economy <pack> [level] [--compare] [--report test.json]` | gold curve of a greedy all-economy player (harbours grow and mines run dry each dawn as in the game; assumes nothing is ever knocked out); vs the base map's vanilla; `--report`: what a saved `test` run actually received per dawn and which buildings were knocked out most |
 | `waves <pack> [level] [--compare [Map]]` | per night: enemies, effective HP, gold, flyers; vs vanilla |
 | `play <pack> <level>` | load as a normal run (real gold); prints load warnings |
 | `sandbox <pack> <level> [--at X Z]` | Studio test play: unlimited gold, king at X,Z |
@@ -403,8 +403,8 @@ Buildings (cost per level; +income per dawn):
 | Castle Center | 3 / 7 / 20 | - | lose condition; shoots from L2; each level a perk choice; gates most of a map |
 | House | 2 / 2 | +1 / +1 | the basic economy; cheap, fragile (20 HP) |
 | Mill | 3 / 4 / 6 | +1 / +1 / +4 | unlocks its Fields (1 g each, +1); fields follow the mill |
-| Gold Mine | 5 | +6, falling each dawn | early burst |
-| Harbour | 3 / 7 | grows each dawn to a cap | slow, big |
+| Gold Mine | 5 | +6, then -1 each dawn down to 1 | early burst |
+| Harbour | 3 / 7 | 0, then +1 each dawn up to 5; L2 doubles it, the growth and the cap (10) | slow, big |
 | Defense Tower | 3 / 5 / 15 | - | 36 m range; L2 and L3 are choices (Castle/Sniper/Armored/Bunker; Archer/Ballistic/Fire/Healing spires) |
 | Barracks | 4 / 8 / 16 | - | melee squad (Knights / Spearmen / Flails / Berserkers) |
 | Archery Range | 4 / 8 / 16 | - | archer squad (Longbow / Crossbow / Hunters / Fire) |
@@ -415,7 +415,7 @@ Buildings (cost per level; +income per dawn):
 | Shrine | 3 | - | 777 HP decoy/buff |
 
 Vanilla maps for scale: 12-15 nights; starting gold 7-23; 10-18 houses, 2-5 mills, 10-31 towers, 2 barracks, 2
-archery ranges per map; an all-economy player (`economy`, an upper bound: real players also buy defence, and mines decline) reaches 13-60 gold per dawn by day 4 and 40-90 by day 6. Night 1 is 3-20 weak enemies
+archery ranges per map; an all-economy player (`economy`, an upper bound: real players also buy defence, and mines decline) reaches 5-50 gold per dawn by day 4 and 25-110 by day 6. Night 1 is 3-20 weak enemies
 (0.1-0.9k effective HP); nights grow roughly 1.3x per night with a dip every 3-4 nights and a final night 2-4x the
 one before it (Nordfels: 0.1k → 0.5k by N4 → 2.9k N10 → 6.8k N13). Flyers appear from about night 4-7.
 

@@ -124,11 +124,15 @@ On: Durststein, Freifort, Moorweg, Nordfels, Sturmklamm, Totend, Uferwind, Wildb
 
 On: Durststein, Freifort, Frostsee, Moorweg, Sturmklamm, Totend, Wildbach. Base HP 20.0.
 
+Each dawn: -1g income, down to 1g.
+
 - L1: 5g: +6g
 
 ### Harbour
 
 On: Freifort, Frostsee, Moorweg, Uferwind, Wildbach. Base HP 60.0.
+
+Each dawn: +1g income, up to 5g (starts at 0). L2 adds its current income again and doubles the growth and the cap.
 
 - L1: 3g: -
 - L2: 7g: +60 HP
@@ -271,21 +275,21 @@ Per night: enemies, effective HP (sum of HP x difficulty, elite x4), gold droppe
 
 **Nordfels**: d1 2, d2 6, d3 13, d4 19, d5 33, d6 42, d7 51, d8 51, d9 51, d10 51, d11 51, d12 51, d13 51
 
-**Durststein**: d1 13, d2 25, d3 38, d4 60, d5 84, d6 88, d7 88, d8 88, d9 88, d10 88, d11 88, d12 88
+**Durststein**: d1 6, d2 11, d3 16, d4 27, d5 54, d6 69, d7 82, d8 79, d9 76, d10 73, d11 73, d12 73
 
-**Frostsee**: d1 2, d2 5, d3 6, d4 13, d5 21, d6 35, d7 42, d8 42, d9 42, d10 42, d11 42, d12 42, d13 42
+**Frostsee**: d1 0, d2 3, d3 4, d4 5, d5 12, d6 26, d7 46, d8 67, d9 70, d10 69, d11 68, d12 67, d13 67
 
-**Uferwind**: d1 7, d2 13, d3 25, d4 45, d5 69, d6 84, d7 84, d8 84, d9 84, d10 84, d11 84, d12 84
+**Uferwind**: d1 1, d2 7, d3 17, d4 35, d5 66, d6 107, d7 114, d8 114, d9 114, d10 114, d11 114, d12 114
 
-**Sturmklamm**: d1 4, d2 10, d3 15, d4 30, d5 50, d6 65, d7 65, d8 65, d9 65, d10 65, d11 65, d12 65, d13 65
+**Sturmklamm**: d1 4, d2 10, d3 15, d4 30, d5 41, d6 65, d7 63, d8 61, d9 59, d10 57, d11 55, d12 55, d13 55
 
-**Wildbach**: d1 5, d2 6, d3 15, d4 27, d5 45, d6 65, d7 65, d8 65, d9 65, d10 65, d11 65, d12 65, d13 65
+**Wildbach**: d1 4, d2 9, d3 13, d4 24, d5 46, d6 64, d7 73, d8 71, d9 69, d10 67, d11 66, d12 65, d13 65
 
-**Moorweg**: d1 6, d2 13, d3 25, d4 43, d5 58, d6 58, d7 58, d8 58, d9 58, d10 58, d11 58, d12 58
+**Moorweg**: d1 6, d2 8, d3 18, d4 36, d5 49, d6 64, d7 64, d8 62, d9 60, d10 59, d11 58, d12 58
 
-**Freifort**: d1 5, d2 11, d3 22, d4 39, d5 54, d6 62, d7 62, d8 62, d9 62, d10 62, d11 62, d12 62, d13 62
+**Freifort**: d1 2, d2 5, d3 14, d4 27, d5 54, d6 81, d7 80, d8 79, d9 78, d10 77, d11 77, d12 77, d13 77
 
-**Totend**: d1 6, d2 19, d3 35, d4 49, d5 61, d6 61, d7 61, d8 61, d9 61, d10 61, d11 61, d12 61, d13 61, d14 61, d15 61
+**Totend**: d1 10, d2 18, d3 33, d4 49, d5 60, d6 59, d7 58, d8 57, d9 56, d10 56, d11 56, d12 56, d13 56, d14 56, d15 56
 
 ## Scenery library (prop meshes usable on any map)
 
