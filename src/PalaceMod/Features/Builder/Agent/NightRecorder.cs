@@ -139,7 +139,8 @@ namespace PalaceMod.Builder.Agent
                 ["units"] = new JObject { ["atDusk"] = n.UnitsStart, ["fewestStanding"] = n.UnitsMin == int.MaxValue ? 0 : n.UnitsMin, ["standingAtEnd"] = n.UnitsEnd },
                 ["king"] = new JObject { ["knockouts"] = n.KingKnockouts },
                 ["enemies"] = new JObject { ["seen"] = n.EnemiesSeen.Count, ["mostAtOnce"] = n.EnemiesMax },
-                ["gold"] = new JObject { ["atDusk"] = n.GoldStart, ["now"] = n.GoldEnd },
+                // atDusk: as the night began (after the day's purchases); atEnd: as it ended, before dawn income.
+                ["gold"] = new JObject { ["atDusk"] = n.GoldStart, ["atEnd"] = n.GoldEnd },
                 ["events"] = new JArray(n.Events),
             };
         }

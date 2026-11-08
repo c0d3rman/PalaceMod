@@ -24,10 +24,11 @@ game through the **Agent bridge**.
 7. Test in the game: `python3 palace.py test <pack-id> <level-id> --plan plan.json --shots shots/` (buys what a player
    would, plays the nights at 3x speed, reports each night), or `play` / `sandbox` and drive it step by step.
    `render --live` draws your overlay on a real top-down picture and the game's own enemy routes.
-8. Iterate: change ops, apply, re-test. Packs reload in the game within ~2 s; reload the level (`play` again) to see
-   changes.
+8. Iterate: change the ops file and `apply --fresh` it (the level is emptied back to what `level` made, its nights kept,
+   then the whole file runs again; ops aren't idempotent, so a plain second `apply` of the same file fails at the first
+   `add_slot`). Packs reload in the game within ~2 s; reload the level (`play` again) to see changes.
 
-All commands print JSON. Errors go to stderr as `{"error": "..."}` with exit code 2.
+All commands print JSON. Errors go to stderr as `{"error": "..."}` with exit code 2; `test` exits 1 when the run is lost.
 
 ## 2. Setup
 
@@ -35,7 +36,9 @@ All commands print JSON. Errors go to stderr as `{"error": "..."}` with exit cod
   Agent bridge > Enabled** (off by default). That also writes this kit to `<Thronefall>/BepInEx/PalaceMod/Agent/`.
   Settings > Mods > General > "Gameplay-changing features" must be on (custom levels are gameplay-changing).
 - `palace.py` finds the game itself when it runs from that folder; otherwise pass `--game "<Thronefall folder>"` or
-  set `PALACE_GAME`. Python 3.8+, no packages.
+  set `PALACE_GAME`. Python 3.8+, no packages. `where` says which install it picked and why (`chosenBecause`), lists
+  any others it found, and warns when it fell back to the default Steam install; a `--game` or `PALACE_GAME` that
+  doesn't exist is an error, never a silent fallback.
 - The bridge is a file channel in `BepInEx/PalaceMod/Agent/bridge/`: `palace.py` writes a request file, the game
   answers in a response file (and rewrites `status.json` every 2 s). Nothing listens on the network.
 - With the bridge on, the game keeps running when another window has focus. If a command times out, the game may be
@@ -65,9 +68,11 @@ All commands print JSON. Errors go to stderr as `{"error": "..."}` with exit cod
   and, through requirements, most of the map. Castle levels cost 3 / 7 / 20 gold on every map.
 - **Units.** Barracks, Archery Ranges and Hero's Quarters train squads that guard near their building and that the
   player can command. Towers shoot. Houses and mills defend themselves weakly.
-- **Enemies** pick targets by type: most attack the nearest player thing; spiders and wasps go for economy, racers
-  for the castle, siege for buildings, hunterlings for the king. Flyers ignore terrain and walls. Large enemies need
-  wider paths. See `reference.md` > Enemies.
+- **Enemies** pick targets by type: most attack the **nearest** player building or unit as they walk; spiders and
+  wasps go for economy, racers for the castle, siege for buildings, hunterlings for the king. Flyers ignore terrain and
+  walls. Large enemies need wider paths. See `reference.md` > Enemies. So whatever stands first on a lane is hit by
+  every wave on that lane, every night: a farm on the spawn side of a river isn't raided "sometimes", it's the first
+  contact (`economy --report` shows how often each building was knocked out in a test).
 - **Difficulty** per night multiplies enemy HP (x difficulty) and damage (x halfway to it); elite enemies have x4 HP,
   x3 damage.
 
@@ -78,7 +83,11 @@ All commands print JSON. Errors go to stderr as `{"error": "..."}` with exit cod
 - Positions in the pack are `[x, y, z]`. Ops take `"at": [x, z]` and fill `y` from the ground (the cached map
   grid, or your terrain). Use `"pos": [x, y, z]` only to force a height.
 - `rotY`: yaw in degrees around the vertical axis (copies keep their base's tilt). Turn buildings to face the
-  lane they guard; it is cosmetic.
+  lane they guard; for most buildings it is cosmetic.
+- **Which way lines and walls run**: at `rotY` 0 a spawn line's segment, and a wall or gate copied from a host's
+  "Gate Variant", runs **east-west** (along x), so it faces, or blocks, traffic moving north or south; at `rotY` 90 it
+  runs north-south. To close an east-west pass, use `rotY` 90. A gate's length varies by host piece; check it with
+  `render --live` or a screenshot before relying on it to seal a gap.
 - Build slots need ~5 m between centres (7+ for large buildings: castle, barracks, temple); the checker warns under
   4.5 m. Keep slots on walkable ground (green in renders) so the king can reach them.
 - The game camera looks at the map from the south-ish at an angle; a picture's "up" is +z, not the player's view.
@@ -140,6 +149,12 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
   you don't use (`remove_spawn_line`), or they keep showing in `paths`, renders and the minimap. A wave set that
   still spawns from a removed line is an error, and so is removing a line the map's own nights use while the level
   has no wave set. Every slot you add defaults to "needs the castle built" when you use ops.
+- **The host still decides a lot**, even on `flat`: which building kinds exist (`add_slot` copies a host slot of that
+  kind, so a kind the host lacks can't be placed: Frostsee has no Mill), the castle position, the playable rectangle
+  (`terrain_init`'s default grid), the light and ground palette, and how much room the terrain has above the castle
+  (heights are world heights, clamped to [-8, 30] m: Sturmklamm's castle sits at 31 m, so nothing there can rise above
+  it). `reference.md` > Maps > "What the host decides" has the kinds-by-host table and each host's rectangle and
+  headroom. Choose the host from it before designing.
 - `base: null` (the map as it is) keeps all vanilla slots, scenery and routes; you then remove, move, re-price and
   add. Good for remixes; for original designs use `cleared` or `flat`.
 - Added slots are named `PalaceBuilder <id>` in the running game; `palace.py build`/plans accept the bare id.
@@ -166,7 +181,11 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
   1): a building is never upgraded past the castle's level, which is what makes castle upgrades the pacing lever.
   Added slots copy their base's cap.
 - Ops shorthand (palace.py): `"castle"` (castle built), `"castle:3"` (castle level 3), `"h1"` (slot h1 built),
-  `"h1:2"` (h1 at level 2), `"start"` (from the start).
+  `"h1:2"` (h1 at level 2), `"start"` (from the start). Levels in the shorthand count from 1 = built, and `show`,
+  `ref slots` and `test` reports use the same counting (`"needs": "h1:1"` = h1 built, a build result's `from`/`to` 0 =
+  unbuilt, 1 = built). Only the raw pack JSON counts from 0 (`"level": 0` = built).
+- `chain` decides the links itself (tree mode joins each slot to its nearest chained neighbour, not always the castle);
+  `apply` prints every link (`h3 <- h6`), and a plan must buy a slot's prerequisite first.
 
 ### WaveSetDef (the nights)
 
@@ -219,27 +238,27 @@ and damage list. Use custom units sparingly; vanilla enemies are well balanced a
 | `ref build [--maps A,B] [--force]` | cache catalog + map dumps from the game (needed once) |
 | `ref maps` / `ref slots <map> [--kind House]` / `ref buildings [--kind]` / `ref enemies [--player]` / `ref waves <map> [--raw]` / `ref scenery [map]` | reference data |
 | `ref render <map> -o f.png` / `ref doc` | base map picture (with offline enemy routes) / regenerate reference.md |
-| `new <pack>` / `level <pack> <level> --host M [--base map\|cleared\|flat] [--waves empty\|vanilla\|none]` | create |
-| `apply <pack> ops.json [--level L] [--dry-run]` | run ops; saves; prints offline errors/warnings |
+| `new <pack>` / `level <pack> <level> --host M [--base map\|cleared\|flat] [--waves empty\|vanilla\|none] [--force]` | create (`--base flat` also runs a default `terrain_init`; `--force` replaces the level) |
+| `apply <pack> ops.json [--level L] [--dry-run] [--fresh]` | run ops; saves; prints offline errors/warnings. `--fresh` first empties the level (nights kept) so the same file can be re-applied |
 | `check <pack> [--live]` | offline checks; `--live` adds the game's validator (exit 1 on errors) |
 | `show <pack> [level]` | the level as it will play: every slot, what it needs, costs, income, lines |
 | `render <pack> [level] -o f.png [--labels names\|costs\|reqs\|none] [--live]` | top-down picture; routes in one colour per line, named, lengths in the legend; offline they're an estimate, `--live` = real game render + the game's routes (level loaded) |
-| `economy <pack> [level] [--compare]` | gold curve of a greedy all-economy player; vs the base map's vanilla |
+| `economy <pack> [level] [--compare] [--report test.json]` | gold curve of a greedy all-economy player (assumes nothing is ever knocked out); vs the base map's vanilla; `--report`: what a saved `test` run actually received per dawn and which buildings were knocked out most |
 | `waves <pack> [level] [--compare [Map]]` | per night: enemies, effective HP, gold, flyers; vs vanilla |
 | `play <pack> <level>` | load as a normal run (real gold); prints load warnings |
 | `sandbox <pack> <level> [--at X Z]` | Studio test play: unlimited gold, king at X,Z |
 | `edit <pack> <level>` | open the level in the in-game Studio (the player's editor: F5 there test-plays); it edits its own copy and Ctrl+S writes pack.json, so don't `apply` while the player has unsaved Studio changes |
-| `test <pack> <level> [--nights 1-3] [--plan p.json] [--build all] [--god] [--invulnerable] [--gold N] [--speed 3] [--shots dir]` | load, buy per plan each day, play nights, report each |
+| `test <pack> <level> [--nights 1-3] [--plan p.json] [--carry] [--save] [--catchup play\|free\|none] [--free] [--build all] [--god] [--invulnerable] [--gold N] [--speed 3] [--shots dir] [--quiet]` | load, buy per plan each day once its gold is in, play nights, report each (one progress line per night on stderr) |
 | `night [N] [--speed 3]` | start the next night (or jump to night N) and wait for its report |
-| `build <slot> [level] [branch] [--pay]` | build/upgrade now (free unless --pay); `castle`, an added id, or a host name |
+| `build <slot> [level] [branch] [--pay]` | build/upgrade now (free unless --pay); `castle`, an added id, or a host name; exit 1 if refused |
 | `spawn <unit> [count] [--elite] [--line L \| --at X Z]` | spawn enemies now |
-| `cheat god\|invulnerable\|infinitegold [on\|off]`, `cheat gold N`, `cheat speed X`, `cheat kill`, `cheat heal`, `cheat endnight`, `cheat teleport X,Z` | test helpers |
+| `cheat god\|invulnerable\|infinitegold [on\|off]`, `cheat gold N`, `cheat speed X`, `cheat kill`, `cheat heal`, `cheat endnight`, `cheat teleport X,Z` (or `X Z`; negatives are fine) | test helpers |
 | `paths [--rescan] [--points]` | the game's own route from every ground line to the castle, on the graph its enemies use (`Enemy Units L` if the line spawns large ones): `length` m from the line itself, `at` (the line's middle), `start` (where that lands on walkable ground), `snap` (m between them) and a `warning` when the line is over 10 m off walkable ground; `--points` adds the waypoints `[[x, z], ...]` |
 | `paths --between X1 Z1 X2 Z2` | whether each ground graph (small enemies, large enemies, the king's `Player Units S`) connects two points, and how far each point is from walkable ground |
 | `report` | the current or last night's report |
 | `shot -o f.png` | screenshot of the game window |
 | `game status` / `game slots` / `game log` / `game menu` / `game cmd "<raw>"` | raw game access |
-| `share <pack> [--export]` | share code / .tfpack file through the game |
+| `share <pack> [--clipboard]` / `share <pack> --export [-o f.tfpack] [--force]` | share code (JSON; the clipboard only with `--clipboard`) / .tfpack file (`written`: its exact path; without `-o` a new numbered file in the game's `exports/` folder) |
 
 ### Ops (JSON list; each `{"op": ..., ...}`; `"level"` optional when the pack has one level or with `--level`)
 
@@ -266,7 +285,7 @@ and damage list. Use custom units sparingly; vanilla enemies are well balanced a
 | `ramp` | `from` [x,z], `to` [x,z], `width`, `fromHeight`, `toHeight`, `falloff` |
 | `paint` | `material` `ground`\|`high`\|`low`\|`earth`\|`sand`\|`road`\|`rock`, shape |
 | `block` | `on` (true), shape: ground units and the king can't enter; works on any base |
-| `water` | `level` (m relative to y, default -1), `on`, shape; digs the ground to level-1 m |
+| `water` | `level` (m relative to y, default -1), `on`, shape; digs the ground to level-1 m. `on: false` makes the cells land again and raises the dug ground back to `height` (default 0; `fill: false` keeps it dug) |
 | `set` | `path` (e.g. `"levels[0].waveSet"`), `value` (or `delete: true`): raw edit |
 
 Shapes: `"circle": {"center": [x,z], "radius": r}`, `"rect": {"min": [x,z], "max": [x,z]}`,
@@ -281,17 +300,48 @@ Shapes: `"circle": {"center": [x,z], "radius": r}`, `"rect": {"min": [x,z], "max
 ```
 
 Keys are days (the day before night N). Items are slot ids (one level up) or `{slot, level, branch}` (up to that
-level; `branch` picks a choice, 0-based). Purchases are paid with the run's gold (`--free` to skip) and stop when it
-runs out; the report lists what was bought and why anything failed. Write the plan a real player would follow; it
-proves the economy works, not just the defence.
+level, counting from 1 = built; `branch` picks a choice, 0-based). Each day `test` first waits until the dawn income
+and the night's coins are in the treasury, then buys in list order with the run's gold. Write the plan a real player
+would follow; it proves the economy works, not just the defence.
+
+- A refused item (`"ok": false` with an `error`: not enough gold, requirement not met, castle level too low) is an
+  error in the report, never silent. By default it's dropped. `"options": {"carry": true}` (or `--carry`, or
+  `"carry": true` on one item) retries it at the start of the next day until it's bought.
+- `"options": {"save": true}` (or `--save`, or `"save": true` on one item): when an item is refused for gold, buy
+  nothing else that day, so the gold is kept for it (with carry, the rest of the day moves to the next day too). That's
+  how a plan "saves up" for castle level 3 instead of spending the 20 g on houses.
+- `--free`: purchases cost nothing (a defence-only probe; the economy isn't tested).
+- `--nights N-M`: the earlier nights are played first (`--catchup play`, the default: the plan with real income, so
+  night N starts with what a player would have; listed under `catchup`), or skipped: `--catchup free` builds the
+  earlier days' items for free and jumps to night N, `--catchup none` jumps with nothing built (add `--gold X`).
+
+```json
+{ "options": {"carry": true},
+  "1": ["castle", "h1", "h2"],
+  "3": [{"slot": "castle", "level": 2, "branch": 0, "save": true}, "t1", "h3"] }
+```
 
 ### Reading a night report
 
-`outcome`: `dawn` (survived), `victory` (survived the last night), `defeat` (castle fell), `timeout` (enemies
-still alive: stuck or unreachable; see `timeoutStatus`). Also `castle.minHp`/`maxHp`, `buildings.knockedOut` (names),
-`units` standing, `king.knockouts`, `enemies.seen`, gold at dusk and now, timed `events`. The king does nothing during
-`test` (he stands where he was), so a defence that holds in `test` holds without the player's help; a real player adds
-his own damage (roughly one strong unit). Use `--god` to keep the king alive, `--invulnerable` to test pathing alone.
+The `test` output: `result` (`victory`, `survived` (every requested night, not the last), `defeat`, `timeout`),
+`refusedPurchases`, a `summary` row per night (outcome, castle low, knock-outs, bought, refused, gold after dawn,
+income paid), then the full `nights` reports. Each night report:
+
+- `outcome`: `dawn` (survived), `victory` (survived the last night), `defeat` (castle fell), `timeout` (enemies still
+  alive: stuck or unreachable; see `timeoutStatus`).
+- `bought`: the purchases made on the day **before** this night, one entry per plan item, always the same shape:
+  `{slot (the plan's id: an added slot's bare id, castle, or a host name), name (the game object), kind, from, to,
+  target, spent, gold (after it), ok, error}`; `plannedDay` when a carried item was bought later.
+- `castle.minHp`/`maxHp`, `buildings.knockedOut` (names; they pay nothing the next dawn), `units` standing,
+  `king.knockouts`, `enemies.seen`, timed `events`.
+- `gold`: `atDusk` (as the night began, after the day's purchases), `atEnd` (as it ended, before dawn), `afterDawn`
+  (the next morning once income and the night's coins are in: what the next day can spend).
+- `income`: the next dawn's `nominal` income (every building), `blocked` (knocked out that night) and `paid`.
+- `after`: the game status at that same moment (the next morning; the end screen after the last night).
+
+The king does nothing during `test` (he stands where he was), so a defence that holds in `test` holds without the
+player's help; a real player adds his own damage (roughly one strong unit). Use `--god` to keep the king alive,
+`--invulnerable` to test pathing alone.
 
 ## 7. Terrain (base "flat")
 
@@ -300,7 +350,9 @@ host's. The castle keeps its host x/z and stands on whatever height you give the
 ground too.
 
 - Grid: `origin` [x,z] is the min corner, `cell` metres (default 2), `size` [W,H] cells (each ≤ 400). Corner heights,
-  metres relative to `y` (default: the castle's height), world height clamped to [-8, +30] m. The grid's edge is a
+  metres relative to `y` (default: the castle's height); the resulting **world** height is clamped to [-8, +30] m
+  (not relative to the castle: on a high host like Sturmklamm, castle y 31, nothing can rise above the castle; see
+  reference.md > "What the host decides" for each host's headroom). The grid's edge is a
   wall. `terrain_init` without origin/size covers the map's walkable area.
 - Heights: `terrain` with `set` (flat plateau/basin to a height), `raise`/`lower` (add), `smooth`; `ramp` for slopes.
   Slopes steeper than ~32° are cliffs: unwalkable for ground units and the king, painted as rock. A plateau with one
@@ -318,8 +370,8 @@ ground too.
   | Ramp between cliffs, straight | open from 4 | closed ≤ 9, open from 11 (10 depends on the grid) |
   | Ramp between cliffs, diagonal | open from 4 | closed ≤ 8, open from 11 (9-10 depends on the grid) |
 
-  Causeways: a water ring (dug, the default), then `water` `on: false` plus `terrain` `set` height 0 along a `line`
-  of that width. Ramps: a 6 m plateau (`falloff` 1) and a `ramp` (`falloff` 1). "Depends on the grid": shapes fill
+  Causeways: a water ring (dug, the default), then `water` `on: false` along a `line` of that width (it raises the
+  dug ground back to height 0, like a `terrain` `set` 0 over the same line). Ramps: a 6 m plateau (`falloff` 1) and a `ramp` (`falloff` 1). "Depends on the grid": shapes fill
   whole 2 m cells, so where the edges fall on the grid moves the threshold. For a lane only small enemies use, make
   it 6-8 m wide; for one everyone uses, 14 m+. `check` and `render` model the same rules offline (they agreed with
   the game on 140 of 144 measured passages, and erred towards "closed"); confirm with `paths` or
@@ -334,7 +386,7 @@ ground too.
   lighter and `low` a darker grass shade, `earth` a bank colour, `sand` the host's sand, `road` a path that stands out
   from the grass, `rock` the host's pale cliff colour. `block`: invisible no-walk cells (works on any base, also on
   vanilla ground). `water`: unwalkable cells drawn as water, the ground dug under it to `level` - 1 m; `on: false`
-  removes the water but leaves the ground dug (raise it back with `terrain`).
+  makes the cells land again and raises the dug ground back to `height` (default 0; `"fill": false` keeps it dug).
 - On a flat base the host's own rivers, lakes and ponds are hidden (only the field's `water` cells show); a sea all
   round the map (Frostsee) stays round the field. On `cleared` the host's water stays.
 - Each level stores terrain compressed in the pack (a few KB); big terrain levels share as `.tfpack` files rather
@@ -383,6 +435,24 @@ one before it (Nordfels: 0.1k → 0.5k by N4 → 2.9k N10 → 6.8k N13). Flyers 
   near it matter.
 - Leave room: the king must reach every slot; slots 5-7 m apart; don't bury slots in solid props.
 
+**Level shapes**
+
+The tools support many kinds of level; pick the one that serves the idea instead of a default. Some shapes, with the
+tools that make them:
+
+- *Open field*: few obstacles, lanes made by distance and enemy mix; wide approaches, towers and units do the work.
+- *Valley or canyon*: `terrain` plateaus and cliffs (`ramp` for the ways up) funnel lanes into chokes.
+- *Highland keep*: the castle on a mesa with one or two ramps; the economy sprawls below where it's exposed.
+- *River or delta*: `water` bands with fords and bridges (`water on:false` lines) decide the crossings.
+- *Island or causeways*: the castle ringed by water, joined to the shore by a few causeways.
+- *Forest maze*: solid props (`scatter`) wall off lanes; gaps in the trees are the chokes.
+- *Split kingdom*: two or three economic districts in different directions, each with its own lane to hold.
+- *Long road*: one long winding route (or two) with layered defences along it, fliers to punish over-commitment.
+- *Remix*: `base: map` keeps a vanilla map and reshapes it: remove, move and re-price slots, add lines.
+
+Mix them, and let the host's palette and shape suggest one. Independent designs tend to converge on the castle
+island with three causeways; if that's where yours is heading, check whether another shape fits the idea better.
+
 **Economy vs defence**
 
 - The core decision each day is "grow or defend". Make both possible every day: early nights must be beatable with
@@ -391,7 +461,10 @@ one before it (Nordfels: 0.1k → 0.5k by N4 → 2.9k N10 → 6.8k N13). Flyers 
 - A realistic player (half the gold into economy) should reach about 10-25 per dawn by night 4 and 30-50 by night 8. Run
   `economy --compare`: your curve should sit near the host's vanilla one, unless the level is deliberately lean.
 - Gate expansions with castle levels (2 and 3) and with chains, so the map unfolds over the first 4-6 nights.
-- Put the best economy where it's exposed (far mills, mines on an entrance) so greed has a cost.
+- Put the best economy where it's exposed (far mills, mines on an entrance) so greed has a cost. Mind the targeting
+  rule (section 3): a building that is the first thing on a lane is hit every night, so it rarely pays at all. Give
+  exposed economy some cover (a tower in range, a wall in front), and check the real income with
+  `economy --report test.json` rather than `economy`'s all-standing curve.
 - Every enemy gold drop matters early (5-15 per night in vanilla); late nights drop 15-60.
 
 **Nights**
@@ -412,14 +485,19 @@ one before it (Nordfels: 0.1k → 0.5k by N4 → 2.9k N10 → 6.8k N13). Flyers 
 3. `play`, then `paths`: every ground line reaches the castle (the game's own check).
 4. `test --plan` with a realistic plan for all nights: survives with some damage early, close calls late. If night
    1-3 are lost, they're too hard; if nothing is ever knocked out, too easy.
-5. `test --nights N --gold X --plan` to probe a single late night.
+5. `test --nights N --plan` to probe a late night: it plays the earlier nights first, so night N starts with a real
+   player's kingdom (slow; `--catchup free` jumps there with the earlier days built for free instead).
 6. Screenshots (`--shots`) of the first and last night: does it read well?
 
 ## 10. Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
-| `The Agent bridge isn't on` | enable it in Settings > Mods > Builder; the game must be running |
+| `The Agent bridge isn't on` | enable it in Settings > Mods > Builder > Agent bridge; the game must be running |
+| `The game isn't running` / `hasn't updated the Agent bridge` | the game was closed (start it again; the bridge stays on), or it's loading or frozen |
+| `slot 'x' already exists` on a second `apply` | ops aren't idempotent: `apply --fresh ops.json` |
+| a plan item `isn't available yet` | its prerequisite isn't built yet: check `apply`'s chain links or `show`, buy the prerequisite first |
+| `test` says the economy is fine but the run starves | buildings knocked out pay nothing: `economy --report test.json` |
 | `No reference data yet` | `ref build` (game running) |
 | `the game's validator found errors` | read the listed `issues` (JSON paths into the pack) |
 | a slot never appears | its prerequisite isn't on the level, isn't reachable, or needs a castle level that's never bought; `show` lists `needs` |

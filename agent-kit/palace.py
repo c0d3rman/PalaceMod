@@ -13,7 +13,7 @@ Made for coding agents. Python 3.8+, standard library only, any OS. Read level-b
     python3 palace.py economy my.pack gorge ; python3 palace.py waves my.pack gorge
     python3 palace.py test my.pack gorge --nights 1-3 --plan plan.json --shots shots/
 
-Every command prints JSON (or a text table with --text where offered) and exits non-zero on failure.
+Every command prints JSON and exits non-zero on failure (`test`: 1 when the run is lost or stuck).
 """
 import argparse
 import base64
@@ -74,25 +74,50 @@ def steam_roots():
     return [home / ".steam/steam/steamapps/common/Thronefall", home / ".local/share/Steam/steamapps/common/Thronefall"]
 
 
+def pid_alive(pid):
+    """Whether a process exists; None when that can't be told (no pid, or Windows, where os.kill would end it)."""
+    if not isinstance(pid, int) or pid <= 0 or sys.platform.startswith("win"):
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return None
+    return True
+
+
 class Env:
     """Where things are: the game's BepInEx folder, the packs, the kit (this folder) and its reference cache."""
 
     def __init__(self, game=None):
         self.bepinex = None
+        self.source = None
         candidates = []
         if game:
-            candidates.append(Path(game).expanduser())
+            candidates.append((Path(game).expanduser(), "--game"))
         if os.environ.get("PALACE_GAME"):
-            candidates.append(Path(os.environ["PALACE_GAME"]).expanduser())
+            candidates.append((Path(os.environ["PALACE_GAME"]).expanduser(), "PALACE_GAME"))
         # The kit lives in <game>/BepInEx/PalaceMod/Agent when the mod wrote it.
         if HERE.parent.name == "PalaceMod" and HERE.parent.parent.name == "BepInEx":
-            candidates.append(HERE.parent.parent.parent)
-        candidates += steam_roots()
-        for c in candidates:
+            candidates.append((HERE.parent.parent.parent, "the game this palace.py was written into"))
+        candidates += [(r, "the default Steam install") for r in steam_roots()]
+        self.found = []
+        for c, why in candidates:
             b = c if c.name == "BepInEx" else c / "BepInEx"
-            if b.is_dir():
-                self.bepinex = b
-                break
+            if b.is_dir() and b.resolve() not in [f.resolve() for f, _ in self.found]:
+                self.found.append((b, why))
+        self.error = None
+        if self.found:
+            self.bepinex, self.source = self.found[0]
+        explicit = [(c, why) for c, why in candidates if why in ("--game", "PALACE_GAME")]
+        if explicit and self.source != explicit[0][1]:
+            # Never fall back to another install when one was named: that could be the player's real game.
+            c, why = explicit[0]
+            self.error = f"{why} points at {c}, which has no BepInEx folder (is it the Thronefall folder?)"
+            self.bepinex, self.source = None, None
         self.kit = HERE
         # The reference cache lives with the game's copy of the kit, so every copy of palace.py shares it.
         game_kit = self.bepinex / "PalaceMod" / "Agent" if self.bepinex else self.kit
@@ -100,7 +125,7 @@ class Env:
 
     def need_game(self):
         if not self.bepinex:
-            raise Fail("Can't find the game's BepInEx folder. Pass --game <Thronefall folder> or set PALACE_GAME.")
+            raise Fail(self.error or "Can't find the game's BepInEx folder. Pass --game <Thronefall folder> or set PALACE_GAME.")
         return self.bepinex
 
     @property
@@ -124,29 +149,57 @@ class Game:
     def __init__(self, env):
         self.env = env
 
-    def status_file(self):
+    def status_file(self, tries=4):
+        """bridge/status.json plus its age in seconds and whether its process is alive; None if there is none. A read
+        that fails (the game rewriting it) is retried, so one unlucky read never looks like "bridge off"."""
         f = self.env.bridge / "status.json"
-        if not f.exists():
-            return None
-        try:
-            s = json.loads(f.read_text())
-        except (ValueError, OSError):
-            return None
-        s["age"] = round(time.time() - s.get("time", 0), 1)
-        return s
+        for attempt in range(tries):
+            if attempt:
+                time.sleep(0.25)
+            if not f.exists():
+                continue
+            try:
+                s = json.loads(f.read_text())
+            except (ValueError, OSError):
+                continue
+            s["age"] = round(time.time() - s.get("time", 0), 1)
+            alive = pid_alive(s.get("pid"))
+            if alive is not None:
+                s["running"] = alive
+            return s
+        return None
 
-    def require(self):
-        s = self.status_file()
-        if s is None:
-            raise Fail("The Agent bridge isn't on. In the game: Settings > Mods > Builder > Agent bridge > Enabled (it's off by "
-                       "default), with the game running. Then retry.")
-        if s["age"] > 15:
-            raise Fail(f"The Agent bridge last answered {s['age']} s ago: is the game running (and not frozen)?")
-        return s
+    def require(self, grace=30):
+        """The bridge's status, or a Fail that says what's wrong: bridge off, game not running, or game not answering.
+        A game that is running but quiet (a scene load can stall it for a while) gets `grace` seconds to come back."""
+        deadline = time.time() + grace
+        while True:
+            s = self.status_file()
+            if s is None:
+                raise Fail(f"The Agent bridge isn't on ({self.env.bridge / 'status.json'} doesn't exist). In the game: Settings > "
+                           "Mods > Builder > Agent bridge > Enabled (it's off by default), with the game running. Then retry.")
+            if s["age"] <= 15 and s.get("running") is not False:
+                return s
+            if s.get("running") is False:
+                raise Fail(f"The game isn't running: its last bridge status is {s['age']} s old and its process ({s.get('pid')}) "
+                           f"is gone. Start the game (the bridge stays on), then retry.")
+            if time.time() >= deadline:
+                raise Fail(f"The game hasn't updated the Agent bridge for {s['age']} s (process {s.get('pid')}"
+                           f"{' still running' if s.get('running') else ''}): loading, frozen, or paused? Then retry.")
+            time.sleep(1.0)
+
+    def touch_activity(self):
+        """Marks client activity (bridge/last-request), so a harness that watches the game, like the PalaceMod dev pool's
+        idle lease, knows the game is in use."""
+        try:
+            (self.env.bridge / "last-request").touch()
+        except OSError:
+            pass
 
     def raw(self, text, timeout=60):
         """Sends one command line; returns its text result. Raises Fail with the game's message on an error."""
         self.require()
+        self.touch_activity()
         folder = self.env.bridge
         rid = uuid.uuid4().hex
         response = folder / f"command-{rid}.response"
@@ -158,6 +211,7 @@ class Game:
         tmp.write_text(f"@{rid}\n{text.strip()}\n")
         os.replace(tmp, request)
         deadline = time.time() + timeout
+        next_check = time.time() + 3
         while time.time() < deadline:
             time.sleep(0.1)
             if response.exists():
@@ -169,6 +223,13 @@ class Game:
                 if status != "ok":
                     raise Fail(f"game: {result.strip()}")
                 return result
+            if time.time() >= next_check:
+                # A game that quit (or crashed) mid-command would leave us waiting out the whole timeout.
+                next_check = time.time() + 3
+                s = self.status_file()
+                if s is not None and s.get("running") is False:
+                    request.unlink(missing_ok=True)
+                    raise Fail(f"The game isn't running: it exited while handling `{text}` (process {s.get('pid')} is gone).")
         raise Fail(f"The game didn't answer `{text}` within {timeout} s (loading? check `palace.py game log`).")
 
     LOADS = ("play ", "sandbox ", "edit ", "vanilla ", "menu")
@@ -197,7 +258,7 @@ class Game:
                 if predicate(last):
                     return last
             except Fail as e:
-                if "isn't on" in str(e):
+                if "isn't on" in str(e) or "isn't running" in str(e):
                     raise
             time.sleep(poll)
         raise Fail(f"Timed out after {timeout} s waiting for {what}; last status: {json.dumps(last)}")
@@ -675,7 +736,7 @@ class Ops:
         bs = ensure(lv, "buildSlots", {})
         adds = ensure(bs, "add", [])
         if any(a.get("id") == sid for a in adds):
-            raise Fail(f"slot {sid!r} already exists (use move_slot / set_slot)")
+            raise Fail(f"slot {sid!r} already exists (use move_slot / set_slot; to re-apply a whole ops file, `apply --fresh`)")
         src = self.ref.map(lv["host"])
         if op.get("from"):
             base = next((s for s in src["slots"] if s["name"] == op["from"]), None)
@@ -823,6 +884,7 @@ class Ops:
         first = op.get("first", "castle")
         every = int(op.get("every", 0))
         n = 0
+        links = []
         castle_level = 1
         m = re.match(r"^castle:(\d+)$", first)
         if m:
@@ -839,7 +901,9 @@ class Ops:
                 spec = p
             _, e = self.find_slot_entry(lv, k)
             e["requires"] = parse_req(spec, lv, None)
-        return f"chained {len(keys)} slots ({mode})"
+            links.append(f"{str(k).split('add:', 1)[-1]} <- {str(spec).split('add:', 1)[-1]}")
+        # Print the links: a plan has to buy each slot's prerequisite first.
+        return f"chained {len(keys)} slots ({mode}): " + ", ".join(links)
 
     # ---- props -------------------------------------------------------------------------------------------------------
 
@@ -854,7 +918,7 @@ class Ops:
         props = ensure(lv, "props", [])
         pid = op.get("id") or self.new_prop_id(props, op["mesh"])
         if any(p.get("id") == pid for p in props):
-            raise Fail(f"prop {pid!r} exists")
+            raise Fail(f"prop {pid!r} exists (to re-apply a whole ops file, `apply --fresh`)")
         props.append({"id": pid, "base": self.prop_base(lv, op["mesh"]), "pos": self.pos(lv, op), "rotY": float(op.get("rotY", 0)),
                       "scale": float(op.get("scale", 1)), "solid": bool(op.get("solid", True))})
         return f"prop {pid}"
@@ -925,7 +989,7 @@ class Ops:
         if not ID_RE.match(lid):
             raise Fail("spawn line id: a-z 0-9 . _ -")
         if any(a.get("id") == lid for a in adds):
-            raise Fail(f"spawn line {lid!r} exists")
+            raise Fail(f"spawn line {lid!r} exists (to re-apply a whole ops file, `apply --fresh`)")
         adds.append({"id": lid, "pos": self.pos(lv, op), "rotY": float(op.get("rotY", 0)), "width": float(op.get("width", 10)),
                      "ground": bool(op.get("ground", True)), "large": bool(op.get("large", True)), "flying": bool(op.get("flying", True))})
         return f"spawn line {lid}"
@@ -1157,9 +1221,18 @@ class Ops:
             t.water_level = float(op["level"])
         on = op.get("on", True)
         shape = Shape.from_op(op)
-        n = t.paint_cells(shape, "water", 1 if on else 0)
+        cells = list(t.cells_in(shape))
+        for idx in cells:
+            t.water[idx] = 1 if on else 0
+        n = len(cells)
         if on and op.get("dig", True):
             t.dig_water()
+        elif not on and op.get("fill", True):
+            # Land again: corners the water dug (and no remaining water cell touches) go back to "height" (default 0, the
+            # terrain's y), so islands and causeways aren't left 2 m down. "fill": false keeps the dug ground.
+            n_fill = t.fill_unwatered(cells, float(op.get("height", 0)))
+            t.store(lv)
+            return f"water off: {n} cells, {n_fill} corners raised back to {float(op.get('height', 0)):g} m"
         t.store(lv)
         return f"water {n} cells"
 
@@ -1401,6 +1474,22 @@ class Terrain:
             for ci in (j * W + i, j * W + i + 1, (j + 1) * W + i, (j + 1) * W + i + 1):
                 if self.hts[ci] > limit:
                     self.hts[ci] = limit
+
+    def fill_unwatered(self, cells, height):
+        """After cells stop being water: their corners that sit at or below the dig depth are set to `height` (m relative
+        to y), so the new land is level to its edge (the bank's slope falls inside the neighbouring water cells, which
+        are unwalkable anyway). Returns how many corners changed."""
+        W = self.w + 1
+        limit = int(round((self.water_level - 1.0) * 100))
+        target = self.clamp_cm(height)
+        changed = set()
+        for idx in cells:
+            i, j = idx % self.w, idx // self.w
+            for c in (j * W + i, j * W + i + 1, (j + 1) * W + i, (j + 1) * W + i + 1):
+                if self.hts[c] <= limit:
+                    self.hts[c] = target
+                    changed.add(c)
+        return len(changed)
 
     def slope_deg(self, i, j):
         W = self.w + 1
@@ -1949,7 +2038,7 @@ def check_pack(ref, data):
             if lv.get("waveSet") == ws.get("id"):
                 level_lines_ |= {a.get("id") for a in ((lv.get("spawnLines") or {}).get("add") or [])}
         if not ws.get("nights"):
-            err(p + ".nights", "no nights")
+            err(p + ".nights", "no nights yet: add them with the waves op (the game refuses a wave set without nights)")
         for ni, n in enumerate(ws.get("nights") or []):
             if not n.get("spawns"):
                 err(f"{p}.nights[{ni}].spawns", "needs at least one spawn")
@@ -2437,9 +2526,26 @@ def cmd_where(env, args):
         s = g.status_file()
     except Fail:
         pass
-    out({"palace.py": VERSION, "kit": str(env.kit), "bepinex": str(env.bepinex) if env.bepinex else None,
-         "packs": str(env.packs) if env.bepinex else None, "reference": str(env.ref), "referenceMaps": Ref(env).maps(),
-         "bridge": s or "off (Settings > Mods > Builder > Agent bridge)"})
+    if s is not None and s.get("age", 0) > 15:
+        s["state"] = "game not running" if s.get("running") is False else "not answering (loading or frozen?)"
+    result = {"palace.py": VERSION, "kit": str(env.kit), "bepinex": str(env.bepinex) if env.bepinex else None,
+              "chosenBecause": env.source, "packs": str(env.packs) if env.bepinex else None, "reference": str(env.ref),
+              "referenceMaps": Ref(env).maps(), "bridge": s or "off (Settings > Mods > Builder > Agent bridge)"}
+    if env.error:
+        result["error"] = env.error
+    others = [{"bepinex": str(b), "via": why} for b, why in env.found[1:]]
+    if others:
+        result["otherInstalls"] = others
+    warnings = []
+    if others and env.source not in ("--game", "PALACE_GAME"):
+        warnings.append(f"{len(env.found)} game installs found; using {env.bepinex} ({env.source}). Pass --game or set "
+                        "PALACE_GAME to pick one explicitly.")
+    if env.source == "the default Steam install":
+        warnings.append("Using the default Steam install because nothing else was given. If that's the player's real game, "
+                        "make sure that's the one you mean to edit.")
+    if warnings:
+        result["warnings"] = warnings
+    out(result)
 
 
 def cmd_game(env, args):
@@ -2490,7 +2596,9 @@ def cmd_ref(env, args):
             g = m.get("grid") or {}
             ext = None
             if g:
-                ext = [g["origin"][0], g["origin"][1], round(g["origin"][0] + g["size"][0] * g["cell"]), round(g["origin"][1] + g["size"][1] * g["cell"])]
+                # The walkable area (the dump samples 12 m beyond it), as terrain_init's default grid covers it.
+                ext = {"minX": g["origin"][0] + 12, "minZ": g["origin"][1] + 12,
+                       "maxX": round(g["origin"][0] + g["size"][0] * g["cell"] - 12), "maxZ": round(g["origin"][1] + g["size"][1] * g["cell"] - 12)}
             rows.append({"map": scene, "castle": m["castle"]["pos"] if m.get("castle") else None, "extent": ext, "nights": m.get("nights"),
                          "startingGold": m.get("startingGold"), "slots": kinds,
                          "spawnLines": [f"{l['name']} ({'G' if l['smallGround'] else ''}{'L' if l['bigGround'] else ''}{'F' if l['flying'] else ''})" for l in m["spawnLines"]]})
@@ -2498,11 +2606,18 @@ def cmd_ref(env, args):
     elif args.what == "slots":
         m = ref.map(args.name)
         rows = []
+        castle_name = (m.get("castle") or {}).get("name")
+        dupes = {}
+        for s in m["slots"]:
+            dupes[s["name"]] = dupes.get(s["name"], 0) + 1
         for s in m["slots"]:
             if args.kind and s["kind"].lower() != args.kind.lower():
                 continue
+            act = "castle" if s.get("activator") == castle_name else s.get("activator")
             rows.append({"name": s["name"], "kind": s["kind"], "at": [s["pos"][0], s["pos"][2]], "y": s["pos"][1],
-                         "needs": f"{s['activator']}:{s['activatorLevel'] + 1}" if s.get("activator") and s.get("startDeactivated") else "start",
+                         "needs": f"{act}:{s['activatorLevel'] + 1}" if s.get("activator") and s.get("startDeactivated") else "start",
+                         **({"duplicateName": f"{dupes[s['name']]} slots share this name, so ops and plans can't tell them apart: avoid naming it"}
+                            if dupes[s["name"]] > 1 else {}),
                          "costs": [u["cost"] for u in s["upgrades"] if not u.get("disabled")],
                          "income": [step_income(u) for u in s["upgrades"] if not u.get("disabled")],
                          **({"castle": True} if s.get("castle") else {}), **({"followsActivator": True} if s.get("followsActivator") else {}),
@@ -2591,6 +2706,37 @@ def reference_markdown(ref):
         L.append(f"| {name} | {c[0]:.0f}, {c[1]:.1f}, {c[2]:.0f} | {ext} | {m['nights']} | {m['startingGold']} | "
                  f"{', '.join(f'{k} {v}' for k, v in sorted(kinds.items()))} | {lines} |")
     L.append("\nThe castle slot of each map is named in `palace.py ref slots <map>` (`\"castle\": true`); in ops and plans just say `castle`.\n")
+
+    L.append("### What the host decides\n")
+    L.append("Even on a `cleared` or `flat` base the host map fixes: **which building kinds you can place** (`add_slot` copies a "
+             "slot of that kind from the host, so a kind the host lacks can't be added: no Mill on Frostsee), the castle's "
+             "position, the playable rectangle (`terrain_init`'s default grid is the host's walkable extent), the sky, light and "
+             "ground palette, and the starting gold default. Terrain heights are **world** heights clamped to "
+             f"[{Terrain.MIN_Y:g}, {Terrain.MAX_Y:g}] m, so a high castle leaves little room to build up (headroom below). Pick "
+             "the host from this table before designing.\n")
+    all_kinds = sorted({s["kind"] for name in maps for s in ref.map(name)["slots"]
+                        if not s.get("followsActivator") and not s.get("castle")})
+    L.append("| Kind | " + " | ".join(maps) + " |")
+    L.append("|---|" + "---|" * len(maps))
+    for kind in all_kinds:
+        row = []
+        for name in maps:
+            row.append("yes" if any(s["kind"] == kind and not s.get("followsActivator") and not s.get("castle")
+                                    for s in ref.map(name)["slots"]) else "-")
+        L.append(f"| {kind} | " + " | ".join(row) + " |")
+    heads = []
+    for name in maps:
+        m = ref.map(name)
+        g = m["grid"]
+        c = m["castle"]["pos"]
+        x0, x1 = g["origin"][0] + 12, g["origin"][0] + g["size"][0] * g["cell"] - 12
+        z0, z1 = g["origin"][1] + 12, g["origin"][1] + g["size"][1] * g["cell"] - 12
+        heads.append(f"| {name} | {x1 - x0:.0f} x {z1 - z0:.0f} | {c[0] - x0:.0f} / {x1 - c[0]:.0f} / {c[2] - z0:.0f} / {z1 - c[2]:.0f} | "
+                     f"{c[1]:.1f} | {Terrain.MAX_Y - c[1]:+.1f} / {Terrain.MIN_Y - c[1]:+.1f} |")
+    L.append("\n| Host | Playable rectangle (m) | Castle to west / east / south / north edge (m) | Castle y | Terrain headroom up / down from the castle (m) |")
+    L.append("|---|---|---|---|---|")
+    L += heads
+    L.append("")
 
     L.append("## Buildings (slot kinds)\n")
     L.append("Per level: cost in gold, then each choice (branch) with its income change (+g per dawn), extra HP and what it adds. "
@@ -2688,8 +2834,14 @@ def cmd_level(env, args):
     ref = Ref(env)
     path, data = load_pack(env, args.pack)
     levels = data.setdefault("levels", [])
-    if any(l.get("id") == args.level for l in levels):
-        raise Fail(f"level {args.level!r} exists")
+    old = next((l for l in levels if l.get("id") == args.level), None)
+    if old is not None:
+        if not args.force:
+            raise Fail(f"level {args.level!r} exists (--force replaces it, and its wave set if no other level uses it)")
+        levels.remove(old)
+        ws = old.get("waveSet")
+        if ws and not any(l.get("waveSet") == ws for l in levels):
+            data["waveSets"] = [w for w in data.get("waveSets") or [] if w.get("id") != ws]
     if not ID_RE.match(args.level):
         raise Fail("level id: a-z 0-9 . _ -")
     ref.map(args.host)
@@ -2716,9 +2868,23 @@ def read_ops(src):
     return ops
 
 
+def fresh_level(env, ref, data, level_id):
+    """Empties a level back to what `level` made (same id, name, host, base and wave-set link; a flat base gets a new
+    default grid). Slots, lines, props and terrain go; the wave set and its nights are kept."""
+    lv = find_level(data, level_id)
+    keep = {k: lv[k] for k in ("id", "name", "description", "host", "base", "waveSet") if k in lv}
+    lv.clear()
+    lv.update(keep)
+    if lv.get("base") == "flat":
+        Ops(env, ref, data, lv["id"]).op_terrain_init({"op": "terrain_init"})
+    return lv["id"]
+
+
 def cmd_apply(env, args):
     ref = Ref(env)
     path, data = load_pack(env, args.pack)
+    if args.fresh:
+        fresh_level(env, ref, data, args.level)
     ops = Ops(env, ref, data, args.level)
     ops.run(read_ops(args.ops))
     issues = [] if args.no_check else check_pack(ref, data)
@@ -2782,7 +2948,44 @@ def cmd_economy(env, args):
         hw = [r["gold"] for r in wave_summary(ref, {}, h["vanillaWaves"])]
         result["vanilla_" + lv["host"]] = [{k: r[k] for k in ("day", "goldAtDusk", "incomePerDawn")} for r in
                                           economy_sim(hs, hc, h["startingGold"], hw, len(h["vanillaWaves"]["nights"]))]
+    if args.report:
+        result["fromTest"] = economy_from_report(json.loads(Path(args.report).read_text()), slots)
     out(result)
+
+
+def economy_from_report(report, slots):
+    """What a `test` run's economy actually paid: per night, the income of the buildings standing at dawn vs the income
+    knocked-out buildings lost (they pay nothing the next dawn), and which buildings were knocked out most often."""
+    by_name = {s.name: s for s in slots.values()}
+    nights = list((report.get("catchup") or {}).get("nights") or []) + list(report.get("nights") or [])
+    rows, counts = [], {}
+    for r in nights:
+        ko = r.get("knockedOut") if "knockedOut" in r else (r.get("buildings") or {}).get("knockedOut")
+        ko = ko or []
+        for name in ko:
+            counts[name] = counts.get(name, 0) + 1
+        inc = r.get("income")
+        if inc:
+            row = {"night": r.get("night"), "outcome": r.get("outcome"), "incomeNominal": inc.get("nominal"),
+                   "incomeLost": inc.get("blocked"), "incomePaid": inc.get("paid")}
+        else:
+            # An older report: estimate the loss from the slots' first-level income.
+            lost = sum(step_income(by_name[n].upgrades[0]) for n in ko if n in by_name and by_name[n].upgrades)
+            nominal = ((r.get("after") or {}).get("buildings") or {}).get("income")
+            row = {"night": r.get("night"), "outcome": r.get("outcome"), "incomeNominal": nominal, "incomeLostEstimate": lost,
+                   "incomePaidEstimate": None if nominal is None else nominal - lost}
+        row["knockedOut"] = len(ko)
+        rows.append(row)
+    played = max(1, len(nights))
+    exposed = sorted(({"building": n.replace("PalaceBuilder ", ""), "knockedOutNights": c, "share": round(c / played, 2),
+                       "income": step_income(by_name[n].upgrades[0]) if n in by_name and by_name[n].upgrades else None}
+                      for n, c in counts.items()), key=lambda e: -e["knockedOutNights"])
+    paid = [r.get("incomePaid", r.get("incomePaidEstimate")) for r in rows]
+    nominal = [r.get("incomeNominal") for r in rows]
+    total_paid = sum(p for p in paid if p is not None)
+    total_nominal = sum(p for p in nominal if p is not None)
+    return {"nights": rows, "paidVsNominal": round(total_paid / total_nominal, 2) if total_nominal else None,
+            "mostKnockedOut": exposed[:15]}
 
 
 def cmd_waves(env, args):
@@ -2853,11 +3056,13 @@ def cmd_play(env, args):
     out({"status": g.status(), "loadWarnings": notes})
 
 
-def wait_night(g, timeout):
+def wait_night(g, timeout, night=None):
+    """Waits for the night's report. `night` (the number the `night` command started) guards against reading the
+    previous night's finished report before the game has begun recording the new one."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         r = g.agent("report")
-        if r.get("done"):
+        if r.get("done") and (night is None or r.get("night") == night):
             return r
         time.sleep(1.0)
     r = g.agent("report")
@@ -2871,11 +3076,12 @@ def cmd_night(env, args):
     g = Game(env)
     if args.speed:
         g.agent(f"speed {args.speed}")
+    expected = args.night or g.status().get("night")
     g.agent("night" + (f" {args.night}" if args.night else ""))
     if args.no_wait:
         out(g.status())
         return
-    out(wait_night(g, args.timeout))
+    out(wait_night(g, args.timeout, expected))
 
 
 def parse_nights(spec, total):
@@ -2884,61 +3090,187 @@ def parse_nights(spec, total):
     if "-" in spec:
         a, b = spec.split("-")
         return list(range(int(a), int(b) + 1))
-    return [int(x) for x in spec.split(",")]
+    return sorted({int(x) for x in spec.split(",")})
+
+
+class Plan:
+    """A test plan: {"1": [items], "2": [...], "options": {"carry": true, "save": false}}. An item is a slot id (one
+    level up) or {"slot", "level" (up to; 1 = built), "branch", "carry", "save"}. carry: a refused item is retried at the
+    start of the next day (until bought). save: when this item is refused, buy nothing else that day (keep the gold for
+    it); with carry the rest of the day's items are carried too."""
+
+    def __init__(self, data, carry=False, save=False):
+        data = data or {}
+        if not isinstance(data, dict):
+            raise Fail("a plan is a JSON object: {\"1\": [\"castle\", \"h1\"], \"2\": [...]}")
+        opts = data.get("options") or {}
+        self.carry = bool(opts.get("carry", carry))
+        self.save = bool(opts.get("save", save))
+        self.days = {}
+        for k, items in data.items():
+            if k == "options":
+                continue
+            if not str(k).isdigit() or not isinstance(items, list):
+                raise Fail(f"plan key {k!r}: days are \"1\", \"2\", ... each with a list of items")
+            self.days[int(k)] = [self.item(x, int(k)) for x in items]
+
+    @staticmethod
+    def item(x, day):
+        if isinstance(x, str):
+            x = {"slot": x}
+        if not isinstance(x, dict) or not x.get("slot"):
+            raise Fail(f"plan day {day}: an item is a slot id or {{\"slot\": ..., \"level\": N, \"branch\": B}}, not {x!r}")
+        return dict(x, day=day)
+
+    def slots(self):
+        return {i["slot"] for items in self.days.values() for i in items}
+
+
+def plan_command(item, free):
+    return f"build {item['slot'].replace(' ', '_')}" + (f" {item['level']}" if "level" in item else "") + \
+        (f" {item.get('branch', 0)}" if "branch" in item else "") + ("" if free else " pay")
+
+
+# Refusals worth retrying later: gold, an unmet requirement, the castle-level cap. A wrong slot name isn't.
+RETRYABLE = ("not enough gold", "not available yet", "can't go past level")
+
+
+def buy_items(g, items, free, carry_default, save_default, day):
+    """Buys items in order. Returns (entries, carried): one report entry per item, and the refused items to retry."""
+    entries, carried = [], []
+    saving = None
+    for item in items:
+        if saving:
+            entry = {"slot": item["slot"], "day": item["day"], "ok": False, "error": f"skipped: saving gold for {saving}"}
+            entries.append(entry)
+            if item.get("carry", carry_default):
+                carried.append(item)
+            continue
+        try:
+            r = g.agent(plan_command(item, free))
+        except Fail as e:
+            r = {"slot": item["slot"], "ok": False, "error": str(e)}
+        if "result" in r and "ok" not in r:  # an older game: no structured build result
+            r = {"slot": item["slot"], "ok": True, "result": r["result"]}
+        entry = dict(r)
+        if item["day"] != day:
+            entry["plannedDay"] = item["day"]
+        entries.append(entry)
+        if entry.get("ok") is False:
+            retry = any(k in (entry.get("error") or "") for k in RETRYABLE)
+            if retry and item.get("carry", carry_default):
+                carried.append(item)
+                entry["carried"] = True
+            if item.get("save", save_default) and "not enough gold" in (entry.get("error") or ""):
+                saving = item["slot"]
+    return entries, carried
+
+
+def wait_settled(g, timeout=30):
+    """Waits for the day to be ready for purchases: after sunrise, and every coin (dawn income, enemy drops) in the
+    treasury, so the day's gold is all there before the first purchase."""
+    deadline = time.time() + timeout
+    calm = 0
+    last = None
+    while time.time() < deadline:
+        last = g.status()
+        if last.get("state") in ("AfterMatchVictory", "AfterMatchDefeat"):
+            return last
+        if last.get("time") == "day" and not last.get("coinsPending"):
+            calm += 1
+            if calm >= 2:  # twice in a row: nothing still being spawned
+                return last
+        else:
+            calm = 0
+        time.sleep(0.4)
+    return last or g.status()
+
+
+def progress(args, text):
+    if not args.quiet:
+        print(text, file=sys.stderr, flush=True)
+
+
+def night_line(rep, total):
+    c = rep.get("castle") or {}
+    ko = (rep.get("buildings") or {}).get("knockedOut") or []
+    failed = [b for b in rep.get("bought", []) if b.get("ok") is False]
+    s = f"night {rep.get('night')}/{total}: {rep.get('outcome')} in {rep.get('seconds')} s, castle {c.get('minHp')}/{c.get('maxHp')}, " \
+        f"{len(ko)} knocked out, bought {sum(1 for b in rep.get('bought', []) if b.get('ok'))}"
+    if failed:
+        s += f", {len(failed)} refused (" + "; ".join(f"{b.get('slot')}: {b.get('error')}" for b in failed[:3]) + ("; ..." if len(failed) > 3 else "") + ")"
+    gold = rep.get("gold") or {}
+    if gold.get("afterDawn") is not None:
+        s += f", gold after dawn {gold['afterDawn']}"
+    return s
 
 
 def cmd_test(env, args):
-    """Loads the level, then for each night: the plan's (or --build's) purchases for that day, start the night, wait
-    for its end, record the report (and screenshots). Stops at a defeat."""
+    """Loads the level, then for each night: waits for the day's gold to land, buys the plan's (or --build's) items for
+    that day, starts the night, waits for its end, records the report (and screenshots). Stops at a defeat. Nights
+    before the first requested one are played too (catch-up), unless --catchup says otherwise."""
     g = Game(env)
     _, data = load_pack(env, args.pack)
     lv = find_level(data, args.level)
-    plan = json.loads(Path(args.plan).read_text()) if args.plan else {}
+    plan = Plan(json.loads(Path(args.plan).read_text()) if args.plan else {}, carry=args.carry, save=args.save)
+    warnings = []
+    try:
+        slots, _, _ = effective_slots(Ref(env), lv)
+        known = {s.label for s in slots.values()} | {"castle"}
+        unknown = sorted(s for s in plan.slots() if s not in known and s.replace("_", " ") not in known)
+        if unknown:
+            warnings.append(f"plan slots not on this level: {', '.join(unknown)}")
+    except Fail:
+        pass
     if not args.no_load:
         cmd_play_quiet(g, data, lv["id"], args.timeout_load)
     st = g.status()
     total = st.get("nights", 0)
     nights = parse_nights(args.nights, total)
+    if not nights:
+        raise Fail("no nights to play")
+    catchup = "none" if args.no_catchup else args.catchup
     if args.god:
         g.agent("god on")
     if args.invulnerable:
         g.agent("invulnerable on")
     if args.gold is not None:
         g.agent(f"gold {args.gold}")
+    if args.speed:
+        g.agent(f"speed {args.speed}")
     shots = Path(args.shots) if args.shots else None
-    results = []
-    first = True
-    for n in nights:
+    results, briefs, catchup_bought = [], [], []
+    carried = []
+    current = st.get("night", 1)
+    first, last = nights[0], nights[-1]
+    jump = first > current and catchup in ("free", "none")
+    if jump and catchup == "free":
+        # Skip ahead: the earlier days' items are built for free, then the run jumps to the first night.
+        for day in range(current, first):
+            entries, _ = buy_items(g, plan.days.get(day, []), True, False, False, day)
+            catchup_bought += entries
+    to_play = list(range(first if jump else current, last + 1))
+    for n in to_play:
         st = g.status()
         if st.get("state") in ("AfterMatchDefeat", "AfterMatchVictory"):
             break
-        # Purchases for the day before night n.
-        days = [str(d) for d in range(1, n + 1)] if first and nights[0] > 1 and not args.no_catchup else [str(n)]
-        bought = []
-        for day in days:
-            for item in plan.get(day, []):
-                if isinstance(item, str):
-                    item = {"slot": item}
-                cmdline = f"build {item['slot'].replace(' ', '_')}" + (f" {item['level']}" if "level" in item else "") + \
-                          (f" {item.get('branch', 0)}" if "branch" in item else "") + ("" if args.free else " pay")
-                try:
-                    bought.append(g.agent(cmdline))
-                except Fail as e:
-                    bought.append({"slot": item["slot"], "error": str(e)})
+        wait_settled(g)
+        items = carried + plan.days.get(n, [])
+        bought, carried = buy_items(g, items, args.free, plan.carry, plan.save, n)
         if args.build == "all":
             bought.append(g.agent("build all"))
-        if first and n > st.get("night", 1):
-            g.agent(f"night {n}")
+        if jump:
+            g.agent(f"night {n}")  # jumps to night n and starts it
+            jump = False
         else:
             g.agent("night")
-        first = False
         if args.speed:
             g.agent(f"speed {args.speed}")
         mid = None
-        if shots:
+        if shots and n in nights:
             time.sleep(args.shot_after)
             mid = g.screenshot(shots / f"night{n}.png")
-        rep = wait_night(g, args.timeout)
+        rep = wait_night(g, args.timeout, n)
         rep["bought"] = bought
         if mid:
             rep["screenshot"] = mid
@@ -2949,20 +3281,55 @@ def cmd_test(env, args):
                 st = g.wait(lambda s: s.get("state") in ("AfterMatchVictory", "AfterMatchDefeat"), 30, "the end screen")
             except Fail:
                 pass
-        rep["after"] = {k: st.get(k) for k in ("time", "gold", "castle", "buildings", "units", "state") if st.get(k) is not None}
         if st.get("state") == "AfterMatchVictory":
             rep["outcome"] = "victory"
         elif st.get("state") == "AfterMatchDefeat":
             rep["outcome"] = "defeat"
-        results.append(rep)
+        rep.setdefault("gold", {})
+        rep["gold"]["afterDawn"] = None
+        rep["income"] = None
+        if rep.get("outcome") == "dawn":
+            # The next morning, once its income and the night's coins are in: what the next day can spend.
+            st = wait_settled(g)
+            b = st.get("buildings") or {}
+            rep["gold"]["afterDawn"] = st.get("gold")
+            if "incomeBlocked" in b:
+                rep["income"] = {"nominal": b.get("income"), "blocked": b.get("incomeBlocked"),
+                                 "paid": b.get("income", 0) - b.get("incomeBlocked", 0)}
+        rep["after"] = {k: st.get(k) for k in ("time", "gold", "castle", "buildings", "units", "state")}
+        if carried:
+            rep["carriedToNextDay"] = [i["slot"] for i in carried]
+        if n in nights:
+            results.append(rep)
+            progress(args, night_line(rep, total))
+        else:
+            brief = {k: rep.get(k) for k in ("night", "outcome", "seconds", "castle", "gold", "income")}
+            brief["knockedOut"] = (rep.get("buildings") or {}).get("knockedOut")
+            brief["bought"] = bought
+            briefs.append(brief)
+            progress(args, "catch-up " + night_line(rep, total))
         if rep.get("outcome") in ("defeat", "timeout", "victory", "left"):
             break
-        # Let dawn finish (income paid, day starts) before the next purchases.
-        try:
-            g.wait(lambda s: s.get("time") == "day" or s.get("state") in ("AfterMatchVictory", "AfterMatchDefeat"), 60, "the next day")
-        except Fail:
-            pass
-    out({"level": f"{data['id']}/{lv['id']}", "nights": results})
+    outcomes = [r.get("outcome") for r in results] + [b.get("outcome") for b in briefs]
+    result = next((o for o in ("defeat", "timeout", "left") if o in outcomes), None) or \
+        ("victory" if "victory" in outcomes else "survived")
+    failed = [dict(b, night=r["night"]) for r in results for b in r.get("bought", []) if b.get("ok") is False]
+    report = {"level": f"{data['id']}/{lv['id']}", "result": result, "nightsPlayed": len(results) + len(briefs),
+              "refusedPurchases": len(failed), "plan": {"carry": plan.carry, "save": plan.save}}
+    if warnings:
+        report["warnings"] = warnings
+    if briefs or catchup_bought:
+        report["catchup"] = {"mode": catchup, "nights": briefs, "bought": catchup_bought}
+    report["summary"] = [{"night": r.get("night"), "outcome": r.get("outcome"), "castleMin": (r.get("castle") or {}).get("minHp"),
+                          "knockedOut": len((r.get("buildings") or {}).get("knockedOut") or []),
+                          "bought": [f"{b.get('slot')} L{b.get('to')}" for b in r.get("bought", []) if b.get("ok")],
+                          "refused": [f"{b.get('slot')}: {b.get('error')}" for b in r.get("bought", []) if b.get("ok") is False],
+                          "goldAfterDawn": (r.get("gold") or {}).get("afterDawn"),
+                          "incomePaid": (r.get("income") or {}).get("paid")} for r in results]
+    report["nights"] = results
+    out(report)
+    if result in ("defeat", "timeout", "left"):
+        sys.exit(1)
 
 
 def cmd_play_quiet(g, data, level, timeout):
@@ -3014,23 +3381,30 @@ def cmd_spawn(env, args):
 
 def cmd_cheat(env, args):
     g = Game(env)
+    value = args.value[0] if args.value else None
     if args.what in ("god", "invulnerable", "infinitegold"):
-        out(g.agent(f"{args.what} {args.value or 'on'}"))
+        out(g.agent(f"{args.what} {value or 'on'}"))
     elif args.what in ("gold", "speed"):
-        out(g.agent(f"{args.what} {args.value}"))
+        out(g.agent(f"{args.what} {value}"))
     elif args.what in ("kill", "heal", "endnight"):
         out(g.agent(args.what))
     elif args.what == "teleport":
-        x, z = args.value.split(",")
-        out(g.agent(f"teleport {x} {z}"))
+        parts = [p for v in args.value for p in v.strip().replace(",", " ").split()]
+        if len(parts) != 2:
+            raise Fail("cheat teleport X,Z (or X Z), e.g. cheat teleport -40,-10")
+        x, z = (float(p) for p in parts)
+        out(g.agent(f"teleport {x:g} {z:g}"))
     else:
         raise Fail("cheat god|invulnerable|infinitegold [on|off] | gold <n> | speed <x> | kill | heal | endnight | teleport <x,z>")
 
 
 def cmd_build(env, args):
     g = Game(env)
-    out(g.agent(f"build {args.slot.replace(' ', '_')}" + (f" {args.level}" if args.level is not None else "") + (f" {args.branch}" if args.branch is not None else "") +
-                (" pay" if args.pay else "")))
+    r = g.agent(f"build {args.slot.replace(' ', '_')}" + (f" {args.level}" if args.level is not None else "") + (f" {args.branch}" if args.branch is not None else "") +
+                (" pay" if args.pay else ""))
+    out(r)
+    if r.get("ok") is False:
+        sys.exit(1)
 
 
 def cmd_shot(env, args):
@@ -3042,12 +3416,19 @@ def cmd_report(env, args):
 
 
 def cmd_share(env, args):
+    """A share code (printed; the clipboard only with --clipboard) or, with --export, a .tfpack file (-o picks the path;
+    the default is a new, numbered file in the game's exports folder). Always JSON."""
     g = Game(env)
     _, data = load_pack(env, args.pack)
     if args.export:
-        print(g.raw(f"builder-share export {data['id']}"))
+        target = Path(args.out).expanduser().resolve() if args.out else None
+        if target and target.exists():
+            if not args.force:
+                raise Fail(f"{target} exists; pass --force to overwrite it")
+            target.unlink()
+        out(g.agent(f"share export {data['id']}" + (f" {target}" if target else "")))
     else:
-        print(g.raw(f"builder-share code {data['id']}"))
+        out(g.agent(f"share code {data['id']}" + (" clipboard" if args.clipboard else "")))
 
 
 def main(argv=None):
@@ -3090,6 +3471,7 @@ def main(argv=None):
     p.add_argument("--name")
     p.add_argument("--base", default="map", choices=["map", "cleared", "flat"])
     p.add_argument("--waves", default="empty", choices=["empty", "vanilla", "none"], help="new wave set: empty, the map's own nights, or none (play vanilla)")
+    p.add_argument("--force", action="store_true", help="replace an existing level of that id (and its wave set)")
 
     p = sub.add_parser("apply", help="apply JSON edit ops (file or - for stdin)")
     p.add_argument("pack")
@@ -3097,6 +3479,8 @@ def main(argv=None):
     p.add_argument("--level", help="default level for ops without \"level\"")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--no-check", action="store_true")
+    p.add_argument("--fresh", action="store_true", help="first empty the level (--level, or the pack's only level) back to what "
+                                                         "`level` made, keeping its nights, so the same ops file can be applied again")
 
     p = sub.add_parser("check", help="offline checks (+ --live: the game's validator)")
     p.add_argument("pack")
@@ -3109,6 +3493,8 @@ def main(argv=None):
         p.add_argument("level", nargs="?")
         if name == "economy":
             p.add_argument("--compare", action="store_true", help="also the base map's vanilla curve")
+            p.add_argument("--report", help="a saved `test` report (JSON): the income that run actually received, night by "
+                                            "night, and the buildings knocked out most often")
         if name == "waves":
             p.add_argument("--compare", nargs="?", const="host", help="also a map's vanilla nights (default: the host)")
 
@@ -3144,7 +3530,13 @@ def main(argv=None):
     p.add_argument("--nights", help="e.g. 1-3 or 2,4 (default: all)")
     p.add_argument("--plan", help="JSON {\"1\": [\"castle\", \"h1\", {\"slot\":\"t1\",\"level\":2,\"branch\":0}], \"2\": [...]}: buys before each night")
     p.add_argument("--build", choices=["none", "all"], default="none", help="all: also build every available blueprint free each day")
-    p.add_argument("--free", action="store_true", help="plan purchases cost nothing")
+    p.add_argument("--free", action="store_true", help="plan purchases cost nothing (probes defence alone; the economy isn't tested)")
+    p.add_argument("--carry", action="store_true", help="retry refused plan items at the start of the next day (plan option \"carry\")")
+    p.add_argument("--save", action="store_true", help="after an item is refused for gold, buy nothing else that day (plan option \"save\")")
+    p.add_argument("--catchup", choices=["play", "free", "none"], default="play",
+                   help="starting at night N>1: play nights 1..N-1 with the plan and real income (play, the default; slow but "
+                        "faithful), build the earlier days' items free and jump (free), or jump with nothing built (none)")
+    p.add_argument("--quiet", action="store_true", help="no per-night progress lines on stderr")
     p.add_argument("--gold", type=int, help="set gold before the first night")
     p.add_argument("--god", action="store_true", help="the king takes no damage")
     p.add_argument("--invulnerable", action="store_true", help="buildings and units take no damage")
@@ -3154,7 +3546,7 @@ def main(argv=None):
     p.add_argument("--timeout", type=float, default=420, help="seconds per night before giving up")
     p.add_argument("--timeout-load", type=float, default=120)
     p.add_argument("--no-load", action="store_true", help="continue the run already loaded")
-    p.add_argument("--no-catchup", action="store_true", help="starting at night N>1: don't apply earlier days' plan")
+    p.add_argument("--no-catchup", action="store_true", help="same as --catchup none")
 
     p = sub.add_parser("edit", help="open the level in the in-game Studio")
     p.add_argument("pack")
@@ -3177,7 +3569,7 @@ def main(argv=None):
 
     p = sub.add_parser("cheat", help="god|invulnerable|infinitegold [on|off] | gold <n> | speed <x> | kill | heal | endnight | teleport <x,z>")
     p.add_argument("what")
-    p.add_argument("value", nargs="?")
+    p.add_argument("value", nargs="*", help="teleport: X,Z or X Z (negative numbers are fine)")
 
     p = sub.add_parser("build", help="build/upgrade a slot in the running level")
     p.add_argument("slot")
@@ -3192,10 +3584,18 @@ def main(argv=None):
 
     p = sub.add_parser("share", help="share code (or --export a .tfpack) through the game")
     p.add_argument("pack")
-    p.add_argument("--export", action="store_true")
+    p.add_argument("--export", action="store_true", help="write a .tfpack file (JSON result: its exact path)")
+    p.add_argument("-o", "--out", help="export: the file to write (default: a new numbered file in the game's exports folder)")
+    p.add_argument("--force", action="store_true", help="export: overwrite --out")
+    p.add_argument("--clipboard", action="store_true", help="code: also copy it to the system clipboard")
 
+    argv = list(sys.argv[1:] if argv is None else argv)
+    argv = [" " + a if re.match(r"^-\d[\d.]*,\s*-?\d", a) else a for a in argv]
     args = ap.parse_args(argv)
     env = Env(args.game)
+    if len(env.found) > 1 and env.source not in ("--game", "PALACE_GAME") and args.cmd != "where":
+        print(f"palace.py: using {env.bepinex} ({env.source}); {len(env.found) - 1} other install(s) found, see `where`",
+              file=sys.stderr)
     fn = globals()["cmd_" + args.cmd]
     try:
         fn(env, args)

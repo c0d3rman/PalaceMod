@@ -83,6 +83,129 @@ namespace PalaceMod.Tests
             }
         }
 
+        /// <summary>Un-watering refills the dug ground; an ops file can be re-applied with --fresh (not without); a
+        /// level can be replaced with --force; economy --report reads a test report's knock-outs and income.</summary>
+        public static void PalacePyReapplyUnwaterAndReport()
+        {
+            string script = FindScript();
+            if (script == null || !HasPython()) { Console.WriteLine("  (skipped: no python3 or agent-kit/palace.py)"); return; }
+            string root = Path.Combine(Path.GetTempPath(), "palace-agent-test-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                string game = Path.Combine(root, "game");
+                Directory.CreateDirectory(Path.Combine(game, "BepInEx"));
+                string refDir = Path.Combine(root, "ref");
+                WriteReference(refDir);
+                string ops = Path.Combine(root, "ops.json");
+                File.WriteAllText(ops, """
+                [
+                 {"op": "water", "rect": {"min": [10, -30], "max": [40, 30]}},
+                 {"op": "water", "on": false, "rect": {"min": [20, -6], "max": [30, 6]}},
+                 {"op": "add_slot", "id": "h1", "kind": "House", "at": [6, 5]},
+                 {"op": "add_slot", "id": "h2", "kind": "House", "at": [-6, 5]},
+                 {"op": "chain", "slots": ["h1", "h2"], "mode": "order"},
+                 {"op": "waves", "nights": [{"spawns": [{"unit": "E Melee", "count": 3, "line": "Gate"}]}]}
+                ]
+                """);
+                Run(script, game, refDir, "new", "test.pack");
+                Run(script, game, refDir, "level", "test.pack", "lv", "--host", "Testmap", "--base", "flat");
+                string applied = Run(script, game, refDir, "apply", "test.pack", ops);
+                Assert.True(applied.Contains("h2 <- h1"), "chain prints its links: " + applied);
+                Assert.True(RunRaw(script, game, refDir, out _, "apply", "test.pack", ops) == 2, "a second plain apply fails (h1 exists)");
+                Run(script, game, refDir, "apply", "test.pack", ops, "--fresh");
+
+                string packFile = Path.Combine(game, "BepInEx", "PalaceBuilder", "packs", "test.pack", "pack.json");
+                var issues = new List<ValidationIssue>();
+                var pack = PackSerializer.Read(File.ReadAllText(packFile), issues);
+                var level = pack.FindLevel("lv");
+                Assert.Equal(2, level.BuildSlots.Add.Count, "--fresh: the slots once, not twice");
+                var grid = GroundCodec.Decode(level.Terrain);
+                Assert.True(Math.Abs(grid.HeightAt(25f, 0f)) < 0.01f, $"un-watered ground is level again: {grid.HeightAt(25f, 0f)}");
+                Assert.True(grid.HeightAt(25f, 20f) < -1.9f, $"water stays dug: {grid.HeightAt(25f, 20f)}");
+                Assert.True(grid.CellAt(25f, 0f, out int ix, out int iz) && !grid.Water[grid.CellIndex(ix, iz)], "the island isn't water");
+
+                Assert.True(RunRaw(script, game, refDir, out _, "level", "test.pack", "lv", "--host", "Testmap") == 2, "level exists");
+                Run(script, game, refDir, "level", "test.pack", "lv", "--host", "Testmap", "--base", "flat", "--force");
+                pack = PackSerializer.Read(File.ReadAllText(packFile), issues);
+                Assert.Equal(1, pack.Levels.Count, "--force replaces the level");
+                Assert.Equal(1, pack.WaveSets.Count, "and its wave set");
+
+                string report = Path.Combine(root, "report.json");
+                File.WriteAllText(report, """
+                {"nights": [
+                  {"night": 1, "outcome": "dawn", "buildings": {"knockedOut": ["PalaceBuilder h1"]}, "income": {"nominal": 4, "blocked": 1, "paid": 3}},
+                  {"night": 2, "outcome": "dawn", "buildings": {"knockedOut": ["PalaceBuilder h1", "PalaceBuilder h2"]}, "income": {"nominal": 4, "blocked": 2, "paid": 2}}]}
+                """);
+                Run(script, game, refDir, "apply", "test.pack", ops);
+                var econ = JObject.Parse(Run(script, game, refDir, "economy", "test.pack", "--report", report))["fromTest"]!;
+                Assert.Equal(0.62, (double)econ["paidVsNominal"]!, "paid 5 of 8");
+                Assert.Equal("h1", (string)econ["mostKnockedOut"]![0]!["building"]!, "h1 knocked out most");
+                Assert.Equal(2, (int)econ["mostKnockedOut"]![0]!["knockedOutNights"]!, "twice");
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch (IOException) { }
+            }
+        }
+
+        /// <summary>The plan buyer against a fake game: refusals are errors, "carry" retries them the next day, "save"
+        /// stops the day's buying after a gold refusal.</summary>
+        public static void PalacePyPlanCarryAndSave()
+        {
+            string script = FindScript();
+            if (script == null || !HasPython()) { Console.WriteLine("  (skipped: no python3 or agent-kit/palace.py)"); return; }
+            const string code = """
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location("palace", sys.argv[1]); P = importlib.util.module_from_spec(spec); spec.loader.exec_module(P)
+class Game:
+    def __init__(self, gold): self.gold, self.calls = gold, []
+    def agent(self, cmd):
+        slot = cmd.split()[1]; self.calls.append(slot)
+        cost = {"castle": 7, "h1": 2, "h2": 2}[slot]
+        if self.gold < cost:
+            return {"slot": slot, "from": 1, "to": 1, "target": 2, "spent": 0, "gold": self.gold, "ok": False, "error": f"not enough gold for level 2 ({cost})"}
+        self.gold -= cost
+        return {"slot": slot, "from": 0, "to": 1, "target": 1, "spent": cost, "gold": self.gold, "ok": True, "error": None}
+plan = P.Plan({"options": {"carry": True}, "1": [{"slot": "castle", "save": True}, "h1", "h2"]})
+g = Game(5)
+entries, carried = P.buy_items(g, plan.days[1], False, plan.carry, plan.save, 1)
+assert [e["ok"] for e in entries] == [False, False, False], entries
+assert g.calls == ["castle"], g.calls
+assert "saving gold for castle" in entries[1]["error"], entries
+assert [i["slot"] for i in carried] == ["castle", "h1", "h2"], carried
+g.gold = 11
+entries, carried = P.buy_items(g, carried, False, plan.carry, plan.save, 2)
+assert all(e["ok"] for e in entries) and not carried and entries[0]["plannedDay"] == 1, entries
+plain = P.Plan({"1": ["castle", "h1"]})
+g = Game(5)
+entries, carried = P.buy_items(g, plain.days[1], False, plain.carry, plain.save, 1)
+assert entries[0]["ok"] is False and entries[1]["ok"] is True and not carried, entries
+print("ok")
+""";
+            var psi = new ProcessStartInfo("python3") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+            psi.ArgumentList.Add("-c");
+            psi.ArgumentList.Add(code);
+            psi.ArgumentList.Add(script);
+            using var p = Process.Start(psi);
+            string output = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
+            p.WaitForExit();
+            Assert.True(p.ExitCode == 0 && output.Trim() == "ok", "plan buyer: " + output);
+        }
+
+        private static int RunRaw(string script, string game, string refDir, out string output, params string[] args)
+        {
+            var psi = new ProcessStartInfo("python3") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+            psi.ArgumentList.Add(script);
+            psi.ArgumentList.Add("--game");
+            psi.ArgumentList.Add(game);
+            foreach (var a in args) psi.ArgumentList.Add(a);
+            psi.Environment["PALACE_REF"] = refDir;
+            using var p = Process.Start(psi);
+            output = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
+            p.WaitForExit();
+            return p.ExitCode;
+        }
+
         /// <summary>remove_spawn_line takes a host line off the map (and restores it); a wave still on it is an error.</summary>
         public static void PalacePyRemovesHostSpawnLines()
         {

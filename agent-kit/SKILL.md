@@ -35,4 +35,10 @@ Install: copy this folder (the one the mod writes to `<Thronefall>/BepInEx/Palac
 - On `cleared`/`flat` bases every slot you add needs the castle (default) or a chain to it, or it never appears.
 - Almost every building can't be upgraded past the castle's level (upgradeCap 0).
 - Each night needs at least one spawn group; ground groups need a line with a route to the castle.
+- The host decides which building kinds exist, the castle position and the playable rectangle, even on `flat`
+  (reference.md > "What the host decides"). Pick it first.
+- Re-apply a changed ops file with `apply --fresh` (ops aren't idempotent).
+- In `test` reports a refused purchase is `"ok": false` with an `error`; read `summary[].refused`. Use plan options
+  `carry`/`save` so a refused castle upgrade isn't silently lost.
+- Enemies hit the nearest building on their lane every night; `economy --report test.json` shows what was really paid.
 - Never hand-edit packs in other folders or the game's saves; packs live in `BepInEx/PalaceBuilder/packs/<id>/`.

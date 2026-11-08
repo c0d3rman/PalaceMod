@@ -58,7 +58,8 @@ version would add an Ogre to night 5 or move the range closer to the forest towe
 
 ## Iterating
 
-- A plan item that can't be bought reports why (`"isn't available yet (its requirement isn't met)"` = buy its
-  prerequisite first; `show` lists every slot's `needs`; `"not enough gold"` = the economy is too slow for that plan).
-- After changing ops, run `apply` again on a fresh level (`level ... ` with a new id, or `new --force` and redo), or
-  edit with `move_slot`/`set_slot`/`remove_slot` ops on the existing one.
+- A plan item that can't be bought is `"ok": false` with the reason in `error` (`"not available yet (its requirement
+  isn't met)"` = buy its prerequisite first; `show` lists every slot's `needs`; `"not enough gold"` = the economy is too
+  slow for that plan, or add `"options": {"carry": true}` so it's retried the next day). `summary[].refused` lists them.
+- After changing the ops file, `apply --fresh watchpost.ops.json` empties the level (nights kept) and runs it again; or
+  edit the existing level with `move_slot`/`set_slot`/`remove_slot` ops.

@@ -163,7 +163,7 @@ namespace PalaceMod.Builder.Agent
         // Read-only queries never change a run.
         private static readonly string[] ReadOnly =
             ["help", "scenes", "agent status", "agent catalog", "agent host", "agent packs", "agent validate", "agent reload",
-             "agent paths", "agent capture", "agent report", "agent screenshot", "agent scenery", "agent wait"];
+             "agent paths", "agent capture", "agent report", "agent screenshot", "agent share", "agent scenery", "agent wait"];
 
         private static void MarkImpact(string line)
         {
@@ -187,9 +187,10 @@ namespace PalaceMod.Builder.Agent
                     ["bepinex"] = Paths.BepInExRootPath,
                     ["packs"] = BuilderServices.Packs?.Root,
                 };
+                // Replaced in one rename, so a client never finds the file missing (it would read "bridge off").
                 File.WriteAllText(StatusFile + ".tmp", status.ToString());
-                File.Delete(StatusFile);
-                File.Move(StatusFile + ".tmp", StatusFile);
+                if (File.Exists(StatusFile)) File.Replace(StatusFile + ".tmp", StatusFile, null);
+                else File.Move(StatusFile + ".tmp", StatusFile);
             }
             catch (Exception e)
             {
