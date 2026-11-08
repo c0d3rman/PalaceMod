@@ -107,6 +107,73 @@ namespace PalaceMod.Builder.Level
                     sb.AppendLine($"ground-layer colliders: {cols.Count} ({string.Join(", ", cols.GroupBy(c => c.GetType().Name).Select(g => g.Key + "x" + g.Count()))}) e.g. {string.Join(", ", cols.Take(5).Select(c => c.name))}");
                     break;
                 }
+                case "mats":
+                {
+                    // The ground materials' shaders and properties, and the vertex data of host meshes drawn with them.
+                    var mats = GroundMaterials.All();
+                    foreach (var kv in mats)
+                    {
+                        var m = kv.Value;
+                        if (m == null) { sb.AppendLine($"{kv.Key}: null"); continue; }
+                        var sh = m.shader;
+                        sb.Append($"{kv.Key}={m.name} shader={sh.name} kw=[{string.Join(",", m.shaderKeywords)}] queue={m.renderQueue}:");
+                        for (int i = 0; i < sh.GetPropertyCount(); i++)
+                        {
+                            string pn = sh.GetPropertyName(i);
+                            switch (sh.GetPropertyType(i))
+                            {
+                                case UnityEngine.Rendering.ShaderPropertyType.Color: sb.Append($" {pn}={m.GetColor(pn)}"); break;
+                                case UnityEngine.Rendering.ShaderPropertyType.Float:
+                                case UnityEngine.Rendering.ShaderPropertyType.Range: sb.Append($" {pn}={m.GetFloat(pn):0.###}"); break;
+                                case UnityEngine.Rendering.ShaderPropertyType.Texture: sb.Append($" {pn}={m.GetTexture(pn)?.name ?? "-"}"); break;
+                                case UnityEngine.Rendering.ShaderPropertyType.Vector: sb.Append($" {pn}={m.GetVector(pn)}"); break;
+                            }
+                        }
+                        sb.AppendLine();
+                    }
+                    var seen = new HashSet<string>();
+                    foreach (var r in Resources.FindObjectsOfTypeAll<MeshRenderer>())
+                    {
+                        if (r == null || r.gameObject.scene != scene) continue;
+                        var mf = r.GetComponent<MeshFilter>();
+                        var mesh = mf?.sharedMesh;
+                        if (mesh == null || !r.sharedMaterials.Any(x => x != null && mats.Values.Contains(x))) continue;
+                        string key = string.Join("+", r.sharedMaterials.Select(x => x?.name));
+                        if (!seen.Add(key) && seen.Count > 0 && !key.Contains("ater")) continue;
+                        if (seen.Count > 30) break;
+                        sb.Append($"{Path(r.transform)} mats={key} layer={r.gameObject.layer} on={r.enabled && r.gameObject.activeInHierarchy} readable={mesh.isReadable} verts={mesh.vertexCount} attrs=[{string.Join(",", mesh.GetVertexAttributes().Select(a => $"{a.attribute}:{a.format}x{a.dimension}"))}] b={r.bounds.min:0}..{r.bounds.max:0}");
+                        if (mesh.isReadable)
+                        {
+                            var cols = mesh.colors;
+                            if (cols.Length > 0) sb.Append($" colors e.g. {string.Join(" ", cols.Take(4).Select(c => c.ToString()))} min={cols.Aggregate(Color.white, (a, c) => new Color(Mathf.Min(a.r, c.r), Mathf.Min(a.g, c.g), Mathf.Min(a.b, c.b), Mathf.Min(a.a, c.a)))}");
+                            var uv = new List<Vector2>();
+                            mesh.GetUVs(0, uv);
+                            if (uv.Count > 0) sb.Append($" uv0 x[{uv.Min(u => u.x):0.###}..{uv.Max(u => u.x):0.###}] y[{uv.Min(u => u.y):0.###}..{uv.Max(u => u.y):0.###}]");
+                            var n = mesh.normals;
+                            if (n.Length > 0) sb.Append($" n e.g. {n[0]}");
+                        }
+                        sb.AppendLine();
+                    }
+                    break;
+                }
+                case "paints":
+                    sb.AppendLine(GroundLayer.PaintColours());
+                    break;
+                case "water":
+                {
+                    // Every renderer drawing with a water material: where it is and whether it's shown.
+                    var wm = new HashSet<Material>(new[] { "waterMaterial", "oceanMaterial", "waterfallMaterial" }.Select(GroundMaterials.Get).Where(m => m != null));
+                    var g = GroundLayer.Grid;
+                    if (g != null) sb.AppendLine($"field x[{g.OriginX:0}..{g.OriginX + g.SizeX:0}] z[{g.OriginZ:0}..{g.OriginZ + g.SizeZ:0}] y={g.Y:0.0} flat={GroundLayer.Flat}");
+                    foreach (var r in Resources.FindObjectsOfTypeAll<Renderer>())
+                    {
+                        if (r == null || r.gameObject.scene != scene || !r.sharedMaterials.Any(wm.Contains)) continue;
+                        var b = r.bounds;
+                        sb.AppendLine($"{Path(r.transform)} {r.GetType().Name} mats={string.Join("+", r.sharedMaterials.Select(m => m?.name))} layer={r.gameObject.layer} shown={r.enabled && r.gameObject.activeInHierarchy && !r.forceRenderingOff} " +
+                                      $"x[{b.min.x:0}..{b.max.x:0}] y[{b.min.y:0.0}..{b.max.y:0.0}] z[{b.min.z:0}..{b.max.z:0}] colliders={r.GetComponents<Collider>().Length}");
+                    }
+                    break;
+                }
                 case "update":
                 {
                     // Time a local graph update over a 20 m box at the castle, then a full scan.
@@ -181,7 +248,7 @@ namespace PalaceMod.Builder.Level
                     break;
                 }
                 default:
-                    return "usage: builder-terrain spike graphs|helper|king|ground|update|scan";
+                    return "usage: builder-terrain spike graphs|helper|king|ground|mats|paints|water|update|scan";
             }
             return sb.ToString();
         }
