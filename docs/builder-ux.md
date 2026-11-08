@@ -376,8 +376,12 @@ appear. The Outliner's "No requirement" chip and a validator warning catch such 
 3. It reloads the host in **play** state through the fast swap (below). The overlay is applied as for a real run.
 4. On load, the king is teleported to the stored cursor point (`PlayerMovement.TeleportTo`, as Teleporters do,
    `TeleporterManager.cs:201`), unless Shift+F5 started it normally. The sandbox panel opens and unlimited gold is on.
-5. **F5** in play (or the pause menu's first row "Back to the Studio", or the end screen's "Back to the Studio")
+5. **F5** in play (or the pause menu's first mod row "Back to the Studio", or the end screen's "Back to the Studio")
    stops the music, then reloads the host in **edit** state and restores the stored editor state.
+   - The game's own exits come back too: in Studio play, `TransitionFromLevelToLevelSelect` (pause menu Back to Map,
+     the resign popup) and `TransitionFromEndScreenToLevelSelect` (end screen Continue, relabelled "Back to the
+     Studio") turn into the same swap, so no path out of a test leaves the editor. The end screen's Try Again restarts
+     play as the game does (the king starts at the castle).
 
 ### Fast swap and "Why not play in place"
 
@@ -392,15 +396,19 @@ appear. The Outliner's "No requirement" chip and a validator warning catch such 
 
 **So each switch is a scene reload, made fast:**
 
-- One `StudioSession` spans both states (`Mode = Edit | Play`). Switching reloads the same host through
-  `SceneTransitionManager.TransitionFromNullToLevel(host)`. `EditorReturn` ignores it because the scene is the
-  session's host (`EditorReturn.cs:297`), and the session never ends in between.
+- One session spans both states. `SessionLauncher.LaunchStudio(request, StudioSessionKind.Edit | Play)` starts it,
+  and on the same host only swaps the session's pack, level and wave set in place (no `Ended`, the stand-in scores
+  and `EditorReturn`'s return point stay), then reloads through `TransitionFromNullToLevel(host)`. `EditorReturn`
+  ignores it because the scene is the session's host. `Studio.NextLoad` tells the shell whether to claim the load
+  (Edit) or leave it to the overlay (Play). The play pack is `TestPacks.Play` (the level, its wave set and the units
+  it reaches, unit-tested), the edit pack `TestPacks.Edit` / `Studio.EditPack`.
 - During a Studio swap, `cloudFadeInTime` and `cloudFadeOutTime` (`SceneTransitionManager`, fields read in
-  `SceneTransitionAnimation`) are set to 0.12 s and restored after. The load itself is the cost. Measure it, and
-  target ≤ 1.5 s per switch on Nordfels.
+  `SceneTransitionAnimation`) are set to 0.12 s and restored after. The load itself is the cost. Each switch logs
+  its time (`Studio: play ready in … ms`, `edit ready in …`). Measured on Nordfels in a pool instance (Apple
+  Silicon, native): play → play 0.9 s, play → edit 0.85 s; from the title the first load takes about 5 s.
 - The menu stays visible under the clouds, as today.
-- The pre-level loadout, perk screen, "Custom run" notice and night-warning `Notify` are skipped. The loadout is
-  `TestLoadout` (last used on the map) as today.
+- The pre-level loadout, perk screen and "Custom run" notice are skipped. The night-warning `Notify` stays: it's the
+  designer's own text, worth seeing in a test. The loadout is `TestLoadout` (last used on the map) as today.
 
 ### Sandbox panel (play mode, right side, collapsible with Tab)
 
@@ -408,18 +416,22 @@ Non-modal dock like the Studio's. Keys in brackets (context `BuilderPlay`).
 
 | Row | Control | Backed by |
 |---|---|---|
-| Gold | ∞ toggle (on) · number | new: an infinite-gold patch (W2) (a `TryToBuildOrUpgradeAndPay`/`PlayerInteraction` balance check that treats the balance as enough and doesn't deduct); `DebugActions.SetGold` for a set value |
-| Night | ▶ Start night [N] · ■ End night · Jump to night [number] | `DebugActions.StartNight`, `EndNight`, `JumpToNight` |
+| Gold | Unlimited (on) · number | `PlayerInteraction.SpendCoins` postfix gives every coin back, and the balance is kept at ≥ 999 (set on the field, so networth and income stats don't move); `DebugActions.SetGold` for a set value (a value under 999 turns Unlimited off) |
+| Night | Start night / End night [N] · Jump to night [number] | `DebugActions.StartNight`, `EndNight`, `JumpToNight` |
 | Speed | 0.5 · 1 · 2 · 4 · 8 [`[` `]`] | `DebugActions.SetSpeed` |
 | King | God mode · Revive | `SetGodMode`, `ReviveKing` |
 | Kingdom | Invulnerable · Heal all · Build all · Max upgrade nearest | `SetInvulnerableKingdom`, `HealAll`, `BuildAllBlueprints`, `MaxUpgrade(NearestBuilding())` |
 | Enemies | Kill all [K] | `KillAllEnemies` |
 | Spawn | unit picker (catalog + pack units, icons) × count [1-50] · elite · at: cursor click / a spawn line | new (W2): instantiate like `Spawn.Update` (decompiled `Spawn.cs:140-180`), with `IUnitFactory.Resolve` for pack units, the night's difficulty scaling and elite material, so enemies path to targets as in a wave |
-| Teleport | T then click the ground; Shift+T brings followers | `PlayerMovement.TeleportTo` + followers via `GetNearestGroundPosition` (as `TeleporterManager.cs:201-226`) |
+| Teleport | T then click the ground (Shift-click keeps it armed, right click cancels) · Bring followers toggle | `PlayerMovement.TeleportTo` + followers via `GetNearestGroundPosition` (as `TeleporterManager.cs:201-226`) |
 | Restart | Restart play from the same spot (R) | the same fast swap, Play → Play |
 | Back | Back to the Studio [F5] | swap to Edit |
 
 - Play mode starts in day 1 planning time. "Start night N" jumps straight to that night.
+- Spawning drives a one-off game `Spawn` (count, 0.12 s interval, elite) frame by frame with the night's
+  `difficultyMulti`, so perks, elite material and the template-aware spawn patch all apply. A click spawn uses a
+  stand-in line at the point.
+- Speed, god mode and invulnerable buildings are global; the sandbox puts them back when the Studio closes.
 - `GameplayImpact` is marked (custom content already marks the run). Scores aren't recorded for Studio play sessions:
   `ScoreStore` is skipped while `StudioSession` is active.
 - Using Back during the night, or on the end screen, stops the music first (see bugs).
@@ -652,6 +664,50 @@ A separate effort is designing a cross-map asset library. The Studio leaves it o
   string. The library effort extends `LevelOverlay`'s prop resolution for its new base kinds; the Studio stays
   agnostic.
 
+### The cross-map scenery library (W5, `Features/Builder/Library/`)
+
+Every scenery mesh of the ten main maps (45 today: trees, rocks, ruins and walls, towers, graveyard pieces) can be
+placed on any map.
+
+- **No game assets are shipped or copied.** The repo holds only a metadata catalog,
+  `src/PalaceMod/Assets/scenery.json`: for each mesh, its name, home map, the maps that use it (with counts), the
+  asset file and object id it lives in, its kind, material names, the maps' typical yaw-free rotation and scale, the
+  vertex count and the bounds. `python3 scripts/dev.py scenery-catalog` regenerates it from the installed game with
+  UnityPy (`scripts/scenery_catalog.py`; the same filter as `LayoutScene.Props`, plus a hand-kept exclusion list and
+  kind table). Rerun it after a game update.
+- **Runtime:** on first use, `SceneryLibrary` reads the meshes from the player's own install (`AssetFileReader`: a
+  minimal reader for serialized format 22 and the Unity 2022.3 Mesh layout; about 400 KB, 85-225 ms once per game
+  session), copies the vertex and index buffers into new readable Meshes and keeps them. Every read is checked: the
+  file header's Unity version must be the catalog's, the object must be a Mesh with the catalog's name and vertex
+  count, and blend shapes, compressed or streamed meshes are refused. An entry that fails is hidden from the browser
+  and logged once (Warn); a level that uses it gets the usual "no scenery" warning, and the rest still loads.
+- **Colours:** a library mesh is drawn with the loaded level's material of the same name (the FlatKit materials
+  `ColorAndLightManager` recolours per level: Trees, Mountain, Buildings, Enemy, Ground Patches), so it takes the host
+  map's colours. "Keep the donor map's colours" (cloning a material with the donor level's `Colorscheme`) is deferred:
+  the colorschemes live in each level's own file as MonoBehaviour data, which needs a type-tree-free reader for that
+  class too.
+- **Refs:** placed library items are ordinary `props` entries with `base: "mesh:<name>"`, optionally
+  `"mesh:<name>@<Map>"` should two maps ever ship a mesh by the same name (the catalog generator refuses that case
+  today). `SceneryLibrary.Resolve(scene, base)` looks in the host's own scenery first (so existing levels look the
+  same; also where a host-only mesh not in the library is found), then the library. `LevelOverlay` (play) and the
+  Studio (`StudioServices.PropResolver`) both use it. `.tfpack` and share codes are unchanged: they carry the string.
+- **Solid props block with their real shape.** Library meshes are readable, so `LayoutScene.SetSolid` gives them a
+  blocker child that uses the mesh itself (and a `MeshCollider`) instead of the bounding box; host meshes, which
+  aren't readable, keep the box. A curved ruin wall blocks only along the wall.
+- **Library tab** (`LibraryBrowser`, registered as `StudioServices.AssetBrowser`): chips "This map" (the Studio's
+  `HostSceneryBrowser`, passed through: this map's scenery and the pack's `asset:` meshes), "All maps", then one per
+  kind (Trees, Rocks, Ruins and walls, Buildings, Graveyard). Tiles are ordered by home map, then kind; the badge is
+  the home map's first three letters, and the tooltip lists the kind and the maps that use it. The text filter matches
+  name, kind and map names ("Moorweg" lists Moorweg's). A mesh the host also has is listed once. New props start at
+  most about 6 m across, like host scenery.
+- **Tile pictures** (`LibraryThumbs`): rendered on demand by an offscreen camera (three-quarter view, transparent
+  background, the level's own materials and sun), four per frame, cached as PNGs in
+  `BepInEx/PalaceBuilder/cache/thumbs/<map>/<mesh>.png` (per host map, since colours differ) and in memory. The
+  browser raises `Changed` once the queue drains.
+- Dev: `dev.py cmd "builder-library status | query [here|all|kind:<Kind>|-] [text] | place <mesh> [x z] | gallery
+  [spacing] | walkable <x> <z> | clear | thumb <mesh> | thumbs [reset]"`. Unit tests (`SceneryLibraryTests`) cover
+  the reader on a synthetic file, ref parsing, the catalog, and, where the game is installed, read every catalog mesh.
+
 ## Data-model changes (summary)
 
 All are additive except one, `DesignPack.CurrentVersion` 1 → 2: `Migrations.Steps[1]` moves `add.activator` and
@@ -664,7 +720,7 @@ All are additive except one, `DesignPack.CurrentVersion` 1 → 2: `Migrations.St
 | `groups[] {id, name, members[]}` | `LevelDef` (editor metadata) | W1 |
 | `spawnLines.add` applied (fields exist) | `LevelOverlay` | W3 |
 | `terrain {…}` | `LevelDef` (see "Terrain") | W4 |
-| `props[].base` kinds from the library | `PropDef.Base` | library effort |
+| `props[].base`: `"mesh:<name>[@<Map>]"` also resolves from the scenery library | `PropDef.Base` | W5 |
 
 The validator covers each, with paths so the Problems popup can select the object.
 
@@ -770,14 +826,16 @@ the Place tool), `PickOnMap`, `AddViewToggle`, `AddDeleteGuard` (W3's "this slot
   - `StudioPlay.cs` (`IStudioPlay`: the session state machine, fast swap, state store and restore)
   - `SandboxPanel.cs` (a `ModDock` panel)
   - `SandboxActions.cs` (infinite gold, spawn at cursor or line, teleport; everything else calls `DebugActions`)
-  - `BuilderManager.Play.cs` (patches: infinite gold, the cloud-time shortening during swaps, skipping the session
+  - `TestPacks.cs` (the play and edit packs, pure C#, `tests/PalaceMod.Tests/TestPackTests.cs`)
+  - `StudioPlayManager.cs` (as built: a manager rather than `BuilderManager.Play.cs`, because play needs its own
+    Update and keys; patches: infinite gold, the cloud-time shortening during swaps, skipping the session
     notice and scores in Studio sessions, the pause-menu row, the end-screen row)
 - `Session/SessionLauncher.cs` (additive):
   - a `SessionRequest.Studio` flag (or `StudioSession` subtype) that keeps the session across same-host reloads and
     marks it Edit or Play
   - skips `ScoreStore` and the notice
 - `Editor/EditorReturn.cs`: stop the music on redirect, and ignore Studio swaps.
-- The `AfterTutorialTipManager.Update` prefix (`BuilderManager.Play.cs`).
+- The `AfterTutorialTipManager.Update` prefix (`StudioPlayManager.cs`).
 
 **Uses:** `Studio.View` and `ModeChanged` from W1; `DebugActions` (Features/Debug, called as is, no edits).
 

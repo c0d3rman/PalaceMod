@@ -37,9 +37,12 @@
     <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Requirements/ChainPreset.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Contracts/Contracts.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Sharing/ShareCodec.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Play/TestPacks.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Sharing/PackArchive.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Assets/GltfCheck.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Assets/Loaders.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Library/AssetFileReader.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Library/SceneryCatalog.cs" />
     <Compile Include="../../src/PalaceMod/Features/Economy/EconomyModel.cs" />
     <Compile Include="../../src/PalaceMod/Features/Economy/PlannerStore.cs" />
     <Compile Include="../../src/PalaceMod/Core/UI/NumberMath.cs" />

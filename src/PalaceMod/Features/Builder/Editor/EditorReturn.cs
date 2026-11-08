@@ -50,6 +50,8 @@ namespace PalaceMod.Builder.Editor
             if (p.Title) scene = stm.mainMenuScene;
             p.Scene = scene;
             reopening = p;
+            // Nothing on the Builder's screens asks for music, so the run's (a night's) would play on until the title.
+            Builder.Studio.Play.StudioPlay.StopMusic();
             Log.For<BuilderManager>().Info($"Back to the Builder: {scene}, {p.PackId} {p.Path}");
         }
 
