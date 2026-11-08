@@ -11,13 +11,15 @@ using UnityEngine.SceneManagement;
     A level's terrain in the loaded host scene (docs/builder-ux.md, "Terrain"). One root object in the host scene (so it
     goes with the scene) holds, per 32x32-cell chunk:
     - on a "flat" base, the ground: a readable mesh on the Ground layer (the recast graphs rasterize it) with a
-      MeshCollider (the king walks on it, coins and lobbed shots hit it), drawn with the level's own ground materials
-      (ColorAndLightManager recolours them, so it follows the scheme and daylight); faces too steep to walk are rock,
-      cells beside water are sand;
+      MeshCollider (the king walks on it, coins and lobbed shots hit it), drawn with copies of the level's own ground
+      materials, re-tinted whenever ColorAndLightManager recolours the originals (so it follows the scheme) and moved
+      apart where the scheme gives several paints one colour (GroundPalette); faces too steep to walk are rock, cells
+      beside water are sand;
     - blocked and water cells: invisible readable columns on the Obstacle layer that reach above the graphs' bounds
       (so they cut the navmesh and leave no walkable top), with a MeshCollider that stops the king; fliers ignore them;
     - water: a plane at the water level with the river material.
-    A flat base also hides the host's ground, cliffs, rivers, roads, invisible walls and flier surface, raises the
+    A flat base also hides the host's ground, cliffs, rivers, lakes and ponds (all its water but a sea reaching past the
+    field, which stays so the field reads as an island), roads, invisible walls and flier surface, raises the
     graphs' height range to the terrain's, and brings its own: walls round the field (king) and a flier surface 5 m
     above the ground (layer Flyer Surface, only switched on while GroundGraphs.Scan runs, as the game's is).
 
@@ -48,7 +50,8 @@ namespace PalaceMod.Builder.Level
         private static Mesh airMesh;
         private static MeshRenderer air;
         private static float blockBottom, blockTop;
-        private static Material[] materials;
+        private static Material[] materials, sources;
+        private static ColorAndLightManager listening;
         private static Material water;
         private static readonly List<(Behaviour b, Renderer r, Collider c, GameObject go)> hidden = [];
 
@@ -167,6 +170,7 @@ namespace PalaceMod.Builder.Level
                 if (go != null) go.SetActive(true);
             }
             hidden.Clear();
+            DropPaints();
             GroundGraphs.Extra.Clear();
             if (root != null) UnityEngine.Object.Destroy(root);
             root = null;
@@ -191,13 +195,16 @@ namespace PalaceMod.Builder.Level
         private static void HideHost(Scene scene)
         {
             var ground = new HashSet<Material>(GroundMaterials.All().Where(kv => kv.Key != "oceanMaterial" && kv.Value != null).Select(kv => kv.Value));
-            // The dark shapes drawn along rivers and roads go with them.
+            // The dark shapes drawn along rivers and roads go with them, and so do waterfalls.
             if (GroundMaterials.Get("shadowShapeMaterial") is Material shadow) ground.Add(shadow);
+            if (GroundMaterials.Get("waterfallMaterial") is Material fall) ground.Add(fall);
+            // The ocean material also draws lakes and ponds (Moorweg's): those go, a sea round the field stays.
+            var ocean = GroundMaterials.Get("oceanMaterial");
             var keepLayers = new HashSet<int> { 0, GroundLayerIndex, ObstacleLayerIndex, WaterLayerIndex, 21 };
             foreach (var r in Resources.FindObjectsOfTypeAll<MeshRenderer>())
             {
                 if (r == null || r.gameObject.scene != scene || !keepLayers.Contains(r.gameObject.layer)) continue;
-                if (r.sharedMaterials.Length == 0 || !r.sharedMaterials.All(m => m != null && ground.Contains(m))) continue;
+                if (r.sharedMaterials.Length == 0 || !r.sharedMaterials.All(m => m != null && (ground.Contains(m) || (m == ocean && OnField(r.bounds))))) continue;
                 if (Owned(r.transform)) continue;
                 if (r.enabled)
                 {
@@ -225,6 +232,9 @@ namespace PalaceMod.Builder.Level
                 }
             }
         }
+
+        private static bool OnField(Bounds b) => Grid != null &&
+            GroundPalette.IsLake(b.min.x, b.min.z, b.max.x, b.max.z, Grid.OriginX, Grid.OriginZ, Grid.OriginX + Grid.SizeX, Grid.OriginZ + Grid.SizeZ);
 
         private static void Hide(Collider c)
         {
@@ -286,9 +296,55 @@ namespace PalaceMod.Builder.Level
         {
             var all = GroundMaterials.All();
             Material M(string f) => all.TryGetValue(f, out var m) && m != null ? m : all.TryGetValue("groundMaterial", out var g) ? g : null;
-            // Indexed by GroundMaterial.
-            materials = [M("groundMaterial"), M("groundHigh"), M("groundLow"), M("earthMaterial"), M("sandMaterial"), M("roadMaterial"), M("rockMaterial")];
+            DropPaints();
+            // Indexed by GroundMaterial. Copies: their colours are moved apart from the scheme's (GroundPalette).
+            sources = [M("groundMaterial"), M("groundHigh"), M("groundLow"), M("earthMaterial"), M("sandMaterial"), M("roadMaterial"), M("rockMaterial")];
+            materials = sources.Select((m, i) => m == null ? null : new Material(m) { name = $"{LayoutScene.AddedPrefix}paint {(GroundMaterial)i}" }).ToArray();
             water = M("waterMaterial");
+            Recolour();
+            // The scheme is applied in ColorAndLightManager.Start (after this) and again on every scheme switch.
+            listening = ColorAndLightManager.Instance ?? UnityEngine.Object.FindObjectOfType<ColorAndLightManager>();
+            listening?.OnColorChange.AddListener(Recolour);
+        }
+
+        // What ColorAndLightManager sets on a ground material (SetMaterialColors, and the outline's tint by daylight).
+        private static readonly string[] SchemeColours = ["_BaseColor", "_ColorDim", "_ColorDimExtra", "_UnityShadowColor", "_OutlineColor"];
+
+        /// <summary>Copies the scheme's current colours onto the paints, then moves the paints' own colours apart.</summary>
+        private static void Recolour()
+        {
+            if (materials == null || sources == null) return;
+            var host = new Rgb[sources.Length];
+            for (int i = 0; i < sources.Length; i++)
+            {
+                var src = sources[i];
+                if (src == null || materials[i] == null) continue;
+                foreach (var p in SchemeColours)
+                    if (src.HasProperty(p)) materials[i].SetColor(p, src.GetColor(p));
+                var c = src.HasProperty("_BaseColor") ? src.GetColor("_BaseColor") : Color.gray;
+                host[i] = new Rgb(c.r, c.g, c.b);
+            }
+            var paint = GroundPalette.Resolve(host);
+            for (int i = 0; i < materials.Length; i++)
+                if (materials[i] != null && materials[i].HasProperty("_BaseColor"))
+                    materials[i].SetColor("_BaseColor", new Color(paint[i].R, paint[i].G, paint[i].B, 1f));
+        }
+
+        /// <summary>Each paint's colour now and the scheme's colour it came from (dev tools).</summary>
+        public static string PaintColours() => materials == null ? "no paints" : string.Join("\n", materials.Select((m, i) =>
+            $"{(GroundMaterial)i}: {Describe(m)} from {sources[i]?.name} {Describe(sources[i])}"));
+
+        private static string Describe(Material m) => m != null && m.HasProperty("_BaseColor") ? m.GetColor("_BaseColor").ToString() : "-";
+
+        private static void DropPaints()
+        {
+            listening?.OnColorChange.RemoveListener(Recolour);
+            listening = null;
+            if (materials != null)
+                foreach (var m in materials)
+                    if (m != null) UnityEngine.Object.Destroy(m);
+            materials = null;
+            sources = null;
         }
 
         private static Chunk MakeChunk(int x0, int z0, int x1, int z1)

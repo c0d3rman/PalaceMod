@@ -206,6 +206,98 @@ print("ok")
             return p.ExitCode;
         }
 
+        /// <summary>remove_spawn_line takes a host line off the map (and restores it); a wave still on it is an error.</summary>
+        public static void PalacePyRemovesHostSpawnLines()
+        {
+            string script = FindScript();
+            if (script == null || !HasPython()) { Console.WriteLine("  (skipped: no python3 or agent-kit/palace.py)"); return; }
+            string root = Path.Combine(Path.GetTempPath(), "palace-agent-test-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                string game = Path.Combine(root, "game");
+                Directory.CreateDirectory(Path.Combine(game, "BepInEx"));
+                string refDir = Path.Combine(root, "ref");
+                WriteReference(refDir);
+                string ops = Path.Combine(root, "ops.json");
+                File.WriteAllText(ops, """
+                [
+                 {"op": "add_spawn_line", "id": "north", "at": [0, 30], "width": 12},
+                 {"op": "waves", "nights": [{"spawns": [{"unit": "E Melee", "count": 3, "line": "north", "gold": 4}]}]},
+                 {"op": "remove_spawn_line", "line": "Gate"}
+                ]
+                """);
+                Run(script, game, refDir, "new", "test.pack", "--name", "Test");
+                Run(script, game, refDir, "level", "test.pack", "lv", "--host", "Testmap", "--base", "cleared");
+                var applied = JObject.Parse(Run(script, game, refDir, "apply", "test.pack", ops));
+                Assert.True(applied["errors"]!.Count() == 0, "removing an unused host line is fine: " + applied);
+                string packFile = Path.Combine(game, "BepInEx", "PalaceBuilder", "packs", "test.pack", "pack.json");
+                var pack = PackSerializer.Read(File.ReadAllText(packFile), new List<ValidationIssue>());
+                Assert.Equal("Gate", pack.FindLevel("lv").SpawnLines.Remove.Single(), "spawnLines.remove");
+                var errors = Validator.Validate(pack).Where(i => i.Severity == Severity.Error).ToList();
+                Assert.True(errors.Count == 0, "the mod's validator agrees: " + string.Join("; ", errors));
+                var show = JObject.Parse(Run(script, game, refDir, "show", "test.pack"));
+                Assert.True(show["spawnLines"]!.All(l => (string)l["name"] != "Gate"), "show leaves the removed line out of spawnLines");
+                Assert.Equal("Gate", (string)show["removedSpawnLines"]![0], "and lists it as removed");
+
+                File.WriteAllText(ops, """[{"op": "night", "night": 1, "spawns": [{"unit": "E Melee", "count": 1, "line": "Gate"}]}]""");
+                applied = JObject.Parse(Run(script, game, refDir, "apply", "test.pack", ops));
+                Assert.True(applied["errors"]!.Any(e => ((string)e["path"]!).Contains("spawnLines.remove")), "a wave on a removed line is an error: " + applied);
+
+                File.WriteAllText(ops, """[{"op": "remove_spawn_line", "line": "Gate", "restore": true}, {"op": "remove_spawn_line", "line": "north"}]""");
+                applied = JObject.Parse(Run(script, game, refDir, "apply", "test.pack", ops));
+                var lines = JObject.Parse(File.ReadAllText(packFile))["levels"]![0]!["spawnLines"];
+                Assert.True(lines == null || (lines["remove"] == null && lines["add"] == null), "restored Gate and deleted the added line: " + lines);
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch (IOException) { }
+            }
+        }
+
+        /// <summary>The offline width check matches the widths measured in game (level-building.md section 7): a 6 m water
+        /// causeway lets small enemies across but not large ones, a 16 m one lets both.</summary>
+        public static void PalacePyCausewayWidths()
+        {
+            string script = FindScript();
+            if (script == null || !HasPython()) { Console.WriteLine("  (skipped: no python3 or agent-kit/palace.py)"); return; }
+            string root = Path.Combine(Path.GetTempPath(), "palace-agent-test-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                string game = Path.Combine(root, "game");
+                Directory.CreateDirectory(Path.Combine(game, "BepInEx"));
+                string refDir = Path.Combine(root, "ref");
+                WriteReference(refDir);
+                Run(script, game, refDir, "new", "test.pack", "--name", "Test");
+                int[] widths = [6, 16];
+                for (int li = 0; li < widths.Length; li++)
+                {
+                    int width = widths[li];
+                    string level = "w" + width, ops = Path.Combine(root, level + ".json");
+                    File.WriteAllText(ops, $$$"""
+                    [
+                     {"op": "terrain_init", "origin": [-50, -50], "size": [50, 50], "cell": 2},
+                     {"op": "water", "level": -1, "circle": {"center": [0, 0], "radius": 30}},
+                     {"op": "water", "on": false, "circle": {"center": [0, 0], "radius": 12}},
+                     {"op": "terrain", "mode": "set", "height": 0, "circle": {"center": [0, 0], "radius": 12}},
+                     {"op": "water", "on": false, "line": {"points": [[1, 0], [1, -40]], "width": {{{width}}}}},
+                     {"op": "terrain", "mode": "set", "height": 0, "line": {"points": [[1, 0], [1, -40]], "width": {{{width}}}}},
+                     {"op": "waves", "nights": [{"spawns": [{"unit": "E Melee", "count": 1, "line": "Gate"}]}]}
+                    ]
+                    """);
+                    Run(script, game, refDir, "level", "test.pack", level, "--host", "Testmap", "--base", "flat");
+                    var applied = JObject.Parse(Run(script, game, refDir, "apply", "test.pack", ops, "--level", level));
+                    Assert.True(applied["errors"]!.Count() == 0, $"{width} m: small enemies cross: {applied}");
+                    // The check covers the whole pack: only this level's warnings count.
+                    bool largeWarned = applied["warnings"]!.Any(w => ((string)w["path"]!).StartsWith($"levels[{li}]") && ((string)w["message"]!).Contains("large enemies from Gate"));
+                    Assert.Equal(width < 10, largeWarned, $"{width} m: large enemies blocked only on the narrow causeway: {applied}");
+                }
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch (IOException) { }
+            }
+        }
+
         private static string FindScript()
         {
             for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)

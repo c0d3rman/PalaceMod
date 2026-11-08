@@ -21,7 +21,19 @@ namespace PalaceMod.Builder.Level
             public bool Reachable;
             public string Detail;
             public List<Vector3> Points = [];
+            /// <summary>The line's middle, where the route is measured from.</summary>
+            public Vector3 From;
+            /// <summary>Where the line's middle lands on the graph (its nearest walkable point), if anywhere.</summary>
+            public Vector3? Start;
+            /// <summary>Flat distance from the line's middle to Start, m: how far off the walkable graph the line is.</summary>
+            public float Snap;
+            /// <summary>Route length in metres from the line itself (Snap plus the path on the graph); 0 when not computed.</summary>
+            public float Length;
+            public bool OffGraph => Snap > OffGraphSnap;
         }
+
+        /// <summary>A line further than this from the walkable graph is off it: its enemies appear somewhere else.</summary>
+        public const float OffGraphSnap = 10f;
 
         /// <summary>Rescans every graph. Returns the time it took in ms, or -1 without pathfinding.</summary>
         public static long Rescan()
@@ -39,7 +51,7 @@ namespace PalaceMod.Builder.Level
         }
 
         /// <summary>Checks each ground spawn line (at its current place) for a path to the castle.</summary>
-        public static List<Route> Check(Scene scene, Func<EnemySpawnLine, Vector3> lineStart = null, bool withPoints = false)
+        public static List<Route> Check(Scene scene, Func<EnemySpawnLine, Vector3> lineStart = null, bool withPoints = false, Func<EnemySpawnLine, bool> include = null)
         {
             var routes = new List<Route>();
             var astar = AstarPath.active;
@@ -47,6 +59,7 @@ namespace PalaceMod.Builder.Level
             if (astar == null || castle == null) return routes;
             foreach (var line in LayoutScene.Lines(scene).Where(LayoutScene.IsGroundLine))
             {
+                if (include != null && !include(line)) continue;
                 var start = lineStart?.Invoke(line) ?? LayoutScene.LineCenter(line.transform);
                 // Large enemies need the wider graph; a line that only spawns small ones is checked on the small graph.
                 string graph = line.canSpawnBigGround ? "Enemy Units L" : "Enemy Units S";
@@ -57,15 +70,23 @@ namespace PalaceMod.Builder.Level
 
         private static Route FindRoute(string name, string graph, Vector3 from, Vector3 to, bool withPoints)
         {
-            var route = new Route { Line = name, Graph = graph };
+            var route = new Route { Line = name, Graph = graph, From = from };
             try
             {
                 var nn = NearestNodeConstraint.Walkable;
                 nn.graphMask = GraphMask.FromGraphName(graph);
-                var a = AstarPath.active.GetNearest(from, nn).node;
+                var na = AstarPath.active.GetNearest(from, nn);
+                var a = na.node;
                 var b = AstarPath.active.GetNearest(to, nn).node;
+                if (a != null)
+                {
+                    route.Start = na.position;
+                    var flat = na.position - from;
+                    flat.y = 0f;
+                    route.Snap = flat.magnitude;
+                }
                 route.Reachable = a != null && b != null && PathUtilities.IsPathPossible(a, b);
-                route.Detail = $"from {from} -> node {(Vector3?)a?.position} area {a?.Area}; to {to} -> node {(Vector3?)b?.position} area {b?.Area}";
+                route.Detail = $"from {from} -> {(a != null ? na.position.ToString() : "nothing")} ({route.Snap:0.0} m) area {a?.Area}; to {to} -> node {(Vector3?)b?.position} area {b?.Area}";
                 // The nearest walkable node can lie outside a ring of props that closes in the spawn point (the inside
                 // is too small to be walkable), which would make a walled-in spawn look connected.
                 if (route.Reachable && a != null && WalledIn(from, (Vector3)a.position))
@@ -79,8 +100,20 @@ namespace PalaceMod.Builder.Level
                     path.traversalConstraint.graphMask = nn.graphMask;
                     AstarPath.StartPath(path);
                     path.BlockUntilCalculated();
-                    // The raw path zigzags through triangle centres; every fourth point reads as a route.
-                    if (!path.error) route.Points = path.vectorPath.Where((_, i) => i % 4 == 0 || i == path.vectorPath.Count - 1).ToList();
+                    if (!path.error)
+                    {
+                        // The raw vectorPath runs through triangle centres, and a flat field's navmesh triangles are
+                        // tens of metres across: two lines in one triangle got the same route and length, and moving
+                        // a line inside it changed nothing. String-pull it from the exact start (the line's middle,
+                        // or the walkable point nearest it) to the castle, as the movement code does, and add the
+                        // walk from the line onto the graph.
+                        var pts = Pulled(path);
+                        float length = route.Snap;
+                        for (int i = 1; i < pts.Count; i++) length += Vector3.Distance(pts[i - 1], pts[i]);
+                        route.Length = length;
+                        route.Points = pts;
+                        if (route.Snap > OnGraphDistance) route.Points.Insert(0, from);
+                    }
                 }
             }
             catch (Exception e)
@@ -88,6 +121,64 @@ namespace PalaceMod.Builder.Level
                 Log.For<BuilderManager>().Warn($"path check for {name} failed: {e.Message}");
             }
             return route;
+        }
+
+        /// <summary>The path's corners, string-pulled through its navmesh triangles (what FunnelModifier does) from
+        /// its snapped start point to its snapped end point.</summary>
+        private static List<Vector3> Pulled(ABPath path)
+        {
+            var result = new List<Vector3>();
+            if (path.path == null || path.path.Count == 0 || path.vectorPath == null || path.vectorPath.Count == 0) return result;
+            path.vectorPath[0] = path.startPoint;
+            path.vectorPath[path.vectorPath.Count - 1] = path.endPoint;
+            var parts = Funnel.SplitIntoParts(path);
+            foreach (var part in parts)
+            {
+                if (part.type == Funnel.PartType.NodeSequence && path.path[part.startIndex] is TriangleMeshNode)
+                {
+                    var funnel = Funnel.ConstructFunnelPortals(path.path, part);
+                    result.AddRange(Funnel.Calculate(funnel, false));
+                }
+                else
+                {
+                    result.Add(part.startPoint);
+                    result.Add(part.endPoint);
+                }
+            }
+            if (result.Count == 0) result.AddRange(path.vectorPath);
+            return result;
+        }
+
+        public sealed class Reachability
+        {
+            public string Graph;
+            public bool Reachable;
+            public float Snap, SnapTo;
+        }
+
+        /// <summary>Whether each ground graph connects two points (each snapped to its nearest walkable point).</summary>
+        public static List<Reachability> Reach(Vector3 a, Vector3 b)
+        {
+            var list = new List<Reachability>();
+            var astar = AstarPath.active;
+            if (astar == null) return list;
+            foreach (var g in astar.data.graphs)
+            {
+                if (g == null || g.name == "Enemy Units Air") continue;
+                var nn = NearestNodeConstraint.Walkable;
+                nn.graphMask = GraphMask.FromGraph(g);
+                var na = astar.GetNearest(a, nn);
+                var nb = astar.GetNearest(b, nn);
+                float Flat(Vector3 p, Vector3 q) { var d = p - q; d.y = 0f; return d.magnitude; }
+                list.Add(new Reachability
+                {
+                    Graph = g.name,
+                    Reachable = na.node != null && nb.node != null && PathUtilities.IsPathPossible(na.node, nb.node),
+                    Snap = na.node != null ? Flat(na.position, a) : -1f,
+                    SnapTo = nb.node != null ? Flat(nb.position, b) : -1f,
+                });
+            }
+            return list;
         }
 
         // A spawn this close to its nearest node is on the walkable area itself (vanilla spawns are, or nearly).
@@ -115,7 +206,8 @@ namespace PalaceMod.Builder.Level
             $"{g.name}: mode={g.collectionSettings.collectionMode} tags=[{string.Join(",", g.collectionSettings.tagMask)}] " +
             $"bounds={g.forcedBoundsCenter}/{g.forcedBoundsSize} " +
             $"colliders={g.collectionSettings.rasterizeColliders} meshes={g.collectionSettings.rasterizeMeshes} " +
-            $"layers={string.Join(",", Enumerable.Range(0, 32).Where(l => (g.collectionSettings.layerMask.value & (1 << l)) != 0).Select(l => LayerMask.LayerToName(l)))}"));
+            $"layers={string.Join(",", Enumerable.Range(0, 32).Where(l => (g.collectionSettings.layerMask.value & (1 << l)) != 0).Select(l => LayerMask.LayerToName(l)))} " +
+            $"cell={g.cellSize} radius={g.characterRadius} climb={g.walkableClimb} slope={g.maxSlope} minRegion={g.minRegionSize}"));
 
         public static string Describe(List<Route> routes) =>
             routes.Count == 0 ? "no ground spawn lines to check" : string.Join(", ", routes.Select(r => $"{r.Line} {(r.Reachable ? "ok" : "BLOCKED")}"));

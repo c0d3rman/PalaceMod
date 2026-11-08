@@ -27,7 +27,7 @@ namespace PalaceMod.Builder.Agent
         private const string Usage =
             "agent status | slots | catalog <file> | host <file> [cell] | packs | reload | validate <pack> | " +
             "play <pack> <level> | sandbox <pack> <level> [x z] | edit <pack> <level> | infinitegold on|off | spawn <unit> [count] [elite] [line <name>|at <x> <z>] | vanilla <scene> | menu | night [n] | endnight | report | build <slot|all> [level] [branch] [pay] | " +
-            "gold <n> | god on|off | invulnerable on|off | speed <x> | kill | heal | teleport <x> <z> | paths | " +
+            "gold <n> | god on|off | invulnerable on|off | speed <x> | kill | heal | teleport <x> <z> | paths [rescan] | reach <x1> <z1> <x2> <z2> | " +
             "share code <pack> [clipboard] | share export <pack> [path] | capture <file> [pixels] | screenshot <file>   agent bridge: JSON state, level tests, map dumps (see agent-kit/)";
 
         internal static void Register() => DevCommands.Register("agent", Usage, Run);
@@ -206,6 +206,9 @@ namespace PalaceMod.Builder.Agent
                     }
                     throw new ArgumentException("usage: agent share code <pack> [clipboard] | share export <pack> [path]");
                 }
+                case "reach":
+                    if (AstarPath.active == null) throw new InvalidOperationException("no level is loaded");
+                    return Json(Reach(args));
                 case "capture":
                 {
                     string path = PathArg(args, 1, out float? option);
@@ -396,20 +399,35 @@ namespace PalaceMod.Builder.Agent
             {
                 ["rescanMs"] = ms,
                 ["castle"] = PathCheck.Castle(scene) is Vector3 c ? V(c) : null,
-                ["routes"] = new JArray(routes.Select(r => new JObject
+                ["routes"] = new JArray(routes.Select(r =>
                 {
-                    ["line"] = r.Line, ["graph"] = r.Graph, ["reachable"] = r.Reachable,
-                    ["length"] = R(Length(r.Points)),
-                    ["points"] = new JArray(r.Points.Select(p => new JArray(R(p.x), R(p.z)))),
+                    var o = new JObject
+                    {
+                        ["line"] = r.Line, ["graph"] = r.Graph, ["reachable"] = r.Reachable,
+                        // Measured from the line's middle: the walk onto the graph (snap) plus the path along it.
+                        ["length"] = R(r.Length),
+                        ["at"] = new JArray(R(r.From.x), R(r.From.z)),
+                        ["start"] = r.Start is Vector3 s ? new JArray(R(s.x), R(s.z)) : null,
+                        ["snap"] = R(r.Snap),
+                        ["points"] = new JArray(r.Points.Select(p => new JArray(R(p.x), R(p.z)))),
+                    };
+                    if (r.OffGraph) o["warning"] = $"the line is {r.Snap:0} m from walkable ground on {r.Graph}: its enemies start at the nearest walkable point ({R(r.Start?.x ?? 0)}, {R(r.Start?.z ?? 0)}), not on the line";
+                    return o;
                 })),
             };
         }
 
-        private static float Length(List<Vector3> pts)
+        /// <summary>reach x1 z1 x2 z2: whether each ground graph connects the two points, and where each lands on it.</summary>
+        private static JObject Reach(string[] args)
         {
-            float sum = 0;
-            for (int i = 1; i < pts.Count; i++) sum += Vector3.Distance(pts[i - 1], pts[i]);
-            return sum;
+            var a = new Vector3(F(Arg(args, 1)), 0f, F(Arg(args, 2)));
+            var b = new Vector3(F(Arg(args, 3)), 0f, F(Arg(args, 4)));
+            a = LayoutScene.Ground(a);
+            b = LayoutScene.Ground(b);
+            return new JObject { ["graphs"] = new JArray(PathCheck.Reach(a, b).Select(r => new JObject
+            {
+                ["graph"] = r.Graph, ["reachable"] = r.Reachable, ["snapFrom"] = R(r.Snap), ["snapTo"] = R(r.SnapTo),
+            })) };
         }
 
         // ---------------------------------------------------------------------------------------------- helpers
