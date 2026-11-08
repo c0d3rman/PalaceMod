@@ -99,7 +99,8 @@ or the edge.
 - **Right panel** (340 px). Tabs:
   - **Inspector:** the selection.
   - **Outliner:** every object, filterable.
-  - **Level:** name, description, base map, nights, starting gold, and the path check with its result.
+  - **Level:** name and description (each value under its label at the panel's full width), the map, base and
+    nights, the path check with its result, and the changes as one row per count ("Slots added 36").
 
   The panel scrolls (`ModScrollArea`).
 - **Status line** (32 px): on the left, what is under the cursor (name, cost chain, requirement, coordinates). In the
@@ -171,6 +172,30 @@ The Studio owns input this way:
 4. In play mode the claim is dropped (the level plays normally); only F5 and the sandbox keys keep a play-context
    claim.
 
+### Text and hover descriptions
+
+- Text never clips or is cut into uselessness: popups widen to their longest row (up to the screen less 48 px) and a
+  row still too long wraps; side-panel rows wrap onto a second line (`StudioDock.Compact` with the page width); tile
+  labels shrink to 60 % before an ellipsis.
+- Names with a hidden meaning (tags, slot kinds, upgrade choices, weapons, behaviours, stats, flags) get their tooltip
+  from one table, `Features/Builder/Model/Descriptions.cs` (`Descriptions.For(kind, name)`), written from the
+  decompiled game; the Enemy Studio and agent kit read the same table.
+
+### Mouse on the UI never reaches the game
+
+The game's menus read the mouse at the controller level, but gameplay reads Rewired actions, and some of it ignores
+the frozen player (`PlayerScept` raises the sceptre on every "Interact"). `KeybindsManager.MouseGate` switches off the
+mouse bindings of every game action while the pointer is on a `ModDock` panel or a mod menu (ModFrame, ModPopup, the
+Studio's frozen dock) is the active frame, and back on once no mouse button is held.
+
+### Placement audit
+
+`dev.py cmd "builder-studio audit"` places every palette kind of the open map (Slots, Scenery, every Library item),
+checks the placed object has the ghost's meshes at the ghost's size, resizes one of two copies of each prop to check
+the other stays put, and undoes everything. Root causes it caught: `LayoutScene.Props` counted the Studio's own prop
+copies (renamed to their item keys) as host scenery, so a resized copy set the host base's scale for every copy of
+that mesh; and the library ghost was drawn at scale 1 while placing used the start scale.
+
 ### Selection and multi-edit
 
 - The selection is an ordered list of item keys (`slot:<name>`, `add:<id>`, `prop:<id>`, `line:<name>`,
@@ -199,7 +224,8 @@ The Studio owns input this way:
 ### Outliner
 
 - Filter chips: Slots, Castle, Scenery, Spawns, Groups, Changed, Problems, No requirement. There's also a text filter.
-- Rows show the icon, name, kind, cost chain and requirement. Clicking selects (Shift/Ctrl as on the map) and
+- Rows show the icon and name on the first line, and the kind, cost chain, requirement and state on a smaller second
+  line (side by side, a 340 px panel cut both to a few letters). Clicking selects (Shift/Ctrl as on the map) and
   double-click frames. It scrolls (`ModScrollArea`) and is never cut short.
 
 ### Context menu (ModPopup at the cursor)
