@@ -32,7 +32,7 @@ namespace PalaceMod
         internal const string Usage =
             "builder-studio open <pack> <level> | new <pack> <scene> [cleared] | state | dock | select <key...> | add <key...> | clear | tool <id> | arm slot <type>|prop <name>|lib <id> " +
             "| cursor <x> <z>|off | click | drag <sx> <sy> <ex> <ey> [left|right|middle] [shift|ctrl|alt] | dragw <x1> <z1> <x2> <z2> [button] [mods] | rclick <x> <z> | press <tile|row> " +
-            "| cam <x> <z> [zoom] [yaw] | delete | dup | copy | paste <x> <z> | group | ungroup | frame | snap <m> | cost <level> <gold|base> | labels | issues | check | play [start] | leave | json   the level Studio";
+            "| cam <x> <z> [zoom] [yaw] | delete | dup | copy | paste <x> <z> | group | ungroup | frame | snap <m> | cost <level> <gold|base> | labels | issues | check | audit (place every palette kind, compare with its ghost) | play [start] | leave | json   the level Studio";
     }
 }
 
@@ -66,6 +66,7 @@ namespace PalaceMod.Builder.Studio
                 }
                 case "state": return StudioShell.Describe();
                 case "dock": return StudioDock.Describe();
+                case "audit": Require(); return StudioAudit.Run();
                 case "select":
                 case "add":
                 case "toggle":

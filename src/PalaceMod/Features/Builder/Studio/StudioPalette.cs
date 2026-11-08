@@ -165,7 +165,11 @@ namespace PalaceMod.Builder.Studio
         public static void ArmLibrary(IAssetBrowser browser, AssetBrowserItem it)
         {
             if (!it.Ready) { Notify.Show("Still loading", NotifyKind.Info, 2f, "builder-studio"); return; }
-            StudioShell.Arm(new StudioPlaceable
+            StudioShell.Arm(LibraryKind(browser, it));
+        }
+
+        public static StudioPlaceable LibraryKind(IAssetBrowser browser, AssetBrowserItem it) =>
+            new()
             {
                 Id = "lib:" + it.Id,
                 Name = it.Name,
@@ -179,8 +183,7 @@ namespace PalaceMod.Builder.Studio
                     try { scale = browser.StartScale(it); } catch (Exception e) { Log.For<BuilderManager>().Caught("Library StartScale failed", e); }
                     return StudioEdits.AddProp(baseRef, it.Name, pos, yaw, scale);
                 },
-            });
-        }
+            };
 
         private static void Shrink(ModRow row, bool on, float room = 60f) => StudioDock.Compact(row, on, room);
     }

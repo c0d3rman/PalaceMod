@@ -219,7 +219,7 @@ namespace PalaceMod.Builder.Studio
                 var b = ResolveProp(prop.Base);
                 if (b == null) continue;
                 var item = Get("prop:" + prop.Id, StudioItemKind.Prop, prop.Id);
-                if (propOf.TryGetValue(item.Key, out var was) && was != b && item.Proxy != null) { UnityEngine.Object.Destroy(item.Proxy); item.Proxy = null; }
+                if (propOf.TryGetValue(item.Key, out var was) && was.Mesh != b.Mesh && item.Proxy != null) { UnityEngine.Object.Destroy(item.Proxy); item.Proxy = null; }
                 propOf[item.Key] = b;
                 item.Name = b.Name;
                 item.TypeName = prop.Solid ? "Scenery" : "Scenery (walk-through)";
