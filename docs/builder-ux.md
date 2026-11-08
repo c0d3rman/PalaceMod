@@ -47,10 +47,12 @@ Stages 3 to 7 repeat many times, so their actions are one or two inputs each, wi
 
 ```text
 Title / pause menu
-  └ Builder (home: packs)                      ModFrame, as today (PackListPage)
-      └ Pack (Units · Wave Sets · Levels · Pack · Problems)
-          ├ Levels row "Open"  ───────────────►  STUDIO (in-world, on the level's map)
-          └ "New level" → Start popup ────────►  STUDIO
+  └ Builder home (My Levels · My Enemies)      ModFrame, wide tabs of preview tiles (Designs/LibraryHome.cs)
+      ├ level tile ─────────────────────────►  STUDIO (in-world, on the level's map)
+      ├ "New level" → Start popup ──────────►  STUDIO
+      ├ enemy tile / "New enemy" ───────────►  ENEMY STUDIO (StudioServices.Enemies; else the unit page)
+      ├ right-click: Rename · Duplicate · Delete · Export
+      └ Import · Export (packs exist only here)
 STUDIO
   ├ Edit mode: toolbar · palette · inspector/outliner/level · top bar · status line
   ├ popups: context menu, requirement picker, chain preset, start/base, nights, problems, Studio menu
@@ -58,7 +60,7 @@ STUDIO
   └ F5 ⇄ Play mode: the level as it plays + sandbox panel
 ```
 
-Leaving the Studio (Studio menu → Leave) returns to the pack screen where it was opened (today's `EditorReturn`).
+Leaving the Studio (Studio menu → Leave) returns to the home (`EditorReturn`; `BuilderEditor.CurrentPlace` counts the home).
 
 ## The Studio (edit mode)
 
@@ -521,6 +523,18 @@ the Level Studio share its undo history and its save.
 Studio level from above (framing its items) into `levels/<id>.png` on every save; the Enemy Studio saves a portrait
 with `DesignLibrary.SavePreview(DesignKind.Enemy, id, texture)`. `DesignLibrary.Preview(kind, id)` loads a sprite,
 cached until the file changes.
+
+**Home** (`Designs/LibraryHome.cs`; `BuilderEditor.Open` opens it, the old pack list is `BuilderEditor.OpenPackList` for
+dev and installed packs). Two wide tabs, My Levels and My Enemies. A toolbar row (New, Import, Export, a search tile that
+types in place, Sort: Recent / Name / Map or Base) over a grid of 268×214 tiles: the saved snapshot (fallback: the map's
+thumbnail, or the base enemy's icon), the name, and one line of facts (map · nights; base · levels that use it).
+Click opens; right-click gives Open, Name, Duplicate, Export… (levels) or Used in (enemies), Delete… (to trash, with
+the levels that use an enemy named). Tiles of installed packs' levels and enemies follow under a header, dimmed; a
+click copies one into the library (with the enemies it needs). The Export popup picks levels and extra enemies (the
+ones the chosen levels use are listed as included) and saves a `.tfpack` (opens the exports folder) or copies a share
+code. In the Level Studio, the Studio menu's Share/Pack editor rows become Export… for library levels, and each spawn
+group in the nights page gets Edit enemy… / Customize enemy… / New enemy… (`Designs/EnemyEditing.cs`). Dev:
+`library home|open|enemy|new-enemy|rename|duplicate|delete|list|preview|export|code|import`.
 
 **Enemy Studio hook** (`StudioServices.Enemies`, `IStudioEnemyEditor.Open(draft, unitId | null, returnToLevelStudio,
 onReturn, out error)`): R2-C2 implements it; the Level Studio's spawn-group picker ("Edit enemy…", "New enemy…") and

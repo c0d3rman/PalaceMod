@@ -385,6 +385,14 @@ namespace PalaceMod.Builder.Editor
             Marked(page, I + "Unit", () => EditorCatalog.UnitName(Pack, Spawn(n, s)?.Unit), "Which enemy the group is. Apply to choose.", sp + ".unit",
                 () => Picker.One("Choose an Enemy", UnitItems(Draft), Spawn(n, s)?.Unit, id => Edit("Change group unit", w => w.Nights[n].Spawns[s].Unit = id, structural: true)),
                 EditorCatalog.UnitIcon(Draft, Spawn(n, s)?.Unit));
+            string current = Spawn(n, s)?.Unit;
+            if (EnemyEditing.IsCustom(Draft, current))
+                page.Row(I + "Edit enemy…", "", "Opens this enemy in the Enemy Studio. Back comes here; the level and the enemy save together.", () => EnemyEditing.Edit(Draft, EnemyEditing.IdOf(current)));
+            else if (current != null)
+                page.Row(I + "Customize enemy…", "", "Makes your own enemy from this one, uses it in this group and opens it.",
+                    () => EnemyEditing.New(Draft, current, id => Edit("Use new enemy", w => w.Nights[n].Spawns[s].Unit = id, structural: true)));
+            page.Row(I + "New enemy…", "", "Starts a new enemy from any game enemy, uses it in this group and opens it.",
+                () => EnemyEditing.PickAndNew(Draft, id => Edit("Use new enemy", w => w.Nights[n].Spawns[s].Unit = id, structural: true)));
             Number(page, Schema.Count, sp + ".count", () => Spawn(n, s)?.Count, (p, v) => p.WaveSets[Index].Nights[n].Spawns[s].Count = Mathf.RoundToInt(v ?? 1), nullable: false, label: I + "Count");
             Number(page, Schema.Interval, sp + ".interval", () => Spawn(n, s)?.Interval, (p, v) => p.WaveSets[Index].Nights[n].Spawns[s].Interval = v ?? 0.5f, nullable: false, label: I + "Interval");
             Number(page, Schema.Delay, sp + ".delay", () => Spawn(n, s)?.Delay, (p, v) => p.WaveSets[Index].Nights[n].Spawns[s].Delay = v ?? 0f, nullable: false, label: I + "Delay");
@@ -443,7 +451,7 @@ namespace PalaceMod.Builder.Editor
             var mine = pack.Units.Where(u => u.Side == UnitSide.Enemy && u.Id != exclude).ToList();
             if (mine.Count > 0)
             {
-                yield return new Picker.Item { Header = true, Label = "This pack" };
+                yield return new Picker.Item { Header = true, Label = EnemyEditing.MineHeader(draft) };
                 foreach (var u in mine)
                 {
                     var b = EditorCatalog.BaseOf(pack, u.Id);

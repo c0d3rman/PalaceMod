@@ -137,10 +137,18 @@ namespace PalaceMod.Builder.Studio.Start
             draft.Edit("Add level", p =>
             {
                 p.Levels ??= [];
-                id = EditorCatalog.UniqueId(Ids.FromName(levelName), p.Levels.Select(l => l?.Id));
+                id = draft.IsLibrary
+                    ? DesignLibrary.Store.UniqueLevelId(Ids.FromName(levelName))
+                    : EditorCatalog.UniqueId(Ids.FromName(levelName), p.Levels.Select(l => l?.Id));
                 p.Levels.Add(new LevelDef { Id = id, Name = levelName, Host = map, Base = b, WaveSet = waveSet });
             }, structural: true);
             ModPopup.Current?.Close();
+            if (draft.IsLibrary)
+            {
+                // A library level is an item from the start: written now, then edited in its own workspace.
+                if (!draft.Save(out string saveError)) Notify.Show(saveError, NotifyKind.Error, 5f, "builder-library");
+                DesignLibrary.Adopt(draft);
+            }
             if (!Studio.Open(draft, id, out string error))
             {
                 Log.For<BuilderManager>().Info($"new level {id}: the Studio didn't open ({error}); showing its page");

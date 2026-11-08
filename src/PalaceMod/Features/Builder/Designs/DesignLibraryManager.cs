@@ -19,7 +19,7 @@ namespace PalaceMod
         {
             base.Awake(plugin);
             PackDraft.Saved += OnSaved;
-            DevCommands.Register("library", "library list [levels|enemies] | preview <level> | export <name> <level,...> [enemy,...] | code <level,...> | import <packId>   the design library", Command);
+            DevCommands.Register("library", "library list [levels|enemies] | home [enemies] | open <level> | enemy <id> | new-enemy <vanilla id> [name] | rename|duplicate|delete level|enemy <id> [name] | preview <level> | export <name> <level,...> [enemy,...] | code <level,...> | import <packId>   the design library", Command);
         }
 
         private static void OnSaved(PackDraft draft)
@@ -84,6 +84,34 @@ namespace PalaceMod
                 }
                 case "code":
                     return DesignLibrary.ShareCode(Split(args.ElementAtOrDefault(2)), Split(args.ElementAtOrDefault(3)), "Shared levels");
+                case "home":
+                    LibraryHome.ShowTab(args.ElementAtOrDefault(2) == "enemies" ? DesignKind.Enemy : DesignKind.Level);
+                    return "home open";
+                case "open":
+                {
+                    string id = args.ElementAtOrDefault(2) ?? throw new ArgumentException("library open <level>");
+                    LibraryHome.OpenLevel(id);
+                    return "opening " + id;
+                }
+                case "enemy":
+                {
+                    string id = args.ElementAtOrDefault(2) ?? throw new ArgumentException("library enemy <id>");
+                    LibraryHome.OpenEnemy(id);
+                    return "opening enemy " + id;
+                }
+                case "new-enemy":
+                {
+                    // library new-enemy <vanilla id> [name]: adds an enemy straight to the library (no editor).
+                    string baseId = (args.ElementAtOrDefault(2) ?? throw new ArgumentException("library new-enemy <vanilla id> [name]")).Replace('_', ' ');
+                    string name = args.Length > 3 ? string.Join(" ", args.Skip(3)) : null;
+                    return DesignLibrary.NewEnemyOnDisk(new UnitDef { Id = Ids.FromName(name ?? baseId), Base = ContentRef.Vanilla(baseId), Name = name });
+                }
+                case "rename":
+                    return DesignLibrary.Rename(Kind(args.ElementAtOrDefault(2)), args.ElementAtOrDefault(3), string.Join(" ", args.Skip(4))) ? "renamed" : throw new ArgumentException("library rename level|enemy <id> <name>");
+                case "duplicate":
+                    return DesignLibrary.Duplicate(Kind(args.ElementAtOrDefault(2)), args.ElementAtOrDefault(3)) ?? throw new ArgumentException("library duplicate level|enemy <id>");
+                case "delete":
+                    return DesignLibrary.Delete(Kind(args.ElementAtOrDefault(2)), args.ElementAtOrDefault(3)) ? "deleted" : throw new ArgumentException("library delete level|enemy <id>");
                 case "import":
                 {
                     var entry = BuilderServices.Packs.Find(args.ElementAtOrDefault(2)) ?? throw new ArgumentException("library import <installed pack id>");
@@ -94,6 +122,8 @@ namespace PalaceMod
                     throw new ArgumentException("library list | preview | export | code | import");
             }
         }
+
+        private static DesignKind Kind(string s) => s == "enemy" || s == "enemies" ? DesignKind.Enemy : DesignKind.Level;
 
         private static IEnumerable<string> Split(string s) => string.IsNullOrEmpty(s) ? [] : s.Split(',').Select(x => x.Trim()).Where(x => x.Length > 0);
     }

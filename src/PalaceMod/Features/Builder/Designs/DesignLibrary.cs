@@ -70,6 +70,21 @@ namespace PalaceMod.Builder
             return workspaces[key] = PackDraft.Workspace(pack);
         }
 
+        /// <summary>A fresh workspace with no level yet, for a new level: once the level is added and saved, Adopt it.</summary>
+        internal static PackDraft NewLevelWorkspace()
+        {
+            var repo = Repo;
+            if (repo == null) return null;
+            repo.Library.Load();
+            return PackDraft.Workspace(repo.Library.Workspace(null));
+        }
+
+        /// <summary>Keeps a workspace that now edits one level as that level's workspace.</summary>
+        internal static void Adopt(PackDraft draft)
+        {
+            if (draft?.WorkspaceLevel is { } id) workspaces[id] = draft;
+        }
+
         /// <summary>Workspaces with unsaved changes (the home marks their tiles).</summary>
         internal static bool HasUnsaved(DesignKind kind, string id) => kind == DesignKind.Level
             ? workspaces.TryGetValue(id, out var d) && d.Dirty
