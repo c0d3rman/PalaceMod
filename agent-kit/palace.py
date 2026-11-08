@@ -326,6 +326,8 @@ class Game:
 # =====================================================================================================================
 
 MAIN_MAPS = ["Nordfels", "Durststein", "Frostsee", "Uferwind", "Sturmklamm", "Wildbach", "Moorweg", "Freifort", "Totend"]
+# Maps whose colour scheme a level or prop can take ("colors").
+COLOR_MAPS = ["Neuland"] + MAIN_MAPS
 
 
 class Ref:
@@ -1053,15 +1055,36 @@ class Ops:
             return mesh
         return "mesh:" + mesh
 
+    def prop_colors(self, lv, base, colors):
+        """A prop's "colors": None (the level's), a map name, or "original" (the map the mesh comes from: the library
+        entry's "@Map" or home map; the host's own scenery already has the host's colours, so None)."""
+        if colors is None:
+            return None
+        if colors != "original":
+            if colors.split("(")[0] not in COLOR_MAPS:
+                raise Fail(f"colors {colors!r}: use \"original\" or one of {', '.join(COLOR_MAPS)}")
+            return colors
+        name, _, at = base[5:].partition("@")
+        if any(s["base"] == "mesh:" + name for s in self.ref.map(lv["host"]).get("scenery", [])) and at in ("", lv["host"]):
+            return None
+        if at:
+            return at.split("(")[0]
+        entry = next((m for m in self.ref.scenery.get("meshes", []) if m["name"] == name), None)
+        return (entry["home"] if entry else lv["host"]).split("(")[0]
+
     def op_add_prop(self, op):
-        """{"op":"add_prop","id":"rock1","mesh":"Rock A","at":[x,z],"rotY":0,"scale":1,"solid":true}"""
+        """{"op":"add_prop","id":"rock1","mesh":"Rock A","at":[x,z],"rotY":0,"scale":1,"solid":true,"colors":"original"}"""
         lv = self.level(op)
         props = ensure(lv, "props", [])
         pid = op.get("id") or self.new_prop_id(props, op["mesh"])
         if any(p.get("id") == pid for p in props):
             raise Fail(f"prop {pid!r} exists (to re-apply a whole ops file, `apply --fresh`)")
-        props.append({"id": pid, "base": self.prop_base(lv, op["mesh"]), "pos": self.pos(lv, op), "rotY": float(op.get("rotY", 0)),
-                      "scale": float(op.get("scale", 1)), "solid": bool(op.get("solid", True))})
+        base = self.prop_base(lv, op["mesh"])
+        prop = {"id": pid, "base": base, "pos": self.pos(lv, op), "rotY": float(op.get("rotY", 0)),
+                "scale": float(op.get("scale", 1)), "solid": bool(op.get("solid", True))}
+        if (colors := self.prop_colors(lv, base, op.get("colors"))) is not None:
+            prop["colors"] = colors
+        props.append(prop)
         return f"prop {pid}"
 
     @staticmethod
@@ -1110,8 +1133,12 @@ class Ops:
             if any(math.hypot(x - a, z - b) < avoid for a, b in keep_clear):
                 continue
             mesh = rng.choice(meshes)
-            props.append({"id": self.new_prop_id(props, mesh), "base": self.prop_base(lv, mesh), "pos": [round(x, 2), self.ground_y(lv, x, z), round(z, 2)],
-                          "rotY": round(rng.uniform(0, 360), 1), "scale": round(rng.uniform(smin, smax), 2), "solid": bool(op.get("solid", True))})
+            base = self.prop_base(lv, mesh)
+            prop = {"id": self.new_prop_id(props, mesh), "base": base, "pos": [round(x, 2), self.ground_y(lv, x, z), round(z, 2)],
+                    "rotY": round(rng.uniform(0, 360), 1), "scale": round(rng.uniform(smin, smax), 2), "solid": bool(op.get("solid", True))}
+            if (colors := self.prop_colors(lv, base, op.get("colors"))) is not None:
+                prop["colors"] = colors
+            props.append(prop)
             placed.append((x, z))
             added += 1
         return f"scattered {added} props"
@@ -2371,12 +2398,16 @@ def check_pack(ref, data):
                 d = math.hypot(a.pos[0] - b.pos[0], a.pos[2] - b.pos[2])
                 if d < 4.5:
                     warn(f"{p}.buildSlots", f"{a.label} and {b.label} are {d:.1f} m apart: buildings will overlap (keep >= 5 m; 7+ for big ones)")
+        if lv.get("colors") is not None and str(lv["colors"]).split("(")[0] not in COLOR_MAPS:
+            err(f"{p}.colors", f"must be a main map ({', '.join(COLOR_MAPS)}) or left out for the host's colours")
         for pi_, pr in enumerate(lv.get("props") or []):
             name = pr.get("base", "")[5:].split("@")[0]
             on_map = any(s["base"] == "mesh:" + name for s in m.get("scenery", []))
             in_lib = any(x["name"] == name for x in ref.scenery.get("meshes", []))
             if not (on_map or in_lib):
                 err(f"{p}.props[{pi_}].base", f"no scenery mesh {name!r} (`palace.py ref scenery`)")
+            if pr.get("colors") is not None and str(pr["colors"]).split("(")[0] not in COLOR_MAPS:
+                err(f"{p}.props[{pi_}].colors", f"must be a main map ({', '.join(COLOR_MAPS)}) or left out")
             for s in slots.values():
                 if pr.get("solid", True) and math.hypot(pr["pos"][0] - s.pos[0], pr["pos"][2] - s.pos[2]) < prop_radius(ref, lv, pr) * 0.8 + 2.0:
                     warn(f"{p}.props[{pi_}]", f"solid prop {pr.get('id')} sits on slot {s.label}")
