@@ -9,9 +9,9 @@ using UnityEngine.SceneManagement;
 /*
     The Studio palette's Library tab (IAssetBrowser) backed by the cross-map scenery library.
 
-    Chips: "This map" (the Studio's own HostSceneryBrowser: this map's scenery and the pack's asset: meshes, passed
-    through untouched), "All maps" (every library mesh, ordered by home map then kind), then one chip per kind (Trees,
-    Rocks, ...) across all maps. The text filter matches a mesh's name, kind and the maps that use it, so "Moorweg"
+    Chips: the palette's own "All" (the Studio's HostSceneryBrowser items, passed through untouched, then every library
+    mesh, ordered by home map then kind), "Here" (the host browser's items plus the library meshes this map uses), then
+    one chip per kind (Trees, Rocks, Walls, Towers, Graves, Other) across all maps. The text filter matches a mesh's name, kind and the maps that use it, so "Moorweg"
     lists Moorweg's. Tiles carry the home map's initials as a badge and a rendered picture (LibraryThumbs) once it's
     drawn. Placed library items are saved as "mesh:<name>", which LevelOverlay and the Studio resolve through
     SceneryLibrary.Resolve (the host's own mesh of that name first).
@@ -20,7 +20,7 @@ namespace PalaceMod.Builder.Library
 {
     internal sealed class LibraryBrowser : IAssetBrowser
     {
-        public const string ThisMap = "here", AllMaps = "all";
+        public const string ThisMap = "here";
         private const string IdPrefix = "library:";
 
         private readonly IAssetBrowser host;
@@ -48,11 +48,8 @@ namespace PalaceMod.Builder.Library
 
         private static List<AssetBrowserCategory> BuildCategories()
         {
-            var list = new List<AssetBrowserCategory>
-            {
-                new() { Id = ThisMap, Name = "This map" },
-                new() { Id = AllMaps, Name = "All maps" },
-            };
+            // The palette's own "All" chip (category null) is every map; chips are narrow, so one short word each.
+            var list = new List<AssetBrowserCategory> { new() { Id = ThisMap, Name = "Here" } };
             foreach (var kind in SceneryLibrary.Catalog.Meshes.Select(m => m.Category).Where(c => c != null).Distinct().OrderBy(KindOrder))
                 list.Add(new AssetBrowserCategory { Id = "kind:" + kind, Name = kind });
             return list;
@@ -60,25 +57,28 @@ namespace PalaceMod.Builder.Library
 
         private static int KindOrder(string kind) => kind switch
         {
-            "Trees" => 0, "Rocks" => 1, "Ruins and walls" => 2, "Buildings" => 3, "Graveyard" => 4, _ => 9,
+            "Trees" => 0, "Rocks" => 1, "Walls" => 2, "Towers" => 3, "Graves" => 4, _ => 9,
         };
 
         public IReadOnlyList<AssetBrowserItem> Query(string category, string text)
         {
             var result = new List<AssetBrowserItem>();
             string filter = string.IsNullOrWhiteSpace(text) ? null : text.Trim();
-            bool hostToo = category == null || category == ThisMap;
-            if (hostToo && host != null)
+            bool here = category == ThisMap;
+            if ((category == null || here) && host != null)
                 result.AddRange(host.Query(null, filter) ?? []);
-            if (category == ThisMap) return result;
 
             var taken = new HashSet<string>(result.Select(i => host?.BaseRef(i)).Where(r => r != null), StringComparer.Ordinal);
             string kind = category != null && category.StartsWith("kind:", StringComparison.Ordinal) ? category.Substring(5) : null;
+            string scene = SceneManager.GetActiveScene().name;
             var maps = SceneryLibrary.Catalog.Maps;
             foreach (var e in SceneryLibrary.Available
                          .OrderBy(e => maps.IndexOf(e.Home)).ThenBy(e => KindOrder(e.Category)).ThenBy(e => e.Name, StringComparer.Ordinal))
             {
                 if (kind != null && e.Category != kind) continue;
+                // "Here" adds the library meshes this map uses that its live scene no longer shows as separate objects
+                // (the game merges most scenery into combined meshes at load).
+                if (here && !e.Maps.ContainsKey(scene)) continue;
                 if (taken.Contains(e.Ref)) continue;   // the host's own copy is already listed
                 if (filter != null && !Matches(e, filter)) continue;
                 result.Add(ItemOf(e));

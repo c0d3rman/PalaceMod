@@ -20,8 +20,10 @@ namespace PalaceMod
         public override void Awake(Plugin plugin)
         {
             base.Awake(plugin);
-            // Registered as StudioServices.AssetBrowser once the Studio shell (HostSceneryBrowser, PropResolver) lands.
-            Browser = new LibraryBrowser(null);
+            // The Library tab ("This map" passes through the Studio's own browser) and the Studio's prop resolution.
+            Browser = new LibraryBrowser(new HostSceneryBrowser());
+            StudioServices.AssetBrowser = Browser;
+            StudioServices.PropResolver = SceneryLibrary.Resolve;
             RegisterDevCommands();
         }
 
@@ -34,7 +36,7 @@ namespace PalaceMod
         private static void RegisterDevCommands()
         {
             DevCommands.Register("builder-library",
-                "builder-library status | query [here|all|kind:<Kind>|-] [text] | place <mesh> [x z] | gallery [spacing] | walkable <x> <z> | clear | thumb <mesh> | thumbs [reset]   scenery library", args =>
+                "builder-library status | query [here|kind:<Kind>|-] [text] | place <mesh> [x z] | gallery [spacing] | walkable <x> <z> | clear | thumb <mesh> | thumbs [reset]   scenery library", args =>
             {
                 string sub = args.Length > 0 ? args[0].ToLowerInvariant() : "status";
                 string rest = string.Join(" ", args.Skip(1));
