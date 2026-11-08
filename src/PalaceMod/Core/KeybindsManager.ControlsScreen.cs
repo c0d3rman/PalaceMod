@@ -536,9 +536,10 @@ namespace PalaceMod
                     {
                         // Fake a physical key press through Unity's Input (which Rewired reads): keybinds press <KeyCode>
                         // An optional hold time keeps it down that long (seconds, unscaled): keybinds press <KeyCode> [seconds]
-                        if (args.Length < 2) throw new ArgumentException("usage: keybinds press <KeyCode> [seconds]");
+                        // A chord holds its keys together: keybinds press LeftCommand+Z
+                        if (args.Length < 2) throw new ArgumentException("usage: keybinds press <KeyCode>[+<KeyCode>...] [seconds]");
                         float seconds = args.Length > 2 ? float.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture) : 0f;
-                        FakeKey.Press((KeyCode)Enum.Parse(typeof(KeyCode), args[1], true), seconds);
+                        FakeKey.Press(args[1].Split('+').Select(k => (KeyCode)Enum.Parse(typeof(KeyCode), k, true)).ToArray(), seconds);
                         return seconds > 0f ? $"holding {args[1]} for {seconds:0.##} s" : $"pressing {args[1]} for {FakeKey.Frames} frames";
                     }
                     case "camera":
@@ -588,14 +589,14 @@ namespace PalaceMod
         private static class FakeKey
         {
             internal const int Frames = 4;
-            private static KeyCode key = KeyCode.None;
+            private static KeyCode[] keys = [];
             private static int start = -1;
             private static bool patched;
 
             private static float until;
             private static int release = -1;
 
-            internal static void Press(KeyCode pressed, float seconds = 0f)
+            internal static void Press(KeyCode[] pressed, float seconds = 0f)
             {
                 if (!patched)
                 {
@@ -607,7 +608,7 @@ namespace PalaceMod
                     harmony.Patch(AccessTools.PropertyGetter(typeof(Input), nameof(Input.anyKey)), postfix: new HarmonyMethod(typeof(FakeKey), nameof(Any)));
                     patched = true;
                 }
-                key = pressed;
+                keys = pressed;
                 start = Time.frameCount + 1;
                 until = Time.unscaledTime + seconds;
                 release = -1;
@@ -619,11 +620,11 @@ namespace PalaceMod
                 if (start >= 0 && release < 0 && Time.frameCount - start >= Frames && Time.unscaledTime >= until) release = Time.frameCount;
             }
 
-            private static int Frame(KeyCode k) => k == key && start >= 0 ? Time.frameCount - start : -1;
+            private static int Frame(KeyCode k) => start >= 0 && Array.IndexOf(keys, k) >= 0 ? Time.frameCount - start : -1;
             private static void Held(KeyCode key, ref bool __result) { Tick(); if (Frame(key) >= 0 && (release < 0 || Time.frameCount < release)) __result = true; }
             private static void Down(KeyCode key, ref bool __result) { if (Frame(key) == 0) __result = true; }
             private static void Up(KeyCode key, ref bool __result) { Tick(); if (Frame(key) >= 0 && Time.frameCount == release) __result = true; }
-            private static void Any(ref bool __result) { Tick(); if (Frame(key) >= 0 && (release < 0 || Time.frameCount <= release)) __result = true; }
+            private static void Any(ref bool __result) { Tick(); if (keys.Length > 0 && Frame(keys[0]) >= 0 && (release < 0 || Time.frameCount <= release)) __result = true; }
         }
 
         private static string Describe(Keybind k)

@@ -16,6 +16,8 @@ namespace PalaceMod
         public override void Awake(Plugin plugin)
         {
             base.Awake(plugin);
+            Builder.Studio.Terrain.TerrainTool.Register();
+            Builder.Studio.Start.StartPopup.FlatFieldAvailable = true;
             DevCommands.Register("builder-terrain",
                 "builder-terrain spike graphs|helper|king|ground|update|scan | flat [cell] | grid | raise <x> <z> <r> <m> [soft] | flatten <x> <z> <r> <h> [soft] | " +
                 "smooth <x> <z> <r> | ramp <ax> <az> <ah> <bx> <bz> <bh> <width> | paint <x> <z> <r> <material> | block|unblock|water|dry <x> <z> <r> | " +
@@ -68,6 +70,37 @@ namespace PalaceMod
                             string json = Newtonsoft.Json.JsonConvert.SerializeObject(def, new Newtonsoft.Json.JsonSerializerSettings { NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore });
                             return $"{json.Length} chars: {(json.Length > 400 ? json.Substring(0, 400) + "..." : json)}";
                         }
+                        case "brush":
+                        {
+                            // The Terrain tool's brush, as the strip sets it: brush <name> [size].
+                            var tool = Builder.Studio.Terrain.TerrainTool.Instance;
+                            if (args.Length > 1)
+                            {
+                                string want = string.Join(" ", args.Skip(1).TakeWhile(a => !float.TryParse(a, NumberStyles.Float, CultureInfo.InvariantCulture, out _)));
+                                int i = Array.FindIndex(Builder.Studio.Terrain.TerrainTool.BrushNames, n => n.Equals(want, StringComparison.OrdinalIgnoreCase));
+                                if (i < 0) throw new ArgumentException($"brushes: {string.Join(", ", Builder.Studio.Terrain.TerrainTool.BrushNames)}");
+                                tool.Brush = (Builder.Studio.Terrain.TerrainBrush)i;
+                                if (float.TryParse(args[args.Length - 1], NumberStyles.Float, CultureInfo.InvariantCulture, out float size)) tool.Radius = size;
+                                Builder.Studio.Studio.RefreshPanels();
+                            }
+                            return $"brush {tool.Brush}, size {tool.Radius} m, available: {string.Join(", ", tool.Available)}";
+                        }
+                        case "stroke":
+                        {
+                            // A stroke through the Terrain tool: stroke [shift] <x> <z> [<x> <z>]... (0.1 s per point).
+                            var tool = Builder.Studio.Terrain.TerrainTool.Instance;
+                            bool shift = args.Length > 1 && args[1] == "shift";
+                            var nums = args.Skip(shift ? 2 : 1).Select(a => float.Parse(a, CultureInfo.InvariantCulture)).ToList();
+                            if (nums.Count < 2 || nums.Count % 2 != 0) throw new ArgumentException("stroke [shift] <x> <z> [<x> <z>]...");
+                            var points = Enumerable.Range(0, nums.Count / 2).Select(i => new Vector3(nums[2 * i], 0f, nums[2 * i + 1])).ToList();
+                            tool.BeginStroke(points[0], shift, false);
+                            foreach (var p in points.Skip(1)) tool.ContinueStroke(p, 0.1f);
+                            tool.EndStroke();
+                            return $"stroke of {points.Count} points; paths stale={tool.PathsStale}; {(Builder.Studio.Studio.Level?.Terrain is Builder.Model.TerrainDef t ? $"level terrain {t.Size?[0]}x{t.Size?[1]}" : "no level terrain")}";
+                        }
+                        case "marks":
+                            GroundLayer.ShowMarks = args.Length < 2 || args[1] != "off";
+                            return "blocked cells " + (GroundLayer.ShowMarks ? "shown" : "hidden");
                         case "snap":
                             GroundLayer.SnapToGround(SceneManager.GetActiveScene());
                             return "slots and king on the ground";
