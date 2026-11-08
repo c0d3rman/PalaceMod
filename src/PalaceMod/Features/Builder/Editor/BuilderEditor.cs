@@ -29,8 +29,15 @@ namespace PalaceMod.Builder.Editor
         /// <summary>Whether the editor can be opened now (the Builder feature is on and the game UI is up).</summary>
         public static bool IsAvailable => Feature<BuilderManager>.On && UIFrameManager.instance != null;
 
-        /// <summary>Opens the pack list.</summary>
+        /// <summary>Opens the Builder home (My Levels, My Enemies).</summary>
         public static void Open()
+        {
+            if (!CheckAvailable()) return;
+            LibraryHome.Open();
+        }
+
+        /// <summary>The old pack list (packs other than the library: installed and dev packs).</summary>
+        internal static void OpenPackList()
         {
             if (!CheckAvailable()) return;
             list ??= new PackListPage();
@@ -316,6 +323,7 @@ namespace PalaceMod.Builder.Editor
             var entry = BuilderServices.Packs.InstallNew(pack);
             Notify.Show($"Imported \"{entry?.Pack?.Name ?? entry?.Id}\"", NotifyKind.Success, key: "builder-editor");
             list?.OnDraftChanged(true);
+            LibraryHome.Refresh();
         }
 
         internal static void OpenFolder()
@@ -371,7 +379,7 @@ namespace PalaceMod.Builder.Editor
             packId = path = null;
             var active = UIFrameManager.instance?.ActiveFrame;
             if (active == null) return false;
-            if (list != null && list.Frame.Frame == active) return true;
+            if (LibraryHome.IsActive || (list != null && list.Frame.Frame == active)) return true;
             packId = drafts.FirstOrDefault(kv => kv.Value == Draft).Key;
             if (packId == null) return false;
             if (unitPage != null && unitPage.Frame.Frame == active) path = $"units[{unitPage.Index}]";
@@ -386,7 +394,9 @@ namespace PalaceMod.Builder.Editor
         internal static void Reopen(string packId, string path)
         {
             Open();
-            if (packId == null || list == null || !list.Frame.IsOpen) return;
+            if (packId == null || packId == DesignLibrary.PackId) return;
+            OpenPackList();
+            if (list == null || !list.Frame.IsOpen) return;
             OpenPack(packId);
             if (string.IsNullOrEmpty(path) || Draft == null || !packPage.Frame.IsOpen) return;
             if (!InRange(path)) return;

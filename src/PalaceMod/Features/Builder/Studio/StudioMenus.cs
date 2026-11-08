@@ -93,14 +93,23 @@ namespace PalaceMod.Builder.Studio
             ModPopup.Open("Studio", page =>
             {
                 page.Row(draft.ReadOnly ? "Save a copy" : "Save", draft.Dirty ? $"<color=#{ModStyle.Hex(ModStyle.Accent)}>unsaved</color>" : Dim("saved"), (string)null, Then(StudioShell.Save));
-                page.Row("Share…", "", (string)null, Then(() =>
+                if (draft.IsLibrary)
+                    page.Row("Export…", "", "Share this level (and the enemies it uses) as a .tfpack or a share code.", Then(() =>
+                    {
+                        if (!draft.Dirty) LibraryHome.OpenExport(Model.DesignKind.Level, Studio.LevelId);
+                        else Notify.Show("Save first", NotifyKind.Info, 3f, "builder-studio");
+                    }));
+                else
                 {
-                    if (draft.Entry is { } entry && !draft.Dirty) Sharing.SharingUI.OpenPack(entry);
-                    else Notify.Show(draft.ReadOnly ? "Save a copy first" : "Save first", NotifyKind.Info, 3f, "builder-studio");
-                }));
-                page.Row("Pack editor", "", "The pack's units, wave sets and levels. Close it to come back.", Then(() => BuilderEditor.OpenPack(draft.SourceId ?? draft.Pack.Id)));
+                    page.Row("Share…", "", (string)null, Then(() =>
+                    {
+                        if (draft.Entry is { } entry && !draft.Dirty) Sharing.SharingUI.OpenPack(entry);
+                        else Notify.Show(draft.ReadOnly ? "Save a copy first" : "Save first", NotifyKind.Info, 3f, "builder-studio");
+                    }));
+                    page.Row("Pack editor", "", "The pack's units, wave sets and levels. Close it to come back.", Then(() => BuilderEditor.OpenPack(draft.SourceId ?? draft.Pack.Id)));
+                }
                 page.Row("Studio settings", "", (string)null, Then(OpenSettings));
-                page.Row("Leave", "", "Back to the pack screen. Unsaved changes stay until the game quits.", Then(() => Studio.Leave()));
+                page.Row("Leave", "", draft.IsLibrary ? "Back to the Builder home. Unsaved changes stay until the game quits." : "Back to the pack screen. Unsaved changes stay until the game quits.", Then(() => Studio.Leave()));
             }, screenPoint: StudioDock.BelowMenu(), width: 380f);
         }
 
