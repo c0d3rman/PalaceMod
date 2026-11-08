@@ -141,7 +141,8 @@ namespace PalaceMod.Builder.Editor
             foreach (var page in Pages) page?.OnDraftChanged(structural);
             if (packPage != null && Draft != null) packPage.Frame.SetTitle(Title(Draft));
             // Keep the draft findable by its saved id after a save or a "Save a copy".
-            if (Draft?.SourceId != null && ExistingDraft(Draft.SourceId) != Draft)
+            // Library workspaces are kept by DesignLibrary, not by pack id.
+            if (Draft?.SourceId != null && !Draft.IsLibrary && ExistingDraft(Draft.SourceId) != Draft)
             {
                 foreach (var key in drafts.Where(kv => kv.Value == Draft).Select(kv => kv.Key).ToList()) drafts.Remove(key);
                 drafts[Draft.SourceId] = Draft;

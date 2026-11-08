@@ -195,6 +195,21 @@ namespace PalaceMod.Builder.Studio
         /// <summary>The asset library's prop resolution (cross-map scenery): a PropBase for a PropDef base string in a
         /// scene, or null to fall back to the host's own scenery.</summary>
         public static Func<UnityEngine.SceneManagement.Scene, string, Level.PropBase> PropResolver;
+        /// <summary>The Enemy Studio (R2-C2 installs it). Null: callers fall back to the pack editor's unit page.</summary>
+        public static IStudioEnemyEditor Enemies;
+    }
+
+    /// <summary>
+    /// The Enemy Studio as the Level Studio and the library home call it. Open edits a unit of a draft: from the Level
+    /// Studio that's Studio.Draft (its level workspace, so enemy and level edits share one undo history and one save);
+    /// from the home it's DesignLibrary.OpenEnemies(). onReturn runs when the player goes back, with the unit's id
+    /// (null if they cancelled a new one), after the caller's screen is restored.
+    /// </summary>
+    internal interface IStudioEnemyEditor
+    {
+        /// <param name="unitId">The unit to edit, or null to start a new enemy (the editor adds it to the draft).</param>
+        /// <param name="returnToLevelStudio">Opened from a running Level Studio: come back to it exactly as it was.</param>
+        bool Open(PackDraft draft, string unitId, bool returnToLevelStudio, Action<string> onReturn, out string error);
     }
 
     /// <summary>The editor state F5 keeps: W1 captures and restores it, W2 stores it across the swap.</summary>

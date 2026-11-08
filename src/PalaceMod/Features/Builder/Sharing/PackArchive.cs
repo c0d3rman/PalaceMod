@@ -172,7 +172,7 @@ namespace PalaceMod.Builder.Sharing
                 var before = pack.Id;
                 var entry = repository().InstallNew(pack, staging);
                 if (entry == null) return Fail(issues, "the pack couldn't be installed");
-                if (entry.Id != before)
+                if (entry.Id != before && entry.Id != LibraryStore.PackId)
                     issues.Add(new ValidationIssue(Severity.Warning, "id", $"you already have a pack \"{before}\", so this one was installed as \"{entry.Id}\""));
                 return entry;
             }
