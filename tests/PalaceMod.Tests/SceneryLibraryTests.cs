@@ -90,6 +90,71 @@ namespace PalaceMod.Tests
             Console.WriteLine($"        read {read} meshes from {data}");
         }
 
+        public static void CatalogHasEveryMapsColours()
+        {
+            var c = Catalog();
+            foreach (var map in c.Maps)
+                Assert.True(c.Colorschemes.TryGetValue(map, out var r) && r.File != null && r.PathId != 0 && !string.IsNullOrEmpty(r.Name), $"{map}: colour scheme");
+            Assert.Equal("Neuland(Tutorial)", c.SchemeMap("Neuland"));
+            Assert.Equal("Frostsee", c.SchemeMap("Frostsee"));
+            Assert.True(c.SchemeMap("Nowhere") == null && c.SchemeMap(null) == null, "unknown map");
+            var rock = c.Find("mesh:Rock A");
+            Assert.Equal(rock.Home, c.DonorOf("mesh:Rock A"));
+            Assert.Equal("Totend", c.DonorOf("mesh:Rock A@Totend"));
+            Assert.True(c.DonorOf("mesh:Nothing") == null, "unknown mesh");
+            // Every main map's colours are accepted in a level or prop.
+            Assert.True(c.Maps.All(m => PalaceMod.Builder.Model.LevelColors.IsMap(m)), "validator knows every map");
+        }
+
+        public static void ReadsSyntheticColorscheme()
+        {
+            var obj = new Writer();
+            obj.I32(0); obj.I64(0); obj.B(1); obj.Align(); obj.I32(5); obj.I64(9);   // m_GameObject, m_Enabled, m_Script
+            obj.Str("Test Map");
+            int n = 0;
+            foreach (var f in RawColorscheme.Fields)
+            {
+                if (f == RawColorscheme.Particles) { obj.I32(0); obj.I64(0); continue; }
+                obj.F32(n++ / 100f); obj.F32(0.5f); obj.F32(0.25f); obj.F32(1f);
+            }
+            var bytes = Wrap(obj.ToArray(), 114, 11);
+            using (var r = new AssetFileReader(new MemoryStream(bytes)))
+            {
+                var s = r.ReadColorscheme(11, "Test Map");
+                Assert.Equal("Test Map", s.Name);
+                Assert.Equal(RawColorscheme.Fields.Length - 1, s.Colors.Count);
+                Assert.True(s.Colors["sunsetLightColor"][0] == 0f && s.Colors["globalShadowColor"][0] == 0.02f && s.Colors["Group3Color"][3] == 1f, "colour values in order");
+                Assert.True(Throws(() => r.ReadColorscheme(11, "Other")), "name checked");
+            }
+            // One colour short: the layout no longer matches the object's size.
+            var shortObj = obj.ToArray();
+            Array.Resize(ref shortObj, shortObj.Length - 16);
+            using (var r = new AssetFileReader(new MemoryStream(Wrap(shortObj, 114, 11))))
+                Assert.True(Throws(() => r.ReadColorscheme(11, "Test Map")), "size checked");
+            using (var r = new AssetFileReader(new MemoryStream(SyntheticFile(out long mesh))))
+                Assert.True(Throws(() => r.ReadColorscheme(mesh, "Tri")), "a mesh isn't a scheme");
+        }
+
+        public static void ReadsInstalledColorschemes()
+        {
+            string data = GameData();
+            if (!Directory.Exists(data)) { Console.WriteLine("        (game not installed; skipped)"); return; }
+            var c = Catalog();
+            foreach (var kv in c.Colorschemes)
+            {
+                using var r = new AssetFileReader(Path.Combine(data, kv.Value.File));
+                var s = r.ReadColorscheme(kv.Value.PathId, kv.Value.Name);
+                var rock = s.Colors["rockLightColor"];
+                Assert.True(rock[3] > 0f && rock.Take(3).Any(v => v > 0f), $"{kv.Key}: rock colour");
+            }
+            Console.WriteLine($"        read {c.Colorschemes.Count} colour schemes from {data}");
+        }
+
+        private static string GameData() =>
+            Environment.GetEnvironmentVariable("PALACEMOD_GAME_DATA")
+                ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                    "Library/Application Support/Steam/steamapps/common/Thronefall/Thronefall.app/Contents/Resources/Data");
+
         private static SceneryCatalog Catalog()
         {
             string dir = AppContext.BaseDirectory;
@@ -123,14 +188,20 @@ namespace PalaceMod.Tests
             var verts = new List<byte>();
             foreach (var f in new float[] { 0, 0, 0, 1, 0, 0, 0, 1, 0 }) verts.AddRange(BitConverter.GetBytes(f));
             obj.Bytes(verts.ToArray()); obj.Align();
-            var objBytes = obj.ToArray();
+            return Wrap(obj.ToArray(), 43, pathId);
+        }
 
+        /// <summary>A serialized file holding one object of a class.</summary>
+        private static byte[] Wrap(byte[] objBytes, int classId, long pathId)
+        {
             var meta = new Writer();
             meta.CStr("2022.3.62f2");
             meta.I32(2);          // platform
             meta.B(0);            // no type trees
             meta.I32(1);          // one type
-            meta.I32(43); meta.B(0); meta.I16(-1); meta.Raw(new byte[16]);
+            meta.I32(classId); meta.B(0); meta.I16(-1);
+            if (classId == 114) meta.Raw(new byte[16]);   // script id
+            meta.Raw(new byte[16]);
             meta.I32(1);          // one object
             // Object entries align to 4 relative to the file start; the header is 48 bytes, so align meta itself.
             meta.Align();

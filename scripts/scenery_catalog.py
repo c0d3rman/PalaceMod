@@ -15,6 +15,7 @@ Usage: scenery_catalog.py <Data dir> <output json>
 import json
 import math
 import statistics
+import struct
 import sys
 from pathlib import Path
 
@@ -181,6 +182,27 @@ def materials_of(objs, go):
     return []
 
 
+def colorscheme_of(level_file, env):
+    """Where a map's Colorscheme asset lives: its ColorAndLightManager's `colorscheme` reference, resolved to a file
+    name and path id. Read from the component's bytes; the fields before it are fixed (m_GameObject, m_Enabled,
+    m_Script, m_Name, sunlight). The mod reads the colours from the player's install (SceneryLibrary.SchemeOf)."""
+    for o in level_file.objects.values():
+        if o.type.name != "MonoBehaviour" or script_class(o) != "ColorAndLightManager":
+            continue
+        raw = o.get_raw_data()
+        off = 28
+        n = struct.unpack_from("<i", raw, off)[0]
+        off += 4 + ((n + 3) & ~3) + 12
+        file_id, path_id = struct.unpack_from("<iq", raw, off)
+        name = Path(level_file.externals[file_id - 1].path).name
+        target = next(f for k, f in env.files.items() if k.endswith(name))
+        obj = target.objects[path_id]
+        if script_class(obj) != "Colorscheme":
+            sys.exit(f"{level_file.name}: the colorscheme reference isn't a Colorscheme")
+        return {"file": name, "pathId": path_id, "name": obj.read(check_read=False).m_Name}
+    sys.exit(f"{level_file.name}: no ColorAndLightManager")
+
+
 def main():
     data_dir, out = Path(sys.argv[1]), Path(sys.argv[2])
     settings = UnityPy.load(str(data_dir / "globalgamemanagers"))
@@ -191,12 +213,13 @@ def main():
     files += [str(data_dir / "resources.assets")] + [str(p) for p in sorted(data_dir.glob("sharedassets*.assets"))]
     env = UnityPy.load(*files)
 
-    merged = {}
+    merged, schemes = {}, {}
     for map_name in MAIN:
         level = f"level{index_of[map_name]}"
         level_file = next(f for k, f in env.files.items() if k.endswith(level))
         if level_file.unity_version != UNITY_VERSION:
             sys.exit(f"{level} is Unity {level_file.unity_version}, expected {UNITY_VERSION}; update UNITY_VERSION")
+        schemes[map_name] = colorscheme_of(level_file, env)
         for key, e in scan_level(level_file).items():
             m = merged.setdefault(key, {"name": e["name"], "mesh": e["mesh"], "maps": {}, "rots": [], "scales": [],
                                         "materials": e["materials"]})
@@ -241,7 +264,9 @@ def main():
     entries.sort(key=lambda x: (MAIN.index(x["home"]), x["category"], x["name"]))
     # One mesh per line keeps the diff after a game update readable.
     lines = ",\n  ".join(json.dumps(e, separators=(",", ":")) for e in entries)
-    out.write_text(f'{{\n "unity": "{UNITY_VERSION}",\n "maps": {json.dumps(MAIN)},\n "meshes": [\n  {lines}\n ]\n}}\n')
+    scheme_lines = ",\n  ".join(f"{json.dumps(k)}:{json.dumps(v, separators=(',', ':'))}" for k, v in schemes.items())
+    out.write_text(f'{{\n "unity": "{UNITY_VERSION}",\n "maps": {json.dumps(MAIN)},\n'
+                   f' "colorschemes": {{\n  {scheme_lines}\n }},\n "meshes": [\n  {lines}\n ]\n}}\n')
     print(f"{len(entries)} meshes -> {out}")
 
 

@@ -102,7 +102,7 @@ namespace PalaceMod.Builder.Library
 
         /// <summary>Where the player's game keeps its asset files: Thronefall_Data on Windows and Linux
         /// (Application.dataPath), Contents/Resources/Data inside the app on a Mac (dataPath is Contents there).</summary>
-        private static string DataFolder
+        internal static string DataFolder
         {
             get
             {
@@ -254,6 +254,14 @@ namespace PalaceMod.Builder.Library
             var entry = Catalog.Find(baseRef);
             if (entry == null) { why = "not on this map or in the library"; return null; }
             return BaseOf(entry, out why);
+        }
+
+        /// <summary>Whether Resolve takes this ref from the host's own scenery (not the library).</summary>
+        public static bool IsHostMesh(Scene scene, string baseRef)
+        {
+            if (!SceneryCatalog.TryParseRef(baseRef, out var name, out var map)) return false;
+            if (map != null && map != scene.name && map != SceneryCatalog.DisplayMap(scene.name)) return false;
+            return HostBases(scene).ContainsKey(SceneryCatalog.Prefix + name);
         }
 
         /// <summary>The host's scenery by id, cached for the frame (LayoutScene.Props walks every mesh in the scene).</summary>

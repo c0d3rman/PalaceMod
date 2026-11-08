@@ -851,9 +851,18 @@ placed on any map.
   and logged once (Warn); a level that uses it gets the usual "no scenery" warning, and the rest still loads.
 - **Colours:** a library mesh is drawn with the loaded level's material of the same name (the FlatKit materials
   `ColorAndLightManager` recolours per level: Trees, Mountain, Buildings, Enemy, Ground Patches), so it takes the host
-  map's colours. "Keep the donor map's colours" (cloning a material with the donor level's `Colorscheme`) is deferred:
-  the colorschemes live in each level's own file as MonoBehaviour data, which needs a type-tree-free reader for that
-  class too.
+  map's colours by default. **Original colours** (`Library/MapColors.cs`): the catalog also records where each main
+  map's `Colorscheme` asset is (`colorschemes`: all ten live in `sharedassets1.assets`, found through each level's
+  `ColorAndLightManager.colorscheme` reference by the generator). `AssetFileReader.ReadColorscheme` reads one from
+  the install (fixed layout: the MonoBehaviour header, then the colour fields in declaration order with
+  `dayLightColor` skipped as readonly and the particles prefab reference in between; checked by name and exact
+  size) into a new `Colorscheme`, cached for the session. A prop's `colors: "<Map>"` swaps each material
+  `ColorAndLightManager` recolours (found by reference on its fields) for a clone coloured from that scheme the way
+  `ApplyColorScheme` does it; the clones' outlines follow the host's sunlight through dusk and dawn
+  (`OnColorChange`). Inspector: "Colours" on any scenery selection toggles between "Level's" and the map it comes
+  from (the library entry's "@Map" or home map; the host for its own scenery). The level's `colors` (Level tab,
+  "Colours") gives the whole level another map's scheme through the game's own `EasySwitchEntireColorSchemeTo` (set
+  before `ColorAndLightManager.Start` in play), keeping the host's weather particles.
 - **Refs:** placed library items are ordinary `props` entries with `base: "mesh:<name>"`, optionally
   `"mesh:<name>@<Map>"` should two maps ever ship a mesh by the same name (the catalog generator refuses that case
   today). `SceneryLibrary.Resolve(scene, base)` looks in the host's own scenery first (so existing levels look the
