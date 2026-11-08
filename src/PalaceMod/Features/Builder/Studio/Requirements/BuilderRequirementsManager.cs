@@ -27,6 +27,22 @@ namespace PalaceMod
         }
 
         private static LinkTool link;
+        private string thumbScene;
+        private float thumbAt;
+
+        // A main map seen as it is (the Studio on a map as it is, or a normal run) gets its start-popup thumbnail once,
+        // a few seconds after it loaded.
+        public override void Update()
+        {
+            var scene = SceneManager.GetActiveScene().name;
+            if (scene != thumbScene) { thumbScene = scene; thumbAt = UnityEngine.Time.unscaledTime + 4f; return; }
+            if (thumbAt < 0f || UnityEngine.Time.unscaledTime < thumbAt) return;
+            thumbAt = -1f;
+            if (scene.Contains(' ') || Builder.Studio.Start.Thumbnails.Has(scene) || !Builder.Studio.Start.StartPopup.Maps().Any(h => h.Scene == scene)) return;
+            var level = Studio.Running ? Studio.Level : BuilderServices.Sessions.Current?.Level;
+            if (level?.Base != null) return;
+            Builder.Studio.Start.Thumbnails.Capture(scene);
+        }
 
         private static void RegisterStudio()
         {
@@ -126,6 +142,18 @@ namespace PalaceMod
                     }
                     case "needs":
                         return string.Join("\n", Studio.Items.Where(i => RequirementState.Ref(i.Key) != null && !i.Removed).Select(i => $"{i.Key}: {RequirementState.DescribeFor(i.Key)}"));
+                    case "start":
+                    {
+                        // The start popup for a pack: start <pack> [create <map> <0|1|2> <name...>]
+                        Builder.Editor.BuilderEditor.OpenPack(args.ElementAtOrDefault(1));
+                        var draft = Builder.Editor.BuilderEditor.Draft ?? throw new InvalidOperationException("no draft");
+                        Builder.Studio.Start.StartPopup.Open(draft);
+                        if (args.ElementAtOrDefault(2) != "create") return $"start popup open; maps: {string.Join(", ", Builder.Studio.Start.StartPopup.Maps().Select(h => h.Scene))}";
+                        Builder.Studio.Start.StartPopup.Choose(args.ElementAtOrDefault(3), int.Parse(args.ElementAtOrDefault(4) ?? "1"), args.Length > 5 ? string.Join(" ", args.Skip(5)) : null);
+                        return $"created {Builder.Studio.Start.StartPopup.Create()}";
+                    }
+                    case "thumb":
+                        return Builder.Studio.Start.Thumbnails.Capture(SceneManager.GetActiveScene().name, force: true) ? $"saved in {Builder.Studio.Start.Thumbnails.Folder}" : "not captured";
                     case "slots":
                     {
                         var sb = new StringBuilder();
