@@ -124,6 +124,8 @@ namespace PalaceMod.Builder
             string key = pack.Id + "/" + def.Id;
             // Rebuild when anything in the pack changed (a unit can reference others, e.g. through SpawnOnDeath).
             string hash = PackSerializer.WriteCompact(pack);
+            // A scenery model is drawn with the loaded map's materials: rebuild it on each map.
+            if (PalaceMod.Builder.Assets.AssetVisuals.SceneDependent(def.Visuals)) hash += "|scene " + SceneManager.GetActiveScene().handle;
             if (templates.TryGetValue(key, out var cached) && cached.template != null && cached.hash == hash) return cached.template;
             if (!building.Add(key)) { error = $"unit {key} spawns itself (through SpawnOnDeath)"; return null; }
             try

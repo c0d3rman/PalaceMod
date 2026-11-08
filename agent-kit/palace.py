@@ -2292,6 +2292,108 @@ def level_waveset(ref, data, level):
 # Checks
 # =====================================================================================================================
 
+MODEL_LOOKS = ("own", "unit")
+MODEL_MOTIONS = ("auto", "bob", "none")
+
+
+def check_unit(ref, u):
+    """(path, message) errors for one UnitDef: its base and its visuals.mesh model (asset:, mesh: or vanilla:)."""
+    errs = []
+    base = u.get("base") or ""
+    if not base.startswith("vanilla:"):
+        errs.append((".base", "must be \"vanilla:<id>\" (`palace.py ref enemies`)"))
+    elif ref.catalog.get("units") and not ref.unit(base[8:]):
+        errs.append((".base", f"no vanilla unit {base[8:]!r} (`palace.py ref enemies`)"))
+    v = u.get("visuals") or {}
+    mesh = v.get("mesh")
+    if mesh is not None:
+        kind, _, mid = str(mesh).partition(":")
+        if kind == "mesh":
+            name = mid.split("@")[0]
+            if ref.scenery.get("meshes") and not any(x["name"] == name for x in ref.scenery["meshes"]):
+                errs.append((".visuals.mesh", f"no scenery mesh {name!r} in the library (`palace.py ref scenery`; a map's own mesh works on that map only)"))
+        elif kind == "vanilla":
+            if ref.catalog.get("units") and not ref.unit(mid):
+                errs.append((".visuals.mesh", f"no unit {mid!r} (`palace.py ref enemies`, `ref enemies --player`)"))
+        elif kind != "asset" or not mid:
+            errs.append((".visuals.mesh", "must be \"asset:<key>\", \"mesh:<scenery mesh>\" or \"vanilla:<unit id>\""))
+    for key in ("meshRotX", "meshRotY", "meshRotZ"):
+        if v.get(key) is not None and not -360 <= float(v[key]) <= 360:
+            errs.append((f".visuals.{key}", "between -360 and 360"))
+    off = v.get("meshOffset")
+    if off is not None and (not isinstance(off, list) or len(off) != 3 or any(not -50 <= float(c) <= 50 for c in off)):
+        errs.append((".visuals.meshOffset", "[x, y, z], each between -50 and 50"))
+    if v.get("meshLook") is not None and v["meshLook"] not in MODEL_LOOKS:
+        errs.append((".visuals.meshLook", f"one of {MODEL_LOOKS}"))
+    if v.get("motion") is not None and v["motion"] not in MODEL_MOTIONS:
+        errs.append((".visuals.motion", f"one of {MODEL_MOTIONS}"))
+    return errs
+
+
+# Damage targets the Enemy Studio's readout uses (the game's tags on those buildings and the king).
+ENEMY_TARGETS = {
+    "house": ["PlayerOwned", "Building", "House", "InfrastructureEconomy"],
+    "wall": ["PlayerOwned", "Building", "Wall", "WallOrTower"],
+    "tower": ["PlayerOwned", "Building", "Tower", "WallOrTower"],
+    "king": ["PlayerOwned", "Player"],
+}
+
+
+def hit_damage(mods, tags, mult=1.0):
+    """The game's damage formula (DamageModifyer.CalculateDamageOnTarget) for one hit."""
+    d = 0.0
+    for m in mods or []:
+        if all(t in tags for t in m.get("tags") or []):
+            d += float(m.get("add") or 0)
+            d *= float(m.get("mult", 1) if m.get("mult") is not None else 1)
+    return d * mult
+
+
+def time_to_kill(hp, per_hit, cooldown):
+    """(hits, seconds) or None: the first hit lands at once."""
+    if per_hit <= 0 or hp <= 0:
+        return None
+    hits = max(1, math.ceil(hp / per_hit - 1e-4))
+    return hits, round((hits - 1) * max(cooldown, 0), 2)
+
+
+def enemy_card(ref, u, difficulty=1.0, elite=False):
+    """A custom enemy's numbers as it spawns: its overrides over the base unit and weapon, damage per hit and per
+    second against buildings and the king, and how long each vanilla troop takes to kill one (as the Enemy Studio's
+    readout shows them)."""
+    base = ref.unit((u.get("base") or "")[8:]) or {}
+    st = u.get("stats") or {}
+    w = u.get("weapon") or {}
+    wbase = w.get("base") or "inherit"
+    wid = base.get("weapon") if wbase == "inherit" else wbase.replace("vanilla:", "")
+    cw = next((x for x in ref.catalog.get("weapons", []) if x["id"] == wid), None) or {}
+    mods = w.get("damage") if w.get("damage") is not None else cw.get("damage") or []
+    tags = set(base.get("tags", [])) - set((u.get("tags") or {}).get("remove") or []) | set((u.get("tags") or {}).get("add") or [])
+    hp_mult = difficulty * (4 if elite else 1)
+    dmg_mult = float(w.get("damageMult") or 1) * (1 + (difficulty - 1) * 0.5) * (3 if elite else 1)
+    hp = float(st.get("maxHp") or base.get("maxHp") or 0) * hp_mult
+    cd = float(st.get("attackCooldown") or base.get("attackCooldown") or 0)
+    card = {"id": u.get("id"), "name": u.get("name"), "base": u.get("base"), "hp": round(hp, 1),
+            "speed": st.get("moveSpeed") or base.get("moveSpeed"), "range": st.get("attackRange") or base.get("attackRange"),
+            "cooldown": cd, "flying": base.get("flying", False), "large": base.get("large", False),
+            "tags": sorted(t for t in tags if t not in ("EnemyOwned", "AUTO_Alive")), "model": (u.get("visuals") or {}).get("mesh") or "base",
+            "deals": {}, "killedBy": {}}
+    for name, ttags in ENEMY_TARGETS.items():
+        per = hit_damage(mods, ttags, dmg_mult)
+        card["deals"][name] = {"perHit": round(per, 2), "perSecond": round(per / cd, 2) if cd > 0 else 0}
+    for p in ref.catalog.get("units", []):
+        if p.get("side") != "player":
+            continue
+        pw = next((x for x in ref.catalog.get("weapons", []) if x["id"] == p.get("weapon")), None)
+        if not pw or not pw.get("damage"):
+            continue  # its damage isn't in the catalog (projectile or spell effects)
+        ttk = time_to_kill(hp, hit_damage(pw.get("damage"), tags), float(p.get("attackCooldown") or 0))
+        card["killedBy"][p["id"]] = {"hits": ttk[0], "seconds": ttk[1]} if ttk else "never"
+        per = hit_damage(mods, set(p.get("tags", [])), dmg_mult)
+        card["deals"][p["id"]] = {"perHit": round(per, 2), "perSecond": round(per / cd, 2) if cd > 0 else 0}
+    return card
+
+
 def check_pack(ref, data):
     issues = []
 
@@ -2306,6 +2408,9 @@ def check_pack(ref, data):
     if not ID_RE.match(str(data.get("id", ""))):
         err("id", "1-64 of a-z 0-9 . _ -")
     unit_ids = {u.get("id") for u in data.get("units") or []}
+    for ui, u in enumerate(data.get("units") or []):
+        for path, msg in check_unit(ref, u):
+            err(f"units[{ui}]" + path, msg)
     for wi, ws in enumerate(data.get("waveSets") or []):
         p = f"waveSets[{wi}]"
         host = ws.get("host")
@@ -3701,6 +3806,38 @@ def cmd_sandbox(env, args):
     out({"status": g.status(), "loadWarnings": g.log_since(mark, features=["Builder"], min_level="warn")})
 
 
+def cmd_enemy(env, args):
+    """A library enemy's numbers (offline), or the in-game Enemy Studio: open it on the enemy, fight it in the arena,
+    take its portrait."""
+    ref = Ref(env)
+    lib = LibraryRef(env.library)
+    data = load_library(lib)
+    u = next((x for x in data.get("units") or [] if x.get("id") == args.id), None)
+    if not u:
+        raise Fail(f"no enemy {args.id!r} in the library (`palace.py list`; make one with an `unit` op)")
+    result = {"card": enemy_card(ref, u, args.difficulty, args.elite),
+              "problems": [{"path": p, "message": m} for p, m in check_unit(ref, u)]}
+    if args.studio or args.fight is not None or args.portrait:
+        g = Game(env)
+        g.raw("builder-enemy library " + args.id)
+        deadline = time.time() + args.timeout
+        while time.time() < deadline and not g.raw("builder-enemy state").startswith("enemy studio"):
+            time.sleep(0.5)
+        state = g.raw("builder-enemy state")
+        if not state.startswith("enemy studio"):
+            raise Fail("the Enemy Studio didn't open: " + state)
+        result["studio"] = state
+        if args.fight is not None:
+            g.raw(f"builder-enemy fight {max(1, args.fight)}")
+            end = time.time() + 100
+            while time.time() < end and g.raw("builder-enemy readout").startswith("running"):
+                time.sleep(1)
+            result["fight"] = g.raw("builder-enemy readout")
+        if args.portrait:
+            result["portrait"] = g.raw("builder-enemy portrait")
+    out(result)
+
+
 def cmd_spawn(env, args):
     g = Game(env)
     u = Ref(env).unit(args.unit) if not args.unit.startswith("vanilla:") else None
@@ -3899,6 +4036,15 @@ def main(argv=None):
     p.add_argument("--at", nargs=2, type=float, metavar=("X", "Z"), help="king's start")
     p.add_argument("--no-infinite", action="store_true", help="normal gold")
     p.add_argument("--timeout", type=float, default=120)
+
+    p = sub.add_parser("enemy", help="a library enemy's numbers (offline); --studio/--fight N/--portrait: the in-game Enemy Studio")
+    p.add_argument("id")
+    p.add_argument("--difficulty", type=float, default=1.0, help="a night's difficulty for the numbers (default 1)")
+    p.add_argument("--elite", action="store_true")
+    p.add_argument("--studio", action="store_true", help="open it in the game's Enemy Studio (an arena on Nordfels)")
+    p.add_argument("--fight", type=int, metavar="N", help="fight N copies against the default defenders and report")
+    p.add_argument("--portrait", action="store_true", help="take its library portrait (library/enemies/<id>.png)")
+    p.add_argument("--timeout", type=float, default=60)
 
     p = sub.add_parser("spawn", help="spawn enemies now (they attack like a wave's)")
     p.add_argument("unit", help="vanilla id (E Melee) or a pack unit id")

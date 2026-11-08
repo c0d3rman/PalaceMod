@@ -956,6 +956,152 @@ placed on any map.
   [spacing] | walkable <x> <z> | clear | thumb <mesh> | thumbs [reset]"`. Unit tests (`SceneryLibraryTests`) cover
   the reader on a synthetic file, ref parsing, the catalog, and, where the game is installed, read every catalog mesh.
 
+## Enemy Studio
+
+The custom-enemy editor, rebuilt the way the Level Studio was: an in-world tool around the live model instead of a
+settings-shaped page. Code: `Features/Builder/Studio/Enemies/`. An enemy is still a `UnitDef` in a `PackDraft`
+(R2-C1's library composes them into the `library` pack), so the runtime, validation and wave sets don't change.
+
+### Decisions
+
+1. **In place, on a loaded map.** The Enemy Studio runs on whatever map the Studio has loaded. Opened from the Level
+   Studio it takes over the same edit scene with no reload: the Level Studio's dock, labels and tools are suspended
+   (`StudioShell.Suspended`), its view is captured (`StudioViewState`), and Back restores it exactly (camera,
+   selection, tool, palette tabs, undo history: the draft is the Level Studio's own `Studio.Draft`, so enemy edits are
+   undo steps of the same history and the level sees them at once). Opened on its own (the library's Enemies tiles),
+   it first opens a throwaway **arena**: a Studio edit session on Nordfels with the "cleared" base (an in-memory pack
+   that is never saved); Back leaves the Studio.
+2. **The model is live, in the world.** A stage at a clear ground point (the Level Studio's camera pivot, or the arena's
+   castle square): a turntable disc with the enemy standing on it at its real size, lit by the level, seen by the
+   Studio's orbit camera (the game camera, turned to perspective while the Enemy Studio is up). Every edit rebuilds the
+   model from the same template the game spawns (`IUnitFactory.Resolve`), so what the stage shows is what a wave
+   spawns, scripts stripped.
+3. **Any asset as the body** (`visuals.mesh`), each with offset, rotation, scale and a material choice:
+   - `asset:<key>`: an imported OBJ/glTF of the pack (as before);
+   - `mesh:<name>[@Map]`: any scenery mesh of the cross-map library or the map (a tree, a rock, a ruin wall, a tower);
+   - `vanilla:<unit id>`: another unit's model (a knight's look on an enemy, a boss's body on a small one).
+   Meshes without a rig get a procedural walk (`motion`).
+4. **Test in the arena, not in a run.** Fight spawns N copies against defenders on the stage, right there in the edit
+   scene. The game's attackers only act at night (`AutoAttack.Update`, `AutoAttackTower.Update` return in the day), so
+   while a fight runs those two treat the arena's own units as if it were night; nothing else changes and nothing
+   outside the arena wakes up. Numbers (DPS, hits and time to kill against the map's towers) are computed from the
+   same damage formula the game uses (`DamageModifyer.CalculateDamageOnTarget`), live and without a fight.
+5. **Save snapshots a portrait** for the library tile (`DesignLibrary.SavePreview(DesignKind.Enemy, id, tex)`), taken
+   by the stage camera on a transparent background.
+
+### Screen
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ [← Level]  Goblin Brute · library ●unsaved  [↶][↷]   ⟳ Turn   ⚠ 1             [Save]   [⚔ Fight (F5)]   │ top bar
+├──────────────────┬──────────────────────────────────────────────────────────┬────────────────────────────┤
+│ Enemies Base Look│                                                          │ Stats Attack Tags Look Abil│
+│ ┌──┐┌──┐┌──┐┌──┐ │                                                          │ Name     Goblin Brute      │
+│ │  ││  ││  ││+ │ │                 the stage (3D, live)                    │ Base     Brute ▸           │
+│ └──┘└──┘└──┘└──┘ │            turntable · model · defenders                │ Hit points  800  (base 600)│
+│ Look: Units ·    │                                                          │ Move speed  4.5            │
+│ Scenery · Import │                                                          │ … (scrolls)                │
+├──────────────────┴──────────────────────────────────────────────────────────┴────────────────────────────┤
+│ Arena  [5]× ☐elite  vs [Knights 3][Archers 3][none]  [Fight] [Reset]  │ 800 HP · 24 dmg/1.2 s · Tower 1: 9 s│ readout
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+- **Top bar:** Back (to the level when opened from one, else Leave), name, pack, save dot, undo/redo, Turn (the
+  turntable spins; off holds the angle), the Problems badge (this enemy's issues; click: the field), Save, Fight.
+- **Palette (left, 300 px), tabs:**
+  - **Enemies:** the draft's custom enemies as tiles (portrait if saved, else the base unit's icon). Click switches the
+    one being edited (undo stays); "+" makes a new one from the selected base (`DesignLibrary.NewEnemy`, or a plain
+    `pack.Units` add before the library lands); right-click: Duplicate, Delete.
+  - **Base:** every vanilla enemy as icon tiles grouped Ground / Large / Flying; click sets `base`. Hover: its stats.
+  - **Look:** the model source, chips Units / Scenery / Imported plus a filter. Scenery tiles use the library's thumbnails;
+    Units the unit icons; Imported the pack's mesh assets. Click sets `visuals.mesh`; the first tile "Base model"
+    clears it.
+- **Inspector (right, 340 px), tabs** (all rows the pack editor's, reused from `UnitPage` so validation markers,
+  typing, base values and reset work the same):
+  - **Stats:** name, id, description, hit points, move speed, attack cooldown, range, keep distance, chase time.
+  - **Attack:** weapon, damage multiplier, projectile speed, damage and splash modifiers.
+  - **Tags:** add/remove; movement (Flying, Large) shown read-only from the base. Hover descriptions everywhere come
+    from `Model/Descriptions.cs` (R2-A).
+  - **Look:** size, tint, icon, the model source with Fit (auto / scale), offset X/Y/Z, turn X/Y/Z, materials (own /
+    enemy: the enemy material takes tint and the elite look), motion (auto / bob / none), texture, sounds.
+  - **Abilities:** behaviours (spawns on death) and what the base unit already does.
+- **Readout (bottom right):** effective HP at the arena's night difficulty, damage per hit and DPS against a building,
+  a knight and the king, and time to kill (and hits) by each tower kind on the map at each level. During a fight:
+  elapsed time, enemies alive, defenders standing, damage dealt each way, and the result.
+
+### Stage and camera
+
+- Orbit: left-drag turns (yaw and pitch, 3-75°), wheel zooms (1.5-60 m), right/middle-drag pans the focus, F frames
+  the model, Home resets.
+- As built, the game's own camera is used: the `CameraRig` is paused and the rig itself is moved so its main camera sits
+  on the orbit, and every camera of the rig switches from orthographic to a 30° perspective (stacked cameras stay
+  aligned, post-processing and outlines unchanged). Back restores the projection, the rig's pose and the rig; the Level
+  Studio's markers, labels and overlays are hidden meanwhile (`StudioShell.HideForSuspend`).
+- The model is an instance of the template with every `MonoBehaviour` removed except the visual ones (`Animator`
+  stays): the base's idle animation plays; a `BuilderVisualMotion` component (also on spawned enemies) adds the
+  procedural walk to a body without a rig.
+- **Portrait:** an offscreen camera renders the model alone (moved far below the map for the shot) at 256×256 on a
+  transparent background, framed on its bounds at 20° pitch from the front-left; Save writes it with
+  `DesignLibrary.SavePreview` (a library draft) or to `PalaceBuilder/cache/portraits/<pack>/<unit>.png` (any other).
+
+### Any-asset visuals (data, additive)
+
+```jsonc
+"visuals": {
+  "mesh": "mesh:Tree_02",            // "asset:<key>" | "mesh:<name>[@Map]" | "vanilla:<unit id>"
+  "meshScale": 0.8,                  // null: fit to the base model's height (as before)
+  "meshRotY": 180, "meshRotX": 0, "meshRotZ": 0,
+  "meshOffset": [0, 0.2, 0],         // metres, after the fit
+  "meshLook": "own",                 // "own": the source's materials; "unit": the enemy body material (tint, elite)
+                                     // null: own for mesh:/vanilla:, unit for asset: (as before)
+  "motion": "auto"                   // "auto" | "bob" | "none"; auto bobs a body that the base's rig doesn't move
+}
+```
+
+- `mesh:` resolves like a prop (`SceneryLibrary.Resolve`: the host map's own mesh first, then the library), with the
+  loaded level's materials, so the tree takes the map's colours. The template's hash includes the scene for these, so
+  each level rebuilds them with its own materials.
+- `vanilla:` takes every visible renderer of that unit's prefab (skinned ones in their bind pose), with its own
+  materials.
+- The source is attached as a child of the base model's biggest body part (so a rigid walk animation still moves it);
+  a skinned body's parts are hidden (the existing `hiddenMesh` trick, since `GPUInstanced` draws hidden renderers)
+  and the child goes on the root. Imported meshes keep the baked path (their UVs and baked colours).
+- `motion` (`BuilderVisualMotion`): bob = a hop of 6 % of the height and a ±6° waddle at the unit's step rate while
+  it moves (measured from its position each frame), a slow breathe when still. Auto = bob when the body was a skinned
+  mesh or the source isn't an imported mesh baked into an animated part.
+- Validation: `mesh` must be one of the three forms (asset keys checked as before, unit ids against the catalog);
+  rotations in [-360, 360], offset components in [-50, 50], `meshLook`/`motion` from their lists.
+
+### Arena fight
+
+- Fight (F5, or the button) spawns `count` (1-50) copies 16 m from the stage, made like the game's `Spawn` makes them
+  (the arena difficulty on hit points and damage, the elite material; no coins), and the chosen defenders (catalog
+  player units, default 3 swordsmen and 3 archers) in an arc on the stage. Every arena unit gets a `BuilderArenaUnit`
+  marker; enemies an arena enemy spawns on death are marked too. Attack scripts of marked units run as at night;
+  unmarked ones don't.
+- Defenders hold their spot (their home is where they stand); enemies target what their priorities find nearest, which
+  is the defenders. The fight ends when one side is down or after 90 s; the units stay until the next fight, Stop (the
+  Fight button again), an edit that rebuilds the template, or Back.
+- Measured by polling hit points (from each unit's first frame alive): damage each way, the first and last kill, who is
+  left. Checked in a pool instance: 4 Iron Brutes (120 HP) beat 3 swordsmen and 3 archers in 33.8 s; 4 Goblin Runners
+  (8 HP) lose in 3.1 s without landing a hit.
+
+### Level Studio hooks
+
+- `StudioServices.Enemies` (`IStudioEnemyEditor.Open(draft, unitId, returnToLevelStudio, onReturn, out error)`, R2-C1's
+  interface) is `EnemyStudioService`. Callers: the wave page's spawn-group rows, the library's Enemies tiles, and the
+  Level Studio's right-click on empty ground ("Enemy Studio…"). With a Level Studio up it opens in place whatever the
+  flag says (the scene is there); menus over the Studio (the wave page) are closed first.
+- Checked: Level Studio (lasso tool, camera at (10, -20) zoom 1.2 yaw 30) → Enemy Studio → an edit → Back gives the
+  same camera, tool and selection, the dock back, and the edit as the undo step "Set maxHp" of the level's draft.
+- Keys: context `BuilderEnemyStudio`, claimed exclusive while its dock is the active menu: Esc Back, Cmd/Ctrl+Z, redo,
+  Cmd/Ctrl+S, F5 Fight, Space turntable, W walk preview, F frame, Home reset view.
+- Dev: `builder-enemy level [unit] | library [unit] | new [base] | state | dock | press <tile> | select <unit> | tab
+  <palette> [panel] [look source] | set <field> <value> | look <ref|base> | fit <scale|-> | offset x y z | rot x y z |
+  material own|unit | motion auto|bob|none | walk on|off | fight [n] | stop | readout | portrait | orbit <yaw> <pitch>
+  <dist> | spin <deg> | undo | redo | save | back`.
+- Not built: a building (a slot's built look) as the body; towers and walls are in the scenery library already.
+
 ## Data-model changes (summary)
 
 All are additive except one, `DesignPack.CurrentVersion` 1 → 2: `Migrations.Steps[1]` moves `add.activator` and
