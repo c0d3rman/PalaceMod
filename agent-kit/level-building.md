@@ -125,6 +125,7 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
                "pos": [x,y,z], "rotY": 0,           // move it (the castle can't move)
                "requires": { "slot": "castle", "level": 1 },   // see Requirements; absent = keep the map's
                "upgradeCap": 0,                     // see Requirements; absent = keep
+               "units": [[-3, 2], null, [3, 2]],    // training slots: where each unit stands (below); absent = the map's
                "upgrades": [{ "cost": 2 }, null, { "cost": 9 }] }],   // per level (index 0 = build); null keeps
     "add": [{ "id": "h1",                           // new slot, unique in the level
               "base": "scene:House Variant",        // the host slot it copies: kind, tree, costs, look
@@ -158,6 +159,13 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
 - `base: null` (the map as it is) keeps all vanilla slots, scenery and routes; you then remove, move, re-price and
   add. Good for remixes; for original designs use `cleared` or `flat`.
 - Added slots are named `PalaceBuilder <id>` in the running game; `palace.py build`/plans accept the bare id.
+- **Training slots' units** (barracks, archery range, hero's quarter...): each unit stands at an offset from its
+  building that moves and turns with the slot: a copy placed on a river bank can put them in the water. `units` on an
+  edit or add sets them: one `[x, z]` per unit in the order the reference lists them (`ref slots <map>` shows the
+  map's as `units`), metres from the slot's centre in its own frame (x right, z forward); `null` entries keep the
+  map's. Whatever you set, play moves any unit home that is off walkable ground to the nearest free ground at level
+  start, keeping them spread out; `check` warns about units off the ground, and `set_units` places them (`at` takes
+  world points).
 - Props: `mesh:<name>` from the map's own scenery or the cross-map scenery library (`ref scenery`, reference.md);
   `mesh:<name>@<Map>` picks one map's mesh. `solid: true` props block units (pathfinding is rebuilt at level start);
   `scale` 0.1-10, relative to how the map itself uses the mesh (a map's own rocks are often scaled up: "Rock A" on
@@ -268,6 +276,7 @@ and damage list. Use custom units sparingly; vanilla enemies are well balanced a
 | `add_slot` | `id`, `kind` (e.g. `"House"`, `"Defense Tower"`, `"Barracks"`; copies the host's slot of that kind) or `from` (a host slot name), `at` [x,z] or `pos`, `rotY`, `requires` (shorthand), `upgradeCap`, `costs` [per level, null keeps] |
 | `move_slot` | `slot` (added id, host name, `castle` can't move), `at`/`pos`, `rotY` |
 | `set_slot` | `slot` (or `castle`), `requires` (null = back to the map's), `upgradeCap`, `costs` |
+| `set_units` | `slot`, `units` [[x,z] in the slot's frame, null keeps that one] or `at` [[x,z] world points]; `units: null` = back to the map's |
 | `remove_slot` | `slot` |
 | `chain` | `slots` [ids/names], `mode` `tree`\|`nearest`\|`order`, `first` (requirement of the root(s), default `"castle"`), `every` N (order/nearest: every N-th link needs one more castle level instead) |
 | `add_prop` | `mesh`, `at`/`pos`, `rotY`, `scale`, `solid`, `id` (auto) |

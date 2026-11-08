@@ -260,6 +260,34 @@ The "Check enemy paths" button is in the Level tab and in View ▾ Routes. It ru
 after an edit that moves solid things, while Routes is on. Each check is a rescan (120 to 220 ms warm on
 Nordfels). The result is a status chip in the Level tab and the top bar's Problems badge ("Blocked: Forest").
 
+### Unit positions
+
+A training building's units (barracks, archery range, hero's quarter...) are children of its slot, at offsets the
+map's author placed around the building. `PathfindMovementPlayerunit.Start` makes wherever a unit stands its home
+(`homePosition`, `homePositionOriginal`): it returns there each morning and respawns next to it, and the build preview
+draws it there. A slot the Builder moves, turns or copies carries the offsets along, so on a river bank the units
+stood (and were previewed, and appeared) in the water until they first walked.
+
+- **Play** (`Level/UnitHomes.cs`, pure part `Level/UnitSpread.cs`, unit-tested): right after the level-start rescan
+  (`GroundGraphs.Scan`, so on the graphs the level plays on), every unit home of every slot on a Builder level that
+  is more than 0.6 m off its own graph (`Seeker.graphMask`) moves to the nearest walkable point, 0.8 m further in,
+  or, if a unit placed before it is within 1.3 m, the nearest free walkable spot in rings around it: a formation
+  stays spread out. The unit's transform moves (its Start, the build preview and respawns use it); units that
+  already started (a building loaded built) get `homePosition`/`homePositionOriginal` too. Logged with the rescan;
+  `builder-units [live] | settle` (dev).
+- **Data:** `units: [[x, z], ...]` on a `buildSlots` edit or add: per unit in the game's order, metres from the
+  slot's centre in its frame (x right, z forward; turns with the slot); null entries and absent = the map's. Applied
+  by `LevelOverlay` before Start; play's settle still runs after.
+- **Studio** (`Studio/Units/`): a selected or hovered training slot shows a disc per unit (verdigris); a unit on
+  unwalkable ground (terrain water, blocked or steeper than 30° on the grid, else off its graph) is a red disc with a
+  cross, shown at all times and listed in Problems ("Outpost camp: 2 of 4 units stand off walkable ground"). With
+  the Select tool, dragging a selected slot's disc moves that unit (one undo step). The Inspector's Units section
+  says how many stand off the ground and has "Move units onto ground" (the same spread as play, on the Studio's
+  ground) and "Reset unit positions"; the context menu has "Move units onto ground". Dev: `builder-units studio |
+  ground | set <key> <i> <x> <z> | reset`.
+- **Agent kit:** the reference lists each map slot's `units`; `check` warns about units off walkable ground;
+  `set_units` places them.
+
 ### Removed
 
 - `LayoutHud`'s three-line key paragraph (`LayoutEditor.HudText`) is replaced by the status line's one-line tool hint.
@@ -818,6 +846,7 @@ All are additive except one, `DesignPack.CurrentVersion` 1 → 2: `Migrations.St
 | `spawnLines.add` applied (fields exist) | `LevelOverlay` | W3 |
 | `terrain {…}` | `LevelDef` (see "Terrain") | W4 |
 | `props[].base`: `"mesh:<name>[@<Map>]"` also resolves from the scenery library | `PropDef.Base` | W5 |
+| `units [[x, z], …]` (see "Unit positions") | `BuildSlotEdit`, `BuildSlotAdd` | R2-B |
 
 The validator covers each, with paths so the Problems popup can select the object.
 

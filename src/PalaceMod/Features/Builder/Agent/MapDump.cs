@@ -90,6 +90,9 @@ namespace PalaceMod.Builder.Agent
             if (s.RequiredRootLevelDifference > -100) o["upgradeCap"] = s.RequiredRootLevelDifference;
             o["canBeBase"] = LayoutScene.CanBeBase(s);
             if (hp != null) o["hp"] = R(hp.maxHp);
+            // A training slot's units: where each stands, [x, z] metres in the slot's frame (LevelDef buildSlots units).
+            var units = UnitHomes.Spots(s);
+            if (units.Count > 0) o["units"] = new JArray(units.Select(u => new JArray(R(u.X), R(u.Z))));
             o["upgrades"] = new JArray(s.OwnUpgrades.Select(u => new JObject
             {
                 ["cost"] = u.cost,

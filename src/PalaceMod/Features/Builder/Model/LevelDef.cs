@@ -70,7 +70,7 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("upgrades")] public List<UpgradeEdit> Upgrades { get; set; }
         /// <summary>Where the units of a training building (barracks, archery range...) stand: one [x, z] per unit in
         /// the game's order, metres from the slot's centre in the slot's frame (x right, z forward; turns with the
-        /// slot). Null keeps the map's; missing entries keep the map's too. In play every unit home is also moved onto
+        /// slot). Null keeps the map's; null or missing entries keep the map's too. In play every unit home is also moved onto
         /// walkable ground.</summary>
         [JsonProperty("units")] public List<float[]> Units { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
@@ -99,7 +99,7 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("upgrades")] public List<UpgradeEdit> Upgrades { get; set; }
         /// <summary>Where the units of a training building (barracks, archery range...) stand: one [x, z] per unit in
         /// the game's order, metres from the slot's centre in the slot's frame (x right, z forward; turns with the
-        /// slot). Null keeps the map's; missing entries keep the map's too. In play every unit home is also moved onto
+        /// slot). Null keeps the map's; null or missing entries keep the map's too. In play every unit home is also moved onto
         /// walkable ground.</summary>
         [JsonProperty("units")] public List<float[]> Units { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
