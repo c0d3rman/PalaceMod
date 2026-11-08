@@ -772,8 +772,8 @@ namespace PalaceMod.Builder.Level
                 case ItemKind.Added:
                     EditLevel($"Delete {item.Label.ToLowerInvariant()}", lv =>
                     {
+                        LevelRequirements.ForgetSlot(lv, LayoutScene.HostSlots(scene), SlotRefs.Added(item.Id), ForgetMode.CloseUp);
                         lv.BuildSlots?.Add?.RemoveAll(a => a?.Id == item.Id);
-                        foreach (var a in lv.BuildSlots?.Add ?? []) if (a.Activator == item.Id) a.Activator = null;
                     });
                     break;
                 case ItemKind.Prop:
