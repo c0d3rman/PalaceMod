@@ -20,9 +20,12 @@ namespace PalaceMod
         public override void Awake(Plugin plugin)
         {
             base.Awake(plugin);
-            StudioServices.AssetBrowser = new LibraryBrowser(null);
+            // Registered as StudioServices.AssetBrowser once the Studio shell (HostSceneryBrowser, PropResolver) lands.
+            Browser = new LibraryBrowser(null);
             RegisterDevCommands();
         }
+
+        internal static LibraryBrowser Browser { get; private set; }
 
         public override void Update() => LibraryThumbs.Pump();
 
@@ -47,7 +50,7 @@ namespace PalaceMod
                     }
                     case "query":
                     {
-                        var browser = StudioServices.AssetBrowser ?? throw new InvalidOperationException("no asset browser");
+                        var browser = StudioServices.AssetBrowser ?? Browser;
                         string cat = args.Length > 1 && args[1] != "-" ? args[1] : null;
                         string text = args.Length > 2 ? string.Join(" ", args.Skip(2)) : null;
                         var items = browser.Query(cat, text);
