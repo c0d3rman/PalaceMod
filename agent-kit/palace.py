@@ -606,7 +606,7 @@ def find_waveset(data, ws_id):
 # =====================================================================================================================
 
 class Slot:
-    __slots__ = ("key", "name", "kind", "pos", "rot", "castle", "upgrades", "req", "cap", "follows", "added", "base")
+    __slots__ = ("key", "name", "kind", "pos", "rot", "castle", "upgrades", "req", "cap", "follows", "added", "base", "units")
 
     def __init__(self, **kw):
         for k in self.__slots__:
@@ -654,7 +654,7 @@ def effective_slots(ref, level):
         r = host_req(s)
         slots[s["name"]] = Slot(key=s["name"], name=s["name"], kind=s["kind"], pos=s["pos"], rot=s.get("rotY", 0), castle=bool(s.get("castle")),
                                 upgrades=playable(s["upgrades"]), req=r, cap=s.get("upgradeCap"), follows=bool(s.get("followsActivator")),
-                                added=False, base=None)
+                                added=False, base=None, units=[list(u) for u in s.get("units") or []])
     warnings = []
 
     def apply_common(slot, e):
@@ -667,6 +667,9 @@ def effective_slots(ref, level):
             slot.req = (rq["slot"], rq.get("level", 0)) if rq.get("slot") else None
         if e.get("upgradeCap") is not None:
             slot.cap = e["upgradeCap"]
+        for i, u in enumerate(e.get("units") or []):
+            if u and len(u) >= 2 and i < len(slot.units):
+                slot.units[i] = [u[0], u[1]]
         for i, u in enumerate(e.get("upgrades") or []):
             if u and u.get("cost") is not None and i < len(slot.upgrades):
                 slot.upgrades[i]["cost"] = u["cost"]
@@ -696,7 +699,8 @@ def effective_slots(ref, level):
         key = "add:" + a["id"]
         req = ("castle", 0) if base.startswith("building:") else host_req(src)
         s = Slot(key=key, name="PalaceBuilder " + a["id"], kind=src["kind"], pos=a.get("pos") or src.get("pos"), rot=a.get("rotY", 0), castle=False,
-                 upgrades=playable(src["upgrades"]), req=req, cap=src.get("upgradeCap"), follows=False, added=True, base=base)
+                 upgrades=playable(src["upgrades"]), req=req, cap=src.get("upgradeCap"), follows=False, added=True, base=base,
+                 units=[list(u) for u in src.get("units") or []])
         if is_empty_base(level) and s.req and s.req[0] != castle and s.req[0] != "castle" and "requires" not in a:
             s.req = ("__removed__", 0)
         apply_common(s, a)
@@ -991,6 +995,34 @@ class Ops:
         if "costs" in op:
             e["upgrades"] = [{"cost": int(c)} if c is not None else None for c in op["costs"]]
         return f"set {op['slot']}"
+
+    def op_set_units(self, op):
+        """{"op":"set_units","slot":"barracks","units":[[x,z],...]}: where a training slot's units stand, metres from the
+        slot's centre in its frame (x right, z forward; turns with the slot), one per unit spot as `ref slots` lists them; null
+        entries keep the map's. "at": [[x,z],...] gives world points instead. "units": null resets to the map's."""
+        lv = self.level(op)
+        kind, e = self.find_slot_entry(lv, op["slot"])
+        if op.get("at") is not None:
+            slots, _, _ = effective_slots(self.ref, lv)
+            s = slots["add:" + e["id"] if kind == "add" else e["ref"]]
+            a = math.radians(s.rot or 0)
+            c, s_ = math.cos(a), math.sin(a)
+            units = []
+            for pt in op["at"]:
+                if pt is None:
+                    units.append(None)
+                    continue
+                dx, dz = float(pt[0]) - s.pos[0], float(pt[1]) - s.pos[2]
+                units.append([dx * c - dz * s_, dx * s_ + dz * c])
+        else:
+            units = op.get("units")
+        if units is None:
+            e.pop("units", None)
+            return f"units of {op['slot']} back to the map's"
+        if not isinstance(units, list) or any(u is not None and (not isinstance(u, list) or len(u) != 2) for u in units):
+            raise Fail("units is a list of [x, z] (or null entries)")
+        e["units"] = [None if u is None else [round(float(u[0]), 2), round(float(u[1]), 2)] for u in units]
+        return f"set {len(units)} unit positions of {op['slot']}"
 
     def op_remove_slot(self, op):
         lv = self.level(op)
@@ -2292,6 +2324,14 @@ def level_waveset(ref, data, level):
 # Checks
 # =====================================================================================================================
 
+def unit_world(slot):
+    """World (x, z) of a training slot's units: offsets in the slot's frame (x right, z forward) turned by its yaw."""
+    a = math.radians(slot.rot or 0)
+    c, s_ = math.cos(a), math.sin(a)
+    x0, z0 = slot.pos[0], slot.pos[2]
+    return [(x0 + ox * c + oz * s_, z0 - ox * s_ + oz * c) for ox, oz in slot.units]
+
+
 MODEL_LOOKS = ("own", "unit")
 MODEL_MOTIONS = ("auto", "bob", "none")
 
@@ -2500,6 +2540,19 @@ def check_pack(ref, data):
             if ij and not any(ground.kind[j][i] in "sw" for j in range(max(0, ij[1] - 1), min(ground.h, ij[1] + 2))
                               for i in range(max(0, ij[0] - 1), min(ground.w, ij[0] + 2))):
                 warn(f"{p}.buildSlots", f"{label} at ({x:.0f}, {z:.0f}) isn't on walkable ground (cliff, water or blocked): the king may not reach it")
+        # Training slots' units (barracks, archery range...): where each stands, from the reference's offsets.
+        moved = {e.get("ref") for e in bs.get("edit") or [] if e.get("pos") or e.get("rotY") is not None or e.get("units")}
+        for s in slots.values():
+            if not s.units or not (s.added or s.key in moved or flat or (lv.get("terrain") or {}).get("blocked")):
+                continue
+            bad = 0
+            for ox, oz in unit_world(s):
+                ij = ground.index(ox, oz)
+                if ij is None or not ground.ok(ij[0], ij[1], False):
+                    bad += 1
+            if bad:
+                warn(f"{p}.buildSlots", f"{s.label}: {bad} of {len(s.units)} units stand off walkable ground (water, cliff or blocked); "
+                                        f"play moves them to the nearest ground, or place them with set_units")
         allp = list(slots.values())
         for i in range(len(allp)):
             for j in range(i + 1, len(allp)):
@@ -3008,6 +3061,7 @@ def cmd_ref(env, args):
                             if dupes[s["name"]] > 1 else {}),
                          "costs": [u["cost"] for u in s["upgrades"] if not u.get("disabled")],
                          "income": [step_income(u) for u in s["upgrades"] if not u.get("disabled")],
+                         **({"units": s["units"]} if s.get("units") else {}),
                          **({"castle": True} if s.get("castle") else {}), **({"followsActivator": True} if s.get("followsActivator") else {}),
                          **({} if s.get("canBeBase") else {"copyable": False})})
         out(rows)

@@ -239,6 +239,7 @@ namespace PalaceMod.Builder.Studio
             public List<UpgradeEdit> Upgrades;
             public SlotRequirement Requires;
             public int? UpgradeCap;
+            public List<float[]> Units;
         }
 
         private static List<Clip> clipboard = [];
@@ -272,6 +273,7 @@ namespace PalaceMod.Builder.Studio
                         Upgrades = ups?.Select(u => u == null ? null : new UpgradeEdit { Cost = u.Cost }).ToList(),
                         Requires = (edit?.Requires ?? add?.Requires)?.Copy(),
                         UpgradeCap = edit?.UpgradeCap ?? add?.UpgradeCap,
+                        Units = (edit?.Units ?? add?.Units)?.Select(u => (float[])u?.Clone()).ToList(),
                     });
                 }
             }
@@ -314,7 +316,7 @@ namespace PalaceMod.Builder.Studio
                         string id = UniqueId("slot", lv, made);
                         made.Add(id);
                         var requires = c.Requires?.Copy() ?? (LevelBases.IsEmpty(lv) || BuildingRefs.IsBuilding(c.Base) ? LevelRequirements.CastleLevel(1) : null);
-                        lv.BuildSlots.Add.Add(new BuildSlotAdd { Id = id, Base = StudioScene.BaseRef(c.Base), Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(c.Yaw, 360f)), Upgrades = c.Upgrades, Requires = requires, UpgradeCap = c.UpgradeCap });
+                        lv.BuildSlots.Add.Add(new BuildSlotAdd { Id = id, Base = StudioScene.BaseRef(c.Base), Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(c.Yaw, 360f)), Upgrades = c.Upgrades, Requires = requires, UpgradeCap = c.UpgradeCap, Units = c.Units?.Select(u => (float[])u?.Clone()).ToList() });
                         keys.Add("add:" + id);
                     }
                     Studio.RunPlaceHooks(lv, keys[keys.Count - 1]);
