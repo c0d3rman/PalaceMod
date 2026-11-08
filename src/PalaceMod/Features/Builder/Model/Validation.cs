@@ -166,6 +166,12 @@ namespace PalaceMod.Builder.Model
                 bool hostKnown = !string.IsNullOrEmpty(ws.Host) && (game == null || game.HasHost(ws.Host));
                 if (!hostKnown) Error(p + ".host", $"unknown host map \"{ws.Host}\" (`builder dump` lists them)");
                 var lines = hostKnown ? game?.SpawnLines(ws.Host) : null;
+                // Lines the pack's levels add on this wave set's map count too (LevelOverlay makes them before the waves).
+                if (lines != null)
+                {
+                    var added = (pack.Levels ?? []).Where(l => l?.WaveSet == ws.Id).SelectMany(l => l.SpawnLines?.Add ?? []).Select(a => a?.Id).Where(id => id != null).ToList();
+                    if (added.Count > 0) lines = lines.Concat(added).Distinct().ToList();
+                }
                 if (ws.StartingGold is int g && (g < 0 || g > 100000)) Error(p + ".startingGold", "must be between 0 and 100000");
                 if (ws.Nights == null || ws.Nights.Count == 0) Error(p + ".nights", "needs at least one night");
                 for (int n = 0; n < (ws.Nights?.Count ?? 0); n++)
@@ -215,6 +221,8 @@ namespace PalaceMod.Builder.Model
                     string ep = $"{p}.buildSlots.edit[{j}]";
                     if (e == null || string.IsNullOrEmpty(e.Ref)) { Error(ep, "needs the name of a build slot on the map"); continue; }
                     CheckPos(e.Pos, ep + ".pos", optional: true);
+                    CheckRequirement(e.Requires, e.UpgradeCap, ep, e.Ref);
+                    if (e.Ref == SlotRefs.Castle) Error(ep + ".ref", "\"castle\" can't be edited this way; name the castle's build slot");
                     CheckCosts(e.Upgrades, ep + ".upgrades");
                 }
                 for (int j = 0; j < (l.BuildSlots?.Add?.Count ?? 0); j++)
@@ -226,7 +234,7 @@ namespace PalaceMod.Builder.Model
                     else if (!placed.Add(a.Id)) Error(ap + ".id", $"\"{a.Id}\" is used twice in this level");
                     if (ContentRef.Parse(a.Base ?? "").Kind != RefKind.Scene) Error(ap + ".base", "must be \"scene:<build slot on the map>\"");
                     CheckPos(a.Pos, ap + ".pos", optional: false);
-                    if (a.ActivatorLevel < 0 || a.ActivatorLevel > 10) Error(ap + ".activatorLevel", "must be between 0 and 10");
+                    CheckRequirement(a.Requires, a.UpgradeCap, ap, SlotRefs.Added(a.Id ?? ""));
                     CheckCosts(a.Upgrades, ap + ".upgrades");
                 }
                 for (int j = 0; j < (l.Props?.Count ?? 0); j++)
@@ -247,9 +255,69 @@ namespace PalaceMod.Builder.Model
                     if (e == null || string.IsNullOrEmpty(e.Ref)) { Error(ep, "needs the name of a spawn line on the map"); continue; }
                     CheckPos(e.Pos, ep + ".pos", optional: true);
                 }
-                if ((l.SpawnLines?.Add?.Count ?? 0) > 0) Warn(p + ".spawnLines.add", "new spawn lines aren't supported yet; move the map's own lines instead");
+                var hostLines = game != null && !string.IsNullOrEmpty(l.Host) ? game.SpawnLines(l.Host) : null;
+                for (int j = 0; j < (l.SpawnLines?.Add?.Count ?? 0); j++)
+                {
+                    var a = l.SpawnLines.Add[j];
+                    string lp = $"{p}.spawnLines.add[{j}]";
+                    if (a == null) { Error(lp, "is empty"); continue; }
+                    if (!Ids.IsValid(a.Id)) Error(lp + ".id", "must be 1-64 characters of a-z, 0-9, '.', '_' or '-'");
+                    else if (!placed.Add("line:" + a.Id)) Error(lp + ".id", $"\"{a.Id}\" is used twice in this level");
+                    else if (hostLines != null && hostLines.Contains(a.Id)) Error(lp + ".id", $"{l.Host} already has a spawn line \"{a.Id}\"");
+                    CheckPos(a.Pos, lp + ".pos", optional: false);
+                    Range(a.Width, 1f, 200f, lp + ".width");
+                    if (!a.Ground && !a.Large && !a.Flying) Error(lp, "spawns nothing: turn on ground, large or flying");
+                }
+                if (!LevelBases.IsKnown(l.Base)) Error(p + ".base", $"must be \"{LevelBases.Cleared}\", \"{LevelBases.Flat}\" or absent");
+                CheckLevelRequirements(l, p);
             }
             return issues;
+
+            void CheckRequirement(SlotRequirement r, int? cap, string path, string self)
+            {
+                if (r != null)
+                {
+                    if (r.Level < 0 || r.Level > 10) Error(path + ".requires.level", "must be between 0 and 10");
+                    if (r.Slot != null && r.Slot == self) Error(path + ".requires.slot", "a slot can't need itself");
+                    if (r.Slot != null && r.Slot.Length == 0) Error(path + ".requires.slot", "is empty (leave it out for \"from the start\")");
+                }
+                if (cap is int c && c != -100 && (c < -10 || c > 10)) Error(path + ".upgradeCap", "must be between -10 and 10, or -100 for no cap");
+            }
+
+            // Prerequisites between the level's own slots: added slots must exist, removed ones can't unlock anything,
+            // and no loops (host slots' own prerequisites aren't known here; LevelOverlay checks them at load).
+            void CheckLevelRequirements(LevelDef l, string p)
+            {
+                var adds = new HashSet<string>((l.BuildSlots?.Add ?? []).Where(a => a?.Id != null).Select(a => SlotRefs.Added(a.Id)), StringComparer.Ordinal);
+                var removed = new HashSet<string>(l.BuildSlots?.Remove ?? [], StringComparer.Ordinal);
+                var edges = new Dictionary<string, SlotRequirement>(StringComparer.Ordinal);
+                var paths = new Dictionary<string, string>(StringComparer.Ordinal);
+                for (int j = 0; j < (l.BuildSlots?.Edit?.Count ?? 0); j++)
+                {
+                    var e = l.BuildSlots.Edit[j];
+                    if (e?.Ref == null || e.Requires == null) continue;
+                    edges[e.Ref] = e.Requires;
+                    paths[e.Ref] = $"{p}.buildSlots.edit[{j}].requires";
+                }
+                for (int j = 0; j < (l.BuildSlots?.Add?.Count ?? 0); j++)
+                {
+                    var a = l.BuildSlots.Add[j];
+                    if (a?.Id == null || a.Requires == null) continue;
+                    edges[SlotRefs.Added(a.Id)] = a.Requires;
+                    paths[SlotRefs.Added(a.Id)] = $"{p}.buildSlots.add[{j}].requires";
+                }
+                foreach (var kv in edges)
+                {
+                    string target = kv.Value.Slot;
+                    if (target == null || target == SlotRefs.Castle) continue;
+                    if (SlotRefs.IsAdded(target) && !adds.Contains(target)) Error(paths[kv.Key] + ".slot", $"no added slot \"{SlotRefs.AddedId(target)}\" in this level");
+                    else if (removed.Contains(target)) Warn(paths[kv.Key] + ".slot", $"\"{target}\" is removed from the map, so this slot never appears");
+                    else if (l.Base != null && !SlotRefs.IsAdded(target)) Warn(paths[kv.Key] + ".slot", $"\"{target}\" is cleared away with the map, so this slot never appears");
+                }
+                var graph = edges.ToDictionary(kv => kv.Key, kv => kv.Value.Slot == null ? null : kv.Value, StringComparer.Ordinal);
+                foreach (var loop in LevelRequirements.Cycles(graph))
+                    Error(paths[loop[0]], $"requirement loop: {string.Join(" needs ", loop.Concat([loop[0]]))}");
+            }
 
             void Range(float? value, float min, float max, string path)
             {
