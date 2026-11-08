@@ -91,6 +91,8 @@ namespace PalaceMod.Builder.Studio
                 KeyCode.Escape => "Esc",
                 KeyCode.Comma => ",",
                 KeyCode.Period => ".",
+                KeyCode.LeftBracket => "[",
+                KeyCode.RightBracket => "]",
                 >= KeyCode.Alpha0 and <= KeyCode.Alpha9 => ((int)(c - KeyCode.Alpha0)).ToString(),
                 _ => c.ToString(),
             };

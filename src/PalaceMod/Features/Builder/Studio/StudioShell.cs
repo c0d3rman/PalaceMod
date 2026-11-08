@@ -120,7 +120,7 @@ namespace PalaceMod.Builder.Studio
             claimed = false;
             Studio.NextLoad = StudioMode.Edit;
             Studio.SetMode(StudioMode.Loading);
-            if (!BuilderServices.Sessions.Launch(new SessionRequest { Pack = copy, LevelId = level }, out error))
+            if (!BuilderManager.Launcher.LaunchStudio(new SessionRequest { Pack = copy, LevelId = level }, StudioSessionKind.Edit, out error))
             {
                 Stop();
                 return false;
@@ -262,6 +262,13 @@ namespace PalaceMod.Builder.Studio
         /// <summary>Test play started a swap: the edit scene goes away with the reload; the session, draft and level stay.</summary>
         public static void OnModeChanged(StudioMode mode)
         {
+            // A swap that didn't start goes back to Edit without a reload: rebuild the editor on the scene that's there.
+            if (mode == StudioMode.Edit && state == State.Waiting && !claimed && LayoutScene.Host(host) is var s && s.IsValid() && s.isLoaded)
+            {
+                claimed = true;
+                startFrame = Time.frameCount - 3;
+                return;
+            }
             if (mode is StudioMode.Loading or StudioMode.Play && state == State.Editing)
             {
                 ClearScene();

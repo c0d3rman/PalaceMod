@@ -52,17 +52,16 @@ namespace PalaceMod
         public IReadOnlyList<ModDockPanel> Panels => panels;
 
         /// <summary>The pointer is over one of the visible panels (or a popup over the dock).</summary>
-        public bool PointerOverPanel
+        public bool PointerOverPanel => Over(ModTile.MousePosition);
+
+        /// <summary>Whether a screen point is over one of the visible panels (or a popup is open over the dock).</summary>
+        public bool Over(Vector2 screen)
         {
-            get
-            {
-                if (root == null || !root.activeInHierarchy) return false;
-                var mouse = ModTile.MousePosition;
-                if (ModPopup.Current != null && ModPopup.Current.IsOpen) return true;
-                foreach (var p in panels)
-                    if (p.Visible && p.Rect != null && RectTransformUtility.RectangleContainsScreenPoint(p.Rect, mouse, null)) return true;
-                return false;
-            }
+            if (root == null || !root.activeInHierarchy) return false;
+            if (ModPopup.Current != null && ModPopup.Current.IsOpen) return true;
+            foreach (var p in panels)
+                if (p.Visible && p.Rect != null && RectTransformUtility.RectangleContainsScreenPoint(p.Rect, screen, null)) return true;
+            return false;
         }
 
         /// <summary>Builds the root (if needed) and makes the dock the active menu. Safe to call every frame.</summary>
@@ -284,7 +283,7 @@ namespace PalaceMod
             list.childForceExpandWidth = true;
             list.childForceExpandHeight = false;
             list.spacing = 0f;
-            Page = new ModPage(Scroll.Content) { Size = size };
+            Page = new ModPage(Scroll.Content) { Size = size, FieldIndent = Mathf.Min(ModField.ValueIndent, size.x * 0.46f) };
             try { build(Page); }
             catch (Exception e)
             {

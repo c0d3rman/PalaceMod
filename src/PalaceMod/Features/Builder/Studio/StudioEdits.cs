@@ -295,7 +295,6 @@ namespace PalaceMod.Builder.Studio
                         lv.Props.Add(new PropDef { Id = id, Base = c.Base, Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(c.Yaw, 360f)), Scale = c.Scale, Solid = c.Solid });
                         keys.Add("prop:" + id);
                     }
-                    Studio.RunPlaceHooks(lv, keys[keys.Count - 1]);
                     else
                     {
                         lv.BuildSlots ??= new BuildSlotOverlay();
@@ -306,6 +305,7 @@ namespace PalaceMod.Builder.Studio
                         lv.BuildSlots.Add.Add(new BuildSlotAdd { Id = id, Base = "scene:" + c.Base, Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(c.Yaw, 360f)), Upgrades = c.Upgrades, Requires = requires, UpgradeCap = c.UpgradeCap });
                         keys.Add("add:" + id);
                     }
+                    Studio.RunPlaceHooks(lv, keys[keys.Count - 1]);
                 }
             });
             foreach (var k in keys) Studio.RaiseItemPlaced(k);

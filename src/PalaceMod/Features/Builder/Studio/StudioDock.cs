@@ -30,7 +30,7 @@ namespace PalaceMod.Builder.Studio
         public static float PaletteScroll => palette?.Scroll?.ScrollY ?? 0f;
         public static float PanelScroll => right?.Scroll?.ScrollY ?? 0f;
         public static bool Active => dock?.IsActive == true;
-        public static bool PointerOverPanel => dock?.PointerOverPanel == true;
+        public static bool PointerOverPanel => dock?.Over(StudioInput.Mouse) == true;
         public static ModDock Dock => dock;
 
         // ---- Build ------------------------------------------------------------------------------------------------
@@ -52,6 +52,7 @@ namespace PalaceMod.Builder.Studio
         {
             Ensure();
             bool fresh = dock.Root == null;
+            ShowHud(false);
             if (!dock.Show()) return;
             if (fresh || toolTiles.Count == 0) BuildAll();
         }
@@ -76,10 +77,28 @@ namespace PalaceMod.Builder.Studio
         {
             ModTooltip.Hide();
             dock?.Hide();
+            ShowHud(true);
+        }
+
+        // The game's HUD (gold, the night's enemy markers) would sit under the panels; it's faded out while editing.
+        private static CanvasGroup hud;
+
+        public static void ShowHud(bool show)
+        {
+            var container = UIFrameManager.instance?.InGameUIContainer;
+            if (container == null) return;
+            if (hud == null || hud.gameObject != container.gameObject)
+            {
+                if (show) return;
+                hud = container.GetComponent<CanvasGroup>() ?? container.gameObject.AddComponent<CanvasGroup>();
+            }
+            hud.alpha = show ? 1f : 0f;
+            hud.blocksRaycasts = show;
         }
 
         public static void Destroy()
         {
+            ShowHud(true);
             dock?.Destroy();
             toolTiles.Clear();
             marquee = anchor = null;
@@ -101,7 +120,7 @@ namespace PalaceMod.Builder.Studio
         private static bool dirtyPlay;
         public static string PlayTab;
 
-        public static bool PointerOverPlayPanel => playDock?.PointerOverPanel == true;
+        public static bool PointerOverPlayPanel => playDock?.Over(StudioInput.Mouse) == true;
 
         /// <summary>Per frame in play mode: shows the play panels without taking the game's input, except while the
         /// pointer is on them (then their rows and tiles take the mouse).</summary>
@@ -112,7 +131,7 @@ namespace PalaceMod.Builder.Studio
             if (playDock == null)
             {
                 playDock = new ModDock("Studio play") { FreezePlayer = false };
-                playPanel = playDock.AddPanel("Play", new Vector2(1, 0), new Vector2(1, 1), new Vector2(-G - RightW, G), new Vector2(-G, -G));
+                playPanel = playDock.AddPanel("Play", new Vector2(1, 0), new Vector2(1, 1), new Vector2(-G - RightW, G + 240f), new Vector2(-G, -G));
                 dirtyPlay = true;
             }
             bool fresh = playDock.Root == null;
@@ -235,8 +254,8 @@ namespace PalaceMod.Builder.Studio
             var tr = title.rectTransform;
             tr.anchorMin = tr.anchorMax = tr.pivot = new Vector2(0f, 1f);
             tr.anchoredPosition = new Vector2(x, 0f);
-            tr.sizeDelta = new Vector2(440f, h);
-            x += 450f;
+            tr.sizeDelta = new Vector2(620f, h);
+            x += 630f;
             undoTile = Button(body, "Undo", new Vector2(h, h), Icon("undo"), null, BuilderEditor.Undo, "Undo", () => Studio.Draft?.History.CanUndo == true ? Studio.Draft.History.UndoLabel : "Nothing to undo");
             undoTile.Place(new Vector2(x, 0f));
             x += h + 6f;
@@ -349,7 +368,8 @@ namespace PalaceMod.Builder.Studio
                     if (tool == StudioShell.Place && StudioShell.Place.Armed == null) { PaletteCollapsed = false; dirtyPalette = true; palette.SetVisible(true); return; }
                     StudioShell.SetTool(tool.Id);
                 };
-                tile.SetBadge(StudioKeys.Label(tool.Key));
+                string key = StudioKeys.Label(tool.Key);
+                tile.SetBadge(key.Length > 1 ? $"<size=65%>{key.Replace("Shift+", "⇧")}</size>" : key);
                 ModTooltip.Attach(tile, tool.Name, () => tool.Hint);
                 toolTiles[tool.Id] = tile;
                 y += size + 8f;
@@ -406,7 +426,7 @@ namespace PalaceMod.Builder.Studio
         }
 
         /// <summary>A row of tab tiles at the top of a page.</summary>
-        public static void Tabs(ModPage page, IReadOnlyList<(string id, string label)> tabs, Func<string> current, Action<string> pick, int perRow)
+        public static void Tabs(ModPage page, IReadOnlyList<(string id, string label)> tabs, Func<string> current, Action<string> pick, int perRow, float textSize = 21f)
         {
             int rows = (tabs.Count + perRow - 1) / perRow;
             var area = page.Custom("Tabs", rows * (TabH + 6f) + 6f);
@@ -416,7 +436,7 @@ namespace PalaceMod.Builder.Studio
             for (int i = 0; i < tabs.Count; i++)
             {
                 var (id, label) = tabs[i];
-                var tile = ModTile.Create(area, "Tab " + id, new Vector2(w, TabH), null, label, 21f);
+                var tile = ModTile.Create(area, "Tab " + id, new Vector2(w, TabH), null, label, textSize);
                 tile.Label.alignment = TextAlignmentOptions.Center;
                 tile.Place(new Vector2((i % perRow) * (w + 6f), -(i / perRow) * (TabH + 6f)));
                 tile.SetOn(current() == id);
@@ -471,6 +491,39 @@ namespace PalaceMod.Builder.Studio
             if (v.PanelTab != null) PanelTab = v.PanelTab;
             PaletteCollapsed = v.PaletteCollapsed;
             RefreshAll();
+        }
+
+        /// <summary>A list row in a side panel: shorter, one line (ellipsis), with room kept for its value on the right;
+        /// lit when on.</summary>
+        public static void Compact(ModRow row, bool on = false, float valueRoom = 60f)
+        {
+            var b = row.Button;
+            var le = b.GetComponent<LayoutElement>();
+            if (le != null) le.preferredHeight = 40f;
+            var text = b.GetComponent<TextMeshProUGUI>();
+            if (text != null)
+            {
+                text.fontSize = Mathf.Min(text.fontSize, 23f);
+                text.enableWordWrapping = false;
+                text.overflowMode = TextOverflowModes.Ellipsis;
+                var value = b.transform.Find("Value")?.GetComponent<TextMeshProUGUI>();
+                if (value != null)
+                {
+                    value.fontSize = 19f;
+                    if (!string.IsNullOrEmpty(value.text)) valueRoom = Mathf.Max(valueRoom, value.GetPreferredValues(value.text).x + 10f);
+                }
+                text.margin = new Vector4(text.margin.x, 0f, valueRoom, 0f);
+                if (on) text.color = ModStyle.Bright;
+            }
+            if (on) ModStyle.AddEmblem(b.transform, 10f).anchoredPosition = new Vector2(-4f, 0f);
+        }
+
+        /// <summary>A heading that fits a side panel.</summary>
+        public static void SmallHeader(ModPage page, string text)
+        {
+            var h = page.Header(text);
+            h.fontSize = 30f;
+            h.enableWordWrapping = true;
         }
 
         // ---- Dev ------------------------------------------------------------------------------------------------

@@ -57,7 +57,7 @@ namespace PalaceMod.Builder.Studio
 
         public static void Build(ModPage page)
         {
-            StudioDock.Tabs(page, Chips.ToList(), () => Chip ?? "", id => { Chip = id.Length == 0 ? null : id; StudioDock.RefreshAll(); }, 4);
+            StudioDock.Tabs(page, Chips.ToList(), () => Chip ?? "", id => { Chip = id.Length == 0 ? null : id; StudioDock.RefreshAll(); }, 4, 17f);
             page.TextInput("Find", () => Text, v => { Text = v ?? ""; StudioDock.RefreshAll(); });
             var items = StudioScene.Items.Where(i => i.Kind != StudioItemKind.Group && StudioScene.GroupOf(i.Key) == null && Matches(i)).ToList();
             var groups = StudioScene.Items.Where(i => i.Kind == StudioItemKind.Group && (Matches(i) || i.Members.Any(m => StudioScene.Find(m) is { } mi && Matches(mi)))).ToList();
@@ -116,17 +116,7 @@ namespace PalaceMod.Builder.Studio
         private static void Row(ModPage page, string label, string value, bool on, Sprite icon, Action click, Action toggle)
         {
             var row = page.Row(label, value, (Func<string>)null, () => { click(); toggle?.Invoke(); }, icon);
-            var b = row.Button;
-            var le = b.GetComponent<LayoutElement>();
-            if (le != null) le.preferredHeight = 38f;
-            var text = b.GetComponent<TextMeshProUGUI>();
-            if (text != null)
-            {
-                text.fontSize = Mathf.Min(text.fontSize, 22f);
-                text.enableWordWrapping = false;
-                text.overflowMode = TextOverflowModes.Ellipsis;
-                if (on) text.color = ModStyle.Bright;
-            }
+            StudioDock.Compact(row, on, 90f);
         }
     }
 }

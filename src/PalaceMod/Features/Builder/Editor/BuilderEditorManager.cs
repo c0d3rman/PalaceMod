@@ -7,7 +7,7 @@ using PalaceMod.Builder.Editor;
 using UnityEngine;
 
 /*
-    Runs the Builder editor (Features/Builder/Editor): its menu entries, undo/redo keys, first-use hint and the
+    Runs the Builder editor (Features/Builder/Editor): its menu entries, undo/redo keys and the
     `builder-ui` dev command. Part of the Builder feature: it follows Builder.Enabled (BuilderManager's switch).
 */
 namespace PalaceMod
@@ -15,7 +15,6 @@ namespace PalaceMod
     public class BuilderEditorManager : BaseManager
     {
         private Keybind undo, redo, redoAlt, undoCtrl, redoCtrl;
-        private static ConfigEntry<bool> hintShown;
 
         public override void Awake(Plugin plugin)
         {
@@ -30,8 +29,6 @@ namespace PalaceMod
                 "Also undoes in the Builder editor.", KeybindFlags.AllowInMenus);
             redoCtrl = Keybinds.Register("Builder", "editor-redo-ctrl-shift", "Builder: redo (Ctrl+Shift)", new KeyboardShortcut(KeyCode.Z, KeyCode.LeftControl, KeyCode.LeftShift),
                 "Also redoes in the Builder editor.", KeybindFlags.AllowInMenus);
-            hintShown = plugin.Config.Bind("Builder", "Editor hint shown", false,
-                new ConfigDescription("Whether the Builder editor's first-use hint has been shown.", null, new SettingTags { Hidden = true }));
             PauseMenu.AddButton("builder", "Builder", BuilderEditor.Open, order: 40, visible: () => Feature<BuilderManager>.On);
             TitleMenu.AddButton("builder", "Builder", BuilderEditor.Open, () => Feature<BuilderManager>.On);
             HookSessionMenu();
@@ -41,18 +38,11 @@ namespace PalaceMod
         public override void Update()
         {
             EditorReturn.Update();
-            if (!BuilderEditor.EditorFocused && !Builder.Level.LayoutEditor.Active) return;
+            if (!BuilderEditor.EditorFocused) return;
             if (!Feature<BuilderManager>.On) { BuilderEditor.Shutdown(); return; }
             if (ModTextInput.Active) return;
             if (redo.Down || redoAlt.Down || redoCtrl.Down) BuilderEditor.Redo();
             else if (undo.Down || undoCtrl.Down) BuilderEditor.Undo();
-        }
-
-        internal static void FirstUseHint()
-        {
-            if (hintShown == null || hintShown.Value) return;
-            hintShown.Value = true;
-            Notify.Show("Builder: left/right changes a value, apply edits it, Cmd+Z undoes", NotifyKind.Info, 6f, key: "builder-hint");
         }
 
         // WP3's custom-runs menu ("Create your own", per-pack "Edit") links here through its hooks.

@@ -90,7 +90,7 @@ namespace PalaceMod.Builder.Studio
                     var size = label.GetPreferredValues(text);
                     var local = (s - (Vector2)layer.position) / scale + layer.rect.size / 2f;
                     var rect = new Rect(local.x - size.x / 2f, local.y, size.x, size.y);
-                    if (prio > 1 && placed.Any(r => r.Overlaps(rect))) continue;
+                    if (prio != 1 && placed.Any(r => r.Overlaps(rect))) continue;
                     placed.Add(rect);
                     label.rectTransform.anchoredPosition = local;
                     label.rectTransform.sizeDelta = new Vector2(size.x + 4f, size.y);
@@ -105,7 +105,8 @@ namespace PalaceMod.Builder.Studio
         {
             var l = Studio.LabelFor(item.Key);
             var color = StudioSelection.Contains(item.Key) ? Level.LayoutMarkers.SelectedColor : item.Removed ? Level.LayoutMarkers.RemovedColor : l.Color ?? StudioScene.KindColor(item);
-            string name = ModFields.TMPEscape(l.Name ?? (full ? item.Name : Economy.PlannerIcons.Short(item.TypeName)));
+            bool hover = StudioSelection.Hover == item.Key;
+            string name = ModFields.TMPEscape(l.Name ?? (hover || item.Kind is StudioItemKind.Prop or StudioItemKind.Line ? item.Name : Economy.PlannerIcons.Short(item.TypeName)));
             string head = $"<color=#{ColorUtility.ToHtmlStringRGB(color)}>{name}</color>";
             if (!full) return head;
             string sub = StudioViewOptions.Labels switch

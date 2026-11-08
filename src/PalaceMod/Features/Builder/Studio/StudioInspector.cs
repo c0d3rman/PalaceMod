@@ -56,7 +56,7 @@ namespace PalaceMod.Builder.Studio
             if (items.Count == 0) { Overview(page); Sections(page, keys); return; }
 
             var byType = items.GroupBy(i => i.TypeName).OrderByDescending(g => g.Count()).ToList();
-            page.Header(items.Count == 1 ? Esc(items[0].Name) : string.Join(" · ", byType.Take(3).Select(g => $"{g.Count()} {Esc(Plural(g.Key, g.Count()))}")) + (byType.Count > 3 ? " …" : ""));
+            StudioDock.SmallHeader(page, items.Count == 1 ? Esc(items[0].Name) : string.Join(" · ", byType.Take(3).Select(g => $"{g.Count()} {Esc(Plural(g.Key, g.Count()))}")) + (byType.Count > 3 ? " …" : ""));
             if (items.Count == 1) page.Row(Esc(items[0].TypeName), Dim(Summary(items[0]).Substring(Esc(items[0].TypeName).Length).TrimStart(' ', '·')));
 
             // Costs: when every selected slot has the same number of levels.
@@ -81,7 +81,7 @@ namespace PalaceMod.Builder.Studio
                 else
                 {
                     var main = byType.First(g => g.Any(i => slots.Contains(i)));
-                    page.Row($"Costs differ by kind", $"{Esc(Plural(main.Key, 2))} only ▸", "Select only one kind to edit costs together.",
+                    page.Row("Costs differ", $"{Esc(Plural(main.Key, 2))} only", "Select only one kind to edit costs together.",
                         () => StudioSelection.Select(slots.Where(s => s.TypeName == main.Key).Select(s => s.Key), SelectOp.Replace));
                 }
             }
@@ -135,11 +135,11 @@ namespace PalaceMod.Builder.Studio
 
             if (items.Count > 1)
             {
-                page.Header("Selected");
+                StudioDock.SmallHeader(page, "Selected");
                 foreach (var i in items)
                 {
                     var item = i;
-                    page.Row(Esc(i.Name), Dim(Esc(i.TypeName)), null, () => StudioSelection.Select([item.Key], SelectOp.Replace));
+                    StudioDock.Compact(page.Row($"{Esc(i.Name)}  <size=75%>{Dim(Esc(i.TypeName))}</size>", null, (string)null, () => StudioSelection.Select([item.Key], SelectOp.Replace)), false, 0f);
                 }
             }
         }
@@ -168,7 +168,7 @@ namespace PalaceMod.Builder.Studio
         private static void Overview(ModPage page)
         {
             var lv = Studio.Level;
-            page.Header(Esc(lv?.Name ?? "Level"));
+            StudioDock.SmallHeader(page, Esc(lv?.Name ?? "Level"));
             var items = StudioScene.Items;
             int Count(StudioItemKind k) => items.Count(i => i.Kind == k && !i.Removed);
             page.Row("Build slots", $"{Count(StudioItemKind.Slot) + Count(StudioItemKind.Added)}", "On the map now (the castle included).");
@@ -176,11 +176,11 @@ namespace PalaceMod.Builder.Studio
             foreach (var g in kinds)
             {
                 string type = g.Key;
-                page.Row("   " + Esc(Plural(type, 2)), g.Count().ToString(), null, () => StudioSelection.Select(StudioScene.Items.Where(i => i.TypeName == type && !i.Removed).Select(i => i.Key), SelectOp.Replace));
+                page.Row("   " + Esc(Plural(type, 2)), g.Count().ToString(), (string)null, () => StudioSelection.Select(StudioScene.Items.Where(i => i.TypeName == type && !i.Removed).Select(i => i.Key), SelectOp.Replace));
             }
             int removed = items.Count(i => i.Removed), moved = items.Count(i => i.Moved);
-            if (removed > 0) page.Row("Removed", removed.ToString(), null, () => StudioSelection.Select(StudioScene.Items.Where(i => i.Removed).Select(i => i.Key), SelectOp.Replace));
-            if (moved > 0) page.Row("Moved", moved.ToString(), null, () => StudioSelection.Select(StudioScene.Items.Where(i => i.Moved).Select(i => i.Key), SelectOp.Replace));
+            if (removed > 0) page.Row("Removed", removed.ToString(), (string)null, () => StudioSelection.Select(StudioScene.Items.Where(i => i.Removed).Select(i => i.Key), SelectOp.Replace));
+            if (moved > 0) page.Row("Moved", moved.ToString(), (string)null, () => StudioSelection.Select(StudioScene.Items.Where(i => i.Moved).Select(i => i.Key), SelectOp.Replace));
             page.Row("Scenery", Count(StudioItemKind.Prop).ToString());
             page.Row("Spawn lines", Count(StudioItemKind.Line).ToString());
             if (StudioShell.PathSummary is string paths) page.Row("Paths", Dim(Esc(paths)));

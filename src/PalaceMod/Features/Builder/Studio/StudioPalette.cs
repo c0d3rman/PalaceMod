@@ -59,9 +59,9 @@ namespace PalaceMod.Builder.Studio
             {
                 string type = g.Key;
                 int onMap = StudioScene.Items.Count(i => (i.Kind is StudioItemKind.Slot or StudioItemKind.Added) && i.TypeName == type && !i.Removed);
-                var row = page.Row(type, $"{Dim(CostChain(g.First().Costs))}  ×{onMap}", () => $"Place a {type.ToLowerInvariant()}: copies the nearest {type.ToLowerInvariant()} on the map (its costs and upgrades).",
+                var row = page.Row($"{type}  <size=75%>{Dim(CostChain(g.First().Costs))}</size>", $"×{onMap}", () => $"Place a {type.ToLowerInvariant()}: copies the nearest {type.ToLowerInvariant()} on the map (its costs and upgrades).",
                     () => ArmSlot(type), PlannerIcons.Kind(type));
-                Shrink(row.Button, armed == "slot:" + type);
+                Shrink(row, armed == "slot:" + type);
             }
         }
 
@@ -91,7 +91,7 @@ namespace PalaceMod.Builder.Studio
             {
                 var kind = b;
                 var row = page.Row(b.Name, Dim($"×{b.Count}"), () => "Place a copy of this map's scenery. Solid by default: units walk around it.", () => StudioShell.Arm(PropKind(kind)));
-                Shrink(row.Button, armed == b.Id);
+                Shrink(row, armed == b.Id);
             }
         }
 
@@ -106,7 +106,7 @@ namespace PalaceMod.Builder.Studio
                 var item = l;
                 var row = page.Row(l.Name, Dim(l.Moved ? "moved" : l.TypeName.Replace("Spawn line", "").Trim()), () => "Select it on the map (drag it to move where enemies come from).",
                     () => { StudioSelection.Select([item.Key], SelectOp.Replace); StudioCamera.FrameItems([item]); });
-                Shrink(row.Button, StudioSelection.Contains(l.Key));
+                Shrink(row, StudioSelection.Contains(l.Key), 110f);
             }
         }
 
@@ -182,20 +182,6 @@ namespace PalaceMod.Builder.Studio
             });
         }
 
-        // Palette rows are a little smaller than a menu's; the armed kind is lit.
-        private static void Shrink(TFUITextButton button, bool on)
-        {
-            var le = button.GetComponent<LayoutElement>();
-            if (le != null) le.preferredHeight = 40f;
-            var text = button.GetComponent<TextMeshProUGUI>();
-            if (text != null)
-            {
-                text.fontSize = Mathf.Min(text.fontSize, 24f);
-                text.enableWordWrapping = false;
-                text.overflowMode = TextOverflowModes.Ellipsis;
-                if (on) text.color = ModStyle.Bright;
-            }
-            if (on) ModStyle.AddEmblem(button.transform, 10f).anchoredPosition = new Vector2(-6f, 0f);
-        }
+        private static void Shrink(ModRow row, bool on, float room = 60f) => StudioDock.Compact(row, on, room);
     }
 }
