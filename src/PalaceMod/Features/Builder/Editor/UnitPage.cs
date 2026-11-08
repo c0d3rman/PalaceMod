@@ -45,12 +45,13 @@ namespace PalaceMod.Builder.Editor
 
         /// <summary>One section of this page, for the Enemy Studio's inspector tabs: "identity", "stats", "weapon",
         /// "tags", "visuals", "behaviours", "actions".</summary>
-        internal void BuildSection(ModPage page, string section)
+        internal void BuildSection(ModPage page, params string[] sections)
         {
             BuildInto(page, p =>
             {
                 var u = Unit;
                 if (u == null) { p.Text("This unit no longer exists."); return; }
+                foreach (string section in sections)
                 switch (section)
                 {
                     case "identity": BuildIdentity(p, u); break;

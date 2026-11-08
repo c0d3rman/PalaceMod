@@ -385,7 +385,7 @@ namespace PalaceMod.Builder.Studio.Enemies
                         case "tags": unitPage.BuildSection(page, "tags"); TagSummary(page); break;
                         case "look": unitPage.BuildSection(page, "visuals"); ModelFields(page); break;
                         case "abilities": unitPage.BuildSection(page, "behaviours"); break;
-                        default: unitPage.BuildSection(page, "identity"); unitPage.BuildSection(page, "stats"); break;
+                        default: unitPage.BuildSection(page, "identity", "stats"); break;
                     }
                 }
                 catch (Exception e) { Log.For<BuilderManager>().Caught("Enemy Studio inspector failed", e); }
