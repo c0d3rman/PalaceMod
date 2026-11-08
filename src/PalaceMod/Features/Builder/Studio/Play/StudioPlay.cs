@@ -121,7 +121,7 @@ namespace PalaceMod.Builder.Studio.Play
                 return;
             }
             Studio.View = view;
-            Swap(new SessionRequest { Pack = TestPacks.Edit(draft.Pack, levelId), LevelId = levelId }, StudioSessionKind.Edit);
+            Swap(new SessionRequest { Pack = Studio.EditPack(draft.Pack, levelId), LevelId = levelId }, StudioSessionKind.Edit);
         }
 
         public void Restart()
@@ -241,7 +241,7 @@ namespace PalaceMod.Builder.Studio.Play
         // ---- Music and clouds -------------------------------------------------------------------------------------
 
         /// <summary>The pointer is over the sandbox panel or a popup: clicks there aren't map clicks.</summary>
-        internal static bool PointerOverUI() => ModPopup.Current != null;
+        internal static bool PointerOverUI() => Studio.PointerOverUI || ModPopup.Current != null;
 
         /// <summary>Fades the music out (night music would otherwise carry on into the editor or the menus).</summary>
         internal static void StopMusic()

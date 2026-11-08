@@ -421,7 +421,7 @@ base's activator, which is removed on an empty map, so it would never appear: `L
   and `EditorReturn`'s return point stay), then reloads through `TransitionFromNullToLevel(host)`. `EditorReturn`
   ignores it because the scene is the session's host. `Studio.NextLoad` tells the shell whether to claim the load
   (Edit) or leave it to the overlay (Play). The play pack is `TestPacks.Play` (the level, its wave set and the units
-  it reaches, unit-tested), the edit pack `TestPacks.Edit` / `Studio.EditPack`.
+  it reaches, unit-tested), the edit pack `Studio.EditPack`.
 - During a Studio swap, `cloudFadeInTime` and `cloudFadeOutTime` (`SceneTransitionManager`, fields read in
   `SceneTransitionAnimation`) are set to 0.12 s and restored after. The load itself is the cost. Each switch logs
   its time (`Studio: play ready in … ms`, `edit ready in …`). Measured on Nordfels in a pool instance (Apple
@@ -933,7 +933,7 @@ the Place tool), `PickOnMap`, `AddViewToggle`, `AddDeleteGuard` (W3's "this slot
   - `StudioPlay.cs` (`IStudioPlay`: the session state machine, fast swap, state store and restore)
   - `SandboxPanel.cs` (a `ModDock` panel)
   - `SandboxActions.cs` (infinite gold, spawn at cursor or line, teleport; everything else calls `DebugActions`)
-  - `TestPacks.cs` (the play and edit packs, pure C#, `tests/PalaceMod.Tests/TestPackTests.cs`)
+  - `TestPacks.cs` (the play pack, pure C#, `tests/PalaceMod.Tests/TestPackTests.cs`)
   - `StudioPlayManager.cs` (as built: a manager rather than `BuilderManager.Play.cs`, because play needs its own
     Update and keys; patches: infinite gold, the cloud-time shortening during swaps, skipping the session
     notice and scores in Studio sessions, the pause-menu row, the end-screen row)
