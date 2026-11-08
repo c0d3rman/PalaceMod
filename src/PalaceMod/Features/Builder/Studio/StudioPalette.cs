@@ -59,9 +59,10 @@ namespace PalaceMod.Builder.Studio
             {
                 string type = g.Key;
                 int onMap = StudioScene.Items.Count(i => (i.Kind is StudioItemKind.Slot or StudioItemKind.Added) && i.TypeName == type && !i.Removed);
-                var row = page.Row($"{type}  <size=75%>{Dim(CostChain(g.First().Costs))}</size>", $"×{onMap}", () => $"Place a {type.ToLowerInvariant()}: copies the nearest {type.ToLowerInvariant()} on the map (its costs and upgrades).",
+                var row = page.Row($"{type}  <size=75%>{Dim(CostChain(g.First().Costs))}</size>", $"×{onMap}", () => $"Place a {type.ToLowerInvariant()}: copies the nearest {type.ToLowerInvariant()} on the map (its costs and upgrades)." +
+                        (Model.Descriptions.For(Model.DescKind.SlotKind, Requirements.SlotKinds.Classify(type).ToString()) is string what ? $"\n{Requirements.SlotKinds.Label(Requirements.SlotKinds.Classify(type))}: {what}" : ""),
                     () => ArmSlot(type), PlannerIcons.Kind(type));
-                Shrink(row, armed == "slot:" + type);
+                Shrink(page, row, armed == "slot:" + type);
             }
         }
 
@@ -91,7 +92,7 @@ namespace PalaceMod.Builder.Studio
             {
                 var kind = b;
                 var row = page.Row(b.Name, Dim($"×{b.Count}"), () => "Place a copy of this map's scenery. Solid by default: units walk around it.", () => StudioShell.Arm(PropKind(kind)));
-                Shrink(row, armed == b.Id);
+                Shrink(page, row, armed == b.Id);
             }
         }
 
@@ -104,10 +105,22 @@ namespace PalaceMod.Builder.Studio
             foreach (var l in lines)
             {
                 var item = l;
-                var row = page.Row(l.Name, Dim(l.Moved ? "moved" : l.TypeName.Replace("Spawn line", "").Trim()), () => "Select it on the map (drag it to move where enemies come from).",
+                var row = page.Row(l.Name, Dim(l.Moved ? "moved" : l.TypeName.Replace("Spawn line", "").Trim()), () => "Select it on the map (drag it to move where enemies come from). " + LineKinds(item),
                     () => { StudioSelection.Select([item.Key], SelectOp.Replace); StudioCamera.FrameItems([item]); });
-                Shrink(row, StudioSelection.Contains(l.Key), 110f);
+                Shrink(page, row, StudioSelection.Contains(l.Key), 110f);
             }
+        }
+
+        /// <summary>What a spawn line lets spawn, described.</summary>
+        private static string LineKinds(StudioItem item)
+        {
+            var l = StudioScene.LineFor(item);
+            if (l == null) return "";
+            var parts = new List<string>();
+            if (l.Small) parts.Add(Model.Descriptions.For(Model.DescKind.Flag, "canSpawnSmallGround"));
+            if (l.Big) parts.Add(Model.Descriptions.For(Model.DescKind.Flag, "canSpawnBigGround"));
+            if (l.Flying) parts.Add(Model.Descriptions.For(Model.DescKind.Flag, "canSpawnFlying"));
+            return string.Join(" ", parts.Where(p => p != null));
         }
 
         // ---- Library --------------------------------------------------------------------------------------------
@@ -185,6 +198,6 @@ namespace PalaceMod.Builder.Studio
                 },
             };
 
-        private static void Shrink(ModRow row, bool on, float room = 60f) => StudioDock.Compact(row, on, room);
+        private static void Shrink(ModPage page, ModRow row, bool on, float room = 60f) => StudioDock.Compact(row, on, room, page.Size.x);
     }
 }

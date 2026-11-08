@@ -105,6 +105,7 @@ namespace PalaceMod.Builder.Studio.Requirements
         private static string Card(string key, StudioItem item, SlotKind kind, List<int> costs)
         {
             var sb = new StringBuilder();
+            if (Descriptions.For(DescKind.SlotKind, kind.ToString()) is string what) sb.AppendLine($"<color=#{ModStyle.Hex(ModStyle.Dim)}>{Label(kind)}: {what}</color>");
             var income = RequirementState.Income(key);
             if (income.Any(i => i != 0))
             {

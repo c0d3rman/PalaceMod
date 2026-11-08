@@ -45,7 +45,7 @@ namespace PalaceMod
         private ModFieldMarker marker;
         internal string Override;   // shown instead of the value while typing
         private readonly TextMeshProUGUI valueText;
-        private bool wrap;
+        private bool wrap, stacked;
 
         private readonly float indent;
 
@@ -71,6 +71,15 @@ namespace PalaceMod
         public const float ValueIndent = 340f;
 
         private const float RowHeight = 46f, WrapPad = 7f, FallbackWidth = 860f;
+
+        /// <summary>Puts the value under the label at the row's full width (narrow panels, long text such as a
+        /// description), wrapping onto as many lines as it needs.</summary>
+        public ModField Stack()
+        {
+            stacked = true;
+            if (!wrap) EnableWrap(); else Fit();
+            return this;
+        }
 
         /// <summary>Lets a long value wrap onto more lines (the row grows) instead of being cut with an ellipsis.</summary>
         internal void EnableWrap()
@@ -105,14 +114,16 @@ namespace PalaceMod
             if (width <= 1f) width = FallbackWidth;
             string shown = valueText.text ?? "";
             // TMP's preferred values include the text's margins (the label's indent on the left).
-            bool multi = shown.IndexOf('\n') >= 0 || valueText.GetPreferredValues(shown, 100000f, 0f).x > width;
+            bool multi = stacked || shown.IndexOf('\n') >= 0 || valueText.GetPreferredValues(shown, 100000f, 0f).x > width;
             float height = RowHeight;
+            float left = stacked ? (label != null ? label.margin.x : 0f) : indent;
+            float top = stacked ? WrapPad + (label != null ? label.fontSize * 1.15f : 30f) : WrapPad;
             if (multi)
             {
                 valueText.enableWordWrapping = true;
                 valueText.overflowMode = TextOverflowModes.Overflow;
                 valueText.alignment = TextAlignmentOptions.TopLeft;
-                valueText.margin = new Vector4(indent, WrapPad, 0f, WrapPad);
+                valueText.margin = new Vector4(left, top, 0f, WrapPad);
                 // Wrapped at the value's real width (rect minus margins), margins included.
                 // Before the first layout there's no width yet: estimate; RefitOnResize fits it again.
                 float textHeight;
@@ -121,7 +132,7 @@ namespace PalaceMod
                     valueText.ForceMeshUpdate();
                     textHeight = valueText.preferredHeight;
                 }
-                else textHeight = valueText.GetPreferredValues(shown, FallbackWidth - indent, 0f).y + 2f * WrapPad;
+                else textHeight = valueText.GetPreferredValues(shown, FallbackWidth - left, 0f).y + top + WrapPad;
                 height = Mathf.Max(RowHeight, textHeight + 2f);
             }
             else

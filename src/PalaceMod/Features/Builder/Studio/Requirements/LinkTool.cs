@@ -26,7 +26,7 @@ namespace PalaceMod.Builder.Studio.Requirements
         public override string Name => "Link";
         public override int Order => 600;
         public override Keybind Key => key;
-        public override Sprite Icon => ModStyle.MarkSprite;
+        public override Sprite Icon => ModStyle.AssetSprite("studio_link.png");
         public override string Hint => pending.Count == 0
             ? "Click what needs something · Ctrl add · Alt-click from the start"
             : $"Click what {(pending.Count == 1 ? RequirementState.Name(RequirementState.Ref(pending[0])) : $"{pending.Count} slots")} need · Ctrl add · Shift keep · Esc cancel";

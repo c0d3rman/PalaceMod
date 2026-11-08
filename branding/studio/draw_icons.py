@@ -139,5 +139,14 @@ def warning():
     save(im, "warning")
 
 
-for f in (select, marquee, lasso, paint, move, rotate, place, erase, menu, undo, redo, play, warning):
+def link():
+    # A chain: two links seen flat with a third, edge-on, through both their ends.
+    im, d = canvas()
+    d.rounded_rectangle((40, 362, 480, 662), radius=150, outline=W, width=LW)
+    d.rounded_rectangle((544, 362, 984, 662), radius=150, outline=W, width=LW)
+    h = LW * 2 // 3
+    d.rounded_rectangle((330, 512 - h, 694, 512 + h), radius=h, fill=W)
+    save(im.rotate(35, resample=Image.BICUBIC), "link")
+
+for f in (select, marquee, lasso, paint, move, rotate, place, erase, menu, undo, redo, play, warning, link):
     f()
