@@ -43,6 +43,7 @@ namespace PalaceMod.Builder.Level
             if (editing)
             {
                 if (LevelBases.IsEmpty(level)) ApplyBaseLook(scene, level, issues);
+                GroundLayer.Apply(scene, pack, level, issues);
                 return;
             }
             if (!HasEdits(level)) return;
@@ -135,6 +136,7 @@ namespace PalaceMod.Builder.Level
             }
 
             int hidden = LevelBases.IsEmpty(level) ? ApplyBaseLook(scene, level, issues) : 0;
+            GroundLayer.Apply(scene, pack, level, issues);   // terrain (a flat field's ground, blocked cells, water)
 
             ScanAfterFrame = Time.frameCount + 2;
             ScanHost = level.Host;
@@ -146,18 +148,14 @@ namespace PalaceMod.Builder.Level
         private static int ApplyBaseLook(Scene scene, LevelDef level, List<ValidationIssue> issues)
         {
             int hidden = EmptyBase.HideScenery(scene);
-            if (level.Base == LevelBases.Flat)
-            {
-                // Ground layer (W4): GroundLayer.Apply(scene, pack, level, issues) goes here. Until it exists a flat
-                // field plays as a cleared map.
-            }
+            // A flat field's ground is replaced by GroundLayer.Apply, called after this.
             return hidden;
         }
 
         public static bool HasEdits(LevelDef level) =>
             level.Base != null ||
             (level.BuildSlots?.Edit?.Count ?? 0) + (level.BuildSlots?.Add?.Count ?? 0) + (level.BuildSlots?.Remove?.Count ?? 0) +
-            (level.SpawnLines?.Edit?.Count ?? 0) + (level.SpawnLines?.Add?.Count ?? 0) + (level.Props?.Count ?? 0) > 0;
+            (level.SpawnLines?.Edit?.Count ?? 0) + (level.SpawnLines?.Add?.Count ?? 0) + (level.Props?.Count ?? 0) > 0 || GroundLayer.Wants(level);
 
         // ---- Requirements -----------------------------------------------------------------------------------------
 

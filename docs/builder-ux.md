@@ -236,15 +236,23 @@ returns), Leave (back to the pack screen, map unloaded), Studio settings (label 
     selection.
   - The View dropdown picks what the text shows.
   - Labels never overlap: lower-priority labels hide (selection > hover > castle > others by distance).
-- **Built preview** (View ▾ or hold Alt): each slot proxy shows its built building at level 1, a ghost in the game's
-  `BuildingInteractor.previewMaterial`. With one slot selected, the inspector's level stepper previews that level
-  (`UpgradeBranch.replacementMesh` / `objectsToActivate`), like the game's preview key. Today the proxy deletes
-  `buildingParent` (`LayoutScene.Proxy`); W3 keeps a stripped copy instead.
-- **Hover card** (tooltip, `ModTooltip`): kind, costs per level, income per level, what it needs, what it unlocks,
-  and its issues.
-- **X-ray** (X): scenery at 35 % alpha, rings and labels drawn on top.
-- **Requirement arrows** (View ▾ Links): curved ground arrows from prerequisite to dependent. They are verdigris for
-  slot links and gold for castle-level links, labelled with the level when it's not "built".
+- **Built preview** (View ▾ "Built preview", or hold the "Studio: built preview" key, Alt): each slot proxy shows its
+  built building at level 1, a ghost in the game's `BuildingInteractor.previewMaterial`. With one slot selected, the
+  inspector's Preview stepper shows it at any level, solid. `LayoutScene.Proxy` keeps the stripped building hidden
+  with a `ProxyLook` (per-upgrade `replacementMesh`, `objectsToActivate`/`objectsToDisable` of the first branch,
+  original materials; serialized, so `Instantiate` copies keep it); `LayoutScene.ShowBuilt(proxy, level, ghost)` and
+  `BuiltLevels(proxy)` drive it (`Studio/Requirements/BuiltPreview.cs`).
+- **Hover card** (`StudioLabel.Card` from `SlotKinds.Provide`): kind, costs per level, total income per level, what it
+  needs (with the castle level it waits for through its chain), what it unlocks, and its problems (a loop, a
+  prerequisite that isn't on the map).
+- **X-ray** (X, `StudioViewOptions.XRay`): the scenery (`EmptyBase.Scenery`, the same set an empty base hides) is drawn
+  in the game's see-through preview material instead of at 35 % alpha (FlatKit materials have no alpha); the shell
+  draws rings with ZTest Always, and labels are UI.
+- **Requirement arrows** (View ▾ Links, `RequirementArrows`): curved ground arrows from prerequisite to dependent,
+  verdigris for slot links and gold for castle-level links (thicker for higher castle levels). The level shows in each
+  slot's badge ("♜2", "⤳ House 6 2") instead of a label on the arrow. Off / the selection's (and the hovered slot's) /
+  all; all while the Link tool is active, where the hovered slot's chain to the castle is brightened and the rest
+  dimmed. Add-ons' links (walls to their gate) aren't drawn.
 
 ### Path check
 
@@ -329,39 +337,51 @@ Nordfels). The result is a status chip in the Level tab and the top bar's Proble
 
 ### Editing
 
-- **Inspector "Needs" row:** a choice of "From the start" / "Castle level ▸ 1-5" / a slot (picked on the map) plus
-  "at level ▸ built / 2 / 3…".
-  - It also has an "Upgrades ≤ castle level" toggle (cap 0) with an offset stepper (cap n).
-  - Multi-select sets them all, and mixed values show "—".
-- **Link tool (K):**
-  1. Select dependents (or click them with K active).
-  2. Click the prerequisite. Clicking the castle opens a level stepper popup; clicking a slot with more than one
-     level opens "after: built / level 2 / …" (default: built).
-  3. Shift keeps the tool armed. Alt-click a dependent clears its requirement.
-  4. A link that would make a cycle is refused with a notice.
+Code: `Studio/Requirements/` (`BuilderRequirementsManager` registers everything with the Studio in `Awake`).
+
+- **Inspector "Requirements" section** (`RequirementInspector`, order 200): "Needs" (click: From the start / Castle
+  level 1-N / A slot on the map…, which uses `Studio.PickOnMap`, then "after: built / level 2 / …"); a "Castle level"
+  or "After" stepper when every selected slot needs the same prerequisite; "Upgrades ≤ castle level" (cap 0) with an
+  "Allowance" number (cap n); "Chain…"; for one slot, "Unlocks" (click selects them) and "Preview" (built look per
+  level). Multi-select sets them all, and mixed values show "—".
+- **Link tool (K, `LinkTool`):**
+  1. The selection when the tool starts are the dependents; with none, a click picks one. Ctrl/Cmd-click adds or drops
+     more.
+  2. A click on another slot (or the castle) is the prerequisite. The castle asks for a level; a slot with more than
+     one level asks "after: built / level 2 / …". The link replaces each dependent's prerequisite.
+  3. Shift on that click keeps the tool for the next link; otherwise it returns to Select. Alt-click makes a slot
+     available from the start. Esc or a right click drops the dependents.
+  4. A link that would make a loop is refused with a notice (`LevelRequirements.WouldCycle`).
 
   While K is active, all link arrows show, and hovering a slot highlights its whole chain to the castle.
-- **Castle-level painting:** context menu "Needs ▸ Castle level N" on a selection. In the Requirements label mode,
-  each slot's badge is clickable and cycles 1-5.
-- **House chain preset** (Inspector "Chain…" button or context menu Chain ▸, on a selection of slots; the kinds may be
-  mixed). A popup:
-  - **In selection order:** the first selected needs its current prerequisite (or the castle at level 1). Each next
-    one needs the previous one, built.
-  - **Nearest neighbour from the castle:** a greedy path. Start at the selected slot nearest the castle (it needs the
-    castle), and each next one is the nearest unlinked slot to the last.
-  - **Branching from the castle:** a minimum spanning tree (Prim's) over the selection plus the castle, rooted at the
-    castle, with each slot needing its tree parent. This matches how vanilla maps fan houses out, and is the default
-    for houses.
-  - Options: "first link at castle level [1]", "every N-th link needs castle level +1" (off by default), "link level:
-    built". There's a live arrow preview before Apply, and Apply is one undo step.
-- **Auto-link while placing** (palette toggle, on by default for houses): a new house needs the nearest existing house
-  (or the castle if none is within 25 m). Other kinds default to "castle level 1".
+- **Context menu** rows on slots: Needs… (the same chooser), Chain…, From the start.
+- **Deleting a prerequisite** (`Studio.AddDeleteGuard`): "Link them to what it needed" / "Make them available from
+  the start" / Cancel (`LevelRequirements.ForgetSlot`), then the delete.
+- **House chain preset** (`ChainPopup`, `ChainPreset` is plain C# and unit-tested; Inspector "Chain…" or the context
+  menu, on a selection of slots; one slot chains every slot of its kind). A popup:
+  - **In selection order:** the first selected needs the castle; each next one needs the previous one.
+  - **Nearest neighbour:** a greedy path from the castle: the selected slot nearest the castle needs it, and each next
+    one is the nearest unlinked slot to the last.
+  - **Branching** (default): a minimum spanning tree (Prim's) over the selection plus the castle, rooted at the
+    castle, with each slot needing its tree parent. This matches how vanilla maps fan houses out.
+  - Options: "First link: castle level [1]" and "Each link: built / level 2…". The "every N-th link needs castle level
+    +1" option is dropped: with one prerequisite per slot, a slot can't need both its neighbour and a castle level.
+    The arrows preview the result live, and Apply is one undo step.
+- **Auto-link while placing** (View ▾ "Auto-link new slots", on by default; `Studio.AddPlaceHook`, inside the placing
+  edit): a new house needs the nearest house within 25 m, else castle level 1; other kinds need castle level 1.
+- **Labels** (`SlotKinds.Provide`, a label provider): kind colour, the planner's icon, the cost chain with the level's
+  overrides, and the requirement badge ("♜2" castle level, "⤳ House 6" a slot, "★" from the start).
+- Dev: `builder-req click [ctrl] [shift] [alt] <key>` (the Link tool's click), `link <key>|<key> > <key> [level]`,
+  `chain branching|nearest|order [apply|popup]` (over the selection), `label <key>`, `needs`; on a live level
+  `slots`, `upgrade <slot>`, `unlocks <slot>`, `proxy <slot> [level]`; `import <pack.json>`, `play <pack> <level>`,
+  `base cleared|flat <map>`, `start <pack> [create <map> <0|1|2> <name>]`, `thumb`.
 
 ### Empty-map default
 
-On an empty base, new slots default to "needs castle level 1": available once the castle is built. A slot with
-`requires` absent would otherwise inherit its base's activator, which is removed on an empty map, so it would never
-appear. The Outliner's "No requirement" chip and a validator warning catch such slots.
+On an empty base, new slots default to "needs castle level 1": available once the castle is built (the shell sets
+it when placing, and auto-link may pick a house instead). A slot with `requires` absent would otherwise inherit its
+base's activator, which is removed on an empty map, so it would never appear: `LevelOverlay` and
+`LevelRequirements.Effective` treat such an added slot as "castle level 1", so it plays anyway.
 
 ## Play mode (test play)
 
@@ -464,21 +484,27 @@ Non-modal dock like the Studio's. Keys in brackets (context `BuilderPlay`).
 
 ## Starting a level, and the empty map
 
-**Start popup** (Pack › Levels › New level, or Builder home › New level, which creates a pack when there's none):
+**Start popup** (`Studio/Start/StartPopup.cs`, `StartPopup.Open(draft)`; Pack › Levels › New level):
 
 ```text
  New level
- [ Empty ]  [Nordfels]  [Uferwind]  [ …10 main maps, thumbnails ]
- Name  [Goblin Pass        ]          Nights  [The map's own ▾]
-                                                    [Create and open]
+ [Nordfels] [Durststein] [Frostsee] [Uferwind] [Sturmklamm]      thumbnail tiles of the 9 main maps
+ [Wildbach] [Moorweg]    [Freifort] [Totend]
+ Nordfels                         13 nights · 5 spawn lines · 8◉
+ Start from    The map as it is ▸ Cleared ▸ Flat field
+ Name          Nordfels (cleared)
+ Nights        The map's own ▸ (the pack's wave sets for that map)
+ Create and open
 ```
 
-- Thumbnails: `LevelCapture` can't render a map that isn't loaded. So each tile shows the map's own preview sprite
-  from its `LevelInfo` where it has one, else its name. A thumbnail is captured the first time the Studio opens a
-  host and cached at `PalaceBuilder/cache/thumbs/<scene>.png` for later.
-- **Empty**: a second row picks **Cleared** (the map's ground, nothing on it) or **Flat field** (generated flat
-  ground), and the map that supplies the castle position, lighting, colour scheme and sky (default Nordfels). It
-  creates the level with `"base": "cleared"` or `"base": "flat"` (null = the map as it is).
+- The map tiles are the main maps (catalog hosts without a variant suffix). "Start from" picks `base`: null, `cleared`
+  or `flat`; Flat field shows only once the terrain layer sets `StartPopup.FlatFieldAvailable`. The map supplies the
+  castle position, lighting, colour scheme and sky either way. Create adds the level (one undo step) and opens it in
+  the Studio.
+- Thumbnails (`Thumbnails.cs`): `LevelInfo` has no preview picture and `LevelCapture` can't render a map that isn't
+  loaded, so a main map is pictured around its castle a few seconds after it's first seen as it is (a normal run or
+  the Studio on a map as it is) and cached at `BepInEx/PalaceBuilder/cache/thumbs/<scene>.png`. Until then its tile
+  shows only its name.
 
 **What "empty" means technically.** Creating a scene from nothing stays out (`builder-design.md`: managers, camera,
 day/night and lighting all live in the level scenes). An empty level is the host map loaded as usual, with these
@@ -490,10 +516,14 @@ changes applied by the overlay at load (after Awake, before Start):
    - The game's `ColorAndLightManager` names its ground, water and road materials (`groundMaterial`, `groundHigh`,
      `groundLow`, `earthMaterial`, `sandMaterial`, `groundPatches`, `rockMaterial`, water, ocean, `road`;
      decompiled `ColorAndLightManager.cs:66-99`).
-   - Every renderer in the host scene is disabled **unless** it uses only those materials, or it belongs to the
-     castle, the spawner, the camera, UI or managers. This works whether or not MeshFusion has combined the scenery,
-     because combined chunks are per material. A spike checks it on the 10 main maps first: screenshot and count the
-     renderers hidden per map.
+   - Every renderer in the host scene is disabled **unless** it uses only those materials, or it belongs to a build
+     slot, the spawner, a unit (`Hp`), the king, the camera, UI or the invisible walls (`EmptyBase`). MeshFusion
+     combining runs at Start, after the overlay, so every `MeshFusionSource` of an empty base is turned off first
+     (the scenery stays separate renderers).
+   - Checked on the 9 main maps (`builder-req base cleared <map>`, screenshots): renderers hidden per map: Nordfels
+     3067, Durststein 104, Frostsee 103, Uferwind 1288, Sturmklamm 3167, Wildbach 2850, Moorweg 3586, Freifort 2771,
+     Totend 1046 (the desert and snow maps are mostly rock, which is ground). Every spawn line still reaches the castle
+     on all 9 (Wildbach's "Upper Level Side" only once W4's `GroundGraphs.Scan` replaced the plain rescan). Rocks and cliffs stay: they use `rockMaterial`.
    - Scenery colliders under hidden renderers are disabled too. The host's `invisibleWalls` stay, so the map's
      boundary still holds.
 3. **Cleared only:** the host ground stays, so cliffs, water and paths keep working with no new geometry. The
@@ -501,8 +531,10 @@ changes applied by the overlay at load (after Awake, before Start):
 4. **Flat field only:** the host's ground renderers and colliders are disabled too. W4's ground layer (see
    "Terrain") supplies a flat heightfield at the castle's height, its collider, boundary walls and the minimap
    rebuild. The host's spawn lines are moved to the field's edges.
-5. `spawnLines.add` is implemented (W3; the fields already exist). It clones a host `EnemySpawnLine` under the
-   spawner and renames it, so wave spawns can name it. Empty maps need their own lines.
+5. `spawnLines.add` is implemented: a copy of a host `EnemySpawnLine` (one spawning the same kinds, if any) under the
+   spawner, named the line's id, made a straight two-point line of `width` through `pos` turned by `rotY`, with its
+   shared/separate attack-path lists cleared. Wave spawns may name it (the validator counts lines the pack's levels
+   add for that wave set), and the start-of-level path check includes it.
 6. One full rescan after Start, which happens today after any overlay (`BuilderLevelManager.ScanAfterLevelStart`).
 
 Cost: Cleared is S-M and low risk, since it only removes things and keeps the host's ground, walls and graphs
@@ -521,15 +553,16 @@ semantics. Flat field is M on top of W4's ground layer.
   - Graphs ship pre-baked. The game never rescans, apart from `NavmeshCut`s on slots and units.
   - The mod already rescans at runtime: `PathCheck.Rescan`, 120-220 ms warm on Nordfels, 0.4-1 s the first time.
   - Local updates (`GraphUpdateObject` with `updatePhysics`) rebuild only the touched tiles of a tiled recast graph.
-    The cost is unmeasured.
+    The shipped graphs are one tile each, so a local update costs a full scan (see "T0 results").
 - **Units and enemies take their height from the navmesh**, snapping to it every frame
   (`PathfindMovementEnemy.cs:321-343`, `PathfindMovementPlayerunit.cs:399-401`). Raised ground carries them as soon as
   the graphs are rescanned.
   - **The king** is a `CharacterController` with gravity, so he needs a real collider. Below y = -10 he's teleported
     back to the start (`PlayerMovement.cs:32, 261-266`).
   - Coins and lobbed projectiles raycast a `groundLayer`.
-- **Fliers** use `Enemy Units Air`, spawning 5 m up (`Spawn.cs:276`). Whether that graph is recast or mesh-sourced
-  (the `flyerSurface`) isn't recorded. Falkenpass generated an 8 m grid surface 5 m above its terrain.
+- **Fliers** use `Enemy Units Air`, spawning 5 m up (`Spawn.cs:276`). It is a recast graph over the "Flyer Surface"
+  layer (9): the `flyerSurface` meshes, which are inactive in play. Falkenpass generated an 8 m grid surface 5 m above
+  its terrain.
 - **Water** has no gameplay script. It is a scrolling material, and is blocked by having no walkable ground plus
   invisible walls.
 - **Map bounds** are `PathMesher` meshes and colliders under `NavmeshBakeHelper.invisibleWalls`.
@@ -541,100 +574,146 @@ semantics. Flat field is M on top of W4's ground layer.
 - Falkenpass did all of this for one hand-coded map: a floor collider, cliffs, its own Air surface and the four
   native graph names in order. It proves the approach works, not the cost of an editor.
 
+### T0 results (measured in a pool instance)
+
+| | Nordfels | Uferwind |
+|---|---|---|
+| Graphs | 4 × `RecastGraph`, one tile each (`useTiles` off), cell 0.2 m | same |
+| Ground graphs | layers Ground (6) + Obstacle (7), meshes only, maxSlope 30°, climb 0.5 m, radius 0.5 (L: 4) | maxSlope 40°, radius 0.5 (L: 2) |
+| Air graph | layer Flyer Surface (9), radius 0.5 | layers Obstacle + Flyer Surface, maxSlope 90° |
+| Bounds | centre (0, 0, -31.3), size 206 × 15 × 134 | centre (-15.5, 27.9, -78.2), size 236 × 39 × 320 |
+| Full scan (warm) | 100-140 ms (400-800 ms with the ground layer and pruning) | 0.7-1.4 s |
+| Local 20 m `GraphUpdateObject` | 106-127 ms: the same as a full scan (one tile) | 1 s |
+| King | `CharacterController` on layer Player (11), slope 45°, step 0.3 m; collides with Ground, Obstacle, Flyer Surface (9) and Default | same |
+
+**Two bugs in every runtime rescan (plain `AstarPath.Scan()`, which `PathCheck.Rescan` was), fixed by
+`Level/GroundGraphs.Scan`:**
+
+1. **The Air graph comes back empty.** `NavmeshBakeHelper.flyerSurface` is inactive in play, so the scanner finds no
+   flier surface and fliers have no graph. `GroundGraphs.Scan` activates it (invisibly) for the duration of the scan.
+   It can't stay active: its box colliders are on a layer the king collides with.
+2. **The walkable area grows past the map.** The bake kept only the areas the map uses; a rescan also turns the tops
+   of cliffs, rocks and walls into walkable islands (Nordfels: 541 nodes instead of 132; enemies snap onto them and
+   the minimap draws them). The invisible walls hide most of their renderers on Start (`PathMesher._hideOnStart`; no
+   map uses `HideMeshRendOnPlay`). `GroundGraphs.Scan` shows the walls' renderers to the scanner, then **prunes
+   islands**: on each ground graph, it makes unwalkable every area that holds none of the baked graph's nodes (taken
+   before the first rescan in the scene), the castle, or (on a flat field) a ground spawn line. Nordfels after a
+   rescan: 133 walkable nodes in one area, as baked.
+
+Known gap: on Uferwind the bake has two small southern areas (89 of 444 nodes) that no runtime rescan reproduces,
+with or without the fixes; whatever geometry the bake saw there isn't in the scene at runtime. Custom Uferwind levels
+with edits have always lost them. Whether any of its spawn lines lead there is unverified (they're inactive until a
+night starts).
+
 ### Feasibility
 
 | Feature | Feasible | Cost | Main risk |
 |---|---|---|---|
-| Walkable/blocked paint (ground units) | yes, now | S-M | Fliers ignore it (by design). Uses the solid-prop blocker pattern (`LayoutScene.SetSolid`). |
+| Walkable/blocked paint (ground units) | built | S-M | Fliers ignore it (by design). Readable obstacle columns, as the solid-prop blockers. |
 | Cliff, rock and wall pieces as solid props | yes, now (blocking) | S | Host scenery meshes may be unreadable. Blocking already works through blocker boxes. |
 | Walkable ramps and plateaus as pieces | yes | M | Needs a generated readable mesh plus a `MeshCollider` (the king) on the Ground layer. |
 | Water planes and shorelines | yes | M | Visual: the ocean or water material. Blocking: a footprint cut from the heightfield, or a layer-7 blocker. |
-| Sculpting on a **Flat field** (heightfield replaces the ground) | yes | L | Air surface (unknown graph type), minimap rebuild, rescan time, boundary walls, y ≥ -8. |
+| Sculpting on a **Flat field** (heightfield replaces the ground) | built | L | Air surface (recast on layer 9: generated), minimap rebuild, rescan time, boundary walls, y ≥ -8. |
 | Sculpting **on a vanilla map's ground** | partly | L+ | The host ground is one combined mesh with hand-made walls and colliders. Raising is possible (heightfield patches on top); lowering and digging aren't, without replacing the ground. Later. |
 | Removing parts of a vanilla map piecemeal | partly | M-L | MeshFusion can cut sources from combined meshes (`CombinedObject.cs:109-112`), but whether the scenes keep their sources is unverified. v1 only does all-or-nothing (Cleared). |
 
-### Design (W4)
+### Design (W4, as built)
 
 **Stages:**
 
-| Stage | Cost | Delivers |
+| Stage | State | Delivers |
 |---|---|---|
-| T0 spike | S | Run `builder-level spike graphs` on Nordfels and Uferwind: the Ground layer number, cell size, tiles and bounds, and the Air graph's type and source. Time a `GraphUpdateObject` over a 20 m box. Check that the invisible walls survive a rescan (they might use `HideMeshRendOnPlay`, which disables renderers the scanner then skips). Write the numbers into this doc. |
-| T1 ground layer + Flat field | M | A generated heightfield ground. All of these are needed for the Flat field: chunks, readable meshes, a `MeshCollider` on the ground layer, the host's materials, boundary walls (a mesh and collider around the field, on the invisible-wall layer), an Air surface (if T0 shows it's mesh-sourced: a grid 5 m above the max height, as Falkenpass did), and the minimap rebuild (`MinimapRenderer` private `GenerateGroundMesh` + `RenderBackground` after the rescan). |
-| T2 brushes | L | Raise/lower, flatten, smooth, set height, material paint; live re-mesh in the editor. |
-| T3 walkable paint + pieces | S-M | Blocked/walkable paint on any base, and cliff/ramp/rock pieces in the palette. |
-| T4 water | M | A water level and water paint on the Flat field, with shoreline material. |
-| Later | | Patches on vanilla ground (raise only), piecemeal scenery removal on vanilla maps. |
+| T0 spike | done | "T0 results" above (`builder-terrain spike graphs\|helper\|king\|ground\|update\|scan\|region`). |
+| T1 ground layer + Flat field | done | `Level/GroundLayer.cs`: chunked readable meshes on the Ground layer with `MeshCollider`s, the level's own ground materials, walls round the field, a flier surface, the graphs' height range widened, the host's ground hidden; `Level/MinimapRefresh.cs`; `Level/GroundGraphs.cs` (the rescan). |
+| T2 brushes | done | Raise/lower, flatten, set height, smooth, material paint; live re-mesh while dragging. |
+| T3 walkable paint + pieces | paint done; pieces not built | Block/unblock on any base. Cliffs, plateaus and ramps are brush work on a flat field (a hard-edged Set height makes a plateau with cliff sides; the Ramp brush cuts a walkable slope). Blocking rock and cliff *pieces* on a map's own ground are the existing solid props (`LayoutScene.SetSolid`); walkable ramp pieces on a map's own ground are deferred (see "Not built"). |
+| T4 water | done (flat field) | Water brush and water level; the bed is dug 1 m below the surface, banks turn to sand, water cells are blocked for ground units and the king. |
+| Later | | Raise-only patches on a map's own ground, piecemeal scenery removal on vanilla maps. |
 
-**Data** (`LevelDef.terrain`, additive):
+**Data** (`LevelDef.terrain`, `Model/TerrainDef.cs`; encoded by `Level/GroundCodec.cs`, unit-tested):
 
 ```jsonc
 "terrain": {
-  "origin": [x, z], "cell": 2.0, "size": [w, h],          // grid in world space; 2 m cells by default
-  "heights": "<base64 deflate of int16 cm, row-major>",   // (w+1)*(h+1) samples; absent = flat at the castle's height
-  "materials": "<base64 deflate of byte per cell>",       // 0 ground, 1 high, 2 low, 3 earth, 4 sand, 5 road, 6 rock
-  "blocked": "<base64 deflate bitmask per cell>",         // ground units can't walk; fliers can
-  "water": { "level": -1.5, "cells": "<base64 bitmask>" } // water surface; water cells are unwalkable
+  "origin": [x, z],           // world corner of cell (0, 0) (min x, min z)
+  "cell": 2.0,                // cell edge in m (0.5-16)
+  "size": [w, h],             // cells along +x and +z (1-400 each)
+  "y": 0.0,                   // world height of 0 (the castle's height for a new field)
+  "heights": "<b64>",         // (w+1)*(h+1) corners, row-major (z*(w+1)+x): int16 cm relative to y, delta-coded along
+                              // that order, little-endian, raw deflate
+  "materials": "<b64>",       // byte per cell (z*w+x), raw deflate: 0 grass, 1 high grass, 2 low grass, 3 earth,
+                              // 4 sand, 5 road, 6 rock
+  "blocked": "<b64>",         // bit per cell (LSB first), raw deflate: ground units and the king can't enter; fliers can
+  "water": { "level": -1.0, "cells": "<b64 bitmask>" }   // level relative to y; water cells are unwalkable
 }
 ```
 
-- Size: a 200 × 200 m field at 2 m is 10k samples (20 KB raw), and mostly-flat fields deflate to a few KB.
-  - That is too big for chat-sized share codes. `SharingUI.CopyCode` already suggests a `.tfpack` above 2,000
-    characters, and terrain levels will usually take that path.
-  - Alternative (open question): store terrain in an asset file (`assets/terrain.bin`) referenced from the level, so
-    codes stay small, at the cost of a code not carrying the terrain.
-- Heights are clamped to [-8, +30] m. Below -10 the game respawns the king.
+- Every array is optional and left out when all zero. A flat level with no `terrain` gets a field over the host's
+  graph bounds at the castle's height (Nordfels: origin [-104, -100], 104 × 68 cells).
+- Measured sizes: a plain field ~100 characters; the acceptance field (plateau, ramp, hill, pond, road patch, blocked
+  strip) ~800. Share codes stay under the 2,000-character chat size for typical sculpting; heavy sculpting goes
+  through `.tfpack` as `SharingUI` already suggests.
+- Heights are clamped to [-8, +30] m world. Below -10 the game respawns the king.
+- `heights`, `materials` and `water` only show on `"base": "flat"`; `blocked` works on every base.
 
-**Brushes** (Terrain tool, T; a brush strip in the palette area while active):
+**Runtime (play and the Studio's edit load):** `LevelOverlay` calls `GroundLayer.Apply(scene, pack, level, issues)`
+after the empty base's scenery hide, before Start.
 
-| Brush | Click/drag | Modifiers |
-|---|---|---|
-| Raise / lower | Adds height under the brush (falloff) | Shift = the other way |
-| Flatten | Sets the height to the height under the press | Alt-click samples a height |
-| Smooth | Averages | |
-| Set height | To the number in the brush strip | |
-| Paint material | The chosen material | |
-| Block / unblock | The walkable mask (ground units) | Shift = unblock |
-| Water | Marks cells as water, at the water level | Shift = remove |
+- Flat base: the host's renderers drawn only with ground, rock, river, road and shadow-shape materials are hidden
+  (and MeshFusion is kept off them; the ocean stays, so the field reads as an island), with the Ground-layer colliders,
+  the invisible walls and the flier surface. The generated ground replaces them. Steep faces (> 32°: the graphs' max
+  slope is 30°) are drawn with the rock material, so cliffs read as cliffs; grass next to water is drawn as sand.
+  Slots and the king are put on the new ground.
+- Every base: blocked and water cells become invisible readable columns on the Obstacle layer that reach above the
+  graphs' bounds (no walkable top) with a `MeshCollider` (the king). They're named like the props' blockers, so the
+  path check sees a spawn walled in by them.
+- The flier surface is a mesh 5 m above the highest ground around each corner, on layer Flyer Surface, inactive except
+  while `GroundGraphs.Scan` runs (as the game's); the Air graph's max slope and climb are raised so fliers cross cliffs.
+- The level-start rescan (`GroundGraphs.Scan`) then builds the graphs, prunes islands and redraws the minimap.
 
-- Brush size: `[` `]` or Alt+wheel. Strength is in the brush strip. A ring cursor (an `IStudioOverlay`) shows size
-  and falloff.
-- Each stroke is one undo step (coalesced through `PackDraft.Edit` with a stroke id).
-- Slopes over the recast graph's max slope become unwalkable on their own (cliffs). The mesh paints faces steeper than
-  that with `rockMaterial`, so cliffs read as cliffs.
+**Brushes** (Terrain tool, T, `Studio/Terrain/TerrainTool.cs`; its strip in the palette's place while active):
 
-**Editing performance:**
+| Brush | Drag | Modifiers | Strip |
+|---|---|---|---|
+| Raise | Adds height (m/s at the centre, falloff) | Shift lowers | Size, Strength, Softness |
+| Flatten | Levels to the height under the press | | Size, Softness |
+| Set height | Levels to the strip's height (Softness 0: a plateau with cliff sides) | Alt-click samples | Size, Height, Softness |
+| Smooth | Averages with neighbours | | Size, Strength |
+| Ramp | From the press (top) to the release (bottom): a straight slope between the two heights | | Width |
+| Material | Paints the chosen material | | Size, Material |
+| Block | The walkable mask | Shift unblocks | Size |
+| Water | Water cells (the bed is dug to 1 m below the level) | Shift dries | Size, Water level |
 
-- Re-mesh only the touched chunks (32×32 cells) during a stroke: no graph work, and markers snap to the new height
-  through `LayoutScene.Ground`. That falls back to a raycast on the ground layer when the stroke leaves the graph
-  stale, because `Ground` reads `Enemy Units S`.
-- On stroke end, mark the graphs **stale**. "Routes" (path check) and F5 rescan: a local `GraphUpdateObject` over the
-  touched bounds if T0 shows it's cheap, else a full `Scan()`.
-- A "paths out of date" chip shows in the top bar while stale.
+- On a map's own ground only Block is offered; the others need a Flat field (chosen in the Start popup).
+- `[` and `]` size the brush. A ring on the ground (an `IStudioOverlay`) shows it; the ramp shows its line while
+  dragging. Blocked cells are drawn as a red wash in edit mode only.
+- Each stroke is one undo step (`Studio.Edit` writing `LevelDef.terrain`). Undo, redo and other edits rebuild the
+  shown ground from the level when it differs (`Studio.ItemsChanged`, compared by `GroundLayer.KeyOf`).
+- Esc during a stroke drops it.
 
-**At play:**
+**Editing performance:** a stroke re-meshes only the touched 32 × 32-cell chunks (and their colliders) every frame,
+with no graph work; `LayoutScene.Ground` and `IStudioTerrain.Height` read the terrain's own height, so markers follow
+at once. On release the graphs are **stale** (`IStudioTerrain.PathsStale`; the strip's "Paths" row says "Out of date"
+and updates them on click). A local `GraphUpdateObject` costs a full scan (one-tile graphs), so `UpdatePaths` is a
+full `GroundGraphs.Scan`: 400-800 ms on a Nordfels field. Play reloads the map, so F5 needs no rescan of its own.
 
-1. The overlay builds the ground layer before Start (meshes, collider, walls, Air surface).
-2. The existing full rescan runs at Start+2.
-3. Rebuild the minimap.
-4. Check reachability (already done).
+**Dev:** `builder-terrain flat [cell] | brush <name> [size] | stroke [shift] <x> <z> ... | raise/flatten/smooth/ramp/
+paint/block/water ... | waterlevel | marks | king <x> <z> | snap | scan | grid | encode | save <pack> | clear`.
+`save` writes the shown terrain into a one-level pack; `builder-req play <pack>` plays it.
 
-**Owns:**
+**Not built (and why):**
 
-- New `Features/Builder/Studio/Terrain/`:
-  - `TerrainTool.cs`, `TerrainBrushes.cs` (pure C#, unit-tested: brush maths on a height grid), `TerrainStrip.cs`
-- New `Features/Builder/Level/`:
-  - `GroundLayer.cs` (heightfield → chunked meshes, colliders, materials, Air surface, walls)
-  - `GroundCodec.cs` (pack encoding, unit-tested)
-  - `MinimapRefresh.cs`
-- An additive `LevelOverlay.ApplyTerrain` call, and `LevelDef.TerrainDef`.
+- **Sculpting a map's own ground** (raise, lower, ramps as pieces on vanilla maps): the host ground is one combined
+  mesh with hand-placed walls and colliders. Raising would need heightfield patches drawn over it that blend at their
+  edges and cut the host's ground for the king's collider; lowering needs the host ground replaced. Flat field covers
+  sculpting; on vanilla maps, Block paint plus solid scenery props shape the walkable area.
+- **Water on a map's own ground:** the water plane needs ground below it, which only the flat field controls.
 
-**Acceptance (T1 + T2):**
+**Acceptance (T1 + T2), verified in a pool instance on Nordfels** (a flat field with a 4 m plateau round the castle,
+a ramp, a hill, a pond and a blocked strip, saved as a pack and played):
 
-- A Flat field with a sculpted hill and a cliff ring around the castle with one ramp: ground enemies take the ramp,
-  fliers cross the cliff, and the king walks up the ramp and can't walk up the cliff.
-- The minimap shows the new shape.
-- Path check, rescan and swap times are logged.
+- The king walks up the ramp onto the plateau (y 0 → 4) and is stopped by the cliff.
+- All three ground lines reach the castle; with a 6 m ramp the large-enemy graph (radius 4) is correctly cut off.
+- The minimap shows the new shape. Level-start rescan 639 ms.
 
 ## Asset browser slot
 
@@ -911,15 +990,15 @@ the Place tool), `PickOnMap`, `AddViewToggle`, `AddDeleteGuard` (W3's "this slot
 
 ### W4: terrain
 
-**Owns:** see "Terrain, Design (W4)". It is a separate workstream because it touches the ground, the graphs and
-play-time rescans, none of which the others need.
+**Owns:** `Studio/Terrain/` (`TerrainTool.cs`: tool, strip, ring, `IStudioTerrain`; `TerrainBrushes.cs`;
+`TerrainSpike.cs`; `BuilderTerrainManager.cs`: registration and the `builder-terrain` command), `Level/GroundLayer.cs`,
+`Level/GroundCodec.cs`, `Level/GroundGraphs.cs`, `Level/MinimapRefresh.cs`, `Model/TerrainDef.cs`.
 
-- It starts with the T0 spike, which needs a pool game instance.
-- The Flat field base uses W3's base plumbing (`LevelDef.Base`, the scenery hide). The contract between them is
-  `LevelDef.terrain` and one call, `GroundLayer.Apply(scene, level)`, that W3's overlay makes when `base == "flat"` or
-  `terrain != null`.
-- W4 can be staffed after W1-W3 if only three agents are available. Its T3 (walkable paint) is the cheapest
-  user-visible part if the plan has to be cut.
+- Hooks in others' files (additive): `LevelOverlay` calls `GroundLayer.Apply(scene, pack, level, issues)` after the
+  empty base's look, in play and in the edit load, and `HasEdits` counts terrain; `PathCheck.Rescan` is
+  `GroundGraphs.Scan`; `LayoutScene.Ground` reads the terrain first; `LevelDef.terrain`; the Start popup's Flat field
+  is switched on by `StartPopup.FlatFieldAvailable`.
+- Anything that rescans the graphs must use `GroundGraphs.Scan`, never `AstarPath.Scan` (see "T0 results").
 
 ### File-overlap table
 
