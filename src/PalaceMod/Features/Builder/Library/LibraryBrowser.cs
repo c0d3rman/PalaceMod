@@ -130,7 +130,8 @@ namespace PalaceMod.Builder.Library
             if (e == null) return host?.MakeGhost(item, parent);
             var b = SceneryLibrary.BaseOf(e, out _);
             if (b == null) return null;
-            var go = LayoutScene.MakeProp(SceneManager.GetActiveScene(), b, "ghost " + e.Name, Vector3.zero, 0f, 1f, false);
+            // The ghost is the size the prop will be placed at.
+            var go = LayoutScene.MakeProp(SceneManager.GetActiveScene(), b, "ghost " + e.Name, Vector3.zero, 0f, StartScale(item), false);
             go.transform.SetParent(parent, false);
             return go;
         }

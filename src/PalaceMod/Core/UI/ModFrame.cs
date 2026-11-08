@@ -791,6 +791,10 @@ namespace PalaceMod
             var selected = frame.CurrentSelection;
             last = selected;
             if (selected == null || !selected.transform.IsChildOf(content)) return;
+            // Hovering selects what's under the pointer: scrolling it into view then would move another element under
+            // the still pointer, which hovering selects and scrolls to in turn, so a click near the edge lands a row
+            // or two further on. Only keyboard and controller selection (the frame's mouse is asleep) scrolls.
+            if (!frame.MouseSleeping && PointerOver()) return;
             var rect = (RectTransform)selected.transform;
             var corners = new Vector3[4];
             rect.GetWorldCorners(corners);

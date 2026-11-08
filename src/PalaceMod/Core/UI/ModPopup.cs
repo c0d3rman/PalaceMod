@@ -33,7 +33,8 @@ namespace PalaceMod
 
         private readonly string title;
         private readonly Action<ModPage> build;
-        private readonly float width;
+        private readonly float baseWidth;
+        private float width;
         private GameObject root;
         private UIFrame frame;
         private RectTransform panel, content;
@@ -47,7 +48,7 @@ namespace PalaceMod
         {
             this.title = title;
             this.build = build;
-            this.width = width;
+            this.width = baseWidth = width;
         }
 
         /// <summary>Opens a popup beside <paramref name="near"/> (or at screen point <paramref name="screenPoint"/>, or
@@ -152,19 +153,32 @@ namespace PalaceMod
             var current = frame.CurrentSelection;
             string selectedName = keepSelection && current != null && page != null && page.Elements.Contains(current) ? current.name : null;
             int selectedIndex = page != null && current != null ? page.Elements.IndexOf(current) : -1;
-            foreach (Transform child in content.Cast<Transform>().ToList()) Object.DestroyImmediate(child.gameObject);
-            page = new ModPage(content) { Size = new Vector2(width - 52f, 600f) };
-            try { build(page); }
-            catch (Exception e)
+            // Rows never clip: the popup widens to its longest row (up to most of the screen), and a row still too long
+            // wraps onto more lines.
+            width = baseWidth;
+            for (int pass = 0; pass < 2; pass++)
             {
-                Log.Core.Caught($"ModPopup \"{title}\": building it failed", e);
-                page.Text("This couldn't be shown; the error is in the BepInEx log.");
+                foreach (Transform child in content.Cast<Transform>().ToList()) Object.DestroyImmediate(child.gameObject);
+                panel.sizeDelta = new Vector2(width, panel.sizeDelta.y);
+                page = new ModPage(content) { Size = new Vector2(width - 52f, 600f) };
+                try { build(page); }
+                catch (Exception e)
+                {
+                    Log.Core.Caught($"ModPopup \"{title}\": building it failed", e);
+                    page.Text("This couldn't be shown; the error is in the BepInEx log.");
+                }
+                float need = page.Elements.OfType<TFUITextButton>().Select(RowWidth).DefaultIfEmpty(0f).Max() + 52f;
+                float max = Mathf.Max(baseWidth, ((RectTransform)root.transform).rect.width - 96f);
+                if (pass > 0 || need <= width + 0.5f) break;
+                width = Mathf.Min(need, max);
             }
+            panel.sizeDelta = new Vector2(width, panel.sizeDelta.y);
             // Rows are the game's menu entries: a little smaller here.
             foreach (var e in page.Elements.OfType<TFUITextButton>())
             {
                 var le = e.GetComponent<LayoutElement>();
                 if (le != null) le.preferredHeight = 40f;
+                WrapIfLong(e, width - 52f);
             }
             var rows = page.NavigationRows();
             for (int r = 0; r < rows.Count; r++)
@@ -181,6 +195,63 @@ namespace PalaceMod
             Position();
             if (keepSelection && page.Elements.Count > 0 && selectedIndex >= 0)
                 frame.Select(page.Elements.FirstOrDefault(e => e.name == selectedName) ?? page.Elements[Math.Min(selectedIndex, page.Elements.Count - 1)]);
+        }
+
+        /// <summary>The label's preferred size in the largest of the row's styles: a selected row's text is bigger (and
+        /// bold), and it must fit then too.</summary>
+        internal static Vector2 LabelWidth(TFUITextButton row, TextMeshProUGUI text, float width)
+        {
+            var size = text.GetPreferredValues(text.text, width, 0f);
+            float keepSize = text.fontSize;
+            var keepFont = text.font;
+            try
+            {
+                foreach (var style in new[] { row.selectedStyle, row.focussedStyle, row.focussedAndSelectedStyle })
+                {
+                    if (style == null || style.fontSize <= 0f) continue;
+                    text.fontSize = style.fontSize;
+                    if (style.font != null) text.font = style.font;
+                    var s = text.GetPreferredValues(text.text, width, 0f);
+                    size = Vector2.Max(size, s);
+                    text.font = keepFont;
+                }
+            }
+            finally
+            {
+                text.fontSize = keepSize;
+                text.font = keepFont;
+            }
+            return size;
+        }
+
+        /// <summary>The width a row's label (with its icon margin) and value need on one line.</summary>
+        internal static float RowWidth(TFUITextButton row)
+        {
+            var text = row.GetComponent<TextMeshProUGUI>();
+            if (text == null || string.IsNullOrEmpty(text.text)) return 0f;
+            float w = LabelWidth(row, text, 100000f).x + text.margin.x + Mathf.Max(0f, text.margin.z);
+            var value = row.transform.Find("Value")?.GetComponent<TextMeshProUGUI>();
+            if (value != null && !string.IsNullOrEmpty(value.text)) w += value.GetPreferredValues(value.text, 100000f, 100f).x + 24f;
+            return w + 8f;
+        }
+
+        /// <summary>A row too long for its room wraps onto more lines and grows to fit them.</summary>
+        internal static void WrapIfLong(TFUITextButton row, float room)
+        {
+            if (RowWidth(row) <= room + 0.5f) return;
+            var text = row.GetComponent<TextMeshProUGUI>();
+            if (text == null) return;
+            // Fields lay out their own value (indented beside the label); leave them be.
+            var value = row.transform.Find("Value")?.GetComponent<TextMeshProUGUI>();
+            if (value != null && value.margin.x > 0f) return;
+            // The wrapped label keeps clear of the value on the right.
+            if (value != null && !string.IsNullOrEmpty(value.text))
+                text.margin = new Vector4(text.margin.x, text.margin.y, Mathf.Max(text.margin.z, value.GetPreferredValues(value.text, 100000f, 100f).x + 16f), text.margin.w);
+            text.enableWordWrapping = true;
+            text.overflowMode = TextOverflowModes.Overflow;
+            float h = LabelWidth(row, text, room - text.margin.x - Mathf.Max(0f, text.margin.z)).y + 12f;
+            var le = row.GetComponent<LayoutElement>();
+            if (le != null) le.preferredHeight = Mathf.Max(le.preferredHeight, h);
         }
 
         // Beside the anchor (right if there's room, else left), kept on screen.

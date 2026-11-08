@@ -105,7 +105,7 @@ namespace PalaceMod.Builder.Level
             foreach (var mf in Resources.FindObjectsOfTypeAll<MeshFilter>())
             {
                 if (mf == null || mf.gameObject.scene != scene || mf.sharedMesh == null || string.IsNullOrEmpty(mf.sharedMesh.name)) continue;
-                if (NonPropLayers.Contains(mf.gameObject.layer) || mf.name.StartsWith(AddedPrefix)) continue;
+                if (NonPropLayers.Contains(mf.gameObject.layer) || IsOurs(mf.transform)) continue;
                 if (mf.GetComponentInParent<BuildSlot>(true) != null || mf.GetComponentInParent<Hp>(true) != null) continue;
                 // Units and their gear (the king's weapons, troops waiting in the scene) aren't scenery.
                 if (mf.GetComponentInParent<PlayerMovement>(true) != null || mf.GetComponentInParent<PathfindMovement>(true) != null) continue;
@@ -131,6 +131,16 @@ namespace PalaceMod.Builder.Level
                 };
             }
             return byMesh.Values.OrderByDescending(p => p.Count).ThenBy(p => p.Name).Take(24).ToList();
+        }
+
+        /// <summary>Something the mod made (a placed prop, the Studio's copies and ghosts, which it renames to their item
+        /// keys): it or a parent is named "PalaceBuilder ...". Never host scenery: counting a placed copy would give the
+        /// host's base that copy's scale and turn, and every copy of the mesh would follow it.</summary>
+        internal static bool IsOurs(Transform t)
+        {
+            for (; t != null; t = t.parent)
+                if (t.name.StartsWith(AddedPrefix, System.StringComparison.Ordinal)) return true;
+            return false;
         }
 
         private static string Readable(string mesh) => mesh.Replace('_', ' ').Trim();

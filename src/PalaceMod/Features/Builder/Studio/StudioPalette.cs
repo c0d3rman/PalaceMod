@@ -60,12 +60,14 @@ namespace PalaceMod.Builder.Studio
                 string type = g.Key;
                 int onMap = StudioScene.Items.Count(i => (i.Kind is StudioItemKind.Slot or StudioItemKind.Added) && i.TypeName == type && !i.Removed);
                 bool standard = g.All(n => n.Standard);
-                string tip = standard
+                var kind = Requirements.SlotKinds.Classify(type);
+                string tip = (standard
                     ? $"Place a {type.ToLowerInvariant()}: this map has none, so it's the game's standard {type.ToLowerInvariant()} (the one every map's are copies of). Needs castle level 1 unless you link it."
-                    : $"Place a {type.ToLowerInvariant()}: copies the nearest {type.ToLowerInvariant()} on the map (its costs and upgrades).";
+                    : $"Place a {type.ToLowerInvariant()}: copies the nearest {type.ToLowerInvariant()} on the map (its costs and upgrades).")
+                    + (Model.Descriptions.For(Model.DescKind.SlotKind, kind.ToString()) is string what ? $"\n{Requirements.SlotKinds.Label(kind)}: {what}" : "");
                 var row = page.Row($"{type}  <size=75%>{Dim(CostChain(g.First().Costs))}</size>", $"×{onMap}", () => tip,
                     () => ArmSlot(type), PlannerIcons.Kind(type));
-                Shrink(row, armed == "slot:" + type);
+                Shrink(page, row, armed == "slot:" + type);
             }
         }
 
@@ -95,7 +97,7 @@ namespace PalaceMod.Builder.Studio
             {
                 var kind = b;
                 var row = page.Row(b.Name, Dim($"×{b.Count}"), () => "Place a copy of this map's scenery. Solid by default: units walk around it.", () => StudioShell.Arm(PropKind(kind)));
-                Shrink(row, armed == b.Id);
+                Shrink(page, row, armed == b.Id);
             }
         }
 
@@ -108,10 +110,22 @@ namespace PalaceMod.Builder.Studio
             foreach (var l in lines)
             {
                 var item = l;
-                var row = page.Row(l.Name, Dim(l.Moved ? "moved" : l.TypeName.Replace("Spawn line", "").Trim()), () => "Select it on the map (drag it to move where enemies come from).",
+                var row = page.Row(l.Name, Dim(l.Moved ? "moved" : l.TypeName.Replace("Spawn line", "").Trim()), () => "Select it on the map (drag it to move where enemies come from). " + LineKinds(item),
                     () => { StudioSelection.Select([item.Key], SelectOp.Replace); StudioCamera.FrameItems([item]); });
-                Shrink(row, StudioSelection.Contains(l.Key), 110f);
+                Shrink(page, row, StudioSelection.Contains(l.Key), 110f);
             }
+        }
+
+        /// <summary>What a spawn line lets spawn, described.</summary>
+        private static string LineKinds(StudioItem item)
+        {
+            var l = StudioScene.LineFor(item);
+            if (l == null) return "";
+            var parts = new List<string>();
+            if (l.Small) parts.Add(Model.Descriptions.For(Model.DescKind.Flag, "canSpawnSmallGround"));
+            if (l.Big) parts.Add(Model.Descriptions.For(Model.DescKind.Flag, "canSpawnBigGround"));
+            if (l.Flying) parts.Add(Model.Descriptions.For(Model.DescKind.Flag, "canSpawnFlying"));
+            return string.Join(" ", parts.Where(p => p != null));
         }
 
         // ---- Library --------------------------------------------------------------------------------------------
@@ -169,7 +183,11 @@ namespace PalaceMod.Builder.Studio
         public static void ArmLibrary(IAssetBrowser browser, AssetBrowserItem it)
         {
             if (!it.Ready) { Notify.Show("Still loading", NotifyKind.Info, 2f, "builder-studio"); return; }
-            StudioShell.Arm(new StudioPlaceable
+            StudioShell.Arm(LibraryKind(browser, it));
+        }
+
+        public static StudioPlaceable LibraryKind(IAssetBrowser browser, AssetBrowserItem it) =>
+            new()
             {
                 Id = "lib:" + it.Id,
                 Name = it.Name,
@@ -183,9 +201,8 @@ namespace PalaceMod.Builder.Studio
                     try { scale = browser.StartScale(it); } catch (Exception e) { Log.For<BuilderManager>().Caught("Library StartScale failed", e); }
                     return StudioEdits.AddProp(baseRef, it.Name, pos, yaw, scale);
                 },
-            });
-        }
+            };
 
-        private static void Shrink(ModRow row, bool on, float room = 60f) => StudioDock.Compact(row, on, room);
+        private static void Shrink(ModPage page, ModRow row, bool on, float room = 60f) => StudioDock.Compact(row, on, room, page.Size.x);
     }
 }

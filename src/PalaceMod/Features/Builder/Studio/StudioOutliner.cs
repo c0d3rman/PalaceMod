@@ -67,7 +67,7 @@ namespace PalaceMod.Builder.Studio
                 var group = g;
                 bool open = expanded.Contains(g.Key);
                 bool on = g.Members.Count > 0 && g.Members.All(StudioSelection.Contains);
-                Row(page, (open ? "▾ " : "▸ ") + Esc(g.Name), $"{g.Members.Count}", on, null, () => Click(group), () =>
+                Row(page, (open ? "▾ " : "▸ ") + Esc(g.Name), $"{g.Members.Count} objects", on, null, () => Click(group), () =>
                 {
                     if (!expanded.Add(group.Key)) expanded.Remove(group.Key);
                     StudioDock.RefreshAll();
@@ -94,7 +94,7 @@ namespace PalaceMod.Builder.Studio
             string badge = Studio.LabelFor(i.Key).Badge;
             string state = i.Removed ? "removed" : i.Moved ? "moved" : "";
             var parts = new[] { costs, badge, state }.Where(s => !string.IsNullOrEmpty(s));
-            return $"<color=#{ModStyle.Hex(ModStyle.Dim)}>{Esc(string.Join(" · ", parts))}</color>";
+            return Esc(string.Join(" · ", parts.Prepend(i.Kind == StudioItemKind.Group ? null : i.TypeName != i.Name ? i.TypeName : null).Where(s => !string.IsNullOrEmpty(s))));
         }
 
         private static void Click(StudioItem group)
@@ -113,10 +113,9 @@ namespace PalaceMod.Builder.Studio
             StudioSelection.Select([item.Key], op);
         }
 
-        private static void Row(ModPage page, string label, string value, bool on, Sprite icon, Action click, Action toggle)
-        {
-            var row = page.Row(label, value, (Func<string>)null, () => { click(); toggle?.Invoke(); }, icon);
-            StudioDock.Compact(row, on, 90f);
-        }
+        // The name gets the row's whole width and the costs, requirement and state go on a line under it: side by side,
+        // a 340 px panel cut both to a few letters.
+        private static void Row(ModPage page, string label, string value, bool on, Sprite icon, Action click, Action toggle) =>
+            StudioDock.DetailRow(page, label, value, on, icon, () => { click(); toggle?.Invoke(); });
     }
 }

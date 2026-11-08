@@ -66,6 +66,7 @@ namespace PalaceMod
             if (!Ready) return;
             PatchGlyphs();
             UpdateClaims();
+            UpdateMouseGate();
         }
 
         // ---- Exclusive contexts -----------------------------------------------------------------------------------
@@ -462,6 +463,7 @@ namespace PalaceMod
             private static void Prefix()
             {
                 ReleaseBlocked(); // never save a blocked binding as switched off; it's re-blocked next frame
+                if (mouseBlocked.Count > 0) ReleaseMouse();
                 if (!Ready || resetting) return;
                 foreach (var keybind in byAction.Values) Sync(keybind);
             }

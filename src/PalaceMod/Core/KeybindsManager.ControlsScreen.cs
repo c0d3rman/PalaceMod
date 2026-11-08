@@ -542,6 +542,9 @@ namespace PalaceMod
                         FakeKey.Press(args[1].Split('+').Select(k => (KeyCode)Enum.Parse(typeof(KeyCode), k, true)).ToArray(), seconds);
                         return seconds > 0f ? $"holding {args[1]} for {seconds:0.##} s" : $"pressing {args[1]} for {FakeKey.Frames} frames";
                     }
+                    case "mousegate":
+                        MouseGateOff = args.Length > 1 && args[1] == "off";
+                        return $"mouse gate {(MouseGateOff ? "off" : "on")}, blocking now: {MouseGated}";
                     case "camera":
                     {
                         // The camera's zoom, to check a claimed key didn't also zoom: keybinds camera

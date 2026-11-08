@@ -57,7 +57,12 @@ namespace PalaceMod.Builder.Studio
 
             var byType = items.GroupBy(i => i.TypeName).OrderByDescending(g => g.Count()).ToList();
             StudioDock.SmallHeader(page, items.Count == 1 ? Esc(items[0].Name) : string.Join(" · ", byType.Take(3).Select(g => $"{g.Count()} {Esc(Plural(g.Key, g.Count()))}")) + (byType.Count > 3 ? " …" : ""));
-            if (items.Count == 1) page.Row(Esc(items[0].TypeName), Dim(Summary(items[0]).Substring(Esc(items[0].TypeName).Length).TrimStart(' ', '·')));
+            if (items.Count == 1)
+            {
+                // The kind on one line, its costs and requirement under it: side by side they ran into each other.
+                string rest = Summary(items[0]).Substring(Esc(items[0].TypeName).Length).TrimStart(' ', '·');
+                page.Text(Esc(items[0].TypeName) + (rest.Length > 0 ? "\n" + Dim(rest) : ""));
+            }
 
             // Costs: when every selected slot has the same number of levels.
             var slots = items.Where(i => (i.Kind is StudioItemKind.Slot or StudioItemKind.Added) && i.BaseCosts.Count > 0).ToList();
@@ -95,7 +100,7 @@ namespace PalaceMod.Builder.Studio
                     v => StudioMath.Common(props.Select(p => StudioEdits.PropDef(p)?.Scale ?? 1f), out bool m) is var _ && m ? Dim(Mixed) : $"{v:0.##}×",
                     () => "Size against the map's own.");
                 bool solid = StudioMath.Common(props.Select(p => StudioEdits.PropDef(p)?.Solid ?? true), out bool solidMixed);
-                page.Row("Solid", solidMixed ? Dim(Mixed) : solid ? "Yes" : "No", "Solid scenery blocks units; walk-through is decoration.",
+                page.Row("Solid", solidMixed ? Dim(Mixed) : solid ? "Yes" : "No", Descriptions.For(DescKind.Flag, "Solid") ?? "Solid scenery blocks units; walk-through is decoration.",
                     () => StudioEdits.SetProps(props, solidMixed || !solid ? "Make solid" : "Make walk-through", d => d.Solid = solidMixed || !solid));
                 if (StudioServices.Colors is { } colors)
                 {
@@ -151,7 +156,7 @@ namespace PalaceMod.Builder.Studio
                 foreach (var i in items)
                 {
                     var item = i;
-                    StudioDock.Compact(page.Row($"{Esc(i.Name)}  <size=75%>{Dim(Esc(i.TypeName))}</size>", null, (string)null, () => StudioSelection.Select([item.Key], SelectOp.Replace)), false, 0f);
+                    StudioDock.Compact(page.Row($"{Esc(i.Name)}  <size=75%>{Dim(Esc(i.TypeName))}</size>", null, (string)null, () => StudioSelection.Select([item.Key], SelectOp.Replace)), false, 0f, page.Size.x);
                 }
             }
         }
@@ -207,32 +212,55 @@ namespace PalaceMod.Builder.Studio
             if (draft == null || lv == null) return;
             string id = lv.Id;
             void Set(string label, Action<LevelDef> change) => draft.Edit(label, p => { var l = p.FindLevel(id); if (l != null) change(l); }, structural: true);
-            page.TextInput("Name", () => Studio.Level?.Name, v => Set("Rename level", l => l.Name = v), () => "Shown in the Custom runs list.");
-            page.TextInput("Description", () => Studio.Level?.Description, v => Set("Set description", l => l.Description = v), () => "A sentence about the level, shown in its tooltip.", 300, multiline: true);
+            // A narrow panel: text fields put their value under the label at the full width, and every count gets a row
+            // of its own instead of one line of "36 added, 4 moved, ..." beside a label.
+            page.TextInput("Name", () => Studio.Level?.Name, v => Set("Rename level", l => l.Name = v), () => "Shown in the Custom runs list.").Stack();
+            page.TextInput("Description", () => Studio.Level?.Description, v => Set("Set description", l => l.Description = v), () => "A sentence about the level, shown in its tooltip.", 300, multiline: true).Stack();
             var host = EditorCatalog.Host(lv.Host);
-            page.Row("Map", Esc(host?.DisplayName ?? lv.Host), "The map the level is built on.");
-            if (lv.Base != null) page.Row("Base", lv.Base == LevelBases.Flat ? "Flat field" : "Cleared", "Everything but the castle is removed from the map.");
-            var sets = new List<(string Value, string Display)> { (null, "The map's own") };
+            StudioDock.SmallHeader(page, "Setup");
+            Compact(page, page.Row("Map", Esc(host?.DisplayName ?? lv.Host), "The map the level is built on."));
+            if (lv.Base != null) Compact(page, page.Row("Base", lv.Base == LevelBases.Flat ? "Flat field" : "Cleared", "Everything but the castle is removed from the map."));
+            var sets = new List<(string Value, string Display)> { (null, "Map's own") };
             sets.AddRange(draft.Pack.WaveSets.Where(w => w?.Host == lv.Host).Select(w => (w.Id, string.IsNullOrWhiteSpace(w.Name) ? w.Id : w.Name)));
             page.Choice("Nights", sets.Select(s => s.Display).ToList(), () => sets.FindIndex(s => s.Value == Studio.Level?.WaveSet),
                 i => Set("Set nights", l => l.WaveSet = sets[i].Value), tooltip: () => "Which enemies come: the map's own nights, or one of this pack's wave sets for this map.");
             if (lv.WaveSet != null)
             {
                 int ws = draft.Pack.WaveSets.FindIndex(w => w?.Id == lv.WaveSet);
-                if (ws >= 0) page.Row("Edit nights", "▸", "Opens the wave set; Back returns here.", () => BuilderEditor.OpenWaveSet(ws));
+                if (ws >= 0) Compact(page, page.Row("Edit nights", "▸", "Opens the wave set; Back returns here.", () => BuilderEditor.OpenWaveSet(ws)));
             }
             var palettes = new List<string> { null };
             palettes.AddRange(LevelColors.Maps);
-            page.Choice("Colours", palettes.Select(m => m == null ? "The map's own" : m).ToList(),
+            page.Choice("Colours", palettes.Select(m => m == null ? "Map's own" : m).ToList(),
                 () => Math.Max(0, palettes.FindIndex(m => m == Studio.Level?.Colors?.Split('(')[0])),
                 i => Set("Set colours", l => l.Colors = palettes[i]),
                 tooltip: () => "The colour scheme of the whole level: ground, scenery, buildings and light.");
-            page.Header("Paths");
-            page.Row("Check paths", Dim(StudioShell.PathShort), "Rescans pathfinding with your changes and draws each spawn line's route: red is blocked.", StudioShell.CheckPaths);
-            page.Header("Layout");
-            page.Row("Changes", Dim(Esc(LevelSummary(lv))));
+            StudioDock.SmallHeader(page, "Paths");
+            StudioDock.DetailRow(page, "Check paths", Esc(StudioShell.PathShort), false, null, StudioShell.CheckPaths,
+                () => "Rescans pathfinding with your changes and draws each spawn line's route: red is blocked.");
+            StudioDock.SmallHeader(page, "Changes");
+            var counts = LevelCounts(lv);
+            if (counts.Count == 0) page.Text(Dim("None yet"));
+            foreach (var (what, n) in counts) Compact(page, page.Row(what, n.ToString()));
             if (LevelOverlay.HasEdits(lv))
-                page.Row("Clear the layout", "", "Puts the map back the way it was (undoable).", () => Studio.Edit("Clear the layout", l => { l.BuildSlots = null; l.SpawnLines = null; l.Props = null; l.Groups = null; }));
+                Compact(page, page.Row("Clear the layout", "", "Puts the map back the way it was (undoable).", () => Studio.Edit("Clear the layout", l => { l.BuildSlots = null; l.SpawnLines = null; l.Props = null; l.Groups = null; })));
+        }
+
+        private static void Compact(ModPage page, ModRow row) => StudioDock.Compact(row, false, 60f, page.Size.x);
+
+        /// <summary>What the layout changes, as (what, how many), leaving out zeros.</summary>
+        public static List<(string What, int Count)> LevelCounts(LevelDef lv)
+        {
+            var list = new List<(string, int)>();
+            void Add(string what, int n) { if (n > 0) list.Add((what, n)); }
+            Add("Slots moved", lv.BuildSlots?.Edit?.Count(e => e?.Pos != null || e?.RotY != null) ?? 0);
+            Add("Slots added", lv.BuildSlots?.Add?.Count ?? 0);
+            Add("Slots removed", lv.BuildSlots?.Remove?.Count ?? 0);
+            Add("Slots repriced", lv.BuildSlots?.Edit?.Count(e => e?.Upgrades?.Any(u => u?.Cost != null) == true) ?? 0);
+            Add("Scenery placed", lv.Props?.Count ?? 0);
+            Add("Spawn lines moved", lv.SpawnLines?.Edit?.Count ?? 0);
+            Add("Spawn lines removed", lv.SpawnLines?.Remove?.Count ?? 0);
+            return list;
         }
 
         public static string LevelSummary(LevelDef lv)
