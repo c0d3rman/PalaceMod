@@ -28,7 +28,7 @@ namespace PalaceMod.Builder.Agent
             "agent status | slots | catalog <file> | host <file> [cell] | packs | reload | validate <pack> | " +
             "play <pack> <level> | sandbox <pack> <level> [x z] | edit <pack> <level> | infinitegold on|off | spawn <unit> [count] [elite] [line <name>|at <x> <z>] | vanilla <scene> | menu | night [n] | endnight | report | build <slot|all> [level] [branch] [pay] | " +
             "gold <n> | god on|off | invulnerable on|off | speed <x> | kill | heal | teleport <x> <z> | paths | " +
-            "capture <file> [pixels] | screenshot <file>   agent bridge: JSON state, level tests, map dumps (see agent-kit/)";
+            "share code <pack> [clipboard] | share export <pack> [path] | capture <file> [pixels] | screenshot <file>   agent bridge: JSON state, level tests, map dumps (see agent-kit/)";
 
         internal static void Register() => DevCommands.Register("agent", Usage, Run);
 
@@ -186,6 +186,26 @@ namespace PalaceMod.Builder.Agent
                 case "paths":
                     if (EnemySpawner.instance == null) throw new InvalidOperationException("no level is loaded");
                     return Json(Paths(rescan: args.Length > 1 && args[1] == "rescan"));
+                case "share":
+                {
+                    // share code <pack> [clipboard] | share export <pack> [path]: the clipboard is only touched when asked.
+                    string what = Arg(args, 1).ToLowerInvariant();
+                    var entry = FindPack(Arg(args, 2));
+                    if (what == "code")
+                    {
+                        string code = BuilderServices.Share.Encode(entry.Pack);
+                        bool clip = args.Length > 3 && args[3] == "clipboard";
+                        if (clip) GUIUtility.systemCopyBuffer = code;
+                        return Json(new JObject { ["pack"] = entry.Id, ["chars"] = code.Length, ["clipboard"] = clip, ["code"] = code });
+                    }
+                    if (what == "export")
+                    {
+                        string path = args.Length > 3 ? PathArg(args, 3) : null;
+                        string written = BuilderServices.Archives.Export(entry, path);
+                        return Json(new JObject { ["pack"] = entry.Id, ["written"] = Path.GetFullPath(written) });
+                    }
+                    throw new ArgumentException("usage: agent share code <pack> [clipboard] | share export <pack> [path]");
+                }
                 case "capture":
                 {
                     string path = PathArg(args, 1, out float? option);
@@ -239,12 +259,17 @@ namespace PalaceMod.Builder.Agent
             var king = PlayerInteraction.instance != null ? PlayerInteraction.instance.GetComponent<Hp>() : null;
             if (king != null) o["king"] = new JObject { ["hp"] = R(king.HpValue), ["maxHp"] = R(king.maxHp), ["knockedOut"] = king.KnockedOut, ["pos"] = V(king.transform.position) };
             var buildings = BuiltSlots().ToList();
+            // Knocked out during the last night: no harvest the next dawn (the flag clears at dusk).
+            int blocked = buildings.Where(KnockedOutTonight).Sum(s => s.GoldIncome);
             o["buildings"] = new JObject
             {
                 ["built"] = buildings.Count,
                 ["knockedOut"] = buildings.Count(s => BuildingHp(s)?.KnockedOut == true),
                 ["income"] = buildings.Sum(s => s.GoldIncome),
+                ["incomeBlocked"] = blocked,
             };
+            // Gold still on its way to the treasury: dawn income being spawned, coins flying or lying on the ground.
+            o["coinsPending"] = CoinSpawner.AllCoinsLeftToBeSpawned + (TagManager.instance.coins?.Count ?? 0);
             var units = TagManager.instance.PlayerUnits.Where(u => u != null && u.Hp != null).ToList();
             o["units"] = new JObject { ["alive"] = units.Count(u => !u.Hp.KnockedOut), ["total"] = units.Count };
             o["enemies"] = TagManager.instance.EnemyUnits.Count(e => e != null && e.Hp != null && !e.Hp.KnockedOut);
@@ -264,6 +289,9 @@ namespace PalaceMod.Builder.Agent
             var scene = EnemySpawner.instance != null ? EnemySpawner.instance.gameObject.scene : SceneManager.GetActiveScene();
             return LayoutScene.Slots(scene).Where(s => s.gameObject.activeInHierarchy && s.Level > 0 && !s.ActivatorUpgradesThis);
         }
+
+        private static bool KnockedOutTonight(BuildSlot slot) =>
+            TagManager.instance.playerBuildingInteractors.Any(i => i != null && i.targetBuilding == slot && i.KnockedOutTonight);
 
         internal static Hp BuildingHp(BuildSlot slot) => slot.BuildingParent != null ? slot.BuildingParent.GetComponent<Hp>() : null;
 
@@ -292,7 +320,9 @@ namespace PalaceMod.Builder.Agent
 
         /// <summary>build &lt;slot|all&gt; [level] [branch] [pay]: builds or upgrades a slot to a level (default: one
         /// level up). Choices take the branch (0-based, default 0). "pay" charges the cost like a player would and stops
-        /// when gold runs out; otherwise it's free.</summary>
+        /// when gold runs out; otherwise it's free. Every outcome has the same shape: slot (the id a plan uses: an added
+        /// slot's bare id, else the host name), from/to (levels before and after; 0 = unbuilt, 1 = built), target,
+        /// spent, gold, ok, and error (why it stopped short of the target, else null). Only a malformed command throws.</summary>
         private static JObject Build(string[] args)
         {
             string target = Arg(args, 1);
@@ -300,20 +330,19 @@ namespace PalaceMod.Builder.Agent
             var rest = args.Skip(2).Where(a => a != "pay").ToList();
             if (target.Equals("all", StringComparison.OrdinalIgnoreCase))
                 return new JObject { ["result"] = DebugActions.BuildAllBlueprints() };
-            var slot = FindSlot(target) ?? throw new ArgumentException($"no build slot \"{target}\" (`agent slots` lists them)");
-            if (!slot.gameObject.activeInHierarchy) throw new InvalidOperationException($"{slot.name} isn't available yet (its requirement isn't met)");
+            var slot = FindSlot(target);
+            if (slot == null) return BuildResult(target, null, 0, 0, 0, $"no build slot \"{target}\" (`agent slots` lists them)");
+            int from = slot.Level;
             int to = rest.Count > 0 ? int.Parse(rest[0], CultureInfo.InvariantCulture) : slot.Level + 1;
             int branch = rest.Count > 1 ? int.Parse(rest[1], CultureInfo.InvariantCulture) : 0;
             to = Mathf.Clamp(to, 0, slot.Upgrades.Count);
+            if (!slot.gameObject.activeInHierarchy) return BuildResult(target, slot, from, to, 0, "not available yet (its requirement isn't met)");
             int spent = 0;
             string stopped = null;
             while (slot.Level < to)
             {
                 var up = slot.Upgrades[slot.Level];
-                if (pay)
-                {
-                    if (DebugActions.Gold < up.cost) { stopped = $"not enough gold for level {slot.Level + 1} ({up.cost})"; break; }
-                }
+                if (pay && DebugActions.Gold < up.cost) { stopped = $"not enough gold for level {slot.Level + 1} ({up.cost}, have {DebugActions.Gold})"; break; }
                 if (!slot.CanBeUpgraded) { stopped = $"can't go past level {slot.Level} (needs a higher castle level, or it's maxed)"; break; }
                 int before = slot.Level;
                 int b = up.upgradeBranches.Count > 1 ? Mathf.Clamp(branch, 0, up.upgradeBranches.Count - 1) : 0;
@@ -325,7 +354,20 @@ namespace PalaceMod.Builder.Agent
                     spent += up.cost;
                 }
             }
-            return new JObject { ["slot"] = slot.name, ["level"] = slot.Level, ["spent"] = spent, ["gold"] = DebugActions.Gold, ["stopped"] = stopped };
+            if (stopped == null && slot.Level < to) stopped = $"stopped at level {slot.Level}";
+            return BuildResult(target, slot, from, to, spent, stopped);
+        }
+
+        private static JObject BuildResult(string asked, BuildSlot slot, int from, int to, int spent, string error)
+        {
+            string id = slot == null ? asked : slot.name.StartsWith(LayoutScene.AddedPrefix) ? slot.name.Substring(LayoutScene.AddedPrefix.Length)
+                : LayoutScene.IsCastle(slot) ? "castle" : slot.name;
+            return new JObject
+            {
+                ["slot"] = id, ["name"] = slot?.name, ["kind"] = slot?.buildingName,
+                ["from"] = from, ["to"] = slot?.Level ?? from, ["target"] = to,
+                ["spent"] = spent, ["gold"] = DebugActions.Gold, ["ok"] = error == null, ["error"] = error,
+            };
         }
 
         /// <summary>A slot by GameObject name, or an added slot by its id in the level.</summary>
