@@ -92,7 +92,8 @@ or the edge.
 - **Toolbar** (left, 56 px tiles in one column): the tools, each a `ModTile` with its icon, the key in the corner
   badge, and its name in the tooltip.
 - **Palette** (300 px, collapsible with Tab). Tabs:
-  - **Slots:** every slot kind on the host. Shows the icon, the cost chain and the count on the map.
+  - **Slots:** every slot kind on the host, plus every other kind as the game's standard building (see "Building
+    kinds the host lacks"). Shows the icon, the cost chain and the count on the map.
   - **Scenery:** the host's scenery meshes, with a text filter.
   - **Spawns:** spawn lines: moving the host's, adding new ones, and removing the host's (`spawnLines.remove`: deactivated at load, so no enemies, routes or markers; Studio Delete toggles it, undoable).
   - **Library:** the asset browser slot (see "Asset browser slot").
@@ -617,6 +618,33 @@ changes applied by the overlay at load (after Awake, before Start):
 Cost: Cleared is S-M and low risk, since it only removes things and keeps the host's ground, walls and graphs
 semantics. Flat field is M on top of W4's ground layer.
 
+### Building kinds the host lacks (`building:<kind>`)
+
+An added slot used to be only a copy of a host slot, so a kind the host lacks couldn't be placed (no Mill on
+Frostsee). Every player building kind is also a `Resources` prefab in `resources.assets` (the `ResourceManager`
+container lists them: `mill variant`, `field variant`, `mine shaft`, `fishing harbour`, `heros quarter variant`,
+`archer hut`, `swordsmen hut`, `temple`, ...), and that prefab is the **whole build slot**, not just a mesh: `BuildSlot`
+with its upgrade tree, the blueprint and built parents, interactor, cost display, health bar, feedbacks, troops and the
+upgrade-effect objects (e.g. the Mill's `Mill_ImprovedPlow`, `Mill_ImprovementExplosiveTrap`,
+`Mill_Improvement_Scarecrows`). The maps' slots are instances of these prefabs. So no harvest and no reading of other
+level files is needed: `Resources.Load` works in any scene.
+
+- **Data:** `buildSlots.add[].base` takes `"building:<kind>"` besides `"scene:<host slot>"` (`Model/ContentRef.cs`,
+  `BuildingRefs`: archery-range, barracks, barricades, blacksmith, bridge, defense-tower, field, gold-mine, harbour,
+  heros-quarter, house, mill, royal-forge, shrine, summoning-circle, temple). No version bump; the validator refuses
+  an unknown kind. Walls aren't offered: every map has them and a wall piece is part of its gate.
+- **Play (`LevelOverlay`):** the prefab is instantiated exactly like a cloned host slot (inactive holder, deterministic
+  save GUID, cost edits, requirements, then activation under the castle's parent). The prefab has no map wiring, so
+  with no `requires` it needs castle level 1 (`LevelRequirements.Effective` and `ApplyRequirements` agree).
+- **Studio:** `StudioScene.Enter` adds a palette base (`NativeSlot.Standard`, named by its base) for each kind the
+  host has no copyable slot of, with its proxy look from the prefab; it is never an object on the map. Placing one
+  writes `building:<kind>` and the castle level 1 default (then auto-link). Kinds the host has still copy the nearest
+  host slot, so the map's own tuning wins where it exists.
+- **Agents:** `agent host` adds `buildings` (each standard building in the slots' shape, named `building:<kind>`);
+  `palace.py add_slot {"kind": "Mill"}` falls back to it when the host has none.
+- Dev: `builder-level buildings` prints each standard building's tree and how the loaded map's own slots of that kind
+  differ from it.
+
 ## Terrain
 
 ### How the map's ground works (from the code)
@@ -901,6 +929,7 @@ All are additive except one, `DesignPack.CurrentVersion` 1 → 2: `Migrations.St
 | `spawnLines.add` applied (fields exist) | `LevelOverlay` | W3 |
 | `terrain {…}` | `LevelDef` (see "Terrain") | W4 |
 | `props[].base`: `"mesh:<name>[@<Map>]"` also resolves from the scenery library | `PropDef.Base` | W5 |
+| `buildSlots.add[].base`: `"building:<kind>"` (the game's standard building, any map) | `BuildSlotAdd.Base` | R2-D |
 
 The validator covers each, with paths so the Problems popup can select the object.
 

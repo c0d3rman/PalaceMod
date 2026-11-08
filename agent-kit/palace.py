@@ -677,16 +677,27 @@ def effective_slots(ref, level):
             warnings.append(f"edit of {e.get('ref')!r}: no such slot on the level")
             continue
         apply_common(s, e)
+    standard = {b["name"]: b for b in m.get("buildings") or []}
     for a in bs.get("add") or []:
-        base = (a.get("base") or "")[6:] if (a.get("base") or "").startswith("scene:") else None
-        src = host.get(base)
+        raw = a.get("base") or ""
+        if raw.startswith("building:"):
+            # The game's standard building of a kind (any map); it needs castle level 1 unless "requires" says otherwise.
+            base, src = raw, standard.get(raw)
+            if src is None:
+                warnings.append(f"add {a.get('id')!r}: no standard building {raw!r}" +
+                                ("" if standard else " (this map's reference predates them: `palace.py ref build --force`)"))
+                continue
+        else:
+            base = raw[6:] if raw.startswith("scene:") else None
+            src = host.get(base)
         if src is None:
             warnings.append(f"add {a.get('id')!r}: base {a.get('base')!r} isn't a slot of {level['host']}")
             continue
         key = "add:" + a["id"]
-        s = Slot(key=key, name="PalaceBuilder " + a["id"], kind=src["kind"], pos=a.get("pos") or src["pos"], rot=a.get("rotY", 0), castle=False,
-                 upgrades=playable(src["upgrades"]), req=host_req(src), cap=src.get("upgradeCap"), follows=False, added=True, base=base)
-        if is_empty_base(level) and s.req and s.req[0] != castle and "requires" not in a:
+        req = ("castle", 0) if base.startswith("building:") else host_req(src)
+        s = Slot(key=key, name="PalaceBuilder " + a["id"], kind=src["kind"], pos=a.get("pos") or src.get("pos"), rot=a.get("rotY", 0), castle=False,
+                 upgrades=playable(src["upgrades"]), req=req, cap=src.get("upgradeCap"), follows=False, added=True, base=base)
+        if is_empty_base(level) and s.req and s.req[0] != castle and s.req[0] != "castle" and "requires" not in a:
             s.req = ("__removed__", 0)
         apply_common(s, a)
         slots[key] = s
@@ -695,6 +706,15 @@ def effective_slots(ref, level):
         if s.req and s.req[0] == "castle":
             s.req = (castle, s.req[1])
     return slots, castle, warnings
+
+
+def standard_buildings(ref, maps):
+    """The game's standard buildings ("building:<kind>", the same on every map) from the first map reference that has them."""
+    for name in maps:
+        b = ref.map(name).get("buildings")
+        if b:
+            return b
+    return []
 
 
 def step_income(step):
@@ -861,11 +881,18 @@ class Ops:
     def host_slot_for(self, level, kind):
         m = self.ref.map(level["host"])
         k = kind.lower()
-        match = [s for s in m["slots"] if s.get("canBeBase") and (s["kind"].lower() == k or (s.get("display") or "").lower() == k)]
+        def is_kind(s):
+            return s["kind"].lower() == k or (s.get("display") or "").lower() == k or s["name"] == "building:" + k
+        match = [s for s in m["slots"] if s.get("canBeBase") and is_kind(s)]
         if not match:
-            kinds = sorted({s["kind"] for s in m["slots"] if s.get("canBeBase")})
-            raise Fail(f"no slot of kind {kind!r} on {level['host']} to copy; kinds there: {kinds}. "
-                       f"Use \"from\": \"<slot name>\" for a specific one (`palace.py ref slots {level['host']}`).")
+            # A kind the map lacks: the game's standard building of that kind.
+            std = [b for b in m.get("buildings") or [] if is_kind(b)]
+            if std:
+                return std[0]
+            kinds = sorted({s["kind"] for s in m["slots"] if s.get("canBeBase")} | {b["kind"] for b in m.get("buildings") or []})
+            raise Fail(f"no building kind {kind!r}; kinds: {kinds}" +
+                       ("" if m.get("buildings") else f" (this map's reference has only its own kinds: `palace.py ref build --force --maps {level['host']}` adds the rest)") +
+                       f". Use \"from\": \"<slot name>\" for a specific one (`palace.py ref slots {level['host']}`).")
         # The most common tree for that kind (most upgrade levels first).
         match.sort(key=lambda s: (-len(s["upgrades"]), s["name"]))
         return match[0]
@@ -889,8 +916,9 @@ class Ops:
                 raise Fail(f"{op['from']!r} can't be copied (the castle, a wall piece its gate upgrades, or a slot with slots inside)")
         else:
             base = self.host_slot_for(lv, op["kind"])
-        entry = {"id": sid, "base": "scene:" + base["name"], "pos": self.pos(lv, op), "rotY": float(op.get("rotY", 0))}
-        req = op.get("requires", "castle" if is_empty_base(lv) else None)
+        standard = base["name"].startswith("building:")
+        entry = {"id": sid, "base": base["name"] if standard else "scene:" + base["name"], "pos": self.pos(lv, op), "rotY": float(op.get("rotY", 0))}
+        req = op.get("requires", "castle" if is_empty_base(lv) or standard else None)
         if req is not None:
             entry["requires"] = parse_req(req, lv, None)
         if op.get("upgradeCap") is not None:
@@ -898,7 +926,7 @@ class Ops:
         if op.get("costs"):
             entry["upgrades"] = [{"cost": int(c)} if c is not None else None for c in op["costs"]]
         adds.append(entry)
-        return f"added {sid} ({base['kind']} from {base['name']})"
+        return f"added {sid} ({base['kind']}, " + ("the game's standard one: this map has none)" if standard else f"from {base['name']})")
 
     def find_slot_entry(self, lv, ref_name):
         """('add', entry) for an added slot id, or ('host', edit entry created on demand)."""
@@ -2880,8 +2908,9 @@ def reference_markdown(ref):
     L.append("\nThe castle slot of each map is named in `palace.py ref slots <map>` (`\"castle\": true`); in ops and plans just say `castle`.\n")
 
     L.append("### What the host decides\n")
-    L.append("Even on a `cleared` or `flat` base the host map fixes: **which building kinds you can place** (`add_slot` copies a "
-             "slot of that kind from the host, so a kind the host lacks can't be added: no Mill on Frostsee), the castle's "
+    L.append("Even on a `cleared` or `flat` base the host map fixes: **which of its slots `add_slot` copies** (a kind the host "
+             "has is a copy of its most complete slot of that kind; a kind it lacks, like a Mill on Frostsee, is the game's "
+             "standard building of that kind, `building:<kind>`, the same tree as the table below), the castle's "
              "position, the playable rectangle (`terrain_init`'s default grid is the host's walkable extent), the sky, light and "
              "ground palette, and the starting gold default. Terrain heights are **world** heights clamped to "
              f"[{Terrain.MIN_Y:g}, {Terrain.MAX_Y:g}] m, so a high castle leaves little room to build up (headroom below). Pick "
@@ -2913,7 +2942,9 @@ def reference_markdown(ref):
     L.append("## Buildings (slot kinds)\n")
     L.append("Per level: cost in gold, then each choice (branch) with its income change (+g per dawn), extra HP and what it adds. "
              "Hidden tiers exist in the data but are switched off in normal play (PalaceMod's optional \"Level 4 buildings\" turns them on). "
-             "`add_slot` copies the most complete slot of the kind on the host map, so these trees are what you get.\n")
+             "`add_slot` copies the most complete slot of the kind on the host map, or places the game's standard building of a kind "
+             "the host lacks (`building:<kind>`: " + ", ".join(f"`{b['name'][9:]}`" for b in standard_buildings(ref, maps)) + "), "
+             "so these trees are what you get.\n")
     seen = {}
     for name in maps:
         for s in ref.map(name)["slots"]:

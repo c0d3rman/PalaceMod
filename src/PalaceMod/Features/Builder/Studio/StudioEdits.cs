@@ -189,9 +189,9 @@ namespace PalaceMod.Builder.Studio
                 lv.BuildSlots ??= new BuildSlotOverlay();
                 lv.BuildSlots.Add ??= [];
                 id = UniqueId("slot", lv);
-                var add = new BuildSlotAdd { Id = id, Base = "scene:" + baseName, Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(yaw, 360f)) };
+                var add = new BuildSlotAdd { Id = id, Base = StudioScene.BaseRef(baseName), Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(yaw, 360f)) };
                 // On an empty base the slot it copies is gone, so it would never unlock: it needs the castle instead.
-                if (LevelBases.IsEmpty(lv)) add.Requires = LevelRequirements.CastleLevel(1);
+                if (LevelBases.IsEmpty(lv) || n.Standard) add.Requires = LevelRequirements.CastleLevel(1);
                 lv.BuildSlots.Add.Add(add);
                 Studio.RunPlaceHooks(lv, "add:" + id);
             });
@@ -313,8 +313,8 @@ namespace PalaceMod.Builder.Studio
                         lv.BuildSlots.Add ??= [];
                         string id = UniqueId("slot", lv, made);
                         made.Add(id);
-                        var requires = c.Requires?.Copy() ?? (LevelBases.IsEmpty(lv) ? LevelRequirements.CastleLevel(1) : null);
-                        lv.BuildSlots.Add.Add(new BuildSlotAdd { Id = id, Base = "scene:" + c.Base, Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(c.Yaw, 360f)), Upgrades = c.Upgrades, Requires = requires, UpgradeCap = c.UpgradeCap });
+                        var requires = c.Requires?.Copy() ?? (LevelBases.IsEmpty(lv) || BuildingRefs.IsBuilding(c.Base) ? LevelRequirements.CastleLevel(1) : null);
+                        lv.BuildSlots.Add.Add(new BuildSlotAdd { Id = id, Base = StudioScene.BaseRef(c.Base), Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(c.Yaw, 360f)), Upgrades = c.Upgrades, Requires = requires, UpgradeCap = c.UpgradeCap });
                         keys.Add("add:" + id);
                     }
                     Studio.RunPlaceHooks(lv, keys[keys.Count - 1]);
