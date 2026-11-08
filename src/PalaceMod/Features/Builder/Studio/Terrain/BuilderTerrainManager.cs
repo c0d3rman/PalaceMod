@@ -82,6 +82,26 @@ namespace PalaceMod
                             var k = pm.transform.position;
                             return $"king at {k.x:0.0} {k.y:0.00} {k.z:0.0}" + (GroundLayer.TryHeight(k, out float gy) ? $" (ground {gy:0.00})" : "");
                         }
+                        case "save":
+                        {
+                            // A user pack with one level on this map carrying the shown terrain (test setup; play it with
+                            // `builder-req play <pack>`).
+                            Need(g);
+                            string id = args.Length > 1 ? args[1] : throw new ArgumentException("missing pack id");
+                            string scene = SceneManager.GetActiveScene().name;
+                            var pack = new Builder.Model.DesignPack { Id = id, Name = "Terrain " + id, Author = "dev" };
+                            pack.Levels.Add(new Builder.Model.LevelDef
+                            {
+                                Id = Builder.Model.Ids.FromName(scene + "-terrain"),
+                                Name = scene + " Terrain",
+                                Host = scene,
+                                Base = GroundLayer.Flat ? Builder.Model.LevelBases.Flat : null,
+                                Terrain = GroundCodec.Encode(g),
+                            });
+                            Builder.BuilderServices.Packs.Save(pack);
+                            Builder.BuilderServices.Packs.Refresh();
+                            return $"saved {id} with level {pack.Levels[0].Id}";
+                        }
                         case "clear":
                             GroundLayer.Clear();
                             return "cleared";

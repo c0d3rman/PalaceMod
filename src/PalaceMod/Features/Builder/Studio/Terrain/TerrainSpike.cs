@@ -88,7 +88,7 @@ namespace PalaceMod.Builder.Level
                     {
                         if (r.gameObject.scene != scene || !r.sharedMaterials.Any(set.Contains)) continue;
                         var mf = r.GetComponent<MeshFilter>();
-                        string key = $"layer {LayerMask.LayerToName(r.gameObject.layer)} mats={string.Join("+", r.sharedMaterials.Select(m => m?.name))} readable={mf?.sharedMesh?.isReadable} collider={r.GetComponent<Collider>()?.GetType().Name}";
+                        string key = $"layer {LayerMask.LayerToName(r.gameObject.layer)} mats={string.Join("+", r.sharedMaterials.Select(m => m?.name))} readable={mf?.sharedMesh?.isReadable} collider={r.GetComponent<Collider>()?.GetType().Name} enabled={r.enabled} root={r.transform.root.name} comps={string.Join(",", r.GetComponents<Component>().Select(c => c.GetType().Name).Where(n => n != "Transform" && n != "MeshFilter" && n != "MeshRenderer"))}";
                         byLayer[key] = byLayer.TryGetValue(key, out int n) ? n + 1 : 1;
                     }
                     foreach (var kv in byLayer.OrderByDescending(k => k.Value)) sb.AppendLine($"{kv.Value}x {kv.Key}");

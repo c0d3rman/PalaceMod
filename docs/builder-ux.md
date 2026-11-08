@@ -283,10 +283,10 @@ Nordfels). The result is a status chip in the Level tab and the top bar's Proble
   the castle's level". The initial build is never capped.
 - **`activatorUpgradesThis`:** an add-on (a mill's fields, wall pieces) built and upgraded through its activator. It
   is not editable as a requirement and moves with its owner.
-- **Two requirements at once** ("castle level 3 *and* House 6") are not native. With one activator, the Studio
-  expresses it the native way where possible: link to House 6, and if House 6 itself needs castle level 3, the
-  dependent inherits it (shown as "needs House 6 (castle 3 via House 6)"). A true AND gate is out of scope for v1
-  (see "Open questions").
+- **One prerequisite per slot (decided).** The Studio uses only the native mechanism: a slot needs one slot or the
+  castle at a level. "Castle level 3 *and* House 6" is expressed by chaining: link to House 6, and if House 6 needs
+  castle level 3, the dependent inherits it (shown as "needs House 6 (castle 3 via House 6)",
+  `LevelRequirements.CastleLevelVia`). There is no mod-side AND gate. The Link tool replaces a slot's prerequisite.
 
 ### Data (additive; `DesignPack` version 2 with a migration)
 
@@ -297,16 +297,31 @@ Nordfels). The result is a status chip in the Level tab and the top bar's Proble
 "upgradeCap": 0                                                                            // requiredRootLevelDifference; null = keep, -100 = none
 ```
 
-- `slot: null` with the object present means "available from the start" (`startDeactivated = false`, no activator).
+- `slot` absent with the object present means "available from the start" (`startDeactivated = false`, no activator).
 - `"castle"` resolves to the host's castle slot.
 - `level` is the activator level, so 0 = built. The UI shows "Castle level N" as `level = N-1`.
-- `Migrations.Steps[1]` turns `add.activator`/`add.activatorLevel` into `add.requires`. The old fields are read but no
-  longer written.
-- The validator refuses cycles (`levels[i].buildSlots…requires: A needs B needs A`), unknown slots, a `requires` on
-  the castle or on an `ActivatorUpgradesThis` add-on, and `level` past the prerequisite's highest level.
-- **Applying (`LevelOverlay`):** after cloning and before activation, set `activatorBuilding`, `activatorLevel`,
-  `startDeactivated` and `requiredRootLevelDifference` on host slots and clones alike. This is the same window the
-  clone code already uses. `BuildSlot.Start` then builds `requiredRoot`, `isActivatorOf` and the rest itself.
+- `upgradeCap` takes -10..10 or -100. A cap only means something on a slot whose chain reaches the castle (the root is
+  the top of the activator chain; a slot available from the start is its own root, so cap 0 stops it at level 1).
+- `Migrations.Steps[1]` (`MoveActivatorsToRequires`) turns `add.activator`/`add.activatorLevel` into `add.requires`
+  (an activator naming another added slot becomes `add:<id>`) and drops the old fields. Tested in
+  `tests/PalaceMod.Tests/RequirementsTests.cs`.
+- Code: `Model/Requirements.cs` (plain C#): `SlotRefs` (refs and Studio keys), `LevelBases`, `HostSlots` (the host's
+  own prerequisites, from `LayoutScene.HostSlots(scene)`), and `LevelRequirements`: `Explicit`/`Set`/`SetCap` for
+  one slot, `Effective` (every slot's prerequisite as it will play), `ChainUp`, `Dependents`, `WouldCycle`, `Cycles`,
+  `CastleLevelVia`, `ForgetSlot`.
+- The validator refuses loops among the level's own requirements, unknown added slots, a slot needing itself, and
+  out-of-range levels and caps; it warns about a slot that needs a removed (or cleared-away) host slot. Host slots'
+  own prerequisites, the castle and add-ons are only known with the map loaded, so the overlay checks those.
+- **Applying (`LevelOverlay.ApplyRequirements`):** after cloning and before activation, set `activatorBuilding`,
+  `activatorLevel`, `startDeactivated` and `requiredRootLevelDifference` on host slots and clones alike.
+  `BuildSlot.Start` then builds `requiredRoot`, `isActivatorOf` and the rest itself. At load, with the whole graph
+  known (host prerequisites included), a requirement on the castle or an add-on is skipped, a missing prerequisite
+  becomes "castle level 1", a level past the prerequisite's last is clamped, and a requirement that would close a
+  loop is replaced by "castle level 1" (`BuildSlot.Start` walks the activator chain and would never return), each
+  with a warning.
+- Checked in game (`builder-req`, Nordfels): castle level 2 and slot links appear exactly when the game's own
+  preview (`GetBuildSlotsThatWillUnlockWhenUpgraded`) lists them; a loop through a host slot's own prerequisite is
+  broken with a warning.
 - **Removing a prerequisite:** deleting a slot that others need offers (popup, default first): "Link its dependents
   to what it needs" (the chain closes up) / "Make them available from the start" / Cancel. Today removal silently
   hides every slot the removed one unlocks (`LevelOverlay` removal comment); the validator now warns about any
@@ -706,6 +721,15 @@ internal interface IStudioPlay   // W2 implements; W1 calls it from F5 / the Pla
 internal static class StudioServices { public static IStudioPlay Play; public static IAssetBrowser AssetBrowser; }
 ```
 
+As landed (`StudioApi.cs`), beyond the sketch above: `Studio.SetMode` (W2 sets Loading/Play, the shell Edit/Off),
+`Studio.NextLoad` (W2 sets Play before a play swap and Edit before returning; the shell claims a host load only for
+Edit), `Studio.View` (settable; the shell restores it on the next edit load, then clears it), `Studio.Items`/`Find`/
+`ItemAt`/`ItemsChanged`/`SelectionChanged`, `Studio.Arm(StudioPlaceable)` (palette, library and terrain pieces share
+the Place tool), `PickOnMap`, `AddViewToggle`, `AddDeleteGuard` (W3's "this slot is a prerequisite" popup),
+`AddPanel(id, mode, visible, build)` (W2's sandbox panel), `StudioTool.HasPanel`/`BuildPanel` (W4's brush strip),
+`StudioServices.Terrain` (`IStudioTerrain`: height while sculpting, stale paths) and `StudioViewOptions` (View ▾).
+`Keybinds.ClaimExclusive(context, whileActive)` is in `Core/Keybinds.cs`.
+
 ### W1: Studio shell, tools, selection, inspector and menus
 
 **Owns:**
@@ -836,7 +860,7 @@ Merge order: W1's `StudioApi.cs` + `ModDock` skeleton first (a small PR), then a
 
 - The wave page redesign (it opens from the Studio's Nights popup unchanged).
 - Moving the castle.
-- AND requirements.
+- AND requirements (decided: chain through other slots instead).
 - Removing or moving individual host scenery (only all-or-nothing via the empty base).
 - Controller-first editing.
 - A web editor.
@@ -846,10 +870,7 @@ Merge order: W1's `StudioApi.cs` + `ModDock` skeleton first (a small PR), then a
 1. **Terrain now or later?** W4's T1 + T2 (a sculptable Flat field) is the largest and riskiest piece (L). Options:
    staff it in parallel now, or ship W1-W3 first and start W4 with the T0 spike. T3 (walkable paint and cliff
    pieces, S-M) gives most of the "shape the playable area" value on any map.
-2. **Two requirements at once** ("castle level 3 and House 6"). The game allows one prerequisite per slot. Options:
-   go without (chain through a slot that needs the castle level), or add a mod-side gate (a patch that keeps a slot
-   hidden until both are met). The gate would also work in vanilla-less shared levels, but it's beyond-vanilla
-   behaviour.
+2. ~~Two requirements at once~~ Decided: one native prerequisite per slot; combine by chaining.
 3. **Terrain in share codes.** Options: embed it in the level JSON (self-contained, but codes for terrain levels are
    usually over the 2,000-character chat size, so it goes through `.tfpack`), or keep it in an asset file (codes stay
    small, but a code alone doesn't carry the terrain).

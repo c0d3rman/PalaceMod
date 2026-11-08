@@ -67,11 +67,7 @@ namespace PalaceMod.Builder.Level
         /// <summary>Whether a level has a ground layer at all.</summary>
         public static bool Wants(LevelDef level) => level != null && (level.Terrain != null || IsFlat(level));
 
-        public static bool IsFlat(LevelDef level) => LevelBase(level) == "flat";
-
-        /// <summary>The level's base kind ("cleared", "flat" or null). Stub until W3's LevelDef.Base lands.</summary>
-        public static string LevelBase(LevelDef level) =>
-            level?.Extra != null && level.Extra.TryGetValue("base", out var t) ? (string)t : null;
+        public static bool IsFlat(LevelDef level) => level?.Base == LevelBases.Flat;
 
         /// <summary>Play: builds the level's terrain in the freshly loaded host (after Awake, before Start).</summary>
         public static void Apply(Scene scene, DesignPack pack, LevelDef level, List<ValidationIssue> issues)
@@ -190,11 +186,21 @@ namespace PalaceMod.Builder.Level
             var keepLayers = new HashSet<int> { 0, GroundLayerIndex, ObstacleLayerIndex, WaterLayerIndex, 21 };
             foreach (var r in Resources.FindObjectsOfTypeAll<MeshRenderer>())
             {
-                if (r == null || r.gameObject.scene != scene || !r.enabled || !keepLayers.Contains(r.gameObject.layer)) continue;
+                if (r == null || r.gameObject.scene != scene || !keepLayers.Contains(r.gameObject.layer)) continue;
                 if (r.sharedMaterials.Length == 0 || !r.sharedMaterials.All(m => m != null && ground.Contains(m))) continue;
                 if (Owned(r.transform)) continue;
-                r.enabled = false;
-                hidden.Add((null, r, null, null));
+                if (r.enabled)
+                {
+                    r.enabled = false;
+                    hidden.Add((null, r, null, null));
+                }
+                // Once the level runs, MeshFusion turns its sources and combined chunks back on: keep it off them.
+                foreach (var mb in r.GetComponents<MonoBehaviour>())
+                    if (mb != null && mb.enabled && (mb.GetType().Namespace ?? "").StartsWith("NGS.MeshFusionPro", StringComparison.Ordinal))
+                    {
+                        mb.enabled = false;
+                        hidden.Add((mb, null, null, null));
+                    }
                 foreach (var c in r.GetComponents<Collider>()) Hide(c);
             }
             foreach (var c in Resources.FindObjectsOfTypeAll<Collider>())
