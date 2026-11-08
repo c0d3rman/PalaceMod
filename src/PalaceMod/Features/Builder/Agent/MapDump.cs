@@ -58,7 +58,12 @@ namespace PalaceMod.Builder.Agent
                     ["flying"] = l.canSpawnFlying, ["smallGround"] = l.canSpawnSmallGround, ["bigGround"] = l.canSpawnBigGround,
                 };
             }));
-            root["scenery"] = new JArray(LayoutScene.Props(scene).Select(p => new JObject { ["base"] = p.Id, ["name"] = p.Name, ["count"] = p.Count }));
+            root["scenery"] = new JArray(LayoutScene.Props(scene).Select(p => new JObject
+            {
+                ["base"] = p.Id, ["name"] = p.Name, ["count"] = p.Count,
+                // Size of a prop of this base at scale 1 (as the map uses it), metres: [x, height, z].
+                ["size"] = PropSize(p),
+            }));
             root["grid"] = Grid(cell);
             return root;
         }
@@ -120,6 +125,22 @@ namespace PalaceMod.Builder.Agent
             if (troops.Count > 0) o["troops"] = new JArray(troops);
             if (attackers > 0) { o["attackers"] = attackers; o["range"] = R(range); }
             return o;
+        }
+
+        private static JArray PropSize(PropBase p)
+        {
+            if (p.Mesh == null) return null;
+            var b = p.Mesh.bounds;
+            var m = Matrix4x4.TRS(Vector3.zero, p.Upright, p.Scale);
+            Vector3 min = Vector3.positiveInfinity, max = Vector3.negativeInfinity;
+            for (int i = 0; i < 8; i++)
+            {
+                var c = m.MultiplyPoint3x4(b.center + Vector3.Scale(b.extents, new Vector3((i & 1) == 0 ? -1 : 1, (i & 2) == 0 ? -1 : 1, (i & 4) == 0 ? -1 : 1)));
+                min = Vector3.Min(min, c);
+                max = Vector3.Max(max, c);
+            }
+            var s = max - min;
+            return [R(s.x), R(s.y), R(s.z)];
         }
 
         private static string Clean(string name)

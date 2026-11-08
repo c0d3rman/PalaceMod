@@ -403,7 +403,7 @@ class Slot:
 
     @property
     def label(self):
-        return self.key[4:] if self.key.startswith("add:") else self.name
+        return "castle" if self.castle else self.key[4:] if self.key.startswith("add:") else self.name
 
 
 def is_empty_base(level):
@@ -667,6 +667,8 @@ class Ops:
     def find_slot_entry(self, lv, ref_name):
         """('add', entry) for an added slot id, or ('host', edit entry created on demand)."""
         bs = ensure(lv, "buildSlots", {})
+        if ref_name == "castle":
+            ref_name = next(s["name"] for s in self.ref.map(lv["host"])["slots"] if s.get("castle"))
         r = ref_name[4:] if ref_name.startswith("add:") else ref_name
         for a in bs.get("add") or []:
             if a.get("id") == r:
@@ -1380,6 +1382,21 @@ class Terrain:
 SLOPE_LIMIT = 32.0
 
 
+def prop_radius(ref, level, p):
+    """Half the footprint of a placed prop, metres: the host map's own use of the mesh if it has one (map dump,
+    footprint x/z), else the scenery library's (mesh size x/y before it's stood upright), else 1.5."""
+    name = p["base"][5:].split("@")[0]
+    size = None
+    for s in ref.map(level["host"]).get("scenery", []):
+        if s["base"] == "mesh:" + name and s.get("size"):
+            size = (s["size"][0], s["size"][2])
+    if size is None:
+        for m_ in ref.scenery.get("meshes", []):
+            if m_["name"] == name and m_.get("size"):
+                size = (m_["size"][0], m_["size"][1])
+    return (max(size) / 2 if size else 1.5) * float(p.get("scale", 1))
+
+
 class LevelGround:
     """The level's walkable ground as a grid: the map's sampled ground, or the flat terrain; minus blocked/water cells,
     solid props. Approximate: the game's navmesh is the truth (`palace.py paths` asks the game)."""
@@ -1418,15 +1435,10 @@ class LevelGround:
                         ij = self.index(x, z)
                         if ij and self.kind[ij[1]][ij[0]] in "sw":
                             self.kind[ij[1]][ij[0]] = "."
-        # Solid props block (radius from the scenery library's size, else 1.5 m).
-        sizes = {m_["name"]: m_.get("size") for m_ in ref.scenery.get("meshes", [])}
+        # Solid props block, over most of their footprint.
         for p in level.get("props") or []:
-            if not p.get("solid", True):
-                continue
-            name = p["base"][5:].split("@")[0]
-            size = sizes.get(name)
-            r = (max(size[0], size[1]) / 2 if size else 1.5) * float(p.get("scale", 1)) * 0.8
-            self.stamp(p["pos"][0], p["pos"][2], r, ".")
+            if p.get("solid", True):
+                self.stamp(p["pos"][0], p["pos"][2], prop_radius(ref, level, p) * 0.8, ".")
         # Buildings aren't obstacles here: enemies break through walls and buildings in their way.
 
     def index(self, x, z):
@@ -1655,6 +1667,12 @@ def economy_sim(slots, castle, start_gold, wave_gold, nights):
                 for k2, s2 in slots.items():
                     if s2.req and s2.req[0] == k and s2.req[1] == level[k] and s2.upgrades:
                         unlock += step_income(s2.upgrades[0])
+                if k == castle:
+                    # A castle level also lifts the upgrade cap of every capped building.
+                    for k2, s2 in slots.items():
+                        if k2 != castle and s2.cap is not None and s2.cap > -100 and 0 < level[k2] < len(s2.upgrades) \
+                                and level[k2] + 1 == level[castle] + 1 + s2.cap:
+                            unlock += step_income(s2.upgrades[level[k2]])
                 value = inc + 0.5 * unlock
                 if k == castle and level[k] == 0:
                     value = 1e6  # the castle first
@@ -1717,7 +1735,7 @@ def check_pack(ref, data):
             err(p + ".nights", "no nights")
         for ni, n in enumerate(ws.get("nights") or []):
             if not n.get("spawns"):
-                warn(f"{p}.nights[{ni}]", "no enemies this night")
+                err(f"{p}.nights[{ni}].spawns", "needs at least one spawn")
             for si, s in enumerate(n.get("spawns") or []):
                 sp = f"{p}.nights[{ni}].spawns[{si}]"
                 u = s.get("unit", "")
@@ -1805,7 +1823,7 @@ def check_pack(ref, data):
             if not (on_map or in_lib):
                 err(f"{p}.props[{pi_}].base", f"no scenery mesh {name!r} (`palace.py ref scenery`)")
             for s in slots.values():
-                if pr.get("solid", True) and math.hypot(pr["pos"][0] - s.pos[0], pr["pos"][2] - s.pos[2]) < 3.0:
+                if pr.get("solid", True) and math.hypot(pr["pos"][0] - s.pos[0], pr["pos"][2] - s.pos[2]) < prop_radius(ref, lv, pr) * 0.8 + 2.0:
                     warn(f"{p}.props[{pi_}]", f"solid prop {pr.get('id')} sits on slot {s.label}")
                     break
         # Lines and routes.
@@ -2068,7 +2086,7 @@ def render(ref, data, level, path, background=None, world=None, routes=None, lab
                     cv.rect(xa, ya, xb + 1, yb + 1, (60, 110, 170))
         for p in level.get("props") or []:
             x, y = P(p["pos"][0], p["pos"][2])
-            cv.disc(x, y, max(2, 1.6 * float(p.get("scale", 1)) * sx), (40, 80, 45) if p.get("solid", True) else (80, 120, 80))
+            cv.disc(x, y, max(2, prop_radius(ref, level, p) * sx), (40, 80, 45) if p.get("solid", True) else (80, 120, 80), 0.85)
     # Grid ticks every 20 m.
     step = 20
     for gx in range(int(math.ceil(x0 / step)) * step, int(x1), step):
@@ -2274,7 +2292,7 @@ def cmd_ref(env, args):
             rows.setdefault(s.get("category", "?"), []).append({"mesh": s["name"], "size": s.get("size"), "maps": sorted(s.get("maps", {}))})
         if args.name:
             m = ref.map(args.name)
-            rows[f"on {args.name} (map's own)"] = [{"mesh": x["base"][5:], "count": x["count"]} for x in m.get("scenery", [])]
+            rows[f"on {args.name} (map's own)"] = [{"mesh": x["base"][5:], "count": x["count"], "size": x.get("size")} for x in m.get("scenery", [])]
         out(rows)
     elif args.what == "doc":
         path = Path(args.out or env.ref / "reference.md")
@@ -2657,6 +2675,12 @@ def cmd_test(env, args):
         if mid:
             rep["screenshot"] = mid
         st = g.status()
+        if rep.get("outcome") == "dawn" and rep.get("night") == total:
+            # The last night: the game declares the win a few seconds after dawn.
+            try:
+                st = g.wait(lambda s: s.get("state") in ("AfterMatchVictory", "AfterMatchDefeat"), 30, "the end screen")
+            except Fail:
+                pass
         rep["after"] = {k: st.get(k) for k in ("time", "gold", "castle", "buildings", "units", "state") if st.get(k) is not None}
         if st.get("state") == "AfterMatchVictory":
             rep["outcome"] = "victory"
