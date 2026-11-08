@@ -30,30 +30,12 @@ namespace PalaceMod.Builder.Editor
                 owner.ListRow(page, string.IsNullOrWhiteSpace(lv.Name) ? lv.Id ?? "(unnamed)" : lv.Name,
                     () => $"{host?.DisplayName ?? lv.Host ?? "no map"} · {Summary(lv)}", "Opens it in the Studio, on its map.", $"levels[{i}]", () => BuilderEditor.OpenLevel(index));
             }
-            page.Button("New level on a map", NewLevel, "Starts a level from a map as it is; then edit its layout on the map.");
+            page.Button("New level", NewLevel, "Pick a map and what to start from on it, then build it in the Studio.");
         }
 
         private static void NewLevel()
         {
-            var draft = BuilderEditor.Draft;
-            Picker.One("Choose a Map", WavePage.HostItems(), null, scene =>
-            {
-                var host = EditorCatalog.Host(scene);
-                if (host == null || draft == null) return;
-                int index = draft.Pack.Levels?.Count ?? 0;
-                draft.Edit("Add level", p =>
-                {
-                    p.Levels ??= [];
-                    string name = $"{host.DisplayName} Layout";
-                    p.Levels.Add(new LevelDef
-                    {
-                        Id = EditorCatalog.UniqueId(Ids.FromName(name), p.Levels.Select(l => l?.Id)),
-                        Name = name,
-                        Host = host.Scene,
-                    });
-                }, structural: true);
-                BuilderEditor.OpenLevel(index);
-            });
+            if (BuilderEditor.Draft != null) Studio.Start.StartPopup.Open(BuilderEditor.Draft);
         }
 
         public static string Summary(LevelDef lv)
