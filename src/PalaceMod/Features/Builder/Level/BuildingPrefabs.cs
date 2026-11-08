@@ -60,6 +60,28 @@ namespace PalaceMod.Builder.Level
             return sb.ToString();
         }
 
+        /// <summary>Dev: child objects only in the standard building ("-") or only in the map's first slot of its kind ("+").</summary>
+        public static string Diff(UnityEngine.SceneManagement.Scene scene, string id)
+        {
+            var s = Load(id) ?? throw new ArgumentException("no standard building " + id);
+            var h = LayoutScene.Slots(scene).FirstOrDefault(x => x.buildingName == s.buildingName && LayoutScene.CanBeBase(x)) ?? throw new ArgumentException("the map has none");
+            List<string> Paths(BuildSlot b) => b.GetComponentsInChildren<Transform>(true).Select(t => PathOf(t, b.transform) + " [" + string.Join(",", t.GetComponents<Component>().Select(c => c.GetType().Name)) + "]").ToList();
+            var a = Paths(s);
+            var b = Paths(h);
+            var sb = new System.Text.StringBuilder($"{id} vs {h.name}\n");
+            foreach (var p in a.Except(b)) sb.AppendLine("- " + p);
+            foreach (var p in b.Except(a)) sb.AppendLine("+ " + p);
+            return sb.ToString();
+        }
+
+        private static string PathOf(Transform t, Transform root)
+        {
+            var parts = new List<string>();
+            for (; t != null && t != root; t = t.parent) parts.Add(t.name);
+            parts.Reverse();
+            return string.Join("/", parts);
+        }
+
         private static string Tree(BuildSlot s) => string.Join(" | ", s.OwnUpgrades.Select(u =>
             $"{u.cost}{(u.disableInThisMode ? "(off)" : "")}:" + string.Join("/", (u.upgradeBranches ?? []).Select(b =>
                 $"{(b.choiceDetails != null ? b.choiceDetails.name : "?")}+{b.goldIncomeChange}g+{b.hpChange}hp"))));

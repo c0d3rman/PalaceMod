@@ -54,7 +54,7 @@ namespace PalaceMod
         private void RegisterDevCommand()
         {
             DevCommands.Register("builder-level",
-                "builder-level paths | graphs | spike ... | buildings | <any builder-studio subcommand>   level tools (editing: see builder-studio)", args =>
+                "builder-level paths | graphs | spike ... | buildings [kind] | <any builder-studio subcommand>   level tools (editing: see builder-studio)", args =>
             {
                 string sub = args.FirstOrDefault()?.ToLowerInvariant();
                 switch (sub)
@@ -69,7 +69,7 @@ namespace PalaceMod
                     case "spike":
                         return LevelSpike.Run(args.Length > 1 ? args[1] : "");
                     case "buildings":
-                        return "\n" + BuildingPrefabs.Describe(EnemySpawner.instance != null ? EnemySpawner.instance.gameObject.scene : default);
+                        return "\n" + (args.Length > 1 ? BuildingPrefabs.Diff(EnemySpawner.instance.gameObject.scene, args[1]) : BuildingPrefabs.Describe(EnemySpawner.instance != null ? EnemySpawner.instance.gameObject.scene : default));
                     default:
                         return Builder.Studio.StudioDev.Run(args);
                 }
