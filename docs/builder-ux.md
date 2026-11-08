@@ -713,7 +713,11 @@ a ramp, a hill, a pond and a blocked strip, saved as a pack and played):
 
 - The king walks up the ramp onto the plateau (y 0 → 4) and is stopped by the cliff.
 - All three ground lines reach the castle; with a 6 m ramp the large-enemy graph (radius 4) is correctly cut off.
-- The minimap shows the new shape. Level-start rescan 639 ms.
+- At night a ground enemy was seen on the ramp at (0, 3.3, -23), between the ramp's 0 m foot and 4 m top.
+- The minimap shows the new shape. Level-start rescan 470-640 ms.
+- In the Studio: strokes through the pointer (set height, ramp, water, raise), the strip, the ring and the red wash
+  on blocked cells; undo and redo rebuild the ground; F5 to play and back keeps it; the Studio's path check updates
+  stale paths first (423 ms).
 
 ## Asset browser slot
 
