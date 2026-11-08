@@ -178,7 +178,7 @@ class Game:
             if s is None:
                 raise Fail(f"The Agent bridge isn't on ({self.env.bridge / 'status.json'} doesn't exist). In the game: Settings > "
                            "Mods > Builder > Agent bridge > Enabled (it's off by default), with the game running. Then retry.")
-            if s["age"] <= 15:
+            if s["age"] <= 15 and s.get("running") is not False:
                 return s
             if s.get("running") is False:
                 raise Fail(f"The game isn't running: its last bridge status is {s['age']} s old and its process ({s.get('pid')}) "
@@ -211,6 +211,7 @@ class Game:
         tmp.write_text(f"@{rid}\n{text.strip()}\n")
         os.replace(tmp, request)
         deadline = time.time() + timeout
+        next_check = time.time() + 3
         while time.time() < deadline:
             time.sleep(0.1)
             if response.exists():
@@ -222,6 +223,13 @@ class Game:
                 if status != "ok":
                     raise Fail(f"game: {result.strip()}")
                 return result
+            if time.time() >= next_check:
+                # A game that quit (or crashed) mid-command would leave us waiting out the whole timeout.
+                next_check = time.time() + 3
+                s = self.status_file()
+                if s is not None and s.get("running") is False:
+                    request.unlink(missing_ok=True)
+                    raise Fail(f"The game isn't running: it exited while handling `{text}` (process {s.get('pid')} is gone).")
         raise Fail(f"The game didn't answer `{text}` within {timeout} s (loading? check `palace.py game log`).")
 
     LOADS = ("play ", "sandbox ", "edit ", "vanilla ", "menu")
