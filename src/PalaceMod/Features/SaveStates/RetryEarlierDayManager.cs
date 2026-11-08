@@ -3,11 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using HarmonyLib;
 using UnityEngine;
-using Object = UnityEngine.Object;
 
 /*
     "Earlier Day" in the game's retry popup (pause > Restart, and Try Again on the defeat screen), under its own
-    "Retry Day": a list of this run's earlier dawns, newest first, each loaded with SaveStates.Restore. It only reads
+    "Retry Day" (and Retry Night; see RetryPopup): a list of this run's earlier dawns, newest first, each loaded with SaveStates.Restore. It only reads
     the automatic dawn states the savestates feature takes; it never captures anything itself.
 
     Which dawns belong to this run: every run starts with a day-1 dawn state, so the run's states are those taken
@@ -24,38 +23,26 @@ namespace PalaceMod
         public override string FeatureDescription =>
             "Adds \"Earlier Day\" to the game's retry popup (pause > Restart, and Try Again after a defeat): go back to the dawn of any earlier day this run. Uses the automatic dawn states (Savestates > \"Automatic states\" must include dawn).";
 
-        private const string ButtonName = "PalaceMod Retry Earlier Day";
-
         private ModFrame frame;
-
-        // Retry popups we've added the button to (the pause menu and the end screen each have their own).
-        private readonly List<PopupHook> hooks = [];
-
-        private sealed class PopupHook
-        {
-            public UIFrame Frame;
-            public TFUITextButton Retry, Fresh, Button;
-            public Vector2 RetryPos, FreshPos, BackgroundSize;
-            public RectTransform Background;
-        }
 
         public override void Awake(Plugin plugin)
         {
             base.Awake(plugin);
             frame = new ModFrame("Retry Earlier Day").SetContent(BuildList);
+            RetryPopup.AddButton("earlierday", "Earlier Day", 20, Visible, () => frame.Open());
             RegisterDevCommands();
         }
 
         protected override void OnFeatureDisabled()
         {
             frame.Close();
-            foreach (var hook in hooks) Show(hook, false);
+            RetryPopup.SyncAll();
         }
 
         // ---- Which dawns ------------------------------------------------------------------------------------------
 
         /// <summary>The night the player is on: the night being fought, or the next one during the day.</summary>
-        private static int CurrentNight()
+        internal static int CurrentNight()
         {
             var spawner = EnemySpawner.instance;
             var cycle = DayNightCycle.Instance;
@@ -123,86 +110,7 @@ namespace PalaceMod
 
         // ---- The retry popup ------------------------------------------------------------------------------------
 
-        // The popup's two buttons are found by what they do (EndscreenRetryHelper.RestartLastDay / FreshStart).
-        private static TFUITextButton FindButton(UIFrame popup, string method) =>
-            popup.GetComponentsInChildren<TFUITextButton>(true).FirstOrDefault(b =>
-            {
-                var e = b.onApply;
-                for (int i = 0; i < e.GetPersistentEventCount(); i++)
-                    if (e.GetPersistentMethodName(i) == method) return true;
-                return false;
-            });
-
-        private PopupHook Hook(UIFrame popup)
-        {
-            hooks.RemoveAll(h => h.Frame == null);
-            var hook = hooks.FirstOrDefault(h => h.Frame == popup);
-            if (hook != null) return hook;
-            var retry = FindButton(popup, nameof(EndscreenRetryHelper.RestartLastDay));
-            var fresh = FindButton(popup, nameof(EndscreenRetryHelper.FreshStart));
-            if (retry == null || fresh == null || retry.transform.parent != fresh.transform.parent) return null;
-            var parent = retry.transform.parent;
-            var button = GameWidgets.Button(fresh, parent, ButtonName, "Earlier Day", () => frame.Open());
-            var emblem = ModStyle.AddEmblem(button.transform, 9f);
-            var follower = emblem.gameObject.AddComponent<EmblemFollower>();
-            follower.Text = button.GetComponent<TMPro.TextMeshProUGUI>();
-            follower.Gap = 16f;
-            var rt = (RectTransform)button.transform;
-            rt.sizeDelta = new Vector2(rt.sizeDelta.x, 70f);
-            hook = new PopupHook
-            {
-                Frame = popup,
-                Retry = retry,
-                Fresh = fresh,
-                Button = button,
-                RetryPos = ((RectTransform)retry.transform).anchoredPosition,
-                FreshPos = ((RectTransform)fresh.transform).anchoredPosition,
-                Background = parent as RectTransform,
-                BackgroundSize = parent is RectTransform bg ? bg.sizeDelta : Vector2.zero,
-            };
-            hooks.Add(hook);
-            return hook;
-        }
-
-        // Three rows (New Game, Retry Day, Earlier Day) spaced like the game's two, in a taller panel; or the game's
-        // own layout and navigation back exactly.
-        private static void Show(PopupHook hook, bool show)
-        {
-            if (hook.Button == null || hook.Retry == null || hook.Fresh == null) return;
-            var retry = (RectTransform)hook.Retry.transform;
-            var fresh = (RectTransform)hook.Fresh.transform;
-            if (show)
-            {
-                float step = hook.FreshPos.y - hook.RetryPos.y; // 80 in the game's layout
-                fresh.anchoredPosition = new Vector2(hook.FreshPos.x, hook.FreshPos.y + step / 2f);
-                retry.anchoredPosition = new Vector2(hook.RetryPos.x, hook.RetryPos.y + step / 2f);
-                ((RectTransform)hook.Button.transform).anchoredPosition = new Vector2(hook.RetryPos.x, hook.RetryPos.y - step / 2f);
-                if (hook.Background != null) hook.Background.sizeDelta = hook.BackgroundSize + new Vector2(0f, step);
-                hook.Retry.botNav = hook.Button;
-                hook.Button.topNav = hook.Retry;
-                hook.Button.botNav = hook.Fresh;
-                hook.Fresh.topNav = hook.Button;
-                hook.Button.gameObject.SetActive(true);
-            }
-            else
-            {
-                if (hook.Frame != null && hook.Frame.CurrentSelection == hook.Button) hook.Frame.Select(hook.Retry);
-                hook.Button.gameObject.SetActive(false);
-                fresh.anchoredPosition = hook.FreshPos;
-                retry.anchoredPosition = hook.RetryPos;
-                if (hook.Background != null) hook.Background.sizeDelta = hook.BackgroundSize;
-                hook.Retry.botNav = hook.Fresh;
-                hook.Fresh.topNav = hook.Retry;
-            }
-        }
-
-        private void Sync(UIFrame popup)
-        {
-            var hook = Hook(popup);
-            if (hook == null) return;
-            bool show = IsEnabled && LocalGamestate.SelectedGameMode == LocalGamestate.GameMode.Classic && EarlierDawns().Count > 0;
-            Show(hook, show);
-        }
+        private bool Visible() => IsEnabled && LocalGamestate.SelectedGameMode == LocalGamestate.GameMode.Classic && EarlierDawns().Count > 0;
 
         // Runs before the frame collects its elements, so the button is navigable at once.
         [HarmonyPatch(typeof(UIFrame), nameof(UIFrame.Activate))]
@@ -210,10 +118,8 @@ namespace PalaceMod
         {
             private static void Prefix(UIFrame __instance)
             {
-                if (__instance == null || __instance.GetComponent<EndscreenRetryHelper>() == null) return;
-                var manager = Feature<RetryEarlierDayManager>.Instance;
-                if (manager == null) return;
-                try { manager.Sync(__instance); }
+                if (!RetryPopup.IsRetryPopup(__instance)) return;
+                try { RetryPopup.Sync(__instance); }
                 catch (Exception e) { Log.For<RetryEarlierDayManager>().Error($"Couldn't update the retry popup", e); }
             }
         }

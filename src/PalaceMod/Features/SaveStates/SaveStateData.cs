@@ -26,6 +26,9 @@ namespace PalaceMod
         AutoDusk,
         /// <summary>Taken automatically right before a state is loaded, so a load can be undone.</summary>
         BeforeLoad,
+        /// <summary>Retry night's own slot, taken when a night starts (still daytime) while the automatic dusk states
+        /// are off. One file, overwritten each night; not listed in the savestates menu.</summary>
+        NightStart,
     }
 
     [Serializable]
@@ -62,6 +65,9 @@ namespace PalaceMod
         public List<HpData> playerHp = [];
         public List<UnitData> units = [];
         public List<FlagData> knockedOutTonight = [];
+        /// <summary>Temple upgrades bought that day (active tonight). The game's own save writes them as already
+        /// used, so a load would otherwise lose tonight's effect.</summary>
+        public List<string> templesTonight = [];
         public List<EnemyData> enemies = [];
         public List<V3> freeCoins = [];
         public bool hasSpawner;

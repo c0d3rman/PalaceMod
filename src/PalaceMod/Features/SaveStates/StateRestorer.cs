@@ -49,7 +49,9 @@ namespace PalaceMod
         /// <param name="backup">Capture an undo state of the current moment first.</param>
         /// <param name="asLoadoutChange">A debug-menu loadout swap of the current moment, not a player's load: the run
         /// isn't treated as a practice run (the debug menu marks it itself) and it isn't remembered as the last state.</param>
-        public static void Begin(SaveStateInfo state, bool backup = true, bool asLoadoutChange = false)
+        /// <param name="retry">A retry of the same run (Retry Night), marked with this reason instead of "Savestate
+        /// loaded": the run isn't treated as a practice run, so the game keeps saving it, as after its own retry-day.</param>
+        public static void Begin(SaveStateInfo state, bool backup = true, bool asLoadoutChange = false, string retry = null)
         {
             if (backup && state.Kind != SaveStateKind.BeforeLoad && StateCapture.CanCapture(out _))
             {
@@ -57,14 +59,19 @@ namespace PalaceMod
                 catch (Exception e) { Log.For<SaveStatesManager>().Warn($"Undo state failed: {e.Message}"); }
             }
             Busy = true;
-            Plugin.Instance.StartCoroutine(Run(state, asLoadoutChange));
+            Plugin.Instance.StartCoroutine(Run(state, asLoadoutChange, retry));
         }
 
-        private static IEnumerator Run(SaveStateInfo state, bool asLoadoutChange)
+        private static IEnumerator Run(SaveStateInfo state, bool asLoadoutChange, string retry)
         {
             var data = state.Data;
             Log.For<SaveStatesManager>().Info($"Loading {state}");
-            if (!asLoadoutChange)
+            if (retry != null)
+            {
+                SaveStates.Last = state;
+                GameplayImpact.Mark(retry);
+            }
+            else if (!asLoadoutChange)
             {
                 SaveStates.Last = state;
                 GameplayImpact.Mark("Savestate loaded");
@@ -139,6 +146,7 @@ namespace PalaceMod
             if (!asLoadoutChange) SaveStates.Last = state;
             Log.For<SaveStatesManager>().Info($"Loaded {state}; {Summary()}");
             if (asLoadoutChange) Notify.Show("Loadout applied", NotifyKind.Success, key: "savestates");
+            else if (retry != null) Notify.Show($"Retrying night {state.NightNumber}", NotifyKind.Success, key: "savestates");
             else Notify.Show($"Loaded \"{state.Name}\"", NotifyKind.Success, key: "savestates");
             SaveStates.RaiseRestored(state);
         }
@@ -222,6 +230,9 @@ namespace PalaceMod
             }
             if (data.stats.valid) Priv.Set(PlayerInteraction.instance, "networth", data.stats.networth);
 
+            // Before the night is started again, so tonight's temple effect is applied (once) at its dusk.
+            RestoreTemples(data, paths);
+
             var cycle = DayNightCycle.Instance;
             var spawner = EnemySpawner.instance;
             if (data.night)
@@ -248,6 +259,36 @@ namespace PalaceMod
                 if (!data.spawner.spawning) deferred.Add(() => Priv.Set(spawner, "spawningInProgress", false));
             }
             return deferred;
+        }
+
+        // A temple bought the day of the capture is saved by the game as already used (its OnSave writes
+        // NotEnabledAnymore), so the reloaded one is inert. Put it back the way buying it left it: active tonight, the
+        // building busy, and its at-purchase effect (Prayers: shrine range, no shrine income) applied. Its dusk effect
+        // follows at dusk: SwitchToNight below for a night state, the player's own night call for a day state.
+        private static void RestoreTemples(SaveStateData data, ScenePaths paths)
+        {
+            if (data.templesTonight == null || data.templesTonight.Count == 0) return;
+            var temples = paths.Index(Object.FindObjectsOfType<TempleUpgrade>(true));
+            foreach (string path in data.templesTonight)
+            {
+                if (!temples.TryGetValue(path, out var temple) || !temple.gameObject.activeInHierarchy)
+                {
+                    Log.For<SaveStatesManager>().Warn($"Temple upgrade {path} isn't in the reloaded level; tonight's temple effect is lost");
+                    continue;
+                }
+                if (Priv.Get<TempleUpgrade.State>(temple, "state") == TempleUpgrade.State.EnabledTonight) continue;
+                Priv.Set(temple, "state", TempleUpgrade.State.EnabledTonight);
+                Priv.Set(temple, "effectCurrentlyEnabled", false);
+                Priv.Get<GameObject>(temple, "activeIndicator")?.SetActive(true);
+                var interactor = Priv.Get<BuildingInteractor>(temple, "buildingInteractor");
+                if (interactor != null)
+                {
+                    interactor.buildingIsCurrentlyBusyAndCantBeUpgraded = true;
+                    interactor.UpdateInteractionState();
+                }
+                temple.EnableEffectAtPurchase();
+                Log.For<SaveStatesManager>().Debug($"Temple {temple.GetType().Name} active tonight again");
+            }
         }
 
         private static void RestoreSpawner(SpawnerData saved, EnemySpawner spawner)

@@ -246,6 +246,10 @@ namespace PalaceMod
             {
                 data.knockedOutTonight.Add(new FlagData { path = paths.Of(interactor.transform), value = interactor.KnockedOutTonight });
             }
+            foreach (var temple in Object.FindObjectsOfType<TempleUpgrade>())
+            {
+                if (Priv.Get<TempleUpgrade.State>(temple, "state") == TempleUpgrade.State.EnabledTonight) data.templesTonight.Add(paths.Of(temple.transform));
+            }
         }
 
         private static void CaptureEnemies(SaveStateData data, ScenePaths paths)

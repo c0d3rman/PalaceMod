@@ -160,6 +160,15 @@ namespace PalaceMod
             StateRestorer.Begin(state);
         }
 
+        /// <summary>Loads a state as a retry of the same run (Retry Night): marked with <paramref name="reason"/>, and the
+        /// game keeps saving the run afterwards, as after its own retry-day. Throws like Restore.</summary>
+        internal static void RestoreAsRetry(SaveStateInfo state, string reason)
+        {
+            if (!Feature<SaveStatesManager>.On) throw new InvalidOperationException("Gameplay-changing features are turned off (Settings > Mods > General)");
+            if (!CanRestore(state, out string why)) throw new InvalidOperationException(why);
+            StateRestorer.Begin(state, retry: reason);
+        }
+
         public static void Delete(SaveStateInfo state)
         {
             TryDelete(state.JsonPath);
@@ -314,8 +323,8 @@ namespace PalaceMod
         {
             string dir = LevelFolder(level);
             Directory.CreateDirectory(dir);
-            // The quick slot is one file that each quick save replaces; everything else gets a new file.
-            string id = kind == SaveStateKind.Quick ? "quick" : $"{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}-{kind.ToString().ToLowerInvariant()}";
+            // The quick and night-start slots are one file each that every capture replaces; everything else gets a new file.
+            string id = kind == SaveStateKind.Quick ? "quick" : kind == SaveStateKind.NightStart ? "night-start" : $"{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}-{kind.ToString().ToLowerInvariant()}";
             string json = Path.Combine(dir, id + ".json");
             WriteJson(json, data);
             string png = Path.ChangeExtension(json, ".png");
@@ -366,7 +375,8 @@ namespace PalaceMod
             {
                 case SaveStateKind.Quick: return "Quick save";
                 case SaveStateKind.AutoDawn: return $"Dawn of day {night}";
-                case SaveStateKind.AutoDusk: return $"Before night {night}";
+                case SaveStateKind.AutoDusk:
+                case SaveStateKind.NightStart: return $"Before night {night}";
                 case SaveStateKind.BeforeLoad: return "Before last load";
             }
             var used = new HashSet<string>(List(level).Select(s => s.Name), StringComparer.OrdinalIgnoreCase);

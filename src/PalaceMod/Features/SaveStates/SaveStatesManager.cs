@@ -47,6 +47,8 @@ namespace PalaceMod
         internal AutoStateMode AutoMode => autoMode.Value;
         internal int AutoHistory => autoHistory.Value;
         internal bool ConfirmLoad => confirmLoad.Value;
+        /// <summary>An AutoDusk state will be taken when the next night starts.</summary>
+        internal bool CapturesDusk => IsEnabled && autoMode.Value is AutoStateMode.Dusk or AutoStateMode.Both;
 
         private SaveStateBrowser browser;
         private string lastLevel;
