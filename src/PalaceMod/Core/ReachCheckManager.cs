@@ -24,7 +24,8 @@ using Object = UnityEngine.Object;
       - walked: every step started from free space: a player could walk out the same way.
     The first escapes of each kind are logged with the spot they left from.
 
-    `reach run <out file> [cell]` analyses the loaded level in the background (the report is written as it goes,
+    `reach run <out file> [cell] [baseline]` analyses (baseline: only the walk with nothing built and the slots it
+    doesn't reach) the loaded level in the background (the report is written as it goes,
     plus <out>.nodes.csv); `reach status` reports progress. `reach walk x y z tx tz` steers the king's controller
     from a point toward a target and says where it ended; `reach colliders x y z r` lists what the king collides with
     there; `reach inspect <slot>` dumps a slot's colliders and upgrade objects; `reach capture <png> <half width>`
@@ -42,14 +43,14 @@ namespace PalaceMod
         {
             base.Awake(plugin);
             if (Environment.GetEnvironmentVariable("PALACEMOD_DEV") != "1") return;
-            DevCommands.Register("reach", "reach run <file> [cell] | status | inspect <name>   slot reachability research", args =>
+            DevCommands.Register("reach", "reach run <file> [cell] [baseline] | status | inspect <slot> | walk x y z tx tz | colliders x y z r | capture <png> <hw>   king walk test: slot reachability, bridges, escapes", args =>
             {
                 string sub = args.Length > 0 ? args[0] : "status";
                 switch (sub)
                 {
                     case "run":
                         if (job != null) return "already running: " + status;
-                        var a = new Analysis(args[1], args.Length > 2 ? float.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture) : 1f);
+                        var a = new Analysis(args[1], args.Length > 2 ? float.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture) : 1f, args.Contains("baseline"));
                         job = a.Run();
                         status = "started";
                         return "started";
@@ -188,6 +189,7 @@ namespace PalaceMod
         {
             private readonly string outFile;
             private readonly float cell;
+            private readonly bool baselineOnly;
             private CharacterController cc;
             private Transform king;
             private float radius, yFall;
@@ -196,7 +198,7 @@ namespace PalaceMod
             private static readonly Vector3[] Dirs = Enumerable.Range(0, 8).Select(i => Quaternion.Euler(0, i * 45f, 0) * Vector3.forward).ToArray();
             private int probes;
 
-            public Analysis(string outFile, float cell) { this.outFile = outFile; this.cell = cell; }
+            public Analysis(string outFile, float cell, bool baselineOnly) { this.outFile = outFile; this.cell = cell; this.baselineOnly = baselineOnly; }
 
             private long Key(Vector3 p) =>
                 ((long)(Mathf.RoundToInt(p.x / cell) + 32768) << 40) | ((long)(Mathf.RoundToInt(p.z / cell) + 32768) << 20) | (long)(Mathf.RoundToInt(p.y / 3f) + 512);
@@ -456,6 +458,15 @@ namespace PalaceMod
                     {
                         var se = s.GetComponent<SaveLoadEntity>();
                         log.AppendLine($"SLOT {Id(s)} | {s.buildingName} | pos=({s.transform.position.x:0},{s.transform.position.z:0}) | level={Traverse.Create(s).Field("level").GetValue<int>()} active={s.gameObject.activeInHierarchy} startDeact={s.StartDeactivated} activator={(s.ActivatorBuilding ? Id(s.ActivatorBuilding) + " " + s.ActivatorBuilding.buildingName + " lvl" + s.ActivatorLevel : "-")} upgThis={s.ActivatorUpgradesThis} | baselineReach={root.Interactable.Contains(s)} interactors={InteractColliders(s).Count()}");
+                    }
+
+                    var unreached = slots.Where(x => !root.Interactable.Contains(x)).ToList();
+                    log.AppendLine($"UNREACHED {unreached.Count}: {string.Join(", ", unreached.Select(x => $"{x.buildingName} {Id(x)} ({x.transform.position.x:0},{x.transform.position.z:0})"))}");
+                    if (baselineOnly)
+                    {
+                        log.AppendLine($"done (baseline only) probes={probes} t={sw.Elapsed.TotalSeconds:0.0}s");
+                        status = "finished " + outFile;
+                        yield break;
                     }
 
                     var all = new List<Ctx> { root };
