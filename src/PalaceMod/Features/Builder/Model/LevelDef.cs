@@ -131,7 +131,9 @@ namespace PalaceMod.Builder.Model
     {
         /// <summary>Unique within the level.</summary>
         [JsonProperty("id")] public string Id { get; set; }
-        /// <summary>"mesh:&lt;mesh name&gt;": a scenery mesh of the host map, drawn with that object's materials.</summary>
+        /// <summary>"mesh:&lt;mesh name&gt;[@&lt;Map&gt;]": a scenery mesh of the host map (drawn with that object's
+        /// materials) or, if the host has none by that name, of the cross-map scenery library (drawn with the host's
+        /// material of the same name). "@Map" picks one map's mesh should two maps ever have one by the same name.</summary>
         [JsonProperty("base")] public string Base { get; set; }
         [JsonProperty("pos")] public float[] Pos { get; set; }
         [JsonProperty("rotY")] public float RotY { get; set; }
