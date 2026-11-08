@@ -26,11 +26,8 @@ namespace PalaceMod.Builder.Level
         /// <summary>Rescans every graph. Returns the time it took in ms, or -1 without pathfinding.</summary>
         public static long Rescan()
         {
-            var astar = AstarPath.active;
-            if (astar == null) return -1;
-            var sw = Stopwatch.StartNew();
-            astar.Scan();
-            return sw.ElapsedMilliseconds;
+            // As baked: with the map's invisible walls and flier surface (a plain Scan loses both).
+            return GroundGraphs.Scan();
         }
 
         /// <summary>The castle's position on the loaded map (the castle slot, built or not).</summary>

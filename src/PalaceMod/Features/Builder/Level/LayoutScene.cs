@@ -151,8 +151,9 @@ namespace PalaceMod.Builder.Level
 
         /// <summary>Makes a prop block pathfinding and movement, or not. The host's recast graphs rasterize renderer
         /// meshes (not colliders) on the Ground and Obstacle layers, but skip meshes that aren't CPU-readable, which
-        /// scenery meshes aren't. So a solid prop gets an invisible child: a readable box mesh around the prop's mesh on
-        /// the obstacle layer, with a matching box collider.</summary>
+        /// the host's scenery meshes aren't. So a solid prop gets an invisible child on the obstacle layer: a readable
+        /// box mesh around the prop's mesh with a matching box collider, or, for a readable mesh (the scenery library's),
+        /// the mesh itself with a mesh collider.</summary>
         public static void SetSolid(GameObject go, bool solid)
         {
             go.layer = 0;
@@ -166,6 +167,14 @@ namespace PalaceMod.Builder.Level
             if (mesh == null || existing != null) return;
             var blocker = new GameObject(BlockerName) { layer = ObstacleLayer };
             blocker.transform.SetParent(go.transform, false);
+            if (mesh.isReadable)
+            {
+                // A readable mesh (the scenery library's copies) blocks with its real shape.
+                blocker.AddComponent<MeshFilter>().sharedMesh = mesh;
+                blocker.AddComponent<MeshRenderer>().forceRenderingOff = true;
+                blocker.AddComponent<MeshCollider>().sharedMesh = mesh;
+                return;
+            }
             blocker.transform.localPosition = mesh.bounds.center;
             blocker.transform.localScale = mesh.bounds.size;
             blocker.AddComponent<MeshFilter>().sharedMesh = BlockerMesh();
@@ -208,6 +217,7 @@ namespace PalaceMod.Builder.Level
         /// <summary>The walkable ground nearest to a point (the enemy ground graph), or the point itself.</summary>
         public static Vector3 Ground(Vector3 p)
         {
+            if (GroundLayer.TryHeight(p, out float terrain)) return new Vector3(p.x, terrain, p.z);   // the graphs may be stale while sculpting
             var astar = AstarPath.active;
             if (astar == null) return p;
             try

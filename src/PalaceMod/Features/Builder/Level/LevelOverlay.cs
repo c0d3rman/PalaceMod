@@ -43,6 +43,7 @@ namespace PalaceMod.Builder.Level
             if (editing)
             {
                 if (LevelBases.IsEmpty(level)) ApplyBaseLook(scene, level, issues);
+                GroundLayer.Apply(scene, pack, level, issues);
                 return;
             }
             if (!HasEdits(level)) return;
@@ -127,12 +128,15 @@ namespace PalaceMod.Builder.Level
             foreach (var prop in level.Props ?? [])
             {
                 if (prop?.Id == null) continue;
-                if (prop.Base == null || !bases.TryGetValue(prop.Base, out var b)) { issues.Add(Warn($"prop \"{prop.Id}\": no scenery \"{prop.Base}\" on {level.Host}")); continue; }
+                // The host's own scenery first, then the cross-map library (Library/SceneryLibrary).
+                if (prop.Base == null || !bases.TryGetValue(prop.Base, out var b)) b = Library.SceneryLibrary.Resolve(scene, prop.Base);
+                if (b == null) { issues.Add(Warn($"prop \"{prop.Id}\": no scenery \"{prop.Base}\" on {level.Host} or in the library")); continue; }
                 LayoutScene.MakeProp(scene, b, prop.Id, LayoutScene.ToVector(prop.Pos), prop.RotY, Mathf.Clamp(prop.Scale, 0.1f, 10f), prop.Solid);
                 props++;
             }
 
             int hidden = LevelBases.IsEmpty(level) ? ApplyBaseLook(scene, level, issues) : 0;
+            GroundLayer.Apply(scene, pack, level, issues);   // terrain (a flat field's ground, blocked cells, water)
 
             ScanAfterFrame = Time.frameCount + 2;
             ScanHost = level.Host;
@@ -144,18 +148,14 @@ namespace PalaceMod.Builder.Level
         private static int ApplyBaseLook(Scene scene, LevelDef level, List<ValidationIssue> issues)
         {
             int hidden = EmptyBase.HideScenery(scene);
-            if (level.Base == LevelBases.Flat)
-            {
-                // Ground layer (W4): GroundLayer.Apply(scene, pack, level, issues) goes here. Until it exists a flat
-                // field plays as a cleared map.
-            }
+            // A flat field's ground is replaced by GroundLayer.Apply, called after this.
             return hidden;
         }
 
         public static bool HasEdits(LevelDef level) =>
             level.Base != null ||
             (level.BuildSlots?.Edit?.Count ?? 0) + (level.BuildSlots?.Add?.Count ?? 0) + (level.BuildSlots?.Remove?.Count ?? 0) +
-            (level.SpawnLines?.Edit?.Count ?? 0) + (level.SpawnLines?.Add?.Count ?? 0) + (level.Props?.Count ?? 0) > 0;
+            (level.SpawnLines?.Edit?.Count ?? 0) + (level.SpawnLines?.Add?.Count ?? 0) + (level.Props?.Count ?? 0) > 0 || GroundLayer.Wants(level);
 
         // ---- Requirements -----------------------------------------------------------------------------------------
 

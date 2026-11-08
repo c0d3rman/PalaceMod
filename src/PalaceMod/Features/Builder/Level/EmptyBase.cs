@@ -50,12 +50,35 @@ namespace PalaceMod.Builder.Level
         /// <summary>Hides the host's scenery. Returns how many renderers were turned off.</summary>
         public static int HideScenery(Scene scene)
         {
-            var ground = GroundMaterialNames(scene);
-            if (ground.Count == 0)
+            var list = Scenery(scene, out bool known);
+            if (!known)
             {
                 Log.For<BuilderManager>().Warn($"{scene.name}: no ground materials found; the scenery stays");
                 return 0;
             }
+            foreach (var root in scene.GetRootGameObjects())
+                foreach (var source in root.GetComponentsInChildren<NGS.MeshFusionPro.MeshFusionSource>(true)) source.enabled = false;
+            var hiddenObjects = new HashSet<GameObject>();
+            foreach (var r in list)
+            {
+                r.enabled = false;
+                hiddenObjects.Add(r.gameObject);
+            }
+            foreach (var go in hiddenObjects)
+                foreach (var col in go.GetComponents<Collider>())
+                    col.enabled = false;
+            return list.Count;
+        }
+
+        /// <summary>The host's visible scenery renderers: everything that doesn't draw only with ground materials and
+        /// isn't part of a slot, the spawner, a unit, the king, the camera, UI, the invisible walls or the mod's own
+        /// objects. known is false when the map's ground materials couldn't be found (the list is then empty).</summary>
+        public static List<Renderer> Scenery(Scene scene, out bool known)
+        {
+            var result = new List<Renderer>();
+            var ground = GroundMaterialNames(scene);
+            known = ground.Count > 0;
+            if (!known) return result;
             var keepRoots = new HashSet<Transform>();
             foreach (var root in scene.GetRootGameObjects())
             {
@@ -72,26 +95,19 @@ namespace PalaceMod.Builder.Level
                 }
             }
 
-            int hidden = 0;
-            var hiddenObjects = new HashSet<GameObject>();
             foreach (var root in scene.GetRootGameObjects())
             {
-                foreach (var source in root.GetComponentsInChildren<NGS.MeshFusionPro.MeshFusionSource>(true)) source.enabled = false;
+                if (root.name.StartsWith(LayoutScene.AddedPrefix, StringComparison.Ordinal)) continue;
                 foreach (var r in root.GetComponentsInChildren<Renderer>(true))
                 {
                     if (r == null || !r.enabled || r.gameObject.layer == 5 || r.name.StartsWith(LayoutScene.AddedPrefix, StringComparison.Ordinal)) continue;
                     if (Kept(r.transform, keepRoots)) continue;
                     var mats = r.sharedMaterials;
                     if (mats.Length > 0 && mats.All(m => m != null && ground.Contains(Clean(m.name)))) continue;
-                    r.enabled = false;
-                    hiddenObjects.Add(r.gameObject);
-                    hidden++;
+                    result.Add(r);
                 }
             }
-            foreach (var go in hiddenObjects)
-                foreach (var col in go.GetComponents<Collider>())
-                    col.enabled = false;
-            return hidden;
+            return result;
         }
 
         private static bool Kept(Transform t, HashSet<Transform> keep)

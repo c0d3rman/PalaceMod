@@ -1767,16 +1767,28 @@ def decompile(game, type_name):
         print(f"Decompiled project written to {output} (ignored by Git)")
 
 
-def dump_data(game, scene_filter):
-    """Dev-only: dump every level's waves and enemy stats to .local/gamedata/ (never commit or ship it)."""
+def dump_venv():
     venv = ROOT / ".local/venv-dump"
     python = venv / "bin/python"
     if not python.exists():
         run(sys.executable, "-m", "venv", venv)
         run(python, "-m", "pip", "install", "-q", "UnityPy==1.25.4", "TypeTreeGeneratorAPI")
+    return python
+
+
+def dump_data(game, scene_filter):
+    """Dev-only: dump every level's waves and enemy stats to .local/gamedata/ (never commit or ship it)."""
+    python = dump_venv()
     data = managed_dir(game).parent
     out = ROOT / ".local/gamedata"
     run(python, "-I", ROOT / "scripts/dump_data.py", data, out, *([scene_filter] if scene_filter else []))
+
+
+def scenery_catalog(game):
+    """Dev-only: regenerate the Builder's scenery library catalog (metadata only, committed)."""
+    python = dump_venv()
+    run(python, "-I", ROOT / "scripts/scenery_catalog.py", managed_dir(game).parent,
+        ROOT / "src/PalaceMod/Assets/scenery.json")
 
 
 def file_hash(path):
@@ -1824,7 +1836,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["setup", "build", "install", "run", "launch", "stop", "logs",
                                             "screenshot", "backup-saves", "watch", "decompile", "doctor", "native",
-                                            "cmd", "config", "lease", "land", "instances", "dump-data"])
+                                            "cmd", "config", "lease", "land", "instances", "dump-data",
+                                            "scenery-catalog"])
     parser.add_argument("args", nargs="*",
                         help="native: on|off. dump-data: [scene filter]. cmd: the command, e.g. \"level Neuland\". "
                              "config: get [Section[.Key]] | set Section.Key value. lease: acquire|release|status. "
@@ -2016,6 +2029,8 @@ def main():
         land(args.title, args.body_file, args.dry_run)
     elif args.command == "dump-data":
         dump_data(game, mode)
+    elif args.command == "scenery-catalog":
+        scenery_catalog(game)
     elif args.command == "native":
         if mode not in (None, "on", "off"):
             raise RuntimeError("Usage: dev.py native [on|off]")
