@@ -45,6 +45,29 @@ namespace PalaceMod.Builder.Level
 
         public static bool IsCastle(BuildSlot slot) => slot.GetComponentInChildren<CastleCenter>(true) != null;
 
+        /// <summary>The host's castle slot (the first slot holding the CastleCenter), or null.</summary>
+        public static BuildSlot Castle(Scene scene) => Slots(scene).FirstOrDefault(IsCastle);
+
+        /// <summary>What the requirement code needs to know about the host's own slots: the castle, each slot's own
+        /// prerequisite, level count and add-ons. Only the first slot of a name counts (as everywhere else).</summary>
+        public static Model.HostSlots HostSlots(Scene scene) => HostSlots(Slots(scene));
+
+        public static Model.HostSlots HostSlots(IEnumerable<BuildSlot> slots)
+        {
+            var host = new Model.HostSlots();
+            foreach (var s in slots)
+            {
+                if (s == null || host.Native.ContainsKey(s.name)) continue;
+                if (host.Castle == null && IsCastle(s)) host.Castle = s.name;
+                var a = s.ActivatorBuilding;
+                host.Native[s.name] = s.StartDeactivated && a != null ? new Model.SlotRequirement { Slot = a.name, Level = s.ActivatorLevel } : null;
+                host.Levels[s.name] = s.ActivatorUpgradesThis && a != null ? a.OwnUpgrades.Count : s.OwnUpgrades.Count;
+                if (s.ActivatorUpgradesThis) host.AddOns.Add(s.name);
+            }
+            if (host.Castle != null) host.Native[host.Castle] = null;
+            return host;
+        }
+
         /// <summary>Whether a new slot may be a copy of this one: not the castle, not a wall piece its gate upgrades,
         /// and no build slots nested inside it.</summary>
         public static bool CanBeBase(BuildSlot slot) =>
@@ -229,7 +252,8 @@ namespace PalaceMod.Builder.Level
 
         /// <summary>
         /// A look-only copy of a build slot in its blueprint state: every script, collider and physics part is removed
-        /// before it's activated, so no game code runs for it. Used by the layout editor (never in play).
+        /// before it's activated, so no game code runs for it. Used by the layout editor (never in play). The built
+        /// building is kept, hidden, with what each upgrade level changes (a ProxyLook), so ShowBuilt can preview it.
         /// </summary>
         public static GameObject Proxy(GameObject source, Transform parent, string name)
         {
@@ -240,10 +264,15 @@ namespace PalaceMod.Builder.Level
             var slot = copy.GetComponent<BuildSlot>();
             if (slot != null)
             {
-                Traverse.Create(slot).Field("bluepringParent").GetValue<GameObject>()?.SetActive(true);
-                // The built building (and the units inside it) is never shown here.
+                var blueprint = Traverse.Create(slot).Field("bluepringParent").GetValue<GameObject>();
+                blueprint?.SetActive(true);
                 var built = Traverse.Create(slot).Field("buildingParent").GetValue<GameObject>();
-                if (built != null && built != copy) UnityEngine.Object.DestroyImmediate(built);
+                if (built != null && built != copy)
+                {
+                    var look = copy.AddComponent<ProxyLook>();
+                    look.Capture(slot, blueprint, built);
+                    built.SetActive(false);
+                }
             }
             Strip(copy);
             copy.transform.SetParent(parent, true);
@@ -251,6 +280,19 @@ namespace PalaceMod.Builder.Level
             UnityEngine.Object.Destroy(holder);
             return copy;
         }
+
+        /// <summary>Shows a proxy as its built building at a level (1 = just built) drawn as a ghost, or as its
+        /// blueprint (level 0). Returns false when the proxy has no built look.</summary>
+        public static bool ShowBuilt(GameObject proxy, int level, bool ghost = true)
+        {
+            var look = proxy != null ? proxy.GetComponent<ProxyLook>() : null;
+            if (look == null) return false;
+            look.Show(level, ghost);
+            return true;
+        }
+
+        /// <summary>Upgrade levels a proxy can preview (0 when it has no built look).</summary>
+        public static int BuiltLevels(GameObject proxy) => proxy != null && proxy.GetComponent<ProxyLook>() is ProxyLook l ? l.Levels : 0;
 
         /// <summary>Removes everything but transforms, meshes and renderers.</summary>
         public static void Strip(GameObject go)
@@ -271,7 +313,7 @@ namespace PalaceMod.Builder.Level
                 }
             }
 
-            static bool Keep(Component c) => c is Transform || c is MeshFilter || c is MeshRenderer || c is SkinnedMeshRenderer;
+            static bool Keep(Component c) => c is Transform || c is MeshFilter || c is MeshRenderer || c is SkinnedMeshRenderer || c is ProxyLook;
         }
 
         private static readonly Dictionary<(Type, Type), bool> requires = [];
