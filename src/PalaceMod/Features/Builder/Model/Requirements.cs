@@ -167,7 +167,9 @@ namespace PalaceMod.Builder.Model
                     if (r == null)
                     {
                         string baseName = ContentRef.Parse(a.Base ?? "").Id;
-                        r = LevelBases.IsEmpty(l) ? CastleLevel(1) : baseName != null && host.Native.TryGetValue(baseName, out var nb) ? nb : null;
+                        // A standard building (building:<kind>) has no map prerequisite of its own: castle level 1.
+                        r = LevelBases.IsEmpty(l) || BuildingRefs.IsBuilding(a.Base) ? CastleLevel(1)
+                            : baseName != null && host.Native.TryGetValue(baseName, out var nb) ? nb : null;
                     }
                 }
                 else

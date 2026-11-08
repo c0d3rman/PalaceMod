@@ -257,7 +257,13 @@ namespace PalaceMod.Builder.Model
                     if (a == null) { Error(ap, "is empty"); continue; }
                     if (!Ids.IsValid(a.Id)) Error(ap + ".id", "must be 1-64 characters of a-z, 0-9, '.', '_' or '-'");
                     else if (!placed.Add(a.Id)) Error(ap + ".id", $"\"{a.Id}\" is used twice in this level");
-                    if (ContentRef.Parse(a.Base ?? "").Kind != RefKind.Scene) Error(ap + ".base", "must be \"scene:<build slot on the map>\"");
+                    var abase = ContentRef.Parse(a.Base ?? "");
+                    if (abase.Kind == RefKind.Building)
+                    {
+                        if (BuildingRefs.PathOf(abase.Id) == null)
+                            Error(ap + ".base", $"no building kind \"{abase.Id}\" (kinds: {string.Join(", ", BuildingRefs.Kinds.Select(k => k.Id))})");
+                    }
+                    else if (abase.Kind != RefKind.Scene) Error(ap + ".base", "must be \"scene:<build slot on the map>\" or \"building:<kind>\"");
                     CheckPos(a.Pos, ap + ".pos", optional: false);
                     CheckRequirement(a.Requires, a.UpgradeCap, ap, SlotRefs.Added(a.Id ?? ""));
                     CheckCosts(a.Upgrades, ap + ".upgrades");

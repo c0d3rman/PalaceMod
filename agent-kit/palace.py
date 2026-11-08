@@ -677,16 +677,27 @@ def effective_slots(ref, level):
             warnings.append(f"edit of {e.get('ref')!r}: no such slot on the level")
             continue
         apply_common(s, e)
+    standard = {b["name"]: b for b in m.get("buildings") or []}
     for a in bs.get("add") or []:
-        base = (a.get("base") or "")[6:] if (a.get("base") or "").startswith("scene:") else None
-        src = host.get(base)
+        raw = a.get("base") or ""
+        if raw.startswith("building:"):
+            # The game's standard building of a kind (any map); it needs castle level 1 unless "requires" says otherwise.
+            base, src = raw, standard.get(raw)
+            if src is None:
+                warnings.append(f"add {a.get('id')!r}: no standard building {raw!r}" +
+                                ("" if standard else " (this map's reference predates them: `palace.py ref build --force`)"))
+                continue
+        else:
+            base = raw[6:] if raw.startswith("scene:") else None
+            src = host.get(base)
         if src is None:
             warnings.append(f"add {a.get('id')!r}: base {a.get('base')!r} isn't a slot of {level['host']}")
             continue
         key = "add:" + a["id"]
-        s = Slot(key=key, name="PalaceBuilder " + a["id"], kind=src["kind"], pos=a.get("pos") or src["pos"], rot=a.get("rotY", 0), castle=False,
-                 upgrades=playable(src["upgrades"]), req=host_req(src), cap=src.get("upgradeCap"), follows=False, added=True, base=base)
-        if is_empty_base(level) and s.req and s.req[0] != castle and "requires" not in a:
+        req = ("castle", 0) if base.startswith("building:") else host_req(src)
+        s = Slot(key=key, name="PalaceBuilder " + a["id"], kind=src["kind"], pos=a.get("pos") or src.get("pos"), rot=a.get("rotY", 0), castle=False,
+                 upgrades=playable(src["upgrades"]), req=req, cap=src.get("upgradeCap"), follows=False, added=True, base=base)
+        if is_empty_base(level) and s.req and s.req[0] != castle and s.req[0] != "castle" and "requires" not in a:
             s.req = ("__removed__", 0)
         apply_common(s, a)
         slots[key] = s
@@ -695,6 +706,15 @@ def effective_slots(ref, level):
         if s.req and s.req[0] == "castle":
             s.req = (castle, s.req[1])
     return slots, castle, warnings
+
+
+def standard_buildings(ref, maps):
+    """The game's standard buildings ("building:<kind>", the same on every map) from the first map reference that has them."""
+    for name in maps:
+        b = ref.map(name).get("buildings")
+        if b:
+            return b
+    return []
 
 
 def step_income(step):
@@ -753,12 +773,29 @@ class Ops:
         lid = op.get("level") if isinstance(op.get("level"), str) else self.level_id
         return find_level(self.data, lid)
 
+    def host_ground(self, level):
+        """The host's sampled ground as a function (x, z) -> world y or None, for sculpting a map's own ground."""
+        g = self.ref.map(level["host"]).get("grid")
+        if not g:
+            return None
+        grid = Grid(g)
+        return grid.height
+
+    def terrain_of(self, lv):
+        """The level's terrain with absolute heights: on a map's own ground (base not flat) the pack holds offsets from
+        the host's ground, made absolute here from the reference's sampled ground."""
+        return Terrain(lv["terrain"], host=None if lv.get("base") == "flat" else self.host_ground(lv))
+
     def ground_y(self, level, x, z):
         t = level.get("terrain")
         if t and level.get("base") == "flat":
             y = Terrain(t).height_at(x, z)
             if y is not None:
                 return round(y, 2)
+        if t and t.get("heights"):
+            T = self.terrain_of(level)
+            if T.sculpted_at(x, z):
+                return round(T.height_at(x, z), 2)
         g = self.ref.map(level["host"]).get("grid")
         if g:
             y = Grid(g).height(x, z)
@@ -861,11 +898,18 @@ class Ops:
     def host_slot_for(self, level, kind):
         m = self.ref.map(level["host"])
         k = kind.lower()
-        match = [s for s in m["slots"] if s.get("canBeBase") and (s["kind"].lower() == k or (s.get("display") or "").lower() == k)]
+        def is_kind(s):
+            return s["kind"].lower() == k or (s.get("display") or "").lower() == k or s["name"] == "building:" + k
+        match = [s for s in m["slots"] if s.get("canBeBase") and is_kind(s)]
         if not match:
-            kinds = sorted({s["kind"] for s in m["slots"] if s.get("canBeBase")})
-            raise Fail(f"no slot of kind {kind!r} on {level['host']} to copy; kinds there: {kinds}. "
-                       f"Use \"from\": \"<slot name>\" for a specific one (`palace.py ref slots {level['host']}`).")
+            # A kind the map lacks: the game's standard building of that kind.
+            std = [b for b in m.get("buildings") or [] if is_kind(b)]
+            if std:
+                return std[0]
+            kinds = sorted({s["kind"] for s in m["slots"] if s.get("canBeBase")} | {b["kind"] for b in m.get("buildings") or []})
+            raise Fail(f"no building kind {kind!r}; kinds: {kinds}" +
+                       ("" if m.get("buildings") else f" (this map's reference has only its own kinds: `palace.py ref build --force --maps {level['host']}` adds the rest)") +
+                       f". Use \"from\": \"<slot name>\" for a specific one (`palace.py ref slots {level['host']}`).")
         # The most common tree for that kind (most upgrade levels first).
         match.sort(key=lambda s: (-len(s["upgrades"]), s["name"]))
         return match[0]
@@ -889,8 +933,9 @@ class Ops:
                 raise Fail(f"{op['from']!r} can't be copied (the castle, a wall piece its gate upgrades, or a slot with slots inside)")
         else:
             base = self.host_slot_for(lv, op["kind"])
-        entry = {"id": sid, "base": "scene:" + base["name"], "pos": self.pos(lv, op), "rotY": float(op.get("rotY", 0))}
-        req = op.get("requires", "castle" if is_empty_base(lv) else None)
+        standard = base["name"].startswith("building:")
+        entry = {"id": sid, "base": base["name"] if standard else "scene:" + base["name"], "pos": self.pos(lv, op), "rotY": float(op.get("rotY", 0))}
+        req = op.get("requires", "castle" if is_empty_base(lv) or standard else None)
         if req is not None:
             entry["requires"] = parse_req(req, lv, None)
         if op.get("upgradeCap") is not None:
@@ -898,7 +943,7 @@ class Ops:
         if op.get("costs"):
             entry["upgrades"] = [{"cost": int(c)} if c is not None else None for c in op["costs"]]
         adds.append(entry)
-        return f"added {sid} ({base['kind']} from {base['name']})"
+        return f"added {sid} ({base['kind']}, " + ("the game's standard one: this map has none)" if standard else f"from {base['name']})")
 
     def find_slot_entry(self, lv, ref_name):
         """('add', entry) for an added slot id, or ('host', edit entry created on demand)."""
@@ -1326,7 +1371,7 @@ class Ops:
         lv = self.level(op)
         if not lv.get("terrain"):
             raise Fail("no terrain grid yet: start with {\"op\":\"terrain_init\"}")
-        return lv, Terrain(lv["terrain"])
+        return lv, self.terrain_of(lv)
 
     def op_terrain_init(self, op):
         """{"op":"terrain_init","origin":[x,z],"cell":2,"size":[W,H],"y":<castle height>}: a flat grid (heights 0 = y)."""
@@ -1343,7 +1388,7 @@ class Ops:
             origin = [math.floor((g["origin"][0] + 12) / cell) * cell, math.floor((g["origin"][1] + 12) / cell) * cell]
             size = [min(400, int(math.ceil((g["size"][0] * g["cell"] - 24) / cell))), min(400, int(math.ceil((g["size"][1] * g["cell"] - 24) / cell)))]
         lv["terrain"] = {"origin": [float(origin[0]), float(origin[1])], "cell": float(op.get("cell", 2)), "size": [int(size[0]), int(size[1])],
-                         "y": float(op.get("y", castle["pos"][1] if castle else 0))}
+                         "y": float(op.get("y", castle["pos"][1] if castle else 0)), "format": Terrain.FORMAT}
         if op.get("flat", True):
             lv["base"] = "flat"
         return f"terrain {size[0]}x{size[1]} cells"
@@ -1368,16 +1413,16 @@ class Ops:
         """{"op":"paint","material":"road"|"ground"|"high"|"low"|"earth"|"sand"|"rock", shape...}"""
         lv, t = self.terrain(op)
         mat = Terrain.MATERIALS.index(op["material"]) if op["material"] in Terrain.MATERIALS else int(op["material"])
-        n = t.paint_cells(Shape.from_op(op), "materials", mat)
+        n = t.paint_samples(Shape.from_op(op), mat)
         t.store(lv)
-        return f"painted {n} cells"
+        return f"painted {n} samples ({Terrain.PAINT_RES}x{Terrain.PAINT_RES} per cell)"
 
     def op_block(self, op):
         """{"op":"block","on":true, shape...}: cells ground units (and the king) can't enter; fliers can. Any base."""
         lv = self.level(op)
         if not lv.get("terrain"):
             self.op_terrain_init({"level": lv["id"], "flat": False})
-        t = Terrain(lv["terrain"])
+        t = self.terrain_of(lv)
         n = t.paint_cells(Shape.from_op(op), "blocked", 1 if op.get("on", True) else 0)
         t.store(lv)
         return f"blocked {n} cells"
@@ -1501,12 +1546,19 @@ def b64inflate(s, n):
 
 
 class Terrain:
-    """LevelDef.terrain: (W+1)x(H+1) corner heights (cm relative to y, delta-coded int16), W*H cell materials,
-    blocked and water bitmasks; raw deflate + base64. See the guide's Terrain section."""
+    """LevelDef.terrain: (W+1)x(H+1) corner heights (cm relative to y, delta-coded int16), materials per paint sample
+    ((W*paintRes) x (H*paintRes), format 2; format 1 had one per cell), blocked and water bitmasks per cell; raw deflate
+    + base64. See the guide's Terrain section."""
     MATERIALS = ["ground", "high", "low", "earth", "sand", "road", "rock"]
-    MIN_Y, MAX_Y = -8.0, 30.0
+    # World floor (below -10 the game respawns the king); the ceiling is MAX_ABOVE over y (at least MAX_Y world).
+    MIN_Y, MAX_Y, MAX_ABOVE = -8.0, 30.0, 30.0
+    FORMAT, PAINT_RES = 2, 2
 
-    def __init__(self, t):
+    @staticmethod
+    def max_world(y):
+        return max(Terrain.MAX_Y, y + Terrain.MAX_ABOVE)
+
+    def __init__(self, t, host=None):
         self.ox, self.oz = t["origin"]
         self.cell = float(t["cell"])
         self.w, self.h = t["size"]
@@ -1520,8 +1572,30 @@ class Terrain:
                 v = ((prev + d + 32768) % 65536) - 32768
                 self.hts[i] = v
                 prev = v
+        # A map's own ground: heights are stored as offsets from the host's ground; work on absolute ones.
+        self.host = None
+        if host is not None:
+            self.host = []
+            for j in range(self.h + 1):
+                for i in range(self.w + 1):
+                    hy = host(*self.corner(i, j))
+                    self.host.append(None if hy is None else int(round((hy - self.y) * 100)))
+            self.hts = [v + (hc or 0) for v, hc in zip(self.hts, self.host)]
         n = self.w * self.h
-        self.materials = bytearray(b64inflate(t["materials"], n)) if t.get("materials") else bytearray(n)
+        fmt = int(t.get("format", 1))
+        if fmt > self.FORMAT:
+            raise Fail(f"terrain format {fmt} is newer than this palace.py ({self.FORMAT}): update the agent kit")
+        R = self.PAINT_RES
+        self.pw, self.ph = self.w * R, self.h * R
+        self.materials = bytearray(self.pw * self.ph)
+        if t.get("materials"):
+            res = 1 if fmt == 1 else int(t.get("paintRes", R))
+            raw = b64inflate(t["materials"], self.w * res * self.h * res)
+            row = self.w * res
+            for pz in range(self.ph):
+                for px in range(self.pw):
+                    v = raw[(pz * res // R) * row + px * res // R]
+                    self.materials[pz * self.pw + px] = v if v <= 6 else 0
         self.blocked = self.unbits(t.get("blocked"), n)
         w = t.get("water") or {}
         self.water_level = float(w.get("level", -1.0))
@@ -1558,7 +1632,7 @@ class Terrain:
         return self.y + v / 100.0
 
     def clamp_cm(self, rel):
-        world = max(self.MIN_Y, min(self.MAX_Y, self.y + rel))
+        world = max(self.MIN_Y, min(self.max_world(self.y), self.y + rel))
         return int(round((world - self.y) * 100))
 
     def corners_in(self, shape):
@@ -1624,6 +1698,26 @@ class Terrain:
                 if shape.weight(x, z) >= 0.5:
                     yield j * self.w + i
 
+    def paint_samples(self, shape, value):
+        """Materials: every paint sample (PAINT_RES per cell edge) whose centre is inside the shape (the game draws the
+        result with smooth edges)."""
+        step = self.cell / self.PAINT_RES
+        x0, z0, x1, z1 = shape.bounds()
+        i0, i1 = max(0, int((x0 - self.ox) / step)), min(self.pw - 1, int((x1 - self.ox) / step))
+        j0, j1 = max(0, int((z0 - self.oz) / step)), min(self.ph - 1, int((z1 - self.oz) / step))
+        n = 0
+        for j in range(j0, j1 + 1):
+            for i in range(i0, i1 + 1):
+                if shape.weight(self.ox + (i + 0.5) * step, self.oz + (j + 0.5) * step) >= 0.5:
+                    self.materials[j * self.pw + i] = value
+                    n += 1
+        return n
+
+    def material_at(self, x, z):
+        step = self.cell / self.PAINT_RES
+        i, j = int((x - self.ox) // step), int((z - self.oz) // step)
+        return self.materials[j * self.pw + i] if 0 <= i < self.pw and 0 <= j < self.ph else 0
+
     def paint_cells(self, shape, layer, value):
         arr = getattr(self, layer)
         n = 0
@@ -1666,13 +1760,28 @@ class Terrain:
         gz = ((h[2] - h[0]) + (h[3] - h[1])) / (2 * self.cell)
         return math.degrees(math.atan(math.hypot(gx, gz)))
 
+    def sculpted_at(self, x, z):
+        """Whether the point is on terrain of its own (always on a flat field; on a map's own ground, a moved cell)."""
+        if self.host is None:
+            return True
+        i, j = int((x - self.ox) // self.cell), int((z - self.oz) // self.cell)
+        if not (0 <= i < self.w and 0 <= j < self.h):
+            return False
+        W = self.w + 1
+        for c in (j * W + i, j * W + i + 1, (j + 1) * W + i, (j + 1) * W + i + 1):
+            if self.host[c] is not None and abs(self.hts[c] - self.host[c]) > 0:
+                return True
+        return False
+
     def store(self, lv):
         t = lv["terrain"]
         t["origin"], t["cell"], t["size"], t["y"] = [self.ox, self.oz], self.cell, [self.w, self.h], self.y
-        if any(self.hts):
+        t["format"] = self.FORMAT
+        rel = self.hts if self.host is None else [v - (hc or 0) for v, hc in zip(self.hts, self.host)]
+        if any(rel):
             out_ = bytearray()
             prev = 0
-            for v in self.hts:
+            for v in rel:
                 d = ((v - prev + 32768) % 65536) - 32768
                 out_ += struct.pack("<h", d)
                 prev = v
@@ -1681,8 +1790,10 @@ class Terrain:
             t.pop("heights", None)
         if any(self.materials):
             t["materials"] = b64deflate(self.materials)
+            t["paintRes"] = self.PAINT_RES
         else:
             t.pop("materials", None)
+            t.pop("paintRes", None)
         if any(self.blocked):
             t["blocked"] = b64deflate(self.bits(self.blocked))
         else:
@@ -2985,11 +3096,13 @@ def reference_markdown(ref):
     L.append("\nThe castle slot of each map is named in `palace.py ref slots <map>` (`\"castle\": true`); in ops and plans just say `castle`.\n")
 
     L.append("### What the host decides\n")
-    L.append("Even on a `cleared` or `flat` base the host map fixes: **which building kinds you can place** (`add_slot` copies a "
-             "slot of that kind from the host, so a kind the host lacks can't be added: no Mill on Frostsee), the castle's "
+    L.append("Even on a `cleared` or `flat` base the host map fixes: **which of its slots `add_slot` copies** (a kind the host "
+             "has is a copy of its most complete slot of that kind; a kind it lacks, like a Mill on Frostsee, is the game's "
+             "standard building of that kind, `building:<kind>`, the same tree as the table below), the castle's "
              "position, the playable rectangle (`terrain_init`'s default grid is the host's walkable extent), the sky, light and "
-             "ground palette, and the starting gold default. Terrain heights are **world** heights clamped to "
-             f"[{Terrain.MIN_Y:g}, {Terrain.MAX_Y:g}] m, so a high castle leaves little room to build up (headroom below). Pick "
+             "ground palette, and the starting gold default. Terrain heights go from world y "
+             f"{Terrain.MIN_Y:g} m (the king respawns below -10) up to {Terrain.MAX_ABOVE:g} m above the terrain's `y` (the castle's "
+             f"height; at least world {Terrain.MAX_Y:g} m), so every host has room to build up (headroom below). Pick "
              "the host from this table before designing.\n")
     all_kinds = sorted({s["kind"] for name in maps for s in ref.map(name)["slots"]
                         if not s.get("followsActivator") and not s.get("castle")})
@@ -3009,7 +3122,7 @@ def reference_markdown(ref):
         x0, x1 = g["origin"][0] + 12, g["origin"][0] + g["size"][0] * g["cell"] - 12
         z0, z1 = g["origin"][1] + 12, g["origin"][1] + g["size"][1] * g["cell"] - 12
         heads.append(f"| {name} | {x1 - x0:.0f} x {z1 - z0:.0f} | {c[0] - x0:.0f} / {x1 - c[0]:.0f} / {c[2] - z0:.0f} / {z1 - c[2]:.0f} | "
-                     f"{c[1]:.1f} | {Terrain.MAX_Y - c[1]:+.1f} / {Terrain.MIN_Y - c[1]:+.1f} |")
+                     f"{c[1]:.1f} | {Terrain.max_world(c[1]) - c[1]:+.1f} / {Terrain.MIN_Y - c[1]:+.1f} |")
     L.append("\n| Host | Playable rectangle (m) | Castle to west / east / south / north edge (m) | Castle y | Terrain headroom up / down from the castle (m) |")
     L.append("|---|---|---|---|---|")
     L += heads
@@ -3018,7 +3131,9 @@ def reference_markdown(ref):
     L.append("## Buildings (slot kinds)\n")
     L.append("Per level: cost in gold, then each choice (branch) with its income change (+g per dawn), extra HP and what it adds. "
              "Hidden tiers exist in the data but are switched off in normal play (PalaceMod's optional \"Level 4 buildings\" turns them on). "
-             "`add_slot` copies the most complete slot of the kind on the host map, so these trees are what you get.\n")
+             "`add_slot` copies the most complete slot of the kind on the host map, or places the game's standard building of a kind "
+             "the host lacks (`building:<kind>`: " + ", ".join(f"`{b['name'][9:]}`" for b in standard_buildings(ref, maps)) + "), "
+             "so these trees are what you get.\n")
     seen = {}
     for name in maps:
         for s in ref.map(name)["slots"]:

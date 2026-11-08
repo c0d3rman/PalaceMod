@@ -92,7 +92,8 @@ or the edge.
 - **Toolbar** (left, 56 px tiles in one column): the tools, each a `ModTile` with its icon, the key in the corner
   badge, and its name in the tooltip.
 - **Palette** (300 px, collapsible with Tab). Tabs:
-  - **Slots:** every slot kind on the host. Shows the icon, the cost chain and the count on the map.
+  - **Slots:** every slot kind on the host, plus every other kind as the game's standard building (see "Building
+    kinds the host lacks"). Shows the icon, the cost chain and the count on the map.
   - **Scenery:** the host's scenery meshes, with a text filter.
   - **Spawns:** spawn lines: moving the host's, adding new ones, and removing the host's (`spawnLines.remove`: deactivated at load, so no enemies, routes or markers; Studio Delete toggles it, undoable).
   - **Library:** the asset browser slot (see "Asset browser slot").
@@ -115,8 +116,10 @@ or the edge.
 |---|---|---|
 | Select | V | Click selects. Shift-click adds, Ctrl/Cmd-click toggles. **Dragging from empty ground draws a marquee**, using the same Shift/Ctrl rules. Dragging a selected object moves the whole selection. |
 | Lasso | L | Drag a free shape. Selects the objects whose ground point falls inside it, with Shift/Ctrl as above. |
-| Paint select | B | A ground brush (wheel+Alt sizes it). Dragging adds what it passes over, and Alt+drag removes. |
-| Move | G | Grab: the selection follows the cursor. Click commits; Esc or a right click (without a drag) cancels. X/Z lock an axis, and arrow keys nudge by the snap step (Shift ×5). |
+| Paint select | B | A ground**Dev:** `builder-terrain flat [cell] | host [cell] | brush (wheel+Alt sizes it). Dragging adds what it passes over, and Alt+drag removes. |
+| Move | G | Grab: the selection follows the cursor. Click commits; Esc or a right click (without a drag) cancels. X/Z lock an axis, and arrow keys nudge by theking <x> <z> | walk <dx> <dz> <s> | probe <x> <z> [y] [r] | snap | scan | grid | encode | save <pack> | clear`.
+`host` puts a sculptable grid on the map's own ground; `walk` moves the king through his CharacterController (what he
+can climb); `probe` lists the colliders he meets around a point. `save` writesstep (Shift ×5). |
 | Rotate | R | Turns the selection about its centre by mouse. `,` and `.` step by the turn step (they also work in Select). |
 | Place | (palette) | A ghost of the kind follows the cursor. Click places. Shift keeps placing. `,`/`.` turn the ghost. |
 | Link | K | Click dependents (or use the selection), then click their prerequisite: a slot or the castle. See "Requirements". |
@@ -617,6 +620,33 @@ changes applied by the overlay at load (after Awake, before Start):
 Cost: Cleared is S-M and low risk, since it only removes things and keeps the host's ground, walls and graphs
 semantics. Flat field is M on top of W4's ground layer.
 
+### Building kinds the host lacks (`building:<kind>`)
+
+An added slot used to be only a copy of a host slot, so a kind the host lacks couldn't be placed (no Mill on
+Frostsee). Every player building kind is also a `Resources` prefab in `resources.assets` (the `ResourceManager`
+container lists them: `mill variant`, `field variant`, `mine shaft`, `fishing harbour`, `heros quarter variant`,
+`archer hut`, `swordsmen hut`, `temple`, ...), and that prefab is the **whole build slot**, not just a mesh: `BuildSlot`
+with its upgrade tree, the blueprint and built parents, interactor, cost display, health bar, feedbacks, troops and the
+upgrade-effect objects (e.g. the Mill's `Mill_ImprovedPlow`, `Mill_ImprovementExplosiveTrap`,
+`Mill_Improvement_Scarecrows`). The maps' slots are instances of these prefabs. So no harvest and no reading of other
+level files is needed: `Resources.Load` works in any scene.
+
+- **Data:** `buildSlots.add[].base` takes `"building:<kind>"` besides `"scene:<host slot>"` (`Model/ContentRef.cs`,
+  `BuildingRefs`: archery-range, barracks, barricades, blacksmith, bridge, defense-tower, field, gold-mine, harbour,
+  heros-quarter, house, mill, royal-forge, shrine, summoning-circle, temple). No version bump; the validator refuses
+  an unknown kind. Walls aren't offered: every map has them and a wall piece is part of its gate.
+- **Play (`LevelOverlay`):** the prefab is instantiated exactly like a cloned host slot (inactive holder, deterministic
+  save GUID, cost edits, requirements, then activation under the castle's parent). The prefab has no map wiring, so
+  with no `requires` it needs castle level 1 (`LevelRequirements.Effective` and `ApplyRequirements` agree).
+- **Studio:** `StudioScene.Enter` adds a palette base (`NativeSlot.Standard`, named by its base) for each kind the
+  host has no copyable slot of, with its proxy look from the prefab; it is never an object on the map. Placing one
+  writes `building:<kind>` and the castle level 1 default (then auto-link). Kinds the host has still copy the nearest
+  host slot, so the map's own tuning wins where it exists.
+- **Agents:** `agent host` adds `buildings` (each standard building in the slots' shape, named `building:<kind>`);
+  `palace.py add_slot {"kind": "Mill"}` falls back to it when the host has none.
+- Dev: `builder-level buildings` prints each standard building's tree and how the loaded map's own slots of that kind
+  differ from it.
+
 ## Terrain
 
 ### How the map's ground works (from the code)
@@ -691,7 +721,7 @@ night starts).
 | Walkable ramps and plateaus as pieces | yes | M | Needs a generated readable mesh plus a `MeshCollider` (the king) on the Ground layer. |
 | Water planes and shorelines | yes | M | Visual: the ocean or water material. Blocking: a footprint cut from the heightfield, or a layer-7 blocker. |
 | Sculpting on a **Flat field** (heightfield replaces the ground) | built | L | Air surface (recast on layer 9: generated), minimap rebuild, rescan time, boundary walls, y ≥ -8. |
-| Sculpting **on a vanilla map's ground** | partly | L+ | The host ground is one combined mesh with hand-made walls and colliders. Raising is possible (heightfield patches on top); lowering and digging aren't, without replacing the ground. Later. |
+| Sculpting **on a vanilla map's ground** | built (R2) | L+ | Sculpted cells replace the host's ground: `Level/HostCut.cs` cuts them out of the host's Ground-layer meshes and colliders (exact clipping), so raise, lower, ramps and water all work. Fliers keep the host's flier surface. |
 | Removing parts of a vanilla map piecemeal | partly | M-L | MeshFusion can cut sources from combined meshes (`CombinedObject.cs:109-112`), but whether the scenes keep their sources is unverified. v1 only does all-or-nothing (Cleared). |
 
 ### Design (W4, as built)
@@ -705,7 +735,8 @@ night starts).
 | T2 brushes | done | Raise/lower, flatten, set height, smooth, material paint; live re-mesh while dragging. |
 | T3 walkable paint + pieces | paint done; pieces not built | Block/unblock on any base. Cliffs, plateaus and ramps are brush work on a flat field (a hard-edged Set height makes a plateau with cliff sides; the Ramp brush cuts a walkable slope). Blocking rock and cliff *pieces* on a map's own ground are the existing solid props (`LayoutScene.SetSolid`); walkable ramp pieces on a map's own ground are deferred (see "Not built"). |
 | T4 water | done (flat field) | Water brush and water level; the bed is dug 1 m below the surface, banks turn to sand, water cells are blocked for ground units and the king. |
-| Later | | Raise-only patches on a map's own ground, piecemeal scenery removal on vanilla maps. |
+| R2 | done | Sculpting on a map's own ground (HostCut), smooth paint (format 2), cliff walls for the king, live ramp preview and an exact cursor on cliffs, the brush strip as icons, the height ceiling relative to the castle. |
+| Later | | Piecemeal scenery removal on vanilla maps; fliers over raised host ground. |
 
 **Data** (`LevelDef.terrain`, `Model/TerrainDef.cs`; encoded by `Level/GroundCodec.cs`, unit-tested):
 
@@ -717,8 +748,10 @@ night starts).
   "y": 0.0,                   // world height of 0 (the castle's height for a new field)
   "heights": "<b64>",         // (w+1)*(h+1) corners, row-major (z*(w+1)+x): int16 cm relative to y, delta-coded along
                               // that order, little-endian, raw deflate
-  "materials": "<b64>",       // byte per cell (z*w+x), raw deflate: 0 grass, 1 high grass, 2 low grass, 3 earth,
-                              // 4 sand, 5 road, 6 rock
+  "format": 2,                // 1 (absent): materials per cell; 2: per paint sample
+  "materials": "<b64>",       // byte per paint sample ((w*paintRes) x (h*paintRes), row-major), raw deflate: 0 grass,
+                              // 1 high grass, 2 low grass, 3 earth, 4 sand, 5 road, 6 rock
+  "paintRes": 2,              // paint samples per cell edge (format 2)
   "blocked": "<b64>",         // bit per cell (LSB first), raw deflate: ground units and the king can't enter; fliers can
   "water": { "level": -1.0, "cells": "<b64 bitmask>" }   // level relative to y; water cells are unwalkable
 }
@@ -729,8 +762,14 @@ night starts).
 - Measured sizes: a plain field ~100 characters; the acceptance field (plateau, ramp, hill, pond, road patch, blocked
   strip) ~800. Share codes stay under the 2,000-character chat size for typical sculpting; heavy sculpting goes
   through `.tfpack` as `SharingUI` already suggests.
-- Heights are clamped to [-8, +30] m world. Below -10 the game respawns the king.
-- `heights`, `materials` and `water` only show on `"base": "flat"`; `blocked` works on every base.
+- Heights reach from world -8 m (below -10 the game respawns the king) to 30 m above `y` (at least world 30 m:
+  `TerrainGrid.MaxWorld`), so a high host (Sturmklamm, castle y 31) can still build up.
+- On `"base": "flat"` heights are relative to `y`. On any other base they are **offsets from the host's ground**
+  (sampled at each corner by raycasting its Ground-layer colliders when the terrain is shown; 0 = untouched), and a
+  cell any of whose corners moved is *sculpted*: the terrain draws it and the host's ground is cut away under it.
+  Every field works on every base.
+- Format 2 (R2): materials per paint sample. Format-1 packs (a material per cell) decode with each cell spread over its
+  samples and save as format 2; a format newer than the mod's is refused with "update PalaceMod".
 
 **Runtime (play and the Studio's edit load):** `LevelOverlay` calls `GroundLayer.Apply(scene, pack, level, issues)`
 after the empty base's scenery hide, before Start.
@@ -739,8 +778,26 @@ after the empty base's scenery hide, before Start.
   hidden (and MeshFusion is kept off them), with the Ground-layer colliders, the invisible walls and the flier surface.
   Ocean-material planes go too unless they reach past both opposite edges of the field (a sea, e.g. Frostsee's,
   stays so the field reads as an island): Moorweg draws its ponds with the ocean material. The generated ground
-  replaces them. Steep faces (> 32°: the graphs' max slope is 30°) are drawn with the rock material, so cliffs read
-  as cliffs; grass next to water is drawn as sand. Slots and the king are put on the new ground.
+  replaces them. Triangles steeper than the ground graphs' max slope (30° on every host; read from the graphs) are
+  drawn with the rock material, so cliffs read as cliffs, and each gets an invisible wall (a prism on the Obstacle
+  layer with a collider only, so the graphs don't see it) the king can't pass: what the king can walk down, he can
+  walk back up, exactly where enemies can. (The Far Bank bug: the river bank was a 60° face of one 2 m cell; the king,
+  slope limit 45°, slid down it, landed against the water's blocker columns and couldn't climb back; the "invisible
+  warrior" to the left was the ford's own bank, another face he couldn't climb.) Slots and the king are put on the
+  new ground.
+- Paint is drawn as smooth outlines over the ground (`Level/PaintOutline.cs`): per material, the paint samples' "is
+  this material" field is blurred (3x3 binomial), sampled bilinearly on a 0.5 m lattice and filled by marching squares
+  at 0.42 (just under half, so neighbouring paints overlap instead of leaving a seam); each material is a submesh a
+  few cm over the ground (later materials higher), on layer Default (not rasterized, no collider); whole cells use the
+  ground's own two triangles. Cliff cells keep their rock. Grass by water and under it is drawn as sand, so the shore
+  follows the bank; the water plane also covers the bank cells that cross its level, so the shoreline is where the
+  slope meets the water.
+- A map's own ground (`Level/HostCut.cs`): when the terrain is shown, the host's Ground-layer renderers (the
+  MeshFusion-combined ground the graphs rasterize) and MeshColliders are collected; whenever the sculpted set changes,
+  each is swapped for a copy with the sculpted cells' rectangles subtracted from every triangle (convex pieces,
+  attributes interpolated). Sculpted cells get a 1 m skirt along edges that meet the host's ground, hiding the few-cm
+  seam between the host's surface and the grid's 2 m sampling of it. Paint outside sculpted cells lies on the host's
+  ground (raycast). The graphs' height range is widened to the sculpted heights.
 - The field draws with copies of the host's seven ground materials (`GroundLayer.Recolour`, re-run on
   `ColorAndLightManager.OnColorChange`): the scheme's colours are copied over, then `GroundPalette.Resolve` moves
   paints apart where the scheme gives several one colour (every scheme has ground = high = low; Moorweg, Nordfels and
@@ -763,14 +820,23 @@ after the empty base's scenery hide, before Start.
 | Flatten | Levels to the height under the press | | Size, Softness |
 | Set height | Levels to the strip's height (Softness 0: a plateau with cliff sides) | Alt-click samples | Size, Height, Softness |
 | Smooth | Averages with neighbours | | Size, Strength |
-| Ramp | From the press (top) to the release (bottom): a straight slope between the two heights | | Width |
-| Material | Paints the chosen material | | Size, Material |
+| Ramp | From the press (top) to the release (bottom): a straight incline between the ground's heights there; the ground previews while dragging, the status bar shows the incline and the guide lines turn red past 30° | | Width |
+| Material | Paints the chosen material (smooth edges) | | Size, swatches |
 | Block | The walkable mask | Shift unblocks | Size |
 | Water | Water cells (the bed is dug to 1 m below the level) | Shift dries | Size, Water level |
 
-- On a map's own ground only Block is offered; the others need a Flat field (chosen in the Start popup).
-- `[` and `]` size the brush. A ring on the ground (an `IStudioOverlay`) shows it; the ramp shows its line while
-  dragging. Blocked cells are drawn as a red wash in edit mode only.
+- The strip: the eight brushes as icon tiles (1-8 pick them while the tool is active: `StudioTool.Digit`; the lit
+  tile is the brush, its number in the corner, a tooltip says what it does), one line with the brush's modifier
+  (Shift lowers / unblocks / dries, Alt-click picks a height), its numbers (Size or Width, Strength, Softness, Height,
+  Water level), and for Material the seven paints as swatches in the colours the field draws them (`PaintColour`).
+- Every brush works on every base (a map's own ground included, see HostCut).
+- `[` and `]` or Alt+wheel size the brush. A ring on the ground (an `IStudioOverlay`) shows it, in the brush's colour
+  (Shift's inverse colour while Shift is held), with an inner ring where a soft brush's full strength ends; the ramp
+  shows its centre line and both sides while dragging. Blocked cells are drawn as a red wash in edit mode only.
+- The cursor meets sculpted ground exactly (`TerrainGrid.Raycast` marches the heightfield; on a map's own ground a
+  Ground-layer raycast). It used to intersect a horizontal plane at the camera pivot's height and then sample the
+  ground there, which put a press near a plateau's far edge on the low ground behind it: the ramp's top came out at
+  the bottom's height, so the "ramp" cut a level trench (the R1 ramp bug).
 - Each stroke is one undo step (`Studio.Edit` writing `LevelDef.terrain`). Undo, redo and other edits rebuild the
   shown ground from the level when it differs (`Studio.ItemsChanged`, compared by `GroundLayer.KeyOf`).
 - Esc during a stroke drops it.
@@ -781,17 +847,19 @@ at once. On release the graphs are **stale** (`IStudioTerrain.PathsStale`; the s
 and updates them on click). A local `GraphUpdateObject` costs a full scan (one-tile graphs), so `UpdatePaths` is a
 full `GroundGraphs.Scan`: 400-800 ms on a Nordfels field. Play reloads the map, so F5 needs no rescan of its own.
 
-**Dev:** `builder-terrain flat [cell] | brush <name> [size] | stroke [shift] <x> <z> ... | raise/flatten/smooth/ramp/
-paint/block/water ... | waterlevel | marks | king <x> <z> | snap | scan | grid | encode | save <pack> | clear`.
-`save` writes the shown terrain into a one-level pack; `builder-req play <pack>` plays it.
+**Dev:** `builder-terrain flat [cell] | host [cell] | brush <name> [size] | stroke [shift] <x> <z> ... |
+raise/flatten/smooth/ramp/paint/block/water ... | waterlevel | marks | king <x> <z> | walk <dx> <dz> <s> |
+probe <x> <z> [y] [r] | snap | scan | grid | encode | save <pack> | clear`. `host` puts a sculptable grid on the map's
+own ground; `walk` moves the king through his CharacterController (what he can climb); `probe` lists the colliders he
+meets around a point. `save` writes the shown terrain into a one-level pack; `builder-req play <pack>` plays it.
 
 **Not built (and why):**
 
-- **Sculpting a map's own ground** (raise, lower, ramps as pieces on vanilla maps): the host ground is one combined
-  mesh with hand-placed walls and colliders. Raising would need heightfield patches drawn over it that blend at their
-  edges and cut the host's ground for the king's collider; lowering needs the host ground replaced. Flat field covers
-  sculpting; on vanilla maps, Block paint plus solid scenery props shape the walkable area.
-- **Water on a map's own ground:** the water plane needs ground below it, which only the flat field controls.
+- **Fliers over raised host ground:** on a map's own ground the fliers keep the host's flier surface (a fixed mesh
+  5 m over the original ground), so they pass through hills raised more than ~5 m. Replacing it would mean building a
+  flier surface over the whole host, which the flat field does.
+- **Offline checks of sculpted host ground:** `palace.py check`/`render` model a flat field's heights but not
+  sculpting on a map's own ground; `paths` in game is the truth there.
 
 **Acceptance (T1 + T2), verified in a pool instance on Nordfels** (a flat field with a 4 m plateau round the castle,
 a ramp, a hill, a pond and a blocked strip, saved as a pack and played):
@@ -1047,6 +1115,7 @@ All are additive except one, `DesignPack.CurrentVersion` 1 → 2: `Migrations.St
 | `spawnLines.add` applied (fields exist) | `LevelOverlay` | W3 |
 | `terrain {…}` | `LevelDef` (see "Terrain") | W4 |
 | `props[].base`: `"mesh:<name>[@<Map>]"` also resolves from the scenery library | `PropDef.Base` | W5 |
+| `buildSlots.add[].base`: `"building:<kind>"` (the game's standard building, any map) | `BuildSlotAdd.Base` | R2-D |
 
 The validator covers each, with paths so the Problems popup can select the object.
 

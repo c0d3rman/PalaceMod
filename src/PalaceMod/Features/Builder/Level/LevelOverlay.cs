@@ -77,15 +77,28 @@ namespace PalaceMod.Builder.Level
             {
                 if (add?.Id == null) continue;
                 var baseRef = ContentRef.Parse(add.Base ?? "");
-                if (baseRef.Kind != RefKind.Scene || !slots.TryGetValue(baseRef.Id, out var source)) { issues.Add(Warn($"slot \"{add.Id}\": no build slot \"{add.Base}\" on {level.Host} to copy")); continue; }
-                if (!LayoutScene.CanBeBase(source)) { issues.Add(Warn($"slot \"{add.Id}\": {source.name} can't be copied")); continue; }
+                BuildSlot source;
+                Transform parent;
+                if (baseRef.Kind == RefKind.Building)
+                {
+                    // The game's standard building of a kind (any map): its Resources prefab, placed beside the castle.
+                    source = BuildingPrefabs.Load(baseRef.Id);
+                    if (source == null) { issues.Add(Warn($"slot \"{add.Id}\": no standard building \"{baseRef.Id}\"")); continue; }
+                    parent = all.FirstOrDefault(LayoutScene.IsCastle)?.transform.parent;
+                }
+                else
+                {
+                    if (baseRef.Kind != RefKind.Scene || !slots.TryGetValue(baseRef.Id, out source)) { issues.Add(Warn($"slot \"{add.Id}\": no build slot \"{add.Base}\" on {level.Host} to copy")); continue; }
+                    if (!LayoutScene.CanBeBase(source)) { issues.Add(Warn($"slot \"{add.Id}\": {source.name} can't be copied")); continue; }
+                    parent = source.transform.parent;
+                }
                 var go = UnityEngine.Object.Instantiate(source.gameObject, holder.transform);
                 go.name = LayoutScene.AddedPrefix + add.Id;
                 go.transform.SetPositionAndRotation(LayoutScene.ToVector(add.Pos), LayoutScene.WithYaw(source.transform.rotation, add.RotY));
                 LayoutScene.SetGuid(go, LayoutScene.Guid(pack.Id, level.Id, add.Id));
                 var clone = go.GetComponent<BuildSlot>();
                 ApplyCosts(clone, add.Upgrades);
-                clones.Add((add, clone, source.transform.parent));
+                clones.Add((add, clone, parent));
             }
 
             wired = ApplyRequirements(level, host, slots, clones.ToDictionary(c => SlotRefs.Added(c.def.Id), c => c.slot, StringComparer.Ordinal), issues);
@@ -93,6 +106,7 @@ namespace PalaceMod.Builder.Level
             foreach (var (_, clone, parent) in clones)
             {
                 clone.transform.SetParent(parent, true);
+                if (parent == null && clone.gameObject.scene != scene) SceneManager.MoveGameObjectToScene(clone.gameObject, scene);
                 added++;
             }
             UnityEngine.Object.Destroy(holder);
@@ -195,7 +209,7 @@ namespace PalaceMod.Builder.Level
             foreach (var a in level.BuildSlots?.Add ?? [])
                 if (a?.Id != null && clones.ContainsKey(SlotRefs.Added(a.Id)))
                     if (a.Requires != null) wanted[SlotRefs.Added(a.Id)] = a.Requires;
-                    else if (LevelBases.IsEmpty(level)) wanted[SlotRefs.Added(a.Id)] = LevelRequirements.CastleLevel(1);
+                    else if (LevelBases.IsEmpty(level) || BuildingRefs.IsBuilding(a.Base)) wanted[SlotRefs.Added(a.Id)] = LevelRequirements.CastleLevel(1);
 
             // Drop what can't be applied, and loops (checked against the whole graph, host prerequisites included).
             foreach (var key in wanted.Keys.ToList())

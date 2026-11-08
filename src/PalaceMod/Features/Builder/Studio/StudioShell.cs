@@ -337,6 +337,8 @@ namespace PalaceMod.Builder.Studio
             var cam = Camera.main;
             if (cam == null) return false;
             var ray = cam.ScreenPointToRay(screen);
+            // Sculpted ground: the exact hit (a ground-plane guess lands behind a cliff's top edge).
+            if (GroundLayer.TryRaycast(ray, out point)) return true;
             float height = StudioCamera.Ready ? StudioCamera.Pivot.y : 0f;
             for (int i = 0; i < 2; i++)
             {
@@ -509,7 +511,10 @@ namespace PalaceMod.Builder.Studio
                     foreach (var t in Studio.Tools)
                         if (t.Key?.Down == true) { SetTool(t.Id); return; }
                     for (int i = 0; i < 9; i++)
+                    {
+                        if (StudioKeys.Hotbar[i]?.Down == true && Tool?.Digit(i) == true) return;
                         if (StudioKeys.Hotbar[i]?.Down == true && i < recent.Count) { Arm(recent[i], recentYaw.TryGetValue(recent[i].Id, out var y) ? y : 0f); return; }
+                    }
                 }
             }
             // Arrow keys nudge the selection by the snap step (Shift x5), along the view's axes.

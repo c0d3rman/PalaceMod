@@ -35,6 +35,7 @@ namespace PalaceMod.Tests
                  {"op": "add_slot", "id": "h3", "kind": "House", "at": [0, 10]},
                  {"op": "chain", "slots": ["h1", "h2", "h3"], "mode": "order"},
                  {"op": "set_slot", "slot": "h3", "costs": [5], "upgradeCap": 0},
+                 {"op": "add_slot", "id": "m1", "kind": "Mill", "at": [12, -6]},
                  {"op": "add_spawn_line", "id": "north", "at": [0, 30], "width": 12, "flying": false},
                  {"op": "terrain", "mode": "set", "height": 5, "circle": {"center": [0, 0], "radius": 15}, "falloff": 2},
                  {"op": "ramp", "from": [0, -12], "to": [0, -30], "width": 14, "fromHeight": 5, "toHeight": 0},
@@ -69,6 +70,8 @@ namespace PalaceMod.Tests
                 Assert.Equal(5, adds[2].Upgrades[0].Cost, "cost edit");
                 Assert.Equal(0, adds[2].UpgradeCap, "cap");
                 Assert.Equal(5f, adds[2].Pos[1], "y from the terrain plateau");
+                Assert.Equal("building:mill", adds[3].Base, "a kind the map lacks is the game's standard building");
+                Assert.Equal("castle", adds[3].Requires.Slot, "which needs the castle");
 
                 var grid = GroundCodec.Decode(level.Terrain);
                 Assert.True(Math.Abs(grid.HeightAt(0f, 0f) - 5f) < 0.02f, $"plateau height {grid.HeightAt(0f, 0f)}");
@@ -76,7 +79,7 @@ namespace PalaceMod.Tests
                 Assert.True(Math.Abs(grid.HeightAt(-40f, 30f)) < 0.01f, "untouched ground stays at 0");
                 Assert.True(grid.CellAt(25f, -10f, out int wx, out int wz) && grid.Water[grid.CellIndex(wx, wz)], "water cell");
                 Assert.True(grid.CellAt(-30f, -30f, out int bx, out int bz) && grid.Blocked[grid.CellIndex(bx, bz)], "blocked cell");
-                Assert.True(grid.CellAt(0f, -30f, out int rx, out int rz) && grid.Materials[grid.CellIndex(rx, rz)] == (byte)GroundMaterial.Road, "road cell");
+                Assert.True(grid.MaterialAt(0f, -30f) == GroundMaterial.Road, "road cell");
                 Assert.Equal(9, pack.FindWaveSet(level.WaveSet).StartingGold, "starting gold");
                 Assert.Equal("Totend", level.Colors, "level colours");
                 Assert.True(level.Props.First(x => x.Id == "r1").Colors == null, "original colours of the host's own scenery are the level's");
@@ -454,6 +457,9 @@ print("ok")
                "upgrades": [{"cost": 3, "branches": [{}]}, {"cost": 7, "branches": [{}]}]},
               {"name": "House Variant", "kind": "House", "pos": [5, 0, 8], "startDeactivated": true, "activator": "Castle", "activatorLevel": 0,
                "upgradeCap": 0, "canBeBase": true, "upgrades": [{"cost": 2, "branches": [{"income": 1}]}]}],
+             "buildings": [
+              {"name": "building:mill", "kind": "Mill", "startDeactivated": true, "canBeBase": true,
+               "upgrades": [{"cost": 4, "branches": [{"income": 1}]}, {"cost": 6, "branches": [{"income": 1}]}]}],
              "spawnLines": [{"name": "Gate", "center": [0, 0, -45], "points": [[-5, 0, -45], [5, 0, -45]], "flying": true, "smallGround": true, "bigGround": true}],
              "scenery": [{"base": "mesh:Rock A", "name": "Rock A", "count": 3, "size": [4, 4, 4]}]}
             """);
