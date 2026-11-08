@@ -425,8 +425,9 @@ base's activator, which is removed on an empty map, so it would never appear: `L
 - During a Studio swap, `cloudFadeInTime` and `cloudFadeOutTime` (`SceneTransitionManager`, fields read in
   `SceneTransitionAnimation`) are set to 0.12 s and restored after. The load itself is the cost. Each switch logs
   its time (`Studio: play ready in … ms`, `edit ready in …`). Measured on Nordfels in a pool instance (Apple
-  Silicon, native) with the shell: edit → play 1.2-1.3 s (scene loaded at ~1.0 s), play → edit 2.0-2.1 s, of
-  which the scene load is ~0.85 s and the rest is the shell's edit Enter (proxies, labels, dock). Play → play
+  Silicon, native, other instances running), three round trips: edit → play 1.0-1.3 s; play → edit 1.5-1.6 s, of
+  which the scene load is 0.85-1.0 s and the shell's edit Enter ~0.6 s (proxies kept across reloads of the same
+  host). Load time varies with machine load (one play → edit took 2.6 s with a 1.9 s scene load). Play → play
   (Restart) 0.9 s. From the title the first load takes about 5 s.
 - The menu stays visible under the clouds, as today.
 - The pre-level loadout, perk screen and "Custom run" notice are skipped. The night-warning `Notify` stays: it's the
