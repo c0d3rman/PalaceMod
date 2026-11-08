@@ -20,6 +20,9 @@ namespace PalaceMod.Builder.Studio
         public Vector3 Pos;
         public Quaternion Rot;
         public bool Castle, CanBase, CanMove, AddOn;
+        /// <summary>Not a host slot: the game's standard building of a kind the host lacks (Name is its
+        /// "building:&lt;kind&gt;" base). Only a palette base, never an object on the map.</summary>
+        public bool Standard;
         public List<int> Costs;
         public GameObject Look;        // the hidden proxy template (blueprint look)
         /// <summary>The units it trains, where the map has them (empty for most slots).</summary>
@@ -117,6 +120,23 @@ namespace PalaceMod.Builder.Studio
                 }
                 natives[slot.name] = info;
             }
+            // Kinds the host doesn't have: the game's standard building of that kind (BuildingPrefabs).
+            var hostKinds = new HashSet<string>(natives.Values.Where(n => n.CanBase).Select(n => n.Type), StringComparer.Ordinal);
+            foreach (var (id, prefab) in BuildingPrefabs.All())
+            {
+                string type = LayoutScene.TypeName(prefab);
+                if (!hostKinds.Add(type)) continue;
+                string name = BuildingRefs.Ref(id);
+                var cached = looks.Find("look " + name);
+                natives[name] = new NativeSlot
+                {
+                    Name = name, Type = type, Pos = Vector3.zero, Rot = prefab.transform.rotation, CanBase = true, CanMove = true, Standard = true,
+                    Costs = prefab.OwnUpgrades.Select(u => u.cost).ToList(),
+                    Look = cached != null ? cached.gameObject : LayoutScene.Proxy(prefab.gameObject, looks, "look " + name),
+                };
+                try { natives[name].Units = UnitHomes.Spots(prefab); }
+                catch (Exception e) { Log.For<BuilderManager>().Caught($"Studio: reading {name}'s units failed", e); }
+            }
             long proxies = clock.ElapsedMilliseconds;
             foreach (var line in LayoutScene.Lines(s).Where(l => l.canSpawnSmallGround || l.canSpawnBigGround || l.canSpawnFlying))
             {
@@ -169,6 +189,7 @@ namespace PalaceMod.Builder.Studio
         public static void Reconcile(LevelDef lv)
         {
             if (lv == null || Root == null) return;
+            StudioServices.Colors?.ApplyLevel(lv.Colors);
             var seen = new HashSet<string>(StringComparer.Ordinal);
             bool empty = LevelBases.IsEmpty(lv);
             ordered.Clear();
@@ -176,7 +197,7 @@ namespace PalaceMod.Builder.Studio
             foreach (var n in natives.Values.OrderBy(n => n.Castle ? 0 : 1).ThenBy(n => n.Name, StringComparer.Ordinal))
             {
                 // An empty base removes every slot but the castle; they stay palette bases, not objects on the map.
-                if (empty && !n.Castle) continue;
+                if ((empty && !n.Castle) || n.Standard) continue;
                 var edit = lv.BuildSlots?.Edit?.FirstOrDefault(e => e?.Ref == n.Name);
                 var item = Get("slot:" + n.Name, StudioItemKind.Slot, n.Name);
                 nativeOf[item.Key] = n;
@@ -202,7 +223,7 @@ namespace PalaceMod.Builder.Studio
             {
                 if (add?.Id == null) continue;
                 addIndex++;
-                var baseName = ContentRef.Parse(add.Base ?? "").Id;
+                var baseName = BaseName(add.Base);
                 if (baseName == null || !natives.TryGetValue(baseName, out var n) || n.Look == null) continue;
                 var item = Get("add:" + add.Id, StudioItemKind.Added, add.Id);
                 if (nativeOf.TryGetValue(item.Key, out var was) && was != n && item.Proxy != null) { UnityEngine.Object.Destroy(item.Proxy); item.Proxy = null; }
@@ -230,6 +251,7 @@ namespace PalaceMod.Builder.Studio
                 item.Pos = LayoutScene.ToVector(prop.Pos);
                 item.Yaw = prop.RotY;
                 EnsureProxy(item, () => LayoutScene.MakeProp(Scene, b, "edit " + prop.Id, item.Pos, item.Yaw, 1f, false));
+                StudioServices.Colors?.Paint(item.Proxy, b, prop.Colors);
                 item.Proxy.transform.SetParent(Root, true);
                 item.Proxy.transform.SetPositionAndRotation(item.Pos, Quaternion.Euler(0f, item.Yaw, 0f) * b.Upright);
                 item.Proxy.transform.localScale = b.Scale * Mathf.Clamp(prop.Scale, 0.1f, 10f);
@@ -286,6 +308,15 @@ namespace PalaceMod.Builder.Studio
             catch (Exception e) { Log.For<BuilderManager>().Caught($"Studio prop resolver failed on {baseRef}", e); }
             return b ?? propBases.FirstOrDefault(p => p.Id == baseRef);
         }
+
+        /// <summary>The native an added slot's base names: a host slot name for "scene:X", the whole ref for a
+        /// standard building ("building:mill").</summary>
+        public static string BaseName(string baseRef) =>
+            BuildingRefs.IsBuilding(baseRef) ? baseRef : ContentRef.Parse(baseRef ?? "").Id;
+
+        /// <summary>The level's base string for a native's name (inverse of BaseName).</summary>
+        public static string BaseRef(string nativeName) =>
+            BuildingRefs.IsBuilding(nativeName) ? nativeName : "scene:" + nativeName;
 
         private static StudioItem Get(string key, StudioItemKind kind, string id)
         {

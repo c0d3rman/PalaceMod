@@ -29,9 +29,21 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("props")] public List<PropDef> Props { get; set; }
         /// <summary>Generated or edited ground (Model/TerrainDef.cs); null keeps the host's.</summary>
         [JsonProperty("terrain")] public TerrainDef Terrain { get; set; }
+        /// <summary>A main map whose colour scheme the whole level uses (ground, scenery, buildings, light);
+        /// null keeps the host's.</summary>
+        [JsonProperty("colors")] public string Colors { get; set; }
         /// <summary>Editor groups (Studio metadata, ignored when playing).</summary>
         [JsonProperty("groups")] public List<GroupDef> Groups { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>The maps whose colour schemes a level or prop can take ("colors").</summary>
+    public static class LevelColors
+    {
+        public static readonly string[] Maps = ["Neuland", "Nordfels", "Durststein", "Frostsee", "Uferwind", "Sturmklamm", "Wildbach", "Moorweg", "Freifort", "Totend"];
+
+        /// <summary>A display name from Maps, or a scene name such as "Neuland(Tutorial)".</summary>
+        public static bool IsMap(string map) => map != null && System.Array.IndexOf(Maps, map.Split('(')[0]) >= 0;
     }
 
     /// <summary>A named set of a level's objects the Studio selects together. Members are Studio item keys
@@ -167,6 +179,9 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("scale")] public float Scale { get; set; } = 1f;
         /// <summary>Whether units walk around it (it's added to the pathfinding graphs at level start).</summary>
         [JsonProperty("solid")] public bool Solid { get; set; } = true;
+        /// <summary>A main map whose colour scheme the prop keeps ("Frostsee"), e.g. the map a library prop comes
+        /// from; null takes the level's colours like the map's own scenery.</summary>
+        [JsonProperty("colors")] public string Colors { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 }

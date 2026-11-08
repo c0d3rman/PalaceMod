@@ -294,7 +294,7 @@ namespace PalaceMod.Builder.Studio
             var d = Studio.Draft;
             var lv = Studio.Level;
             string dot = d?.Dirty == true ? $"  <color=#{ModStyle.Hex(ModStyle.Accent)}>●</color> <size=70%>unsaved</size>" : "";
-            title.text = $"{ModFields.TMPEscape(lv?.Name ?? Studio.LevelId ?? "")} <color=#{ModStyle.Hex(ModStyle.Dim)}>· {ModFields.TMPEscape(d?.Pack.Name ?? "")}</color>{dot}";
+            title.text = $"{ModFields.TMPEscape(lv?.Name ?? Studio.LevelId ?? "")} {(d?.IsLibrary == true ? "" : $"<color=#{ModStyle.Hex(ModStyle.Dim)}>· {ModFields.TMPEscape(d?.Pack.Name ?? "")}</color>")}{dot}";
             undoTile?.SetDim(d?.History.CanUndo != true);
             redoTile?.SetDim(d?.History.CanRedo != true);
             snapTile?.SetText(StudioShell.SnapStep <= 0f ? "Snap off" : $"Snap {StudioShell.SnapStep:0.#} m");

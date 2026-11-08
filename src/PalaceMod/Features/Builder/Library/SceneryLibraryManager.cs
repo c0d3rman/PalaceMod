@@ -24,6 +24,7 @@ namespace PalaceMod
             Browser = new LibraryBrowser(new HostSceneryBrowser());
             StudioServices.AssetBrowser = Browser;
             StudioServices.PropResolver = SceneryLibrary.Resolve;
+            StudioServices.Colors = new StudioColors();
             RegisterDevCommands();
         }
 
@@ -32,11 +33,19 @@ namespace PalaceMod
         public override void Update() => LibraryThumbs.Pump();
 
         private static readonly List<GameObject> placed = [];
+        private static readonly Dictionary<GameObject, PropBase> placedBase = [];
+
+        private sealed class StudioColors : IStudioColors
+        {
+            public string DonorOf(Scene scene, string baseRef) => MapColors.DonorOf(scene, baseRef);
+            public void Paint(GameObject prop, PropBase b, string map) => MapColors.Paint(prop, b, map);
+            public void ApplyLevel(string map) => MapColors.ApplyLevel(map);
+        }
 
         private static void RegisterDevCommands()
         {
             DevCommands.Register("builder-library",
-                "builder-library status | query [here|kind:<Kind>|-] [text] | place <mesh> [x z] | gallery [spacing] | walkable <x> <z> | clear | thumb <mesh> | thumbs [reset]   scenery library", args =>
+                "builder-library status | query [here|kind:<Kind>|-] [text] | place <mesh> [x z] | gallery [spacing] | walkable <x> <z> | colors schemes|level <map|->|<map|-> | clear | thumb <mesh> | thumbs [reset]   scenery library", args =>
             {
                 string sub = args.Length > 0 ? args[0].ToLowerInvariant() : "status";
                 string rest = string.Join(" ", args.Skip(1));
@@ -71,6 +80,7 @@ namespace PalaceMod
                         pos = LayoutScene.Ground(pos);
                         var go = LayoutScene.MakeProp(scene, b, "library " + name, pos, 0f, 1f, true);
                         placed.Add(go);
+                        placedBase[go] = b;
                         return $"placed {name} at {pos} (mesh readable={b.Mesh.isReadable}, from {(b.Mesh.isReadable ? "library" : "host")})";
                     }
                     case "gallery":
@@ -110,7 +120,27 @@ namespace PalaceMod
                         int n = placed.Count(g => g != null);
                         foreach (var g in placed) if (g != null) UnityEngine.Object.Destroy(g);
                         placed.Clear();
+                        placedBase.Clear();
                         return $"removed {n}";
+                    }
+                    case "colors":
+                    {
+                        // schemes: read every map's scheme; level <map|->: the level's scheme; <map|->: the placed props'.
+                        if (rest == "schemes")
+                            return string.Join("\n", SceneryLibrary.Catalog.Colorschemes.Keys.Select(k => MapColors.Scheme(k) is { } s
+                                ? $"  {k}: rock {ColorUtility.ToHtmlStringRGB(s.rockLightColor)} tree {ColorUtility.ToHtmlStringRGB(s.treeLightColor)} ground {ColorUtility.ToHtmlStringRGB(s.groundColor)} shadow {ColorUtility.ToHtmlStringRGB(s.globalShadowColor)}"
+                                : $"  {k}: can't be read"));
+                        if (args.Length > 2 && args[1] == "level")
+                        {
+                            string lm = args[2] == "-" ? null : args[2];
+                            MapColors.ApplyLevel(lm);
+                            return $"level colours: {lm ?? "the host's"}";
+                        }
+                        string map = rest == "-" || rest.Length == 0 ? null : rest;
+                        if (map != null && MapColors.Scheme(map) == null) throw new ArgumentException($"no colour scheme for \"{map}\"");
+                        int n = 0;
+                        foreach (var kv in placedBase) if (kv.Key != null) { MapColors.Paint(kv.Key, kv.Value, map); n++; }
+                        return $"{n} placed props in {map ?? "the level's"} colours";
                     }
                     case "thumb":
                     {

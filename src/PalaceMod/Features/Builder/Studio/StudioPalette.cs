@@ -8,8 +8,8 @@ using UnityEngine;
 using UnityEngine.UI;
 
 /*
-    The palette's tabs: Slots (every slot kind on the host), Scenery (the host's scenery meshes), Spawns (the host's
-    spawn lines) and the Library (StudioServices.AssetBrowser). Clicking a kind arms the Place tool.
+    The palette's tabs: Slots (every slot kind on the host, plus the game's standard building of each kind it lacks),
+    Scenery (the host's scenery meshes), Spawns (the host's spawn lines) and the Library (StudioServices.AssetBrowser). Clicking a kind arms the Place tool.
 */
 namespace PalaceMod.Builder.Studio
 {
@@ -59,7 +59,11 @@ namespace PalaceMod.Builder.Studio
             {
                 string type = g.Key;
                 int onMap = StudioScene.Items.Count(i => (i.Kind is StudioItemKind.Slot or StudioItemKind.Added) && i.TypeName == type && !i.Removed);
-                var row = page.Row($"{type}  <size=75%>{Dim(CostChain(g.First().Costs))}</size>", $"×{onMap}", () => $"Place a {type.ToLowerInvariant()}: copies the nearest {type.ToLowerInvariant()} on the map (its costs and upgrades).",
+                bool standard = g.All(n => n.Standard);
+                string tip = standard
+                    ? $"Place a {type.ToLowerInvariant()}: this map has none, so it's the game's standard {type.ToLowerInvariant()} (the one every map's are copies of). Needs castle level 1 unless you link it."
+                    : $"Place a {type.ToLowerInvariant()}: copies the nearest {type.ToLowerInvariant()} on the map (its costs and upgrades).";
+                var row = page.Row($"{type}  <size=75%>{Dim(CostChain(g.First().Costs))}</size>", $"×{onMap}", () => tip,
                     () => ArmSlot(type), PlannerIcons.Kind(type));
                 Shrink(row, armed == "slot:" + type);
             }

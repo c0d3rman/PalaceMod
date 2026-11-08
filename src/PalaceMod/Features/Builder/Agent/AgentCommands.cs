@@ -130,7 +130,7 @@ namespace PalaceMod.Builder.Agent
                     return Json(new JObject { ["loading"] = $"{entry.Id}/{level}", ["studio"] = true });
                 }
                 case "library":
-                    return PalaceMod.DesignLibraryManager.Command(args);
+                    return PalaceMod.DesignLibraryManager.Command(args.Skip(1).ToArray());
                 case "infinitegold":
                     Studio.Play.SandboxActions.InfiniteGold = OnOff(args);
                     return Json(new JObject { ["infiniteGold"] = Studio.Play.SandboxActions.InfiniteGold, ["appliesIn"] = "sandbox play only" });
@@ -454,12 +454,7 @@ namespace PalaceMod.Builder.Agent
 
         /// <summary>What blocks playing a level: for the library only that level, its nights and the units they use
         /// (other library items don't matter); for a pack, the whole pack.</summary>
-        private static List<ValidationIssue> PlayIssues(PackEntry entry, string level)
-        {
-            if (entry.Id != DesignLibrary.PackId || level == null) return entry.Issues.ToList();
-            var play = Studio.Play.TestPacks.Play(entry.Pack, level, out string error) ?? throw new ArgumentException(error);
-            return BuilderServices.Packs.Validate(play);
-        }
+        private static List<ValidationIssue> PlayIssues(PackEntry entry, string level) => DesignLibrary.PlayIssues(entry, level).ToList();
 
         /// <summary>A draft to open a level in: the library's workspace for that level, or the pack itself.</summary>
         private static Editor.PackDraft Draft(PackEntry entry, string level) =>

@@ -1,6 +1,18 @@
 {
  "unity": "2022.3.62f2",
  "maps": ["Neuland(Tutorial)", "Nordfels", "Durststein", "Frostsee", "Uferwind", "Sturmklamm", "Wildbach", "Moorweg", "Freifort", "Totend"],
+ "colorschemes": {
+  "Neuland(Tutorial)":{"file":"sharedassets1.assets","pathId":1817,"name":"Neuland"},
+  "Nordfels":{"file":"sharedassets1.assets","pathId":1818,"name":"Nordfels New"},
+  "Durststein":{"file":"sharedassets1.assets","pathId":1811,"name":"Durststein"},
+  "Frostsee":{"file":"sharedassets1.assets","pathId":1814,"name":"Frostsee"},
+  "Uferwind":{"file":"sharedassets1.assets","pathId":1822,"name":"Uferwind_New"},
+  "Sturmklamm":{"file":"sharedassets1.assets","pathId":1819,"name":"Sturmklamm"},
+  "Wildbach":{"file":"sharedassets1.assets","pathId":1823,"name":"Wildbach"},
+  "Moorweg":{"file":"sharedassets1.assets","pathId":1816,"name":"Moorweg"},
+  "Freifort":{"file":"sharedassets1.assets","pathId":1812,"name":"Freifort"},
+  "Totend":{"file":"sharedassets1.assets","pathId":1820,"name":"Totend B"}
+ },
  "meshes": [
   {"name":"Blob Tree","home":"Neuland(Tutorial)","maps":{"Neuland(Tutorial)":3346,"Wildbach":2826},"file":"sharedassets3.assets","pathId":234,"category":"Trees","materials":["Trees"],"upright":[-0.70711,-0.0,-0.0,0.70711],"scale":[1.0,1.0,1.0],"scaleSpread":0.234,"vertices":41,"size":[4.048,4.029,4.051]},
   {"name":"Rock A","home":"Nordfels","maps":{"Neuland(Tutorial)":133,"Nordfels":257,"Durststein":174,"Frostsee":33,"Sturmklamm":4,"Wildbach":4,"Freifort":15,"Totend":124},"file":"sharedassets3.assets","pathId":230,"category":"Rocks","materials":["Mountain"],"upright":[-0.70711,0.0,0.0,0.70711],"scale":[0.947,0.947,0.947],"scaleSpread":0.73,"vertices":120,"size":[9.705,10.204,14.008]},

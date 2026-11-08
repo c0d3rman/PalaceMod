@@ -47,10 +47,12 @@ Stages 3 to 7 repeat many times, so their actions are one or two inputs each, wi
 
 ```text
 Title / pause menu
-  └ Builder (home: packs)                      ModFrame, as today (PackListPage)
-      └ Pack (Units · Wave Sets · Levels · Pack · Problems)
-          ├ Levels row "Open"  ───────────────►  STUDIO (in-world, on the level's map)
-          └ "New level" → Start popup ────────►  STUDIO
+  └ Builder home (My Levels · My Enemies)      ModFrame, wide tabs of preview tiles (Designs/LibraryHome.cs)
+      ├ level tile ─────────────────────────►  STUDIO (in-world, on the level's map)
+      ├ "New level" → Start popup ──────────►  STUDIO
+      ├ enemy tile / "New enemy" ───────────►  ENEMY STUDIO (StudioServices.Enemies; else the unit page)
+      ├ right-click: Rename · Duplicate · Delete · Export
+      └ Import · Export (packs exist only here)
 STUDIO
   ├ Edit mode: toolbar · palette · inspector/outliner/level · top bar · status line
   ├ popups: context menu, requirement picker, chain preset, start/base, nights, problems, Studio menu
@@ -58,7 +60,7 @@ STUDIO
   └ F5 ⇄ Play mode: the level as it plays + sandbox panel
 ```
 
-Leaving the Studio (Studio menu → Leave) returns to the pack screen where it was opened (today's `EditorReturn`).
+Leaving the Studio (Studio menu → Leave) returns to the home (`EditorReturn`; `BuilderEditor.CurrentPlace` counts the home).
 
 ## The Studio (edit mode)
 
@@ -90,7 +92,8 @@ or the edge.
 - **Toolbar** (left, 56 px tiles in one column): the tools, each a `ModTile` with its icon, the key in the corner
   badge, and its name in the tooltip.
 - **Palette** (300 px, collapsible with Tab). Tabs:
-  - **Slots:** every slot kind on the host. Shows the icon, the cost chain and the count on the map.
+  - **Slots:** every slot kind on the host, plus every other kind as the game's standard building (see "Building
+    kinds the host lacks"). Shows the icon, the cost chain and the count on the map.
   - **Scenery:** the host's scenery meshes, with a text filter.
   - **Spawns:** spawn lines: moving the host's, adding new ones, and removing the host's (`spawnLines.remove`: deactivated at load, so no enemies, routes or markers; Studio Delete toggles it, undoable).
   - **Library:** the asset browser slot (see "Asset browser slot").
@@ -551,6 +554,18 @@ Studio level from above (framing its items) into `levels/<id>.png` on every save
 with `DesignLibrary.SavePreview(DesignKind.Enemy, id, texture)`. `DesignLibrary.Preview(kind, id)` loads a sprite,
 cached until the file changes.
 
+**Home** (`Designs/LibraryHome.cs`; `BuilderEditor.Open` opens it, the old pack list is `BuilderEditor.OpenPackList` for
+dev and installed packs). Two wide tabs, My Levels and My Enemies. A toolbar row (New, Import, Export, a search tile that
+types in place, Sort: Recent / Name / Map or Base) over a grid of 268×214 tiles: the saved snapshot (fallback: the map's
+thumbnail, or the base enemy's icon), the name, and one line of facts (map · nights; base · levels that use it).
+Click opens; right-click gives Open, Name, Duplicate, Export… (levels) or Used in (enemies), Delete… (to trash, with
+the levels that use an enemy named). Tiles of installed packs' levels and enemies follow under a header, dimmed; a
+click copies one into the library (with the enemies it needs). The Export popup picks levels and extra enemies (the
+ones the chosen levels use are listed as included) and saves a `.tfpack` (opens the exports folder) or copies a share
+code. In the Level Studio, the Studio menu's Share/Pack editor rows become Export… for library levels, and each spawn
+group in the nights page gets Edit enemy… / Customize enemy… / New enemy… (`Designs/EnemyEditing.cs`). Dev:
+`library home|open|enemy|new-enemy|rename|duplicate|delete|list|preview|export|code|import`.
+
 **Enemy Studio hook** (`StudioServices.Enemies`, `IStudioEnemyEditor.Open(draft, unitId | null, returnToLevelStudio,
 onReturn, out error)`): R2-C2 implements it; the Level Studio's spawn-group picker ("Edit enemy…", "New enemy…") and
 the home's enemy tiles call it. `DesignLibrary.NewEnemy(draft, baseRef, name)` adds a unit with a free id (one undo
@@ -631,6 +646,33 @@ changes applied by the overlay at load (after Awake, before Start):
 
 Cost: Cleared is S-M and low risk, since it only removes things and keeps the host's ground, walls and graphs
 semantics. Flat field is M on top of W4's ground layer.
+
+### Building kinds the host lacks (`building:<kind>`)
+
+An added slot used to be only a copy of a host slot, so a kind the host lacks couldn't be placed (no Mill on
+Frostsee). Every player building kind is also a `Resources` prefab in `resources.assets` (the `ResourceManager`
+container lists them: `mill variant`, `field variant`, `mine shaft`, `fishing harbour`, `heros quarter variant`,
+`archer hut`, `swordsmen hut`, `temple`, ...), and that prefab is the **whole build slot**, not just a mesh: `BuildSlot`
+with its upgrade tree, the blueprint and built parents, interactor, cost display, health bar, feedbacks, troops and the
+upgrade-effect objects (e.g. the Mill's `Mill_ImprovedPlow`, `Mill_ImprovementExplosiveTrap`,
+`Mill_Improvement_Scarecrows`). The maps' slots are instances of these prefabs. So no harvest and no reading of other
+level files is needed: `Resources.Load` works in any scene.
+
+- **Data:** `buildSlots.add[].base` takes `"building:<kind>"` besides `"scene:<host slot>"` (`Model/ContentRef.cs`,
+  `BuildingRefs`: archery-range, barracks, barricades, blacksmith, bridge, defense-tower, field, gold-mine, harbour,
+  heros-quarter, house, mill, royal-forge, shrine, summoning-circle, temple). No version bump; the validator refuses
+  an unknown kind. Walls aren't offered: every map has them and a wall piece is part of its gate.
+- **Play (`LevelOverlay`):** the prefab is instantiated exactly like a cloned host slot (inactive holder, deterministic
+  save GUID, cost edits, requirements, then activation under the castle's parent). The prefab has no map wiring, so
+  with no `requires` it needs castle level 1 (`LevelRequirements.Effective` and `ApplyRequirements` agree).
+- **Studio:** `StudioScene.Enter` adds a palette base (`NativeSlot.Standard`, named by its base) for each kind the
+  host has no copyable slot of, with its proxy look from the prefab; it is never an object on the map. Placing one
+  writes `building:<kind>` and the castle level 1 default (then auto-link). Kinds the host has still copy the nearest
+  host slot, so the map's own tuning wins where it exists.
+- **Agents:** `agent host` adds `buildings` (each standard building in the slots' shape, named `building:<kind>`);
+  `palace.py add_slot {"kind": "Mill"}` falls back to it when the host has none.
+- Dev: `builder-level buildings` prints each standard building's tree and how the loaded map's own slots of that kind
+  differ from it.
 
 ## Terrain
 
@@ -866,9 +908,18 @@ placed on any map.
   and logged once (Warn); a level that uses it gets the usual "no scenery" warning, and the rest still loads.
 - **Colours:** a library mesh is drawn with the loaded level's material of the same name (the FlatKit materials
   `ColorAndLightManager` recolours per level: Trees, Mountain, Buildings, Enemy, Ground Patches), so it takes the host
-  map's colours. "Keep the donor map's colours" (cloning a material with the donor level's `Colorscheme`) is deferred:
-  the colorschemes live in each level's own file as MonoBehaviour data, which needs a type-tree-free reader for that
-  class too.
+  map's colours by default. **Original colours** (`Library/MapColors.cs`): the catalog also records where each main
+  map's `Colorscheme` asset is (`colorschemes`: all ten live in `sharedassets1.assets`, found through each level's
+  `ColorAndLightManager.colorscheme` reference by the generator). `AssetFileReader.ReadColorscheme` reads one from
+  the install (fixed layout: the MonoBehaviour header, then the colour fields in declaration order with
+  `dayLightColor` skipped as readonly and the particles prefab reference in between; checked by name and exact
+  size) into a new `Colorscheme`, cached for the session. A prop's `colors: "<Map>"` swaps each material
+  `ColorAndLightManager` recolours (found by reference on its fields) for a clone coloured from that scheme the way
+  `ApplyColorScheme` does it; the clones' outlines follow the host's sunlight through dusk and dawn
+  (`OnColorChange`). Inspector: "Colours" on any scenery selection toggles between "Level's" and the map it comes
+  from (the library entry's "@Map" or home map; the host for its own scenery). The level's `colors` (Level tab,
+  "Colours") gives the whole level another map's scheme through the game's own `EasySwitchEntireColorSchemeTo` (set
+  before `ColorAndLightManager.Start` in play), keeping the host's weather particles.
 - **Refs:** placed library items are ordinary `props` entries with `base: "mesh:<name>"`, optionally
   `"mesh:<name>@<Map>"` should two maps ever ship a mesh by the same name (the catalog generator refuses that case
   today). `SceneryLibrary.Resolve(scene, base)` looks in the host's own scenery first (so existing levels look the
@@ -907,6 +958,7 @@ All are additive except one, `DesignPack.CurrentVersion` 1 → 2: `Migrations.St
 | `spawnLines.add` applied (fields exist) | `LevelOverlay` | W3 |
 | `terrain {…}` | `LevelDef` (see "Terrain") | W4 |
 | `props[].base`: `"mesh:<name>[@<Map>]"` also resolves from the scenery library | `PropDef.Base` | W5 |
+| `buildSlots.add[].base`: `"building:<kind>"` (the game's standard building, any map) | `BuildSlotAdd.Base` | R2-D |
 | `units [[x, z], …]` (see "Unit positions") | `BuildSlotEdit`, `BuildSlotAdd` | R2-B |
 
 The validator covers each, with paths so the Problems popup can select the object.

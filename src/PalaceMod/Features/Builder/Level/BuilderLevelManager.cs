@@ -56,7 +56,7 @@ namespace PalaceMod
         private void RegisterDevCommand()
         {
             DevCommands.Register("builder-level",
-                "builder-level paths | graphs | spike ... | <any builder-studio subcommand>   level tools (editing: see builder-studio)", args =>
+                "builder-level paths | graphs | spike ... | buildings [kind] | <any builder-studio subcommand>   level tools (editing: see builder-studio)", args =>
             {
                 string sub = args.FirstOrDefault()?.ToLowerInvariant();
                 switch (sub)
@@ -70,6 +70,8 @@ namespace PalaceMod
                         return "\n" + PathCheck.DescribeGraphs() + "\n" + string.Join("\n", PathCheck.Check(Builder.Studio.StudioShell.Editing ? Builder.Studio.StudioScene.Scene : LayoutScene.Host(BuilderServices.Sessions.Current?.HostScene)).Select(r => $"{r.Line} on {r.Graph}: {r.Detail}"));
                     case "spike":
                         return LevelSpike.Run(args.Length > 1 ? args[1] : "");
+                    case "buildings":
+                        return "\n" + (args.Length > 1 ? BuildingPrefabs.Diff(EnemySpawner.instance.gameObject.scene, args[1]) : BuildingPrefabs.Describe(EnemySpawner.instance != null ? EnemySpawner.instance.gameObject.scene : default));
                     default:
                         return Builder.Studio.StudioDev.Run(args);
                 }
