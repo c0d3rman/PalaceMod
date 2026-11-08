@@ -236,15 +236,23 @@ returns), Leave (back to the pack screen, map unloaded), Studio settings (label 
     selection.
   - The View dropdown picks what the text shows.
   - Labels never overlap: lower-priority labels hide (selection > hover > castle > others by distance).
-- **Built preview** (View ▾ or hold Alt): each slot proxy shows its built building at level 1, a ghost in the game's
-  `BuildingInteractor.previewMaterial`. With one slot selected, the inspector's level stepper previews that level
-  (`UpgradeBranch.replacementMesh` / `objectsToActivate`), like the game's preview key. Today the proxy deletes
-  `buildingParent` (`LayoutScene.Proxy`); W3 keeps a stripped copy instead.
-- **Hover card** (tooltip, `ModTooltip`): kind, costs per level, income per level, what it needs, what it unlocks,
-  and its issues.
-- **X-ray** (X): scenery at 35 % alpha, rings and labels drawn on top.
-- **Requirement arrows** (View ▾ Links): curved ground arrows from prerequisite to dependent. They are verdigris for
-  slot links and gold for castle-level links, labelled with the level when it's not "built".
+- **Built preview** (View ▾ "Built preview", or hold the "Studio: built preview" key, Alt): each slot proxy shows its
+  built building at level 1, a ghost in the game's `BuildingInteractor.previewMaterial`. With one slot selected, the
+  inspector's Preview stepper shows it at any level, solid. `LayoutScene.Proxy` keeps the stripped building hidden
+  with a `ProxyLook` (per-upgrade `replacementMesh`, `objectsToActivate`/`objectsToDisable` of the first branch,
+  original materials; serialized, so `Instantiate` copies keep it); `LayoutScene.ShowBuilt(proxy, level, ghost)` and
+  `BuiltLevels(proxy)` drive it (`Studio/Requirements/BuiltPreview.cs`).
+- **Hover card** (`StudioLabel.Card` from `SlotKinds.Provide`): kind, costs per level, total income per level, what it
+  needs (with the castle level it waits for through its chain), what it unlocks, and its problems (a loop, a
+  prerequisite that isn't on the map).
+- **X-ray** (X, `StudioViewOptions.XRay`): the scenery (`EmptyBase.Scenery`, the same set an empty base hides) is drawn
+  in the game's see-through preview material instead of at 35 % alpha (FlatKit materials have no alpha); the shell
+  draws rings with ZTest Always, and labels are UI.
+- **Requirement arrows** (View ▾ Links, `RequirementArrows`): curved ground arrows from prerequisite to dependent,
+  verdigris for slot links and gold for castle-level links (thicker for higher castle levels). The level shows in each
+  slot's badge ("♜2", "⤳ House 6 2") instead of a label on the arrow. Off / the selection's (and the hovered slot's) /
+  all; all while the Link tool is active, where the hovered slot's chain to the castle is brightened and the rest
+  dimmed. Add-ons' links (walls to their gate) aren't drawn.
 
 ### Path check
 
@@ -329,39 +337,51 @@ Nordfels). The result is a status chip in the Level tab and the top bar's Proble
 
 ### Editing
 
-- **Inspector "Needs" row:** a choice of "From the start" / "Castle level ▸ 1-5" / a slot (picked on the map) plus
-  "at level ▸ built / 2 / 3…".
-  - It also has an "Upgrades ≤ castle level" toggle (cap 0) with an offset stepper (cap n).
-  - Multi-select sets them all, and mixed values show "—".
-- **Link tool (K):**
-  1. Select dependents (or click them with K active).
-  2. Click the prerequisite. Clicking the castle opens a level stepper popup; clicking a slot with more than one
-     level opens "after: built / level 2 / …" (default: built).
-  3. Shift keeps the tool armed. Alt-click a dependent clears its requirement.
-  4. A link that would make a cycle is refused with a notice.
+Code: `Studio/Requirements/` (`BuilderRequirementsManager` registers everything with the Studio in `Awake`).
+
+- **Inspector "Requirements" section** (`RequirementInspector`, order 200): "Needs" (click: From the start / Castle
+  level 1-N / A slot on the map…, which uses `Studio.PickOnMap`, then "after: built / level 2 / …"); a "Castle level"
+  or "After" stepper when every selected slot needs the same prerequisite; "Upgrades ≤ castle level" (cap 0) with an
+  "Allowance" number (cap n); "Chain…"; for one slot, "Unlocks" (click selects them) and "Preview" (built look per
+  level). Multi-select sets them all, and mixed values show "—".
+- **Link tool (K, `LinkTool`):**
+  1. The selection when the tool starts are the dependents; with none, a click picks one. Ctrl/Cmd-click adds or drops
+     more.
+  2. A click on another slot (or the castle) is the prerequisite. The castle asks for a level; a slot with more than
+     one level asks "after: built / level 2 / …". The link replaces each dependent's prerequisite.
+  3. Shift on that click keeps the tool for the next link; otherwise it returns to Select. Alt-click makes a slot
+     available from the start. Esc or a right click drops the dependents.
+  4. A link that would make a loop is refused with a notice (`LevelRequirements.WouldCycle`).
 
   While K is active, all link arrows show, and hovering a slot highlights its whole chain to the castle.
-- **Castle-level painting:** context menu "Needs ▸ Castle level N" on a selection. In the Requirements label mode,
-  each slot's badge is clickable and cycles 1-5.
-- **House chain preset** (Inspector "Chain…" button or context menu Chain ▸, on a selection of slots; the kinds may be
-  mixed). A popup:
-  - **In selection order:** the first selected needs its current prerequisite (or the castle at level 1). Each next
-    one needs the previous one, built.
-  - **Nearest neighbour from the castle:** a greedy path. Start at the selected slot nearest the castle (it needs the
-    castle), and each next one is the nearest unlinked slot to the last.
-  - **Branching from the castle:** a minimum spanning tree (Prim's) over the selection plus the castle, rooted at the
-    castle, with each slot needing its tree parent. This matches how vanilla maps fan houses out, and is the default
-    for houses.
-  - Options: "first link at castle level [1]", "every N-th link needs castle level +1" (off by default), "link level:
-    built". There's a live arrow preview before Apply, and Apply is one undo step.
-- **Auto-link while placing** (palette toggle, on by default for houses): a new house needs the nearest existing house
-  (or the castle if none is within 25 m). Other kinds default to "castle level 1".
+- **Context menu** rows on slots: Needs… (the same chooser), Chain…, From the start.
+- **Deleting a prerequisite** (`Studio.AddDeleteGuard`): "Link them to what it needed" / "Make them available from
+  the start" / Cancel (`LevelRequirements.ForgetSlot`), then the delete.
+- **House chain preset** (`ChainPopup`, `ChainPreset` is plain C# and unit-tested; Inspector "Chain…" or the context
+  menu, on a selection of slots; one slot chains every slot of its kind). A popup:
+  - **In selection order:** the first selected needs the castle; each next one needs the previous one.
+  - **Nearest neighbour:** a greedy path from the castle: the selected slot nearest the castle needs it, and each next
+    one is the nearest unlinked slot to the last.
+  - **Branching** (default): a minimum spanning tree (Prim's) over the selection plus the castle, rooted at the
+    castle, with each slot needing its tree parent. This matches how vanilla maps fan houses out.
+  - Options: "First link: castle level [1]" and "Each link: built / level 2…". The "every N-th link needs castle level
+    +1" option is dropped: with one prerequisite per slot, a slot can't need both its neighbour and a castle level.
+    The arrows preview the result live, and Apply is one undo step.
+- **Auto-link while placing** (View ▾ "Auto-link new slots", on by default; `Studio.AddPlaceHook`, inside the placing
+  edit): a new house needs the nearest house within 25 m, else castle level 1; other kinds need castle level 1.
+- **Labels** (`SlotKinds.Provide`, a label provider): kind colour, the planner's icon, the cost chain with the level's
+  overrides, and the requirement badge ("♜2" castle level, "⤳ House 6" a slot, "★" from the start).
+- Dev: `builder-req click [ctrl] [shift] [alt] <key>` (the Link tool's click), `link <key>|<key> > <key> [level]`,
+  `chain branching|nearest|order [apply|popup]` (over the selection), `label <key>`, `needs`; on a live level
+  `slots`, `upgrade <slot>`, `unlocks <slot>`, `proxy <slot> [level]`; `import <pack.json>`, `play <pack> <level>`,
+  `base cleared|flat <map>`, `start <pack> [create <map> <0|1|2> <name>]`, `thumb`.
 
 ### Empty-map default
 
-On an empty base, new slots default to "needs castle level 1": available once the castle is built. A slot with
-`requires` absent would otherwise inherit its base's activator, which is removed on an empty map, so it would never
-appear. The Outliner's "No requirement" chip and a validator warning catch such slots.
+On an empty base, new slots default to "needs castle level 1": available once the castle is built (the shell sets
+it when placing, and auto-link may pick a house instead). A slot with `requires` absent would otherwise inherit its
+base's activator, which is removed on an empty map, so it would never appear: `LevelOverlay` and
+`LevelRequirements.Effective` treat such an added slot as "castle level 1", so it plays anyway.
 
 ## Play mode (test play)
 
@@ -464,21 +484,27 @@ Non-modal dock like the Studio's. Keys in brackets (context `BuilderPlay`).
 
 ## Starting a level, and the empty map
 
-**Start popup** (Pack › Levels › New level, or Builder home › New level, which creates a pack when there's none):
+**Start popup** (`Studio/Start/StartPopup.cs`, `StartPopup.Open(draft)`; Pack › Levels › New level):
 
 ```text
  New level
- [ Empty ]  [Nordfels]  [Uferwind]  [ …10 main maps, thumbnails ]
- Name  [Goblin Pass        ]          Nights  [The map's own ▾]
-                                                    [Create and open]
+ [Nordfels] [Durststein] [Frostsee] [Uferwind] [Sturmklamm]      thumbnail tiles of the 9 main maps
+ [Wildbach] [Moorweg]    [Freifort] [Totend]
+ Nordfels                         13 nights · 5 spawn lines · 8◉
+ Start from    The map as it is ▸ Cleared ▸ Flat field
+ Name          Nordfels (cleared)
+ Nights        The map's own ▸ (the pack's wave sets for that map)
+ Create and open
 ```
 
-- Thumbnails: `LevelCapture` can't render a map that isn't loaded. So each tile shows the map's own preview sprite
-  from its `LevelInfo` where it has one, else its name. A thumbnail is captured the first time the Studio opens a
-  host and cached at `PalaceBuilder/cache/thumbs/<scene>.png` for later.
-- **Empty**: a second row picks **Cleared** (the map's ground, nothing on it) or **Flat field** (generated flat
-  ground), and the map that supplies the castle position, lighting, colour scheme and sky (default Nordfels). It
-  creates the level with `"base": "cleared"` or `"base": "flat"` (null = the map as it is).
+- The map tiles are the main maps (catalog hosts without a variant suffix). "Start from" picks `base`: null, `cleared`
+  or `flat`; Flat field shows only once the terrain layer sets `StartPopup.FlatFieldAvailable`. The map supplies the
+  castle position, lighting, colour scheme and sky either way. Create adds the level (one undo step) and opens it in
+  the Studio.
+- Thumbnails (`Thumbnails.cs`): `LevelInfo` has no preview picture and `LevelCapture` can't render a map that isn't
+  loaded, so a main map is pictured around its castle a few seconds after it's first seen as it is (a normal run or
+  the Studio on a map as it is) and cached at `BepInEx/PalaceBuilder/cache/thumbs/<scene>.png`. Until then its tile
+  shows only its name.
 
 **What "empty" means technically.** Creating a scene from nothing stays out (`builder-design.md`: managers, camera,
 day/night and lighting all live in the level scenes). An empty level is the host map loaded as usual, with these
@@ -490,10 +516,14 @@ changes applied by the overlay at load (after Awake, before Start):
    - The game's `ColorAndLightManager` names its ground, water and road materials (`groundMaterial`, `groundHigh`,
      `groundLow`, `earthMaterial`, `sandMaterial`, `groundPatches`, `rockMaterial`, water, ocean, `road`;
      decompiled `ColorAndLightManager.cs:66-99`).
-   - Every renderer in the host scene is disabled **unless** it uses only those materials, or it belongs to the
-     castle, the spawner, the camera, UI or managers. This works whether or not MeshFusion has combined the scenery,
-     because combined chunks are per material. A spike checks it on the 10 main maps first: screenshot and count the
-     renderers hidden per map.
+   - Every renderer in the host scene is disabled **unless** it uses only those materials, or it belongs to a build
+     slot, the spawner, a unit (`Hp`), the king, the camera, UI or the invisible walls (`EmptyBase`). MeshFusion
+     combining runs at Start, after the overlay, so every `MeshFusionSource` of an empty base is turned off first
+     (the scenery stays separate renderers).
+   - Checked on the 9 main maps (`builder-req base cleared <map>`, screenshots): renderers hidden per map: Nordfels
+     3067, Durststein 104, Frostsee 103, Uferwind 1288, Sturmklamm 3167, Wildbach 2850, Moorweg 3586, Freifort 2771,
+     Totend 1046 (the desert and snow maps are mostly rock, which is ground). Every spawn line still reaches the castle
+     on all 9 (Wildbach's "Upper Level Side" only once W4's `GroundGraphs.Scan` replaced the plain rescan). Rocks and cliffs stay: they use `rockMaterial`.
    - Scenery colliders under hidden renderers are disabled too. The host's `invisibleWalls` stay, so the map's
      boundary still holds.
 3. **Cleared only:** the host ground stays, so cliffs, water and paths keep working with no new geometry. The
@@ -501,8 +531,10 @@ changes applied by the overlay at load (after Awake, before Start):
 4. **Flat field only:** the host's ground renderers and colliders are disabled too. W4's ground layer (see
    "Terrain") supplies a flat heightfield at the castle's height, its collider, boundary walls and the minimap
    rebuild. The host's spawn lines are moved to the field's edges.
-5. `spawnLines.add` is implemented (W3; the fields already exist). It clones a host `EnemySpawnLine` under the
-   spawner and renames it, so wave spawns can name it. Empty maps need their own lines.
+5. `spawnLines.add` is implemented: a copy of a host `EnemySpawnLine` (one spawning the same kinds, if any) under the
+   spawner, named the line's id, made a straight two-point line of `width` through `pos` turned by `rotY`, with its
+   shared/separate attack-path lists cleared. Wave spawns may name it (the validator counts lines the pack's levels
+   add for that wave set), and the start-of-level path check includes it.
 6. One full rescan after Start, which happens today after any overlay (`BuilderLevelManager.ScanAfterLevelStart`).
 
 Cost: Cleared is S-M and low risk, since it only removes things and keeps the host's ground, walls and graphs
