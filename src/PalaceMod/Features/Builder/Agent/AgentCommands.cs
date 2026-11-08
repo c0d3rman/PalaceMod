@@ -26,7 +26,7 @@ namespace PalaceMod.Builder.Agent
 
         private const string Usage =
             "agent status | slots | catalog <file> | host <file> [cell] | packs | reload | validate <pack> | " +
-            "play <pack> <level> | vanilla <scene> | menu | night [n] | endnight | report | build <slot|all> [level] [branch] [pay] | " +
+            "play <pack> <level> | sandbox <pack> <level> [x z] | infinitegold on|off | spawn <unit> [count] [elite] [line <name>|at <x> <z>] | vanilla <scene> | menu | night [n] | endnight | report | build <slot|all> [level] [branch] [pay] | " +
             "gold <n> | god on|off | invulnerable on|off | speed <x> | kill | heal | teleport <x> <z> | paths | " +
             "capture <file> [pixels] | screenshot <file>   agent bridge: JSON state, level tests, map dumps (see agent-kit/)";
 
@@ -97,6 +97,39 @@ namespace PalaceMod.Builder.Agent
                         throw new InvalidOperationException(error);
                     NightRecorder.Reset();
                     return Json(new JObject { ["loading"] = $"{entry.Id}/{level}" });
+                }
+                case "sandbox":
+                {
+                    // Studio test play: unlimited gold, sandbox panel; the king starts at (x, z) if given.
+                    var entry = FindPack(Arg(args, 1));
+                    string level = Arg(args, 2);
+                    if (entry.Pack.FindLevel(level) == null) throw new ArgumentException($"{entry.Id} has no level \"{level}\"");
+                    Vector3? at = args.Length >= 5 ? new Vector3(F(args[3]), 0f, F(args[4])) : null;
+                    if (!Studio.Play.StudioPlay.Instance.PlayLevel(new Editor.PackDraft(entry), level, at))
+                        throw new InvalidOperationException("test play didn't start (see `agent status` and the log)");
+                    NightRecorder.Reset();
+                    return Json(new JObject { ["loading"] = $"{entry.Id}/{level}", ["sandbox"] = true });
+                }
+                case "infinitegold":
+                    Studio.Play.SandboxActions.InfiniteGold = OnOff(args);
+                    return Json(new JObject { ["infiniteGold"] = Studio.Play.SandboxActions.InfiniteGold, ["appliesIn"] = "sandbox play only" });
+                case "spawn":
+                {
+                    // spawn <unit> [count] [elite] [line <name...> | at <x> <z>]: unit is "vanilla:E Melee" (spaces as _) or a pack unit id.
+                    if (!DebugActions.InLevel) throw new InvalidOperationException("not in a level");
+                    int i = 2, count = 1;
+                    if (args.Length > i && int.TryParse(args[i], out int c)) { count = Mathf.Clamp(c, 1, 200); i++; }
+                    bool elite = args.Length > i && args[i] == "elite";
+                    if (elite) i++;
+                    Vector3? at = null;
+                    string line = null;
+                    if (args.Length > i + 1 && args[i] == "line") line = string.Join(" ", args.Skip(i + 1));
+                    else if (args.Length > i + 2 && args[i] == "at")
+                        at = LayoutScene.Ground(new Vector3(F(args[i + 1]), PlayerInteraction.instance.transform.position.y, F(args[i + 2])));
+                    else at = PlayerInteraction.instance.transform.position + new Vector3(10f, 0f, 10f);
+                    string unit = Arg(args, 1).Replace('_', ' ');
+                    var pack = BuilderServices.Sessions?.Current?.Pack;
+                    return Json(new JObject { ["result"] = Studio.Play.SandboxActions.Spawn(pack, unit, count, elite, at, line) });
                 }
                 case "vanilla":
                 {
@@ -171,6 +204,7 @@ namespace PalaceMod.Builder.Agent
             {
                 ["pack"] = session.Pack?.Id, ["level"] = session.Level?.Id, ["waveSet"] = session.WaveSet?.Id, ["host"] = session.HostScene,
             };
+            o["sandbox"] = Studio.Play.StudioPlay.InPlay;
             if (LocalGamestate.Instance != null) o["state"] = LocalGamestate.Instance.CurrentState.ToString();
             if (!DebugActions.InLevel)
             {

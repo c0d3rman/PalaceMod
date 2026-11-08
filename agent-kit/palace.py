@@ -248,8 +248,7 @@ class Game:
 # Reference data (cached from the game by `ref build`)
 # =====================================================================================================================
 
-MAIN_MAPS = ["Nordfels", "Durststein", "Frostsee", "Uferwind", "Sturmklamm", "Wildbach", "Moorweg", "Freifort", "Totend",
-             "Neuland(Tutorial)"]
+MAIN_MAPS = ["Nordfels", "Durststein", "Frostsee", "Uferwind", "Sturmklamm", "Wildbach", "Moorweg", "Freifort", "Totend"]
 
 
 class Ref:
@@ -1044,7 +1043,10 @@ class Ops:
             g = self.ref.map(lv["host"]).get("grid")
             if not g:
                 raise Fail("give origin and size")
-            origin, size = [g["origin"][0], g["origin"][1]], [int(g["size"][0] * g["cell"] / op.get("cell", 2)), int(g["size"][1] * g["cell"] / op.get("cell", 2))]
+            # The map's walkable area (the dump adds 12 m around it), like the game's own default flat field.
+            cell = float(op.get("cell", 2))
+            origin = [math.floor((g["origin"][0] + 12) / cell) * cell, math.floor((g["origin"][1] + 12) / cell) * cell]
+            size = [min(400, int(math.ceil((g["size"][0] * g["cell"] - 24) / cell))), min(400, int(math.ceil((g["size"][1] * g["cell"] - 24) / cell)))]
         lv["terrain"] = {"origin": [float(origin[0]), float(origin[1])], "cell": float(op.get("cell", 2)), "size": [int(size[0]), int(size[1])],
                          "y": float(op.get("y", castle["pos"][1] if castle else 0))}
         if op.get("flat", True):
@@ -1380,7 +1382,7 @@ SLOPE_LIMIT = 32.0
 
 class LevelGround:
     """The level's walkable ground as a grid: the map's sampled ground, or the flat terrain; minus blocked/water cells,
-    solid props and slots. Approximate: the game's navmesh is the truth (`palace.py paths` asks the game)."""
+    solid props. Approximate: the game's navmesh is the truth (`palace.py paths` asks the game)."""
 
     def __init__(self, ref, level, slots):
         m = ref.map(level["host"])
@@ -1425,9 +1427,7 @@ class LevelGround:
             size = sizes.get(name)
             r = (max(size[0], size[1]) / 2 if size else 1.5) * float(p.get("scale", 1)) * 0.8
             self.stamp(p["pos"][0], p["pos"][2], r, ".")
-        for s in slots.values():
-            if not s.castle:
-                self.stamp(s.pos[0], s.pos[2], 2.0, ".")
+        # Buildings aren't obstacles here: enemies break through walls and buildings in their way.
 
     def index(self, x, z):
         i, j = int((x - self.ox) // self.cell), int((z - self.oz) // self.cell)
@@ -1447,7 +1447,17 @@ class LevelGround:
 
     def ok(self, i, j, large):
         k = self.kind[j][i]
-        return k == "w" or (k == "s" and not large)
+        if k == "w" or (k == "s" and not large):
+            return True
+        if k != "s":
+            return False
+        # The large graph is sampled at cell centres, so a narrow passage can drop out: an 's' cell next to a 'w'
+        # cell counts for large enemies too.
+        for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            ni, nj = i + di, j + dj
+            if 0 <= ni < self.w and 0 <= nj < self.h and self.kind[nj][ni] == "w":
+                return True
+        return False
 
     def nearest_ok(self, x, z, large, radius=12.0):
         ij = self.index(x, z)
@@ -1546,9 +1556,13 @@ def offline_routes(ref, data, level, slots, castle):
             continue
         if used is not None and l["name"] not in used:
             continue
-        large = bool(l["large"])
-        ok, length, pts, why = ground.route((l["center"][0], l["center"][2]), (cpos[0], cpos[2]), large)
-        routes.append({"line": l["name"], "large": large, "reachable": ok, "length": length, "why": why, "points": pts})
+        start, goal = (l["center"][0], l["center"][2]), (cpos[0], cpos[2])
+        ok, length, pts, why = ground.route(start, goal, False)
+        r = {"line": l["name"], "reachable": ok, "length": length, "why": why, "points": pts}
+        if l["large"]:
+            # Large enemies (ogres, rams...) need wider passages; vanilla maps sometimes keep them off a plateau on purpose.
+            r["largeReachable"] = ground.route(start, goal, True)[0] if ok else False
+        routes.append(r)
     return routes
 
 
@@ -1806,6 +1820,9 @@ def check_pack(ref, data):
             for r in offline_routes(ref, data, lv, slots, castle):
                 if not r["reachable"]:
                     err(f"{p}.spawnLines", f"enemies from {r['line']} can't reach the castle ({r['why']}; offline estimate, confirm with `palace.py paths`)")
+                elif r.get("largeReachable") is False:
+                    warn(f"{p}.spawnLines", f"large enemies from {r['line']} can't reach the castle, small ones can (offline estimate; "
+                                            "large ones then attack what they can reach; confirm with `palace.py paths`)")
         # Economy sanity.
         incomes = [s for s in slots.values() if any(step_income(u) > 0 for u in s.upgrades)]
         if not incomes:
@@ -1902,6 +1919,8 @@ class Canvas:
     def text(self, x, y, s, c=(255, 255, 255), scale=2, bg=(0, 0, 0), bga=0.6):
         s = str(s).upper()
         w = len(s) * 6 * scale
+        x = max(2, min(x, self.w - w - 3))
+        y = max(2, min(y, self.h - 7 * scale - 3))
         if bg:
             self.rect(x - 2, y - 2, x + w + 1, y + 7 * scale + 2, bg, bga)
         for k, ch in enumerate(s):
@@ -2217,7 +2236,8 @@ def cmd_ref(env, args):
             for s in ref.map(scene)["slots"]:
                 key = (s["kind"], tuple(u["cost"] for u in s["upgrades"]))
                 e = kinds.setdefault(key, {"kind": s["kind"], "maps": set(), "count": 0, "hp": s.get("hp"), "levels": [
-                    {"cost": u["cost"], "branches": [{k: v for k, v in b.items() if v is not None} for b in u["branches"]]} for u in s["upgrades"]]})
+                    {"cost": u["cost"], **({"hidden": True} if u.get("disabled") else {}),
+                     "branches": [{k: v for k, v in b.items() if v not in (None, "")} for b in u["branches"]]} for u in s["upgrades"]]})
                 e["maps"].add(scene)
                 e["count"] += 1
         rows = sorted(kinds.values(), key=lambda e: (e["kind"], -e["count"]))
@@ -2256,11 +2276,124 @@ def cmd_ref(env, args):
             m = ref.map(args.name)
             rows[f"on {args.name} (map's own)"] = [{"mesh": x["base"][5:], "count": x["count"]} for x in m.get("scenery", [])]
         out(rows)
+    elif args.what == "doc":
+        path = Path(args.out or env.ref / "reference.md")
+        path.write_text(reference_markdown(ref), encoding="utf-8")
+        out({"written": str(path.resolve())})
     elif args.what == "render":
         level = {"id": args.name, "host": args.name}
-        out(render(ref, {}, level, args.out or f"{args.name}.png", labels=args.labels))
+        slots, castle, _ = effective_slots(ref, level)
+        routes = offline_routes(ref, {}, level, slots, castle) if castle in slots else []
+        out(render(ref, {}, level, args.out or f"{args.name}.png", routes=routes, labels=args.labels))
     else:
         raise Fail("ref build | maps | slots <map> | buildings | enemies | waves <map> | scenery [map] | render <map>")
+
+
+def reference_markdown(ref):
+    """reference.md: the tables of the guide's Reference section, from the cached game data."""
+    L = []
+    cat = ref.catalog
+    L.append(f"# Thronefall reference for level building\n\nGenerated by `palace.py ref doc` from the game's own data "
+             f"(game {cat.get('gameVersion')}). Regenerate after a game update. Positions are world metres (x east, z north).\n")
+    maps = [m for m in MAIN_MAPS if ref.has_map(m)]
+    L.append("## Maps\n")
+    L.append("| Map | Castle (x, y, z) | Walkable extent x / z | Nights | Start gold | Slots by kind | Spawn lines (G small ground, L large, F flying) |")
+    L.append("|---|---|---|---|---|---|---|")
+    for name in maps:
+        m = ref.map(name)
+        g = m["grid"]
+        ext = f"{g['origin'][0] + 12:.0f}..{g['origin'][0] + g['size'][0] * g['cell'] - 12:.0f} / {g['origin'][1] + 12:.0f}..{g['origin'][1] + g['size'][1] * g['cell'] - 12:.0f}"
+        kinds = {}
+        for s in m["slots"]:
+            if not s.get("followsActivator") and not s.get("castle"):
+                kinds[s["kind"]] = kinds.get(s["kind"], 0) + 1
+        lines = ", ".join(f"{l['name']} ({'G' if l['smallGround'] else ''}{'L' if l['bigGround'] else ''}{'F' if l['flying'] else ''}) "
+                          f"@{l['center'][0]:.0f},{l['center'][2]:.0f}" for l in m["spawnLines"])
+        c = m["castle"]["pos"]
+        L.append(f"| {name} | {c[0]:.0f}, {c[1]:.1f}, {c[2]:.0f} | {ext} | {m['nights']} | {m['startingGold']} | "
+                 f"{', '.join(f'{k} {v}' for k, v in sorted(kinds.items()))} | {lines} |")
+    L.append("\nThe castle slot of each map is named in `palace.py ref slots <map>` (`\"castle\": true`); in ops and plans just say `castle`.\n")
+
+    L.append("## Buildings (slot kinds)\n")
+    L.append("Per level: cost in gold, then each choice (branch) with its income change (+g per dawn), extra HP and what it adds. "
+             "Hidden tiers exist in the data but are switched off in normal play (PalaceMod's optional \"Level 4 buildings\" turns them on). "
+             "`add_slot` copies the most complete slot of the kind on the host map, so these trees are what you get.\n")
+    seen = {}
+    for name in maps:
+        for s in ref.map(name)["slots"]:
+            if s.get("followsActivator"):
+                continue
+            key = s["kind"]
+            prev = seen.get(key)
+            if prev is None or len(s["upgrades"]) > len(prev[1]["upgrades"]):
+                seen[key] = (name, s, set())
+            seen[key][2].add(name)
+    for kind in sorted(seen):
+        name, s, maps_with = seen[kind]
+        hp = s.get("hp")
+        L.append(f"### {kind}\n\nOn: {', '.join(sorted(maps_with))}. Base HP {hp if hp is not None else '-'}.\n")
+        for i, u in enumerate(s["upgrades"]):
+            parts = []
+            for b in u["branches"]:
+                bits = []
+                if b.get("income"):
+                    bits.append(f"+{b['income']}g")
+                if b.get("hp"):
+                    bits.append(f"+{b['hp']} HP")
+                if b.get("troops"):
+                    bits.append("troops " + "/".join(t[2:] if t.startswith("P ") else t for t in b["troops"]))
+                if b.get("attackers"):
+                    bits.append(f"shoots ({b['range']:.0f} m)")
+                label = b.get("name") or ""
+                parts.append((label + (" " if label and bits else "") + (", ".join(bits))) or "-")
+            L.append(f"- L{i + 1}{' (hidden)' if u.get('disabled') else ''}: {u['cost']}g: " + " | ".join(parts))
+        L.append("")
+    L.append("Notes: a Mill's Fields, Gates' wall pieces and similar are separate slots that *follow* their owner "
+             "(`followsActivator`): bought with it, never placed on their own. Gold Mines lose income each dawn (down to a floor); "
+             "Harbours gain income each dawn (up to a cap). Every income building pays at dawn unless knocked out that night.\n")
+
+    L.append("## Enemies\n")
+    L.append("HP is before the night's difficulty (x difficulty; elite x4 HP, x3 damage). Speed m/s. Diff = the game's own "
+             "threat rating (Eternal Trials). Use the ref in wave spawns: `\"unit\": \"vanilla:E Melee\"`.\n")
+    L.append("| Ref | Name | HP | Speed | Range | Flying | Large | Diff | Notes |")
+    L.append("|---|---|---|---|---|---|---|---|---|")
+    for u in sorted((u for u in cat["units"] if u["side"] == "enemy"), key=lambda u: (u["flying"], u["maxHp"])):
+        tags = [t for t in u["tags"] if t not in ("EnemyOwned", "AUTO_Alive", "MeeleFighter", "RangedFighter", "Humanoid", "NaturallyVulnerableToSplash")]
+        desc = (u.get("description") or "").replace("|", "/").replace("\n", " ")
+        L.append(f"| `{u['ref']}` | {u['name']} | {u['maxHp']:g} | {u['moveSpeed']:g} | {u['attackRange']:g} | {'yes' if u['flying'] else ''} | "
+                 f"{'yes' if u['large'] else ''} | {u.get('difficulty') or 0:g} | {', '.join(tags)}{'. ' if tags and desc else ''}{desc[:140]} |")
+    L.append("\nPlayer troops (custom units' `vanilla:` bases with side player): " +
+             ", ".join(f"`{u['id']}`" for u in cat["units"] if u["side"] == "player") + "\n")
+
+    L.append("## Vanilla nights (reference curves)\n")
+    L.append("Per night: enemies, effective HP (sum of HP x difficulty, elite x4), gold dropped, flyers. Use these to pace your own.\n")
+    for name in maps:
+        h = ref.host(name)
+        if not h:
+            continue
+        rows = wave_summary(ref, {}, h["vanillaWaves"])
+        L.append(f"**{name}** (start gold {h['startingGold']}): " + "; ".join(
+            f"N{r['night']} {r['enemies']}e/{r['effectiveHp'] / 1000:.1f}k hp/{r['gold']}g{'/' + str(r['flying']) + 'fly' if r['flying'] else ''}" for r in rows))
+        L.append("")
+    L.append("## Vanilla economy (greedy all-economy player, gold income per dawn by day)\n")
+    for name in maps:
+        h = ref.host(name)
+        lv = {"id": name, "host": name}
+        sl, c, _ = effective_slots(ref, lv)
+        wg = [r["gold"] for r in wave_summary(ref, {}, h["vanillaWaves"])]
+        sim = economy_sim(sl, c, h["startingGold"], wg, len(h["vanillaWaves"]["nights"]))
+        L.append(f"**{name}**: " + ", ".join(f"d{r['day']} {r['incomePerDawn']}" for r in sim))
+        L.append("")
+    sc = ref.scenery.get("meshes", [])
+    if sc:
+        L.append("## Scenery library (prop meshes usable on any map)\n")
+        by = {}
+        for m in sc:
+            by.setdefault(m.get("category", "Other"), []).append(f"{m['name']} ({max(m['size'][:2]):.0f} m)" if m.get("size") else m["name"])
+        for k in sorted(by):
+            L.append(f"- **{k}**: " + ", ".join(sorted(by[k])))
+        L.append("")
+    return "\n".join(L) + "\n"
 
 
 def cmd_new(env, args):
@@ -2500,7 +2633,7 @@ def cmd_test(env, args):
             for item in plan.get(day, []):
                 if isinstance(item, str):
                     item = {"slot": item}
-                cmdline = f"build {item['slot']}" + (f" {item['level']}" if "level" in item else "") + \
+                cmdline = f"build {item['slot'].replace(' ', '_')}" + (f" {item['level']}" if "level" in item else "") + \
                           (f" {item.get('branch', 0)}" if "branch" in item else "") + ("" if args.free else " pay")
                 try:
                     bought.append(g.agent(cmdline))
@@ -2550,9 +2683,50 @@ def cmd_play_quiet(g, data, level, timeout):
     time.sleep(2.5)
 
 
+def cmd_sandbox(env, args):
+    """Studio test play: unlimited gold (toggle with --no-infinite), the king at (x, z) if given."""
+    g = Game(env)
+    _, data = load_pack(env, args.pack)
+    find_level(data, args.level)
+    v = g.agent(f"validate {data['id']}")
+    if not v.get("ok"):
+        out(v)
+        raise Fail("the game's validator found errors (above)")
+    mark = g.log_size()
+    g.agent(f"sandbox {data['id']} {args.level}" + (f" {args.at[0]} {args.at[1]}" if args.at else ""))
+    g.wait_level_day(timeout=args.timeout)
+    time.sleep(2.5)
+    if args.no_infinite:
+        g.agent("infinitegold off")
+    out({"status": g.status(), "loadWarnings": g.log_since(mark, features=["Builder"], min_level="warn")})
+
+
+def cmd_spawn(env, args):
+    g = Game(env)
+    u = Ref(env).unit(args.unit) if not args.unit.startswith("vanilla:") else None
+    unit = "vanilla:" + u["id"] if u else args.unit
+    where = f" line {args.line}" if args.line else (f" at {args.at[0]} {args.at[1]}" if args.at else "")
+    out(g.agent(f"spawn {unit.replace(' ', '_')} {args.count}" + (" elite" if args.elite else "") + where))
+
+
+def cmd_cheat(env, args):
+    g = Game(env)
+    if args.what in ("god", "invulnerable", "infinitegold"):
+        out(g.agent(f"{args.what} {args.value or 'on'}"))
+    elif args.what in ("gold", "speed"):
+        out(g.agent(f"{args.what} {args.value}"))
+    elif args.what in ("kill", "heal", "endnight"):
+        out(g.agent(args.what))
+    elif args.what == "teleport":
+        x, z = args.value.split(",")
+        out(g.agent(f"teleport {x} {z}"))
+    else:
+        raise Fail("cheat god|invulnerable|infinitegold [on|off] | gold <n> | speed <x> | kill | heal | endnight | teleport <x,z>")
+
+
 def cmd_build(env, args):
     g = Game(env)
-    out(g.agent(f"build {args.slot}" + (f" {args.level}" if args.level is not None else "") + (f" {args.branch}" if args.branch is not None else "") +
+    out(g.agent(f"build {args.slot.replace(' ', '_')}" + (f" {args.level}" if args.level is not None else "") + (f" {args.branch}" if args.branch is not None else "") +
                 (" pay" if args.pay else "")))
 
 
@@ -2588,7 +2762,7 @@ def main(argv=None):
     p.add_argument("--feature", action="append", help="log: only these [Feature] lines (e.g. Builder)")
     p.add_argument("--level", default="warn", choices=["error", "warn", "info", "debug"])
 
-    p = sub.add_parser("ref", help="reference data: build | maps | slots <map> | buildings | enemies | waves <map> | scenery [map] | render <map>")
+    p = sub.add_parser("ref", help="reference data: build | maps | slots <map> | buildings | enemies | waves <map> | scenery [map] | render <map> | doc")
     p.add_argument("what")
     p.add_argument("name", nargs="?")
     p.add_argument("--maps", help="build: comma-separated maps (default: all)")
@@ -2676,6 +2850,24 @@ def main(argv=None):
     p.add_argument("--timeout-load", type=float, default=120)
     p.add_argument("--no-load", action="store_true", help="continue the run already loaded")
     p.add_argument("--no-catchup", action="store_true", help="starting at night N>1: don't apply earlier days' plan")
+
+    p = sub.add_parser("sandbox", help="Studio test play: unlimited gold, start anywhere")
+    p.add_argument("pack")
+    p.add_argument("level")
+    p.add_argument("--at", nargs=2, type=float, metavar=("X", "Z"), help="king's start")
+    p.add_argument("--no-infinite", action="store_true", help="normal gold")
+    p.add_argument("--timeout", type=float, default=120)
+
+    p = sub.add_parser("spawn", help="spawn enemies now (they attack like a wave's)")
+    p.add_argument("unit", help="vanilla id (E Melee) or a pack unit id")
+    p.add_argument("count", nargs="?", type=int, default=1)
+    p.add_argument("--elite", action="store_true")
+    p.add_argument("--line", help="at a spawn line")
+    p.add_argument("--at", nargs=2, type=float, metavar=("X", "Z"))
+
+    p = sub.add_parser("cheat", help="god|invulnerable|infinitegold [on|off] | gold <n> | speed <x> | kill | heal | endnight | teleport <x,z>")
+    p.add_argument("what")
+    p.add_argument("value", nargs="?")
 
     p = sub.add_parser("build", help="build/upgrade a slot in the running level")
     p.add_argument("slot")

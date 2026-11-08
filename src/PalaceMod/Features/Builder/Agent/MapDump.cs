@@ -99,7 +99,7 @@ namespace PalaceMod.Builder.Agent
             var o = new JObject { ["name"] = b.choiceDetails != null ? b.choiceDetails.name : null };
             if (b.goldIncomeChange != 0) o["income"] = b.goldIncomeChange;
             if (b.hpChange != 0) o["hp"] = b.hpChange;
-            var troops = new Dictionary<string, int>();
+            var troops = new SortedSet<string>();
             int attackers = 0;
             float range = 0;
             foreach (var go in b.objectsToActivate ?? [])
@@ -107,8 +107,7 @@ namespace PalaceMod.Builder.Agent
                 if (go == null) continue;
                 foreach (var unit in go.GetComponentsInChildren<PathfindMovementPlayerunit>(true))
                 {
-                    string name = Clean(unit.gameObject.name);
-                    troops[name] = troops.TryGetValue(name, out int n) ? n + 1 : 1;
+                    troops.Add(Clean(unit.gameObject.name));
                 }
                 foreach (var a in go.GetComponentsInChildren<AutoAttack>(true))
                 {
@@ -117,7 +116,8 @@ namespace PalaceMod.Builder.Agent
                     if (a.targetPriorities.Count > 0) range = Mathf.Max(range, a.targetPriorities.Max(t => t.range));
                 }
             }
-            if (troops.Count > 0) o["troops"] = JObject.FromObject(troops);
+            // Troop types the branch switches on (how many of them fight depends on the building; not counted here).
+            if (troops.Count > 0) o["troops"] = new JArray(troops);
             if (attackers > 0) { o["attackers"] = attackers; o["range"] = R(range); }
             return o;
         }
@@ -127,6 +127,8 @@ namespace PalaceMod.Builder.Agent
             int paren = name.IndexOf(" (", StringComparison.Ordinal);
             return (paren > 0 ? name.Substring(0, paren) : name).Trim();
         }
+
+        private static readonly float[,] Sample = { { 0.5f, 0.5f }, { 0.25f, 0.25f }, { 0.75f, 0.25f }, { 0.25f, 0.75f }, { 0.75f, 0.75f } };
 
         private static JObject Grid(float cell)
         {
@@ -151,60 +153,73 @@ namespace PalaceMod.Builder.Agent
             // Keep huge maps to a sane size.
             while ((long)w * h > 250_000) { cell *= 1.5f; w = Mathf.CeilToInt((maxX + margin - minX) / cell); h = Mathf.CeilToInt((maxZ + margin - minZ) / cell); }
 
-            var smallNn = NearestNodeConstraint.Walkable;
-            smallNn.graphMask = GraphMask.FromGraphName("Enemy Units S");
-            NearestNodeConstraint? largeNn = null;
-            if (large != null)
-            {
-                var l = NearestNodeConstraint.Walkable;
-                l.graphMask = GraphMask.FromGraphName("Enemy Units L");
-                largeNn = l;
-            }
+            // Ground height from the Ground layer, then the enemy navmeshes rasterised on top: a cell is walkable when its
+            // centre lies in a walkable triangle (its height is then the navmesh's, which is what units stand on).
+            var hts = new float[w * h];
+            var kind = new char[w * h];
             int groundLayer = LayerMask.NameToLayer("Ground");
             int mask = groundLayer >= 0 ? 1 << groundLayer : Physics.DefaultRaycastLayers;
+            for (int z = 0; z < h; z++)
+                for (int x = 0; x < w; x++)
+                {
+                    int i = z * w + x;
+                    kind[i] = '#';
+                    hts[i] = float.NaN;
+                    if (Physics.Raycast(new Vector3(minX + (x + 0.5f) * cell, 300f, minZ + (z + 0.5f) * cell), Vector3.down, out var hit, 600f, mask, QueryTriggerInteraction.Ignore))
+                    {
+                        hts[i] = hit.point.y;
+                        kind[i] = '.';
+                    }
+                }
+            void Rasterise(NavGraph graph, bool isLarge)
+            {
+                var onLarge = new bool[w * h];
+                graph.GetNodes(node =>
+                {
+                    if (!node.Walkable || node is not TriangleMeshNode tri) return;
+                    Vector3 a = (Vector3)tri.GetVertex(0), b = (Vector3)tri.GetVertex(1), c = (Vector3)tri.GetVertex(2);
+                    int x0 = Mathf.Max(0, Mathf.FloorToInt((Mathf.Min(a.x, b.x, c.x) - minX) / cell)), x1 = Mathf.Min(w - 1, Mathf.FloorToInt((Mathf.Max(a.x, b.x, c.x) - minX) / cell));
+                    int z0 = Mathf.Max(0, Mathf.FloorToInt((Mathf.Min(a.z, b.z, c.z) - minZ) / cell)), z1 = Mathf.Min(h - 1, Mathf.FloorToInt((Mathf.Max(a.z, b.z, c.z) - minZ) / cell));
+                    float den = (b.z - c.z) * (a.x - c.x) + (c.x - b.x) * (a.z - c.z);
+                    if (Mathf.Abs(den) < 1e-6f) return;
+                    for (int z = z0; z <= z1; z++)
+                        for (int x = x0; x <= x1; x++)
+                        {
+                            // The centre or any quarter point inside the triangle (thin bridges fall between centres).
+                            float l1 = 0, l2 = 0, l3 = -1;
+                            for (int k = 0; k < 5 && (l1 < -1e-4f || l2 < -1e-4f || l3 < -1e-4f); k++)
+                            {
+                                float px = minX + (x + Sample[k, 0]) * cell, pz = minZ + (z + Sample[k, 1]) * cell;
+                                l1 = ((b.z - c.z) * (px - c.x) + (c.x - b.x) * (pz - c.z)) / den;
+                                l2 = ((c.z - a.z) * (px - c.x) + (a.x - c.x) * (pz - c.z)) / den;
+                                l3 = 1f - l1 - l2;
+                            }
+                            if (l1 < -1e-4f || l2 < -1e-4f || l3 < -1e-4f) continue;
+                            int i = z * w + x;
+                            if (isLarge) { onLarge[i] = true; continue; }
+                            float y = l1 * a.y + l2 * b.y + l3 * c.y;
+                            if (kind[i] != 's' || y > hts[i]) hts[i] = y;
+                            kind[i] = 's';
+                        }
+                });
+                if (isLarge)
+                    for (int i = 0; i < w * h; i++)
+                        if (onLarge[i] && kind[i] == 's') kind[i] = 'w';
+            }
+            Rasterise(small, false);
+            if (large != null) Rasterise(large, true);
             var heights = new byte[w * h * 2];
             var rows = new JArray();
-            float reach = cell * 0.6f;
             for (int z = 0; z < h; z++)
             {
                 var row = new char[w];
                 for (int x = 0; x < w; x++)
                 {
-                    var p = new Vector3(minX + (x + 0.5f) * cell, 0f, minZ + (z + 0.5f) * cell);
-                    short cm = short.MinValue;
-                    if (Physics.Raycast(new Vector3(p.x, 300f, p.z), Vector3.down, out var hit, 600f, mask, QueryTriggerInteraction.Ignore))
-                    {
-                        cm = (short)Mathf.Clamp(Mathf.RoundToInt(hit.point.y * 100f), short.MinValue + 1, short.MaxValue);
-                        p.y = hit.point.y;
-                    }
-                    bool OnGraph(NearestNodeConstraint? nn)
-                    {
-                        var info = astar.GetNearest(p + Vector3.up * 0.5f, nn.Value);
-                        if (info.node == null) return false;
-                        var d = info.position - p;
-                        return new Vector2(d.x, d.z).magnitude <= reach && Mathf.Abs(d.y) < 3f;
-                    }
-                    if (cm == short.MinValue)
-                    {
-                        // No ground collider (some maps' walkable bridges): the navmesh's own height.
-                        var info = astar.GetNearest(p + Vector3.up * 50f, smallNn);
-                        if (info.node != null && new Vector2(info.position.x - p.x, info.position.z - p.z).magnitude <= reach)
-                        {
-                            p.y = info.position.y;
-                            cm = (short)Mathf.RoundToInt(p.y * 100f);
-                        }
-                    }
-                    char c = '#';
-                    if (cm != short.MinValue)
-                    {
-                        bool s = OnGraph(smallNn);
-                        bool l = largeNn != null && s && OnGraph(largeNn);
-                        c = l ? 'w' : s ? 's' : '.';
-                    }
-                    row[x] = c;
-                    int i = (z * w + x) * 2;
-                    heights[i] = (byte)(cm & 0xff);
-                    heights[i + 1] = (byte)((cm >> 8) & 0xff);
+                    int i = z * w + x;
+                    row[x] = kind[i];
+                    short cm = float.IsNaN(hts[i]) ? short.MinValue : (short)Mathf.Clamp(Mathf.RoundToInt(hts[i] * 100f), short.MinValue + 1, short.MaxValue);
+                    heights[2 * i] = (byte)(cm & 0xff);
+                    heights[2 * i + 1] = (byte)((cm >> 8) & 0xff);
                 }
                 rows.Add(new string(row));
             }
