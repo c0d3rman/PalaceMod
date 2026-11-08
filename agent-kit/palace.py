@@ -3180,7 +3180,8 @@ class Plan:
     """A test plan: {"1": [items], "2": [...], "options": {"carry": true, "save": false}}. An item is a slot id (one
     level up) or {"slot", "level" (up to; 1 = built), "branch", "carry", "save"}. carry: a refused item is retried at the
     start of the next day (until bought). save: when this item is refused, buy nothing else that day (keep the gold for
-    it); with carry the rest of the day's items are carried too."""
+    it); with carry the rest of the day's items are carried too. "king": {"3": "t1", "6": [x, z]}: where the king stands
+    from that night on (see king_point)."""
 
     def __init__(self, data, carry=False, save=False):
         data = data or {}
@@ -3190,8 +3191,12 @@ class Plan:
         self.carry = bool(opts.get("carry", carry))
         self.save = bool(opts.get("save", save))
         self.days = {}
+        king = data.get("king") or {}
+        if not isinstance(king, dict) or any(not str(k).isdigit() for k in king):
+            raise Fail("plan \"king\": {\"<night>\": \"castle\" | \"<slot id>\" | [x, z], ...}")
+        self.king = {int(k): v for k, v in king.items()}
         for k, items in data.items():
-            if k == "options":
+            if k in ("options", "king"):
                 continue
             if not str(k).isdigit() or not isinstance(items, list):
                 raise Fail(f"plan key {k!r}: days are \"1\", \"2\", ... each with a list of items")
@@ -3207,6 +3212,31 @@ class Plan:
 
     def slots(self):
         return {i["slot"] for items in self.days.values() for i in items}
+
+
+def king_point(spec, slots, castle):
+    """Where the king stands for a test: "castle" (just in front of it), a slot id (just in front of that slot, toward
+    the castle, so he isn't inside the building), or x,z ([x, z] or "x,z"). Returns (x, z)."""
+    if isinstance(spec, (list, tuple)) and len(spec) == 2:
+        return float(spec[0]), float(spec[1])
+    text = str(spec).strip()
+    m = re.match(r"^\s*(-?[\d.]+)\s*[, ]\s*(-?[\d.]+)\s*$", text)
+    if m:
+        return float(m.group(1)), float(m.group(2))
+    c = slots.get(castle) if castle else None
+    target = c if text == "castle" else next((s for s in slots.values() if text in (s.label, s.name, s.key) or
+                                               text.replace("_", " ") in (s.label, s.name)), None)
+    if target is None:
+        raise Fail(f"king position {spec!r}: not castle, a slot id on this level, or x,z")
+    x, z = target.pos[0], target.pos[2]
+    if c is not None:
+        dx, dz = c.pos[0] - x, c.pos[2] - z
+        d = (dx * dx + dz * dz) ** 0.5
+        if target is c or d < 1e-3:
+            dx, dz, d = 0.0, -1.0, 1.0  # in front of the castle: a little south of it
+        step = 6.0 if target is c else min(5.0, d)
+        x, z = x + dx / d * step, z + dz / d * step
+    return round(x, 2), round(z, 2)
 
 
 def plan_command(item, free):
@@ -3297,14 +3327,20 @@ def cmd_test(env, args):
     lv = find_level(data, args.level)
     plan = Plan(json.loads(Path(args.plan).read_text()) if args.plan else {}, carry=args.carry, save=args.save)
     warnings = []
+    slots, castle = {}, None
     try:
-        slots, _, _ = effective_slots(Ref(env), lv)
+        slots, castle, _ = effective_slots(Ref(env), lv)
         known = {s.label for s in slots.values()} | {"castle"}
         unknown = sorted(s for s in plan.slots() if s not in known and s.replace("_", " ") not in known)
         if unknown:
             warnings.append(f"plan slots not on this level: {', '.join(unknown)}")
     except Fail:
         pass
+    # Where the king stands each night: --king, then the plan's "king" entries from their night on.
+    king_specs = dict(plan.king)
+    if args.king:
+        king_specs.setdefault(0, args.king)
+    king_at = {n: king_point(spec, slots, castle) for n, spec in king_specs.items()}
     if not args.no_load:
         cmd_play_quiet(g, data, lv["id"], args.timeout_load)
     st = g.status()
@@ -3342,6 +3378,11 @@ def cmd_test(env, args):
         bought, carried = buy_items(g, items, args.free, plan.carry, plan.save, n)
         if args.build == "all":
             bought.append(g.agent("build all"))
+        king = None
+        spot = max((k for k in king_at if k <= n), default=None)
+        if spot is not None:
+            # Every night, so a king knocked out the night before (back at the castle) goes back to his post.
+            king = {"at": list(king_at[spot]), "stood": (g.agent(f"teleport {king_at[spot][0]:g} {king_at[spot][1]:g}") or {}).get("king")}
         if jump:
             g.agent(f"night {n}")  # jumps to night n and starts it
             jump = False
@@ -3355,6 +3396,8 @@ def cmd_test(env, args):
             mid = g.screenshot(shots / f"night{n}.png")
         rep = wait_night(g, args.timeout, n)
         rep["bought"] = bought
+        if king:
+            rep["kingPost"] = king
         if mid:
             rep["screenshot"] = mid
         st = g.status()
@@ -3614,6 +3657,8 @@ def main(argv=None):
     p.add_argument("--plan", help="JSON {\"1\": [\"castle\", \"h1\", {\"slot\":\"t1\",\"level\":2,\"branch\":0}], \"2\": [...]}: buys before each night")
     p.add_argument("--build", choices=["none", "all"], default="none", help="all: also build every available blueprint free each day")
     p.add_argument("--free", action="store_true", help="plan purchases cost nothing (probes defence alone; the economy isn't tested)")
+    p.add_argument("--king", metavar="WHERE", help="where the king stands every night: castle | <slot id> (in front of it) | X,Z "
+                                                   "(default: where he is; the plan's \"king\" entries change it from a night on)")
     p.add_argument("--carry", action="store_true", help="retry refused plan items at the start of the next day (plan option \"carry\")")
     p.add_argument("--save", action="store_true", help="after an item is refused for gold, buy nothing else that day (plan option \"save\")")
     p.add_argument("--catchup", choices=["play", "free", "none"], default="play",

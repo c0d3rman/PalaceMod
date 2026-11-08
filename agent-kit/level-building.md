@@ -248,7 +248,7 @@ and damage list. Use custom units sparingly; vanilla enemies are well balanced a
 | `play <pack> <level>` | load as a normal run (real gold); prints load warnings |
 | `sandbox <pack> <level> [--at X Z]` | Studio test play: unlimited gold, king at X,Z |
 | `edit <pack> <level>` | open the level in the in-game Studio (the player's editor: F5 there test-plays); it edits its own copy and Ctrl+S writes pack.json, so don't `apply` while the player has unsaved Studio changes |
-| `test <pack> <level> [--nights 1-3] [--plan p.json] [--carry] [--save] [--catchup play\|free\|none] [--free] [--build all] [--god] [--invulnerable] [--gold N] [--speed 3] [--shots dir] [--quiet]` | load, buy per plan each day once its gold is in, play nights, report each (one progress line per night on stderr) |
+| `test <pack> <level> [--nights 1-3] [--plan p.json] [--carry] [--save] [--catchup play\|free\|none] [--free] [--king castle|<slot>|X,Z] [--build all] [--god] [--invulnerable] [--gold N] [--speed 3] [--shots dir] [--quiet]` | load, buy per plan each day once its gold is in, play nights, report each (one progress line per night on stderr) |
 | `night [N] [--speed 3]` | start the next night (or jump to night N) and wait for its report |
 | `build <slot> [level] [branch] [--pay]` | build/upgrade now (free unless --pay); `castle`, an added id, or a host name; exit 1 if refused |
 | `spawn <unit> [count] [--elite] [--line L \| --at X Z]` | spawn enemies now |
@@ -311,6 +311,10 @@ would follow; it proves the economy works, not just the defence.
   nothing else that day, so the gold is kept for it (with carry, the rest of the day moves to the next day too). That's
   how a plan "saves up" for castle level 3 instead of spending the 20 g on houses.
 - `--free`: purchases cost nothing (a defence-only probe; the economy isn't tested).
+- `--king WHERE`: where the king stands every night: `castle` (just in front of it), a slot id (just in front of that
+  slot, on the castle side) or `X,Z`. A plan's `"king": {"4": "t1", "8": [-40, -10]}` moves him from that night on.
+  He's put back there before every night (a king knocked out wakes at the castle); each night report's `kingPost`
+  says where he was asked to stand and where he landed. Default: he stays where he is (at the castle after loading).
 - `--nights N-M`: the earlier nights are played first (`--catchup play`, the default: the plan with real income, so
   night N starts with what a player would have; listed under `catchup`), or skipped: `--catchup free` builds the
   earlier days' items for free and jumps to night N, `--catchup none` jumps with nothing built (add `--gold X`).
@@ -339,7 +343,7 @@ income paid), then the full `nights` reports. Each night report:
 - `income`: the next dawn's `nominal` income (every building), `blocked` (knocked out that night) and `paid`.
 - `after`: the game status at that same moment (the next morning; the end screen after the last night).
 
-The king does nothing during `test` (he stands where he was), so a defence that holds in `test` holds without the
+The king does nothing during `test` (he stands where he was, or where `--king` put him), so a defence that holds in `test` holds without the
 player's help; a real player adds his own damage (roughly one strong unit). Use `--god` to keep the king alive,
 `--invulnerable` to test pathing alone.
 
