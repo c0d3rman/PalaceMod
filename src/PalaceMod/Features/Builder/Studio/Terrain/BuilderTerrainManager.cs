@@ -57,6 +57,8 @@ namespace PalaceMod
                             KingWalker.Begin(pm, dir, secs);
                             return $"walking from {start.x:0.0} {start.y:0.00} {start.z:0.0} towards {dir.x:0.00},{dir.z:0.00} for {secs} s; `builder-terrain king` afterwards";
                         }
+                        case "walls":
+                            return $"cliff walls {(args.Length > 1 && args[1] == "off" ? "off" : "on")} in {GroundLayer.SetCliffWalls(!(args.Length > 1 && args[1] == "off"))} chunks";
                         case "probe":
                         {
                             // What stops the king around a point: colliders his layer meets within r.

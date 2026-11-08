@@ -322,6 +322,13 @@ namespace PalaceMod.Builder.Level
             }
             foreach (var c in Resources.FindObjectsOfTypeAll<Collider>())
                 if (c != null && c.gameObject.scene == scene && c.enabled && c.gameObject.layer == GroundLayerIndex && !Owned(c.transform)) Hide(c);
+            // The map's own invisible walls along its rivers and cliffs (PathMesher strips such as Nordfels'
+            // "InvisiWall (3)", outside NavmeshBakeHelper.invisibleWalls): the ground they fenced is gone, and they'd
+            // stop the king in the middle of the new field (the Far Bank's "invisible warrior").
+            foreach (var pm in Resources.FindObjectsOfTypeAll<PathMesher>())
+                if (pm != null && pm.gameObject.scene == scene && !Owned(pm.transform))
+                    foreach (var c in pm.GetComponentsInChildren<Collider>(true))
+                        if (!c.isTrigger) Hide(c);
             foreach (var helper in UnityEngine.Object.FindObjectsOfType<NavmeshBakeHelper>())
             {
                 var walls = HarmonyLib.Traverse.Create(helper).Field("invisibleWalls").GetValue<GameObject>();
@@ -788,6 +795,16 @@ namespace PalaceMod.Builder.Level
         private static bool showMarks;
 
         /// <summary>Whether blocked cells are drawn (the Studio's edit mode).</summary>
+        /// <summary>Dev: switches the king's cliff walls off (to see what he does without them) or back on.</summary>
+        public static int SetCliffWalls(bool on)
+        {
+            int n = 0;
+            if (chunks == null) return 0;
+            foreach (var c in chunks)
+                if (c.WallsCollider != null && c.WallsCollider.sharedMesh != null) { c.WallsCollider.enabled = on; n++; }
+            return n;
+        }
+
         public static bool ShowMarks
         {
             get => showMarks;

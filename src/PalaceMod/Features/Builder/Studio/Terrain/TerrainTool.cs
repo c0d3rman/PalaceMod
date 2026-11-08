@@ -76,7 +76,7 @@ namespace PalaceMod.Builder.Studio.Terrain
             TerrainBrush.SetHeight => "Alt-click: pick height",
             TerrainBrush.Block => "Shift: unblock",
             TerrainBrush.Water => "Shift: dry",
-            TerrainBrush.Ramp => "Drag top → bottom",
+            TerrainBrush.Ramp => "Top → bottom",
             _ => null,
         };
 
