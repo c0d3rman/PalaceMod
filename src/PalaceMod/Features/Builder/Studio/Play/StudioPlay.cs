@@ -43,7 +43,7 @@ namespace PalaceMod.Builder.Studio.Play
         private bool arrivePending, teleportOnArrive;
         private int loadedFrame;
         private readonly Stopwatch swapTimer = new();
-        private long readyMs = -1;
+        private long readyMs = -1, loadedMs = -1;
         private float? savedCloudIn, savedCloudOut;
         private bool sandboxTouched;
 
@@ -160,6 +160,7 @@ namespace PalaceMod.Builder.Studio.Play
         /// <summary>BuilderManager forwards host loads (SceneManager.sceneLoaded, the session's host only).</summary>
         internal void OnHostLoaded(Scene scene)
         {
+            if (Swapping && scene.name == Launcher.Current?.HostScene) loadedMs = swapTimer.ElapsedMilliseconds;
             if (Launcher.StudioKind != StudioSessionKind.Play || scene.name != Launcher.Current?.HostScene) return;
             // A load we didn't start (the end screen's Try Again, a retry): play goes on, from the castle.
             if (phase != Phase.ToPlay) teleportOnArrive = false;
@@ -177,14 +178,14 @@ namespace PalaceMod.Builder.Studio.Play
             {
                 readyMs = swapTimer.ElapsedMilliseconds;
                 LastSwapMs = readyMs;
-                Log.For<BuilderManager>().Info($"Studio: play ready in {readyMs} ms (clouds cleared)");
+                Log.For<BuilderManager>().Info($"Studio: play ready in {readyMs} ms (scene loaded at {loadedMs} ms)");
             }
             if (phase == Phase.ToEdit && !TransitionRunning && Launcher.StudioKind == StudioSessionKind.Edit &&
                 (Studio.Mode == StudioMode.Edit || Studio.Shell == null) && SceneManager.GetActiveScene().name == Launcher.Current?.HostScene)
             {
                 phase = Phase.Idle;
                 LastSwapMs = swapTimer.ElapsedMilliseconds;
-                Log.For<BuilderManager>().Info($"Studio: edit ready in {LastSwapMs} ms");
+                Log.For<BuilderManager>().Info($"Studio: edit ready in {LastSwapMs} ms (scene loaded at {loadedMs} ms)");
             }
             if (InPlay) SandboxActions.KeepGold();
         }
