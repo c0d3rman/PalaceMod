@@ -33,7 +33,7 @@ namespace PalaceMod
             Keybinds.ClaimContext(StudioContexts.Play, () => StudioPlay.InPlay);
             SandboxPanel.Register();
             PauseMenu.AddButton("studio-back", BackLabel, StudioPlay.Instance.ReturnToEdit, order: -100,
-                visible: () => StudioPlay.InPlay && Studio.Shell != null);
+                visible: () => StudioPlay.InPlay);
             Studio.ModeChanged += mode => { if (mode == StudioMode.Off) StudioPlay.Instance.Reset(); };
             SceneManager.sceneLoaded += (scene, _) =>
             {
@@ -114,7 +114,7 @@ namespace PalaceMod
             [HarmonyPriority(Priority.First)]
             private static bool Prefix(SceneTransitionManager __instance)
             {
-                if (!StudioPlay.InPlay || Studio.Shell == null || !Feature<BuilderManager>.On || __instance.SceneTransitionIsRunning) return true;
+                if (!StudioPlay.InPlay || !Feature<BuilderManager>.On || __instance.SceneTransitionIsRunning) return true;
                 StudioPlay.Instance.ReturnToEdit();
                 return false;
             }
@@ -128,7 +128,7 @@ namespace PalaceMod
 
             private static void Postfix(EndOfMatchScoreUIHelper __instance)
             {
-                bool studio = StudioPlay.InPlay && Studio.Shell != null;
+                bool studio = StudioPlay.InPlay;
                 foreach (var button in __instance.GetComponentsInChildren<TFUITextButton>(true))
                 {
                     if (!Calls(button, nameof(EndOfMatchScoreUIHelper.OnContinue))) continue;
