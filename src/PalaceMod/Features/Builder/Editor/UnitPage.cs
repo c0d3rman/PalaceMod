@@ -75,10 +75,11 @@ namespace PalaceMod.Builder.Editor
                 // A fresh unit's id follows its name until the id is used elsewhere.
                 string oldDerived = Ids.FromName(unit.Name ?? "");
                 unit.Name = v;
-                if (v != null && (unit.Id == oldDerived || unit.Id.StartsWith(oldDerived + "-")) && !Referenced(p, unit.Id))
+                // Library ids never change: other levels refer to the enemy by it.
+                if (v != null && !Draft.IsLibrary && (unit.Id == oldDerived || unit.Id.StartsWith(oldDerived + "-")) && !Referenced(p, unit.Id))
                     unit.Id = EditorCatalog.UniqueId(Ids.FromName(v), p.Units.Where(o => o != unit).Select(o => o.Id));
             }, "Shown in the night preview and tooltips.");
-            Text(page, "Id", P + ".id", () => Unit?.Id, (p, v) =>
+            if (!Draft.IsLibrary) Text(page, "Id", P + ".id", () => Unit?.Id, (p, v) =>
             {
                 var unit = p.Units[Index];
                 if (v == null || v == unit.Id) return;

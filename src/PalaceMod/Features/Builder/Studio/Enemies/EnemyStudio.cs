@@ -21,6 +21,13 @@ using UnityEngine;
 */
 namespace PalaceMod.Builder.Studio.Enemies
 {
+    /// <summary>The Enemy Studio as the Level Studio and the library home open it (StudioServices.Enemies).</summary>
+    internal sealed class EnemyStudioService : IStudioEnemyEditor
+    {
+        public bool Open(PackDraft draft, string unitId, bool returnToLevelStudio, Action<string> onReturn, out string error) =>
+            EnemyStudio.Open(draft, unitId, onReturn, out error);
+    }
+
     internal static class EnemyStudio
     {
         private enum State { Off, Opening, Active }
@@ -65,9 +72,11 @@ namespace PalaceMod.Builder.Studio.Enemies
             index = unitId == null ? -1 : d.Pack.Units.FindIndex(u => u?.Id == unitId);
             if (unitId != null && index < 0) { error = $"no unit \"{unitId}\""; draft = null; return false; }
             if (index < 0) index = NewEnemy(null);
+            if (index < 0) { error = "couldn't add an enemy"; draft = null; return false; }
+            // A Level Studio is up: take over its scene in place, and give it back exactly as it was.
             if (Studio.Mode == StudioMode.Edit && StudioShell.Editing)
             {
-                fromLevel = Studio.Draft != null;
+                fromLevel = true;
                 levelView = StudioShell.CaptureViewNow();
                 Enter();
                 return true;
@@ -243,6 +252,12 @@ namespace PalaceMod.Builder.Studio.Enemies
             b ??= catalog?.Units.FirstOrDefault(u => u.Side == UnitSide.Enemy && u.Id == "E Racer") ?? catalog?.Units.FirstOrDefault(u => u.Side == UnitSide.Enemy && !u.Flying && !u.Large);
             string baseRef = ContentRef.Vanilla(b?.Id ?? "E Racer");
             string name = "New " + (b?.DisplayName ?? "Enemy");
+            if (draft.IsLibrary)
+            {
+                // A free id in the whole library, not just this workspace.
+                var made = DesignLibrary.NewEnemy(draft, baseRef, name);
+                return made == null ? -1 : draft.Pack.Units.IndexOf(made);
+            }
             draft.Edit("New enemy", p =>
             {
                 p.Units.Add(new UnitDef
@@ -269,11 +284,13 @@ namespace PalaceMod.Builder.Studio.Enemies
             var u = Unit;
             if (u == null) return;
             string newId = null;
+            var taken = new HashSet<string>(draft.Pack.Units.Select(o => o.Id));
+            if (draft.IsLibrary) foreach (var item in DesignLibrary.Items(DesignKind.Enemy)) taken.Add(item.Id);
             draft.Edit("Duplicate enemy", p =>
             {
                 var copy = EditorCatalog.Copy(p.Units[index]);
                 copy.Name = (copy.Name ?? copy.Id) + " Copy";
-                copy.Id = newId = EditorCatalog.UniqueId(Ids.FromName(copy.Name), p.Units.Select(o => o.Id));
+                copy.Id = newId = EditorCatalog.UniqueId(Ids.FromName(copy.Name), taken);
                 p.Units.Add(copy);
             }, structural: true);
             if (newId != null) Select(newId);
@@ -314,9 +331,8 @@ namespace PalaceMod.Builder.Studio.Enemies
             return Path.Combine(Paths.BepInExRootPath, "PalaceBuilder", "cache", "portraits", Safe(packId), Safe(unitId) + ".png");
         }
 
-        /// <summary>Hands a portrait on (the library sets it); false keeps the cache file.</summary>
-        public static Func<PackDraft, string, Texture2D, bool> PortraitSink;
-
+        /// <summary>Takes the portrait and saves it: into the library (its tile picture) for a library workspace, else a
+        /// cache file. Returns where, or null.</summary>
         public static string SavePortrait()
         {
             var u = Unit;
@@ -325,7 +341,7 @@ namespace PalaceMod.Builder.Studio.Enemies
             if (tex == null) return null;
             try
             {
-                if (PortraitSink?.Invoke(draft, u.Id, tex) == true) return "library";
+                if (draft.IsLibrary && DesignLibrary.SavePreview(DesignKind.Enemy, u.Id, tex)) return DesignLibrary.PreviewPath(DesignKind.Enemy, u.Id) ?? "library";
                 string file = PortraitFile(draft.Pack.Id, u.Id);
                 Directory.CreateDirectory(Path.GetDirectoryName(file));
                 File.WriteAllBytes(file, tex.EncodeToPNG());
@@ -345,6 +361,7 @@ namespace PalaceMod.Builder.Studio.Enemies
         /// <summary>A saved portrait for a tile, or null.</summary>
         public static Sprite PortraitSprite(string packId, string unitId)
         {
+            if (draft?.IsLibrary == true) return DesignLibrary.Preview(DesignKind.Enemy, unitId);
             string file = PortraitFile(packId, unitId);
             if (PortraitCache.TryGetValue(file, out var s)) return s;
             Sprite sprite = null;
