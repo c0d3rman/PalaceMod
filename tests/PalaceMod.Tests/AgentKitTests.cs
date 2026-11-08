@@ -243,6 +243,49 @@ print("ok")
             Assert.True(p.ExitCode == 0 && output.Trim() == "ok", "plan buyer: " + output);
         }
 
+        /// <summary>palace.py's enemy numbers match the mod's (EnemyMath) and its unit check knows the model refs.</summary>
+        public static void PalacePyEnemyCardAndModelChecks()
+        {
+            string script = FindScript();
+            if (script == null || !HasPython()) { Console.WriteLine("  (skipped: no python3 or agent-kit/palace.py)"); return; }
+            const string code = """
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("palace", sys.argv[1]); P = importlib.util.module_from_spec(spec); spec.loader.exec_module(P)
+mods = [{"tags": [], "add": 10, "mult": 1}, {"tags": ["Tower"], "add": 5, "mult": 2}]
+assert P.hit_damage(mods, P.ENEMY_TARGETS["tower"]) == 30, P.hit_damage(mods, P.ENEMY_TARGETS["tower"])
+assert P.hit_damage(mods, P.ENEMY_TARGETS["house"], 0.5) == 5
+assert P.time_to_kill(100, 30, 2) == (4, 6)
+assert P.time_to_kill(100, 0, 2) is None
+class Ref:
+    catalog = {"units": [{"id": "E Melee", "side": "enemy", "maxHp": 25, "attackCooldown": 1, "weapon": "W", "tags": ["EnemyOwned", "MeeleFighter"]},
+                         {"id": "P Knight", "side": "player", "maxHp": 40, "attackCooldown": 2, "weapon": "K", "tags": ["PlayerOwned", "PlayerUnit"]}],
+               "weapons": [{"id": "W", "damage": [{"tags": [], "add": 4, "mult": 1}]}, {"id": "K", "damage": [{"tags": ["MeeleFighter"], "add": 10, "mult": 1}]}]}
+    scenery = {"meshes": [{"name": "Tree_02"}]}
+    def unit(self, uid): return next((u for u in self.catalog["units"] if u["id"] == uid), None)
+r = Ref()
+u = {"id": "tree", "base": "vanilla:E Melee", "stats": {"maxHp": 50}, "visuals": {"mesh": "mesh:Tree_02", "meshOffset": [0, 1, 0], "motion": "bob"}}
+assert P.check_unit(r, u) == [], P.check_unit(r, u)
+c = P.enemy_card(r, u)
+assert c["hp"] == 50 and c["deals"]["house"]["perHit"] == 4 and c["deals"]["house"]["perSecond"] == 4, c
+assert c["killedBy"]["P Knight"] == {"hits": 5, "seconds": 8}, c["killedBy"]
+assert P.enemy_card(r, u, difficulty=2, elite=True)["hp"] == 400
+bad = {"id": "x", "base": "vanilla:E Nope", "visuals": {"mesh": "mesh:Nope", "meshRotZ": 999, "meshLook": "shiny", "motion": "fly"}}
+paths = sorted(p for p, _ in P.check_unit(r, bad))
+assert paths == [".base", ".visuals.meshLook", ".visuals.meshRotZ", ".visuals.mesh", ".visuals.motion"] or set(paths) == {".base", ".visuals.mesh", ".visuals.meshRotZ", ".visuals.meshLook", ".visuals.motion"}, paths
+assert [p for p, _ in P.check_unit(r, {"base": "vanilla:E Melee", "visuals": {"mesh": "tree"}})] == [".visuals.mesh"]
+assert P.check_unit(r, {"base": "vanilla:E Melee", "visuals": {"mesh": "vanilla:P Knight"}}) == []
+print("ok")
+""";
+            var psi = new ProcessStartInfo("python3") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+            psi.ArgumentList.Add("-c");
+            psi.ArgumentList.Add(code);
+            psi.ArgumentList.Add(script);
+            using var p = Process.Start(psi);
+            string output = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
+            p.WaitForExit();
+            Assert.True(p.ExitCode == 0 && output.Trim() == "ok", "enemy card: " + output);
+        }
+
         private static int RunRaw(string script, string game, string refDir, out string output, params string[] args)
         {
             var psi = new ProcessStartInfo("python3") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };

@@ -95,6 +95,11 @@ namespace PalaceMod.Builder.Studio.Enemies
         {
             state = State.Active;
             StudioShell.HideForSuspend();
+            // Opened from a menu over the Studio (the wave page, a picker): the stage takes the screen.
+            if (Picker.IsOpen) Picker.Close();
+            if (ModPopup.Current != null && ModPopup.Current.IsOpen) ModPopup.Current.Close();
+            if (UIFrameManager.instance != null && UIFrameManager.instance.ActiveFrame != null && !ModDock.IsDockFrame(UIFrameManager.instance.ActiveFrame))
+                UIFrameManager.instance.CloseAllFrames();
             BuilderEditor.BindDraft(draft);
             Page.Index = index;
             draft.Changed += OnDraftChanged;
