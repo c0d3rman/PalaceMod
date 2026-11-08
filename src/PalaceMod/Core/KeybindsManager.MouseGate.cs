@@ -28,9 +28,12 @@ namespace PalaceMod
             return active != null && active.gameObject.name.StartsWith("PalaceMod ", System.StringComparison.Ordinal);
         }
 
+        /// <summary>Dev: switches the gate off (keybinds mousegate off).</summary>
+        internal static bool MouseGateOff;
+
         private static void UpdateMouseGate()
         {
-            bool want = ModUIWantsMouse();
+            bool want = !MouseGateOff && ModUIWantsMouse();
             if (want)
             {
                 if (mouseBlocked.Count == 0) BlockMouse();

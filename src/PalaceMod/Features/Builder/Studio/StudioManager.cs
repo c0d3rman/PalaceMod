@@ -67,6 +67,12 @@ namespace PalaceMod.Builder.Studio
                 case "state": return StudioShell.Describe();
                 case "dock": return StudioDock.Describe();
                 case "audit": Require(); return StudioAudit.Run();
+                case "focus":
+                {
+                    var f = UIFrameManager.instance?.ActiveFrame;
+                    static string N(UnityEngine.Object o) => o != null ? o.name : "-";
+                    return f == null ? "no menu" : $"{f.name}: selected {N(f.CurrentSelection)}, focus {N(f.CurrentFocus)}, applied {N(f.LastApplied)}, sleeping {f.MouseSleeping}, mouse gate {KeybindsManager.MouseGated}";
+                }
                 case "select":
                 case "add":
                 case "toggle":

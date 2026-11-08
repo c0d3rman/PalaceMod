@@ -73,6 +73,7 @@ namespace PalaceMod
             if (positionField == null) Log.Core.Warn("SimulatedPointer: Rewired.Mouse has no position field; the game's menus won't see the simulated mouse");
             foreach (var update in new[] { AccessTools.Method(typeof(UIFrame), "Update"), AccessTools.Method(typeof(UIFrameManager), "Update") })
                 harmony.Patch(update, prefix: new HarmonyMethod(typeof(SimulatedPointer), nameof(WritePosition)));
+            harmony.Patch(AccessTools.Method(typeof(UIFrame), "Update"), postfix: new HarmonyMethod(typeof(SimulatedPointer), nameof(ClickIfInlined)));
             Postfix(AccessTools.Method(typeof(Rewired.Controller), nameof(Rewired.Controller.GetButton), [typeof(int)]), nameof(Held));
             Postfix(AccessTools.Method(typeof(Rewired.Controller), nameof(Rewired.Controller.GetButtonDown), [typeof(int)]), nameof(Down));
             Postfix(AccessTools.Method(typeof(Rewired.Controller), nameof(Rewired.Controller.GetButtonUp), [typeof(int)]), nameof(Up));
@@ -115,7 +116,25 @@ namespace PalaceMod
 
         private static void Down(Rewired.Controller __instance, int index, ref bool __result)
         {
-            if (index == 0 && __instance is Rewired.Mouse && ClickFrame == 0) __result = true;
+            if (index == 0 && __instance is Rewired.Mouse && ClickFrame == 0) { __result = true; downSeen = Time.frameCount; }
+        }
+
+        private static int downSeen = -1, emulated = -1;
+
+        // Mono inlines Controller.GetButtonDown into UIFrame.HandleMouseNavigation too (like screenPosition), so the
+        // postfix above never runs there and the frame never sees the press. Then do what the frame does with a press:
+        // apply what's under the pointer (its hover has already selected or focused it this frame).
+        private static void ClickIfInlined(UIFrame __instance)
+        {
+            if (ClickFrame != 0 || downSeen == Time.frameCount || emulated == Time.frameCount) return;
+            var manager = UIFrameManager.instance;
+            if (manager == null || manager.ActiveFrame != __instance || !__instance.Interactable) return;
+            var target = __instance.CurrentFocus ?? __instance.CurrentSelection;
+            if (target == null || target.ignoreMouse || Position is not { } p) return;
+            if (target.transform is RectTransform rect && !RectTransformUtility.RectangleContainsScreenPoint(rect, p, null)) return;
+            emulated = Time.frameCount;
+            if (__instance.CurrentFocus != null) __instance.Select(__instance.CurrentFocus);
+            __instance.Apply();
         }
 
         private static void Up(Rewired.Controller __instance, int index, ref bool __result)
