@@ -91,22 +91,20 @@ namespace PalaceMod.Builder.Studio.Requirements
             return costs;
         }
 
-        /// <summary>"♜2" for castle level 2, "⤳ House 6" for a slot, "★" for from the start; null for the castle.</summary>
+        /// <summary>"Castle 2" for castle level 2, "after House 6" for a slot, "start" for from the start (the game's fonts have no chess or arrow glyphs); null for the castle.</summary>
         public static string Badge(string key)
         {
             string r = RequirementState.Ref(key);
             if (r == null || r == RequirementState.Castle) return null;
             if (!RequirementState.Effective.TryGetValue(r, out var req)) return null;
-            if (req?.Slot == null) return "★";
-            if (req.Slot == RequirementState.Castle) return $"♜{req.Level + 1}";
-            return $"⤳ {RequirementState.Name(req.Slot)}{(req.Level > 0 ? $" {req.Level + 1}" : "")}";
+            if (req?.Slot == null) return "start";
+            if (req.Slot == RequirementState.Castle) return $"Castle {req.Level + 1}";
+            return $"after {RequirementState.Name(req.Slot)}{(req.Level > 0 ? $" {req.Level + 1}" : "")}";
         }
 
         private static string Card(string key, StudioItem item, SlotKind kind, List<int> costs)
         {
             var sb = new StringBuilder();
-            sb.AppendLine($"{Label(kind)}{(item.Kind == StudioItemKind.Added ? " · added" : "")}{(item.Removed ? " · removed" : "")}");
-            if (costs.Count > 0) sb.AppendLine("Cost " + string.Join(" / ", costs.Select(c => c + "◉")));
             var income = RequirementState.Income(key);
             if (income.Any(i => i != 0))
             {
