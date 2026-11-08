@@ -294,7 +294,7 @@ namespace PalaceMod.Builder.Studio
             var d = Studio.Draft;
             var lv = Studio.Level;
             string dot = d?.Dirty == true ? $"  <color=#{ModStyle.Hex(ModStyle.Accent)}>●</color> <size=70%>unsaved</size>" : "";
-            title.text = $"{ModFields.TMPEscape(lv?.Name ?? Studio.LevelId ?? "")} <color=#{ModStyle.Hex(ModStyle.Dim)}>· {ModFields.TMPEscape(d?.Pack.Name ?? "")}</color>{dot}";
+            title.text = $"{ModFields.TMPEscape(lv?.Name ?? Studio.LevelId ?? "")} {(d?.IsLibrary == true ? "" : $"<color=#{ModStyle.Hex(ModStyle.Dim)}>· {ModFields.TMPEscape(d?.Pack.Name ?? "")}</color>")}{dot}";
             undoTile?.SetDim(d?.History.CanUndo != true);
             redoTile?.SetDim(d?.History.CanRedo != true);
             snapTile?.SetText(StudioShell.SnapStep <= 0f ? "Snap off" : $"Snap {StudioShell.SnapStep:0.#} m");
@@ -318,6 +318,7 @@ namespace PalaceMod.Builder.Studio
             var blocked = StudioScene.Routes.Where(r => !r.Reachable).Select(r => r.Line).ToList();
             if (blocked.Count > 0) list.Add(new Model.ValidationIssue(Model.Severity.Warning, prefix, "Blocked: " + string.Join(", ", blocked)));
             if (StudioServices.Terrain?.PathsStale == true) list.Add(new Model.ValidationIssue(Model.Severity.Warning, prefix, "Paths out of date"));
+            list.AddRange(Units.StudioUnits.Issues(prefix));
             return list;
         }
 

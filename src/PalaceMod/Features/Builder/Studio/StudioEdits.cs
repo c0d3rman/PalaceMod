@@ -189,9 +189,9 @@ namespace PalaceMod.Builder.Studio
                 lv.BuildSlots ??= new BuildSlotOverlay();
                 lv.BuildSlots.Add ??= [];
                 id = UniqueId("slot", lv);
-                var add = new BuildSlotAdd { Id = id, Base = "scene:" + baseName, Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(yaw, 360f)) };
+                var add = new BuildSlotAdd { Id = id, Base = StudioScene.BaseRef(baseName), Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(yaw, 360f)) };
                 // On an empty base the slot it copies is gone, so it would never unlock: it needs the castle instead.
-                if (LevelBases.IsEmpty(lv)) add.Requires = LevelRequirements.CastleLevel(1);
+                if (LevelBases.IsEmpty(lv) || n.Standard) add.Requires = LevelRequirements.CastleLevel(1);
                 lv.BuildSlots.Add.Add(add);
                 Studio.RunPlaceHooks(lv, "add:" + id);
             });
@@ -235,9 +235,11 @@ namespace PalaceMod.Builder.Studio
             public Vector3 Offset;
             public float Yaw, Scale = 1f;
             public bool Solid = true;
+            public string Colors;
             public List<UpgradeEdit> Upgrades;
             public SlotRequirement Requires;
             public int? UpgradeCap;
+            public List<float[]> Units;
         }
 
         private static List<Clip> clipboard = [];
@@ -256,7 +258,7 @@ namespace PalaceMod.Builder.Studio
                 {
                     var d = lv?.Props?.FirstOrDefault(p => p?.Id == i.Id);
                     if (d == null) continue;
-                    clips.Add(new Clip { Base = d.Base, IsProp = true, Offset = i.Pos - center, Yaw = i.Yaw, Scale = d.Scale, Solid = d.Solid });
+                    clips.Add(new Clip { Base = d.Base, IsProp = true, Offset = i.Pos - center, Yaw = i.Yaw, Scale = d.Scale, Solid = d.Solid, Colors = d.Colors });
                 }
                 else
                 {
@@ -271,6 +273,7 @@ namespace PalaceMod.Builder.Studio
                         Upgrades = ups?.Select(u => u == null ? null : new UpgradeEdit { Cost = u.Cost }).ToList(),
                         Requires = (edit?.Requires ?? add?.Requires)?.Copy(),
                         UpgradeCap = edit?.UpgradeCap ?? add?.UpgradeCap,
+                        Units = (edit?.Units ?? add?.Units)?.Select(u => (float[])u?.Clone()).ToList(),
                     });
                 }
             }
@@ -303,7 +306,7 @@ namespace PalaceMod.Builder.Studio
                         lv.Props ??= [];
                         string id = UniqueId("prop", lv, made);
                         made.Add(id);
-                        lv.Props.Add(new PropDef { Id = id, Base = c.Base, Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(c.Yaw, 360f)), Scale = c.Scale, Solid = c.Solid });
+                        lv.Props.Add(new PropDef { Id = id, Base = c.Base, Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(c.Yaw, 360f)), Scale = c.Scale, Solid = c.Solid, Colors = c.Colors });
                         keys.Add("prop:" + id);
                     }
                     else
@@ -312,8 +315,8 @@ namespace PalaceMod.Builder.Studio
                         lv.BuildSlots.Add ??= [];
                         string id = UniqueId("slot", lv, made);
                         made.Add(id);
-                        var requires = c.Requires?.Copy() ?? (LevelBases.IsEmpty(lv) ? LevelRequirements.CastleLevel(1) : null);
-                        lv.BuildSlots.Add.Add(new BuildSlotAdd { Id = id, Base = "scene:" + c.Base, Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(c.Yaw, 360f)), Upgrades = c.Upgrades, Requires = requires, UpgradeCap = c.UpgradeCap });
+                        var requires = c.Requires?.Copy() ?? (LevelBases.IsEmpty(lv) || BuildingRefs.IsBuilding(c.Base) ? LevelRequirements.CastleLevel(1) : null);
+                        lv.BuildSlots.Add.Add(new BuildSlotAdd { Id = id, Base = StudioScene.BaseRef(c.Base), Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(c.Yaw, 360f)), Upgrades = c.Upgrades, Requires = requires, UpgradeCap = c.UpgradeCap, Units = c.Units?.Select(u => (float[])u?.Clone()).ToList() });
                         keys.Add("add:" + id);
                     }
                     Studio.RunPlaceHooks(lv, keys[keys.Count - 1]);

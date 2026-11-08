@@ -102,6 +102,18 @@ namespace PalaceMod.Builder.Studio
                 bool solid = StudioMath.Common(props.Select(p => StudioEdits.PropDef(p)?.Solid ?? true), out bool solidMixed);
                 page.Row("Solid", solidMixed ? Dim(Mixed) : solid ? "Yes" : "No", Descriptions.For(DescKind.Flag, "Solid") ?? "Solid scenery blocks units; walk-through is decoration.",
                     () => StudioEdits.SetProps(props, solidMixed || !solid ? "Make solid" : "Make walk-through", d => d.Solid = solidMixed || !solid));
+                if (StudioServices.Colors is { } colors)
+                {
+                    // Level's (recoloured like the map's own scenery) or the colours of the map it comes from.
+                    var current = props.Select(p => StudioEdits.PropDef(p)?.Colors).ToList();
+                    string common = StudioMath.Common(current, out bool colorsMixed);
+                    bool toOriginal = current.Any(c => c == null);
+                    string shown = colorsMixed ? Dim(Mixed) : common == null ? "Level's" : $"{Esc(common.Split('(')[0])}'s";
+                    page.Row("Colours", shown,
+                        "Level's: coloured like the map's own scenery. Click to keep the original colours of the map it comes from (and back).",
+                        () => StudioEdits.SetProps(props, toOriginal ? "Keep original colours" : "Use the level's colours",
+                            d => d.Colors = toOriginal ? colors.DonorOf(StudioScene.Scene, d.Base) : null));
+                }
             }
 
             // Pose of one object.
@@ -217,6 +229,12 @@ namespace PalaceMod.Builder.Studio
                 int ws = draft.Pack.WaveSets.FindIndex(w => w?.Id == lv.WaveSet);
                 if (ws >= 0) Compact(page, page.Row("Edit nights", "▸", "Opens the wave set; Back returns here.", () => BuilderEditor.OpenWaveSet(ws)));
             }
+            var palettes = new List<string> { null };
+            palettes.AddRange(LevelColors.Maps);
+            page.Choice("Colours", palettes.Select(m => m == null ? "Map's own" : m).ToList(),
+                () => Math.Max(0, palettes.FindIndex(m => m == Studio.Level?.Colors?.Split('(')[0])),
+                i => Set("Set colours", l => l.Colors = palettes[i]),
+                tooltip: () => "The colour scheme of the whole level: ground, scenery, buildings and light.");
             StudioDock.SmallHeader(page, "Paths");
             StudioDock.DetailRow(page, "Check paths", Esc(StudioShell.PathShort), false, null, StudioShell.CheckPaths,
                 () => "Rescans pathfinding with your changes and draws each spawn line's route: red is blocked.");

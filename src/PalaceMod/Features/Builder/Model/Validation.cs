@@ -103,11 +103,28 @@ namespace PalaceMod.Builder.Model
                     if (v.Tint != null && !TryParseColor(v.Tint, out _)) Error(p + ".visuals.tint", "must be \"#rrggbb\"");
                     if (v.Scale is float s && (s < 0.1f || s > 10f)) Error(p + ".visuals.scale", "must be between 0.1 and 10");
                     CheckAsset(v.Icon, p + ".visuals.icon", ImageExtensions);
-                    CheckAsset(v.Mesh, p + ".visuals.mesh", MeshExtensions);
+                    switch (ModelRef.Kind(v.Mesh, out string modelId))
+                    {
+                        case ModelKind.Asset: CheckAsset(v.Mesh, p + ".visuals.mesh", MeshExtensions); break;
+                        case ModelKind.Unit:
+                            if (game != null && !game.HasVanillaUnit(modelId, null)) Error(p + ".visuals.mesh", $"no vanilla unit \"{modelId}\"");
+                            break;
+                        case ModelKind.Scenery: break; // resolved against the map and the scenery library when the unit is built
+                        default:
+                            if (v.Mesh != null) Error(p + ".visuals.mesh", "must be \"asset:<key>\", \"mesh:<scenery mesh>\" or \"vanilla:<unit id>\"");
+                            break;
+                    }
+                    foreach (var (rot, key) in new[] { (v.MeshRotX, "meshRotX"), (v.MeshRotZ, "meshRotZ") })
+                        if (rot is float r && (float.IsNaN(r) || r < -360f || r > 360f)) Error(p + ".visuals." + key, "must be between -360 and 360");
+                    if (v.MeshOffset != null && (v.MeshOffset.Length != 3 || v.MeshOffset.Any(o => float.IsNaN(o) || o < -50f || o > 50f)))
+                        Error(p + ".visuals.meshOffset", "must be [x, y, z], each between -50 and 50");
+                    if (v.MeshLook != null && !ModelRef.Looks.Contains(v.MeshLook)) Error(p + ".visuals.meshLook", "must be \"own\" or \"unit\"");
+                    if (v.Motion != null && !ModelRef.Motions.Contains(v.Motion)) Error(p + ".visuals.motion", "must be \"auto\", \"bob\" or \"none\"");
                     CheckAsset(v.Texture, p + ".visuals.texture", ImageExtensions);
                     if (v.MeshScale is float ms && (float.IsNaN(ms) || ms < 0.001f || ms > 1000f)) Error(p + ".visuals.meshScale", "must be between 0.001 and 1000");
                     if (v.MeshRotY is float mr && (float.IsNaN(mr) || mr < -360f || mr > 360f)) Error(p + ".visuals.meshRotY", "must be between -360 and 360");
-                    if ((v.MeshScale != null || v.MeshRotY != null) && v.Mesh == null) Warn(p + ".visuals.mesh", "meshScale and meshRotY only apply with a mesh");
+                    if ((v.MeshScale != null || v.MeshRotY != null || v.MeshRotX != null || v.MeshRotZ != null || v.MeshOffset != null || v.MeshLook != null) && v.Mesh == null)
+                        Warn(p + ".visuals.mesh", "meshScale, meshRot*, meshOffset and meshLook only apply with a mesh");
                     if (v.Sounds != null)
                     {
                         CheckAsset(v.Sounds.Attack, p + ".visuals.sounds.attack", AudioExtensions);
@@ -213,6 +230,7 @@ namespace PalaceMod.Builder.Model
                 if (l == null) { Error(p, "is empty"); continue; }
                 if (!Ids.IsValid(l.Id)) Error(p + ".id", "must be 1-64 characters of a-z, 0-9, '.', '_' or '-'");
                 else if (!levelIds.Add(l.Id)) Error(p + ".id", $"\"{l.Id}\" is used twice");
+                CheckColors(l.Colors, p + ".colors");
                 if (string.IsNullOrEmpty(l.Host) || (game != null && !game.HasHost(l.Host))) Error(p + ".host", $"unknown host map \"{l.Host}\"");
                 if (l.WaveSet != null)
                 {
@@ -239,7 +257,13 @@ namespace PalaceMod.Builder.Model
                     if (a == null) { Error(ap, "is empty"); continue; }
                     if (!Ids.IsValid(a.Id)) Error(ap + ".id", "must be 1-64 characters of a-z, 0-9, '.', '_' or '-'");
                     else if (!placed.Add(a.Id)) Error(ap + ".id", $"\"{a.Id}\" is used twice in this level");
-                    if (ContentRef.Parse(a.Base ?? "").Kind != RefKind.Scene) Error(ap + ".base", "must be \"scene:<build slot on the map>\"");
+                    var abase = ContentRef.Parse(a.Base ?? "");
+                    if (abase.Kind == RefKind.Building)
+                    {
+                        if (BuildingRefs.PathOf(abase.Id) == null)
+                            Error(ap + ".base", $"no building kind \"{abase.Id}\" (kinds: {string.Join(", ", BuildingRefs.Kinds.Select(k => k.Id))})");
+                    }
+                    else if (abase.Kind != RefKind.Scene) Error(ap + ".base", "must be \"scene:<build slot on the map>\" or \"building:<kind>\"");
                     CheckPos(a.Pos, ap + ".pos", optional: false);
                     CheckRequirement(a.Requires, a.UpgradeCap, ap, SlotRefs.Added(a.Id ?? ""));
                     CheckCosts(a.Upgrades, ap + ".upgrades");
@@ -255,6 +279,7 @@ namespace PalaceMod.Builder.Model
                         Error(pp + ".base", "must be \"mesh:<scenery mesh>\" (the map's or the scenery library's), optionally ending \"@<Map>\"");
                     CheckPos(pr.Pos, pp + ".pos", optional: false);
                     Range(pr.Scale, 0.1f, 10f, pp + ".scale");
+                    CheckColors(pr.Colors, pp + ".colors");
                 }
                 for (int j = 0; j < (l.SpawnLines?.Edit?.Count ?? 0); j++)
                 {
@@ -359,6 +384,12 @@ namespace PalaceMod.Builder.Model
                 var graph = edges.ToDictionary(kv => kv.Key, kv => kv.Value.Slot == null ? null : kv.Value, StringComparer.Ordinal);
                 foreach (var loop in LevelRequirements.Cycles(graph))
                     Error(paths[loop[0]], $"requirement loop: {string.Join(" needs ", loop.Concat([loop[0]]))}");
+            }
+
+            void CheckColors(string map, string path)
+            {
+                if (map != null && !LevelColors.IsMap(map))
+                    Error(path, $"must be a main map ({string.Join(", ", LevelColors.Maps)}) or left out for the level's own colours");
             }
 
             void Range(float? value, float min, float max, string path)

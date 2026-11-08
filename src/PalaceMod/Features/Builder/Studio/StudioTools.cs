@@ -63,7 +63,7 @@ namespace PalaceMod.Builder.Studio
 
         public override bool Cancel()
         {
-            bool busy = drag is Drag.Box or Drag.Move;
+            bool busy = Units.StudioUnits.CancelDrag() | drag is Drag.Box or Drag.Move;
             if (drag == Drag.Move) StudioScene.Reconcile(Studio.Level);
             drag = Drag.None;
             StudioDock.SetMarquee(null);
@@ -72,6 +72,8 @@ namespace PalaceMod.Builder.Studio
 
         public override void Update(StudioPointer p)
         {
+            // A press on a selected training slot's unit disc drags that unit (Studio/Units).
+            if (drag == Drag.None && Units.StudioUnits.HandlePointer(p)) return;
             if (p.LeftDown && !p.OverUI)
             {
                 pressKey = p.HoverKey;

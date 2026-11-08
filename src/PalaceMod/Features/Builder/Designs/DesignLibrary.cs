@@ -70,6 +70,21 @@ namespace PalaceMod.Builder
             return workspaces[key] = PackDraft.Workspace(pack);
         }
 
+        /// <summary>A fresh workspace with no level yet, for a new level: once the level is added and saved, Adopt it.</summary>
+        internal static PackDraft NewLevelWorkspace()
+        {
+            var repo = Repo;
+            if (repo == null) return null;
+            repo.Library.Load();
+            return PackDraft.Workspace(repo.Library.Workspace(null));
+        }
+
+        /// <summary>Keeps a workspace that now edits one level as that level's workspace.</summary>
+        internal static void Adopt(PackDraft draft)
+        {
+            if (draft?.WorkspaceLevel is { } id) workspaces[id] = draft;
+        }
+
         /// <summary>Workspaces with unsaved changes (the home marks their tiles).</summary>
         internal static bool HasUnsaved(DesignKind kind, string id) => kind == DesignKind.Level
             ? workspaces.TryGetValue(id, out var d) && d.Dirty
@@ -235,6 +250,24 @@ namespace PalaceMod.Builder
                 RenderTexture.ReleaseTemporary(rt);
             }
         }
+
+        // ---------------------------------------------------------------- playing
+
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<PackEntry, Dictionary<string, List<ValidationIssue>>> playIssues = new();
+
+        /// <summary>What stops a design from playing: for a library level only that level, its nights and the enemies
+        /// they use (a problem in another level doesn't matter); for a pack (or no level), the pack's own issues.</summary>
+        public static IReadOnlyList<ValidationIssue> PlayIssues(PackEntry entry, string levelId)
+        {
+            if (entry?.Pack == null || entry.Id != PackId || levelId == null) return entry?.Issues ?? [];
+            var cache = playIssues.GetOrCreateValue(entry);
+            if (cache.TryGetValue(levelId, out var list)) return list;
+            var play = Studio.Play.TestPacks.Play(entry.Pack, levelId, out string error);
+            list = play == null ? [new ValidationIssue(Severity.Error, "levels", error)] : BuilderServices.Packs.Validate(play);
+            return cache[levelId] = list;
+        }
+
+        public static bool CanPlay(PackEntry entry, string levelId) => !PlayIssues(entry, levelId).Any(i => i.Severity == Severity.Error);
 
         // ---------------------------------------------------------------- export
 

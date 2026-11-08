@@ -146,7 +146,7 @@ namespace PalaceMod.Builder
         private static void DesignRow(ModPage page, Design d, SessionLauncher.ArmedDesign armed, bool showMap)
         {
             var record = ScoreStore.Get(d.Key);
-            bool broken = d.Entry.HasErrors;
+            bool broken = !DesignLibrary.CanPlay(d.Entry, d.LevelId);
             bool isArmed = armed != null && armed.Request.Pack.Id == d.Entry.Id &&
                 armed.Request.WaveSetId == d.WaveSetId && armed.Request.LevelId == d.LevelId;
 
@@ -163,7 +163,12 @@ namespace PalaceMod.Builder
                 if (text != null) text.color = ModStyle.Dim;
             }
             if (OpenPackInEditor != null && EditorAvailable?.Invoke() == true && !d.Entry.ReadOnly && broken)
-                page.Row($"   Edit {d.Entry.Pack.Name ?? d.Entry.Id}", null, "Fix the pack's problems in the Builder.", () => OpenPackInEditor(d.Entry.Id));
+            {
+                if (d.Entry.Id == DesignLibrary.PackId && d.LevelId != null)
+                    page.Row($"   Edit {d.Name}", null, "Fix its problems in the Studio.", () => LibraryHome.OpenLevel(d.LevelId));
+                else
+                    page.Row($"   Edit {d.Entry.Pack.Name ?? d.Entry.Id}", null, "Fix the pack's problems in the Builder.", () => OpenPackInEditor(d.Entry.Id));
+            }
         }
 
         private static string Tooltip(Design d, DesignRecord record)
@@ -178,8 +183,9 @@ namespace PalaceMod.Builder
             if (!string.IsNullOrEmpty(desc)) lines.Add(desc);
             if (record?.Best != null)
                 lines.Add($"Best {record.Best.Score} ({record.Best.DateUtc.ToLocalTime():d MMM yyyy}). Played {record.Plays}, won {record.Wins}.");
-            if (d.Entry.HasErrors) lines.Add("Can't be played:\n" + IssuesText(d.Entry.Issues));
-            else if (d.Entry.Issues.Count > 0) lines.Add($"{d.Entry.Issues.Count} warning(s)");
+            var issues = DesignLibrary.PlayIssues(d.Entry, d.LevelId);
+            if (!DesignLibrary.CanPlay(d.Entry, d.LevelId)) lines.Add("Can't be played:\n" + IssuesText(issues));
+            else if (issues.Count > 0) lines.Add($"{issues.Count} warning(s)");
             return string.Join("\n", lines);
         }
 
@@ -191,9 +197,9 @@ namespace PalaceMod.Builder
                 frame.Close();
                 return;
             }
-            if (d.Entry.HasErrors)
+            if (!DesignLibrary.CanPlay(d.Entry, d.LevelId))
             {
-                Notify.Show($"{d.Name} can't be played: {FirstError(d.Entry.Issues)}", NotifyKind.Error, 6f, "builder-menu");
+                Notify.Show($"{d.Name} can't be played: {FirstError(DesignLibrary.PlayIssues(d.Entry, d.LevelId))}", NotifyKind.Error, 6f, "builder-menu");
                 return;
             }
             var request = new SessionRequest { Pack = d.Entry.Pack, WaveSetId = d.WaveSetId, LevelId = d.LevelId };

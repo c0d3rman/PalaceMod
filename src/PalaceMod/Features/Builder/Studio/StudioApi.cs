@@ -122,6 +122,8 @@ namespace PalaceMod.Builder.Studio
         /// <summary>A panel shown in the palette's place while the tool is active (W4's brush strip), or false.</summary>
         public virtual bool HasPanel => false;
         public virtual void BuildPanel(ModPage page) { }
+        /// <summary>Number key n (0-8 for 1-9) while active; true takes it (else it arms the Place hotbar).</summary>
+        public virtual bool Digit(int index) => false;
     }
 
     /// <summary>Something the Place tool can put down: a palette or library tile.</summary>
@@ -195,8 +197,20 @@ namespace PalaceMod.Builder.Studio
         /// <summary>The asset library's prop resolution (cross-map scenery): a PropBase for a PropDef base string in a
         /// scene, or null to fall back to the host's own scenery.</summary>
         public static Func<UnityEngine.SceneManagement.Scene, string, Level.PropBase> PropResolver;
+        /// <summary>Other maps' colour schemes (Library/MapColors).</summary>
+        public static IStudioColors Colors;
         /// <summary>The Enemy Studio (R2-C2 installs it). Null: callers fall back to the pack editor's unit page.</summary>
         public static IStudioEnemyEditor Enemies;
+    }
+
+    internal interface IStudioColors
+    {
+        /// <summary>The map a prop base's colours come from (a library prop's home map, or the host).</summary>
+        string DonorOf(UnityEngine.SceneManagement.Scene scene, string baseRef);
+        /// <summary>Draws a prop made from b in a map's colours (null: the level's).</summary>
+        void Paint(GameObject prop, Level.PropBase b, string map);
+        /// <summary>Gives the loaded level a map's colour scheme (null: the host's own).</summary>
+        void ApplyLevel(string map);
     }
 
     /// <summary>

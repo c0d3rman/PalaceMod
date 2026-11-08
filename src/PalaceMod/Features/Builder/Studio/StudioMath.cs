@@ -53,7 +53,7 @@ namespace PalaceMod.Builder.Studio
             static bool EmptyUpgrade(UpgradeEdit u) => u == null || (u.Cost == null && (u.Extra?.Count ?? 0) == 0);
             if (lv.BuildSlots != null)
             {
-                lv.BuildSlots.Edit?.RemoveAll(e => e == null || (e.Pos == null && e.RotY == null && e.Requires == null && e.UpgradeCap == null
+                lv.BuildSlots.Edit?.RemoveAll(e => e == null || (e.Pos == null && e.RotY == null && e.Requires == null && e.UpgradeCap == null && e.Units == null
                     && (e.Upgrades == null || e.Upgrades.All(EmptyUpgrade)) && (e.Extra?.Count ?? 0) == 0));
                 foreach (var e in lv.BuildSlots.Edit ?? []) if (e.Upgrades != null && e.Upgrades.All(EmptyUpgrade)) e.Upgrades = null;
                 foreach (var a in lv.BuildSlots.Add ?? []) if (a?.Upgrades != null && a.Upgrades.All(EmptyUpgrade)) a.Upgrades = null;

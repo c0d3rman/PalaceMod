@@ -43,6 +43,13 @@ namespace PalaceMod.Builder.Editor
             UpdateFields();
         };
 
+        /// <summary>Builds into a page that isn't this frame's (the Enemy Studio's dock panels), with the same field
+        /// binding and validation markers.</summary>
+        internal void BuildInto(ModPage page, Action<ModPage> build) => Page(build)(page);
+
+        /// <summary>Refreshes the bound fields' values and markers (after a value edit) without a rebuild.</summary>
+        internal void RefreshFields() => UpdateFields();
+
         public void OnDraftChanged(bool structural)
         {
             if (!Frame.IsOpen) { stale = true; return; }

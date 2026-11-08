@@ -15,6 +15,8 @@ using static PalaceMod.Builder.Agent.AgentCommands;
 
     - slots: every build slot, with its upgrade tree as the scene data has it (costs, income and HP per branch, troops
       and attackers each branch switches on), what unlocks it (activator, activatorLevel) and its upgrade cap.
+    - buildings: the game's standard building of each kind (Level/BuildingPrefabs), in the slots' shape, named by
+      their base "building:<kind>": what `add_slot` places for a kind the map doesn't have.
     - spawnLines: name, points and which enemies each may spawn.
     - grid: the ground sampled every `cell` metres over the enemy navmesh's bounds: height (cm, int16 little-endian,
       base64; -32768 = no ground) and walkability per cell as a row string per z (row 0 = smallest z):
@@ -47,6 +49,16 @@ namespace PalaceMod.Builder.Agent
                 ["nights"] = EnemySpawner.instance.WaveCount,
             };
             root["slots"] = new JArray(slots.Select(Slot));
+            // The game's standard building of every kind (the same on every map): bases "building:<kind>" for kinds
+            // the map lacks. Named by their base; no position.
+            root["buildings"] = new JArray(BuildingPrefabs.All().Select(b =>
+            {
+                var o = Slot(b.Slot);
+                o["name"] = Model.BuildingRefs.Ref(b.Id);
+                o.Remove("pos");
+                o.Remove("rotY");
+                return o;
+            }));
             root["spawnLines"] = new JArray(LayoutScene.Lines(scene).Select(l =>
             {
                 var pts = new JArray();
@@ -90,6 +102,9 @@ namespace PalaceMod.Builder.Agent
             if (s.RequiredRootLevelDifference > -100) o["upgradeCap"] = s.RequiredRootLevelDifference;
             o["canBeBase"] = LayoutScene.CanBeBase(s);
             if (hp != null) o["hp"] = R(hp.maxHp);
+            // A training slot's units: where each stands, [x, z] metres in the slot's frame (LevelDef buildSlots units).
+            var units = UnitHomes.Spots(s);
+            if (units.Count > 0) o["units"] = new JArray(units.Select(u => new JArray(R(u.X), R(u.Z))));
             o["upgrades"] = new JArray(s.OwnUpgrades.Select(u => new JObject
             {
                 ["cost"] = u.cost,
