@@ -284,10 +284,14 @@ namespace PalaceMod.Builder.Agent
         {
             var scene = EnemySpawner.instance != null ? EnemySpawner.instance.gameObject.scene : SceneManager.GetActiveScene();
             var slots = LayoutScene.Slots(scene);
-            name = name.Replace('_', ' ');
-            return slots.FirstOrDefault(s => s.name == name)
-                ?? slots.FirstOrDefault(s => s.name == LayoutScene.AddedPrefix + name)
-                ?? slots.FirstOrDefault(s => string.Equals(s.name, name, StringComparison.OrdinalIgnoreCase));
+            if (name.Equals("castle", StringComparison.OrdinalIgnoreCase)) return slots.FirstOrDefault(LayoutScene.IsCastle);
+            if (name.StartsWith("add:")) name = name.Substring(4);
+            // Commands split on spaces, so a host slot name's spaces may come as underscores ("House_Variant_(3)").
+            string spaced = name.Replace('_', ' ');
+            return slots.FirstOrDefault(s => s.name == LayoutScene.AddedPrefix + name)
+                ?? slots.FirstOrDefault(s => s.name == name)
+                ?? slots.FirstOrDefault(s => s.name == spaced)
+                ?? slots.FirstOrDefault(s => string.Equals(s.name, spaced, StringComparison.OrdinalIgnoreCase));
         }
 
         // ---------------------------------------------------------------------------------------------- paths

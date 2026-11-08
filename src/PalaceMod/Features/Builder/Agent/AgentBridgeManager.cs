@@ -214,6 +214,18 @@ namespace PalaceMod.Builder.Agent
                 stream.CopyTo(file);
                 n++;
             }
+            // The cross-map scenery library's catalog, for `palace.py ref scenery` and prop checks.
+            using (var scenery = asm.GetManifestResourceStream("PalaceMod.Assets.scenery.json"))
+            {
+                if (scenery != null)
+                {
+                    string path = Path.Combine(KitDir, "reference", "scenery.json");
+                    Directory.CreateDirectory(Path.GetDirectoryName(path));
+                    using var file = File.Create(path);
+                    scenery.CopyTo(file);
+                    n++;
+                }
+            }
             return n;
         }
     }
