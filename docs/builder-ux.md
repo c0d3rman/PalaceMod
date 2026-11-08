@@ -652,6 +652,50 @@ A separate effort is designing a cross-map asset library. The Studio leaves it o
   string. The library effort extends `LevelOverlay`'s prop resolution for its new base kinds; the Studio stays
   agnostic.
 
+### The cross-map scenery library (W5, `Features/Builder/Library/`)
+
+Every scenery mesh of the ten main maps (45 today: trees, rocks, ruins and walls, towers, graveyard pieces) can be
+placed on any map.
+
+- **No game assets are shipped or copied.** The repo holds only a metadata catalog,
+  `src/PalaceMod/Assets/scenery.json`: for each mesh, its name, home map, the maps that use it (with counts), the
+  asset file and object id it lives in, its kind, material names, the maps' typical yaw-free rotation and scale, the
+  vertex count and the bounds. `python3 scripts/dev.py scenery-catalog` regenerates it from the installed game with
+  UnityPy (`scripts/scenery_catalog.py`; the same filter as `LayoutScene.Props`, plus a hand-kept exclusion list and
+  kind table). Rerun it after a game update.
+- **Runtime:** on first use, `SceneryLibrary` reads the meshes from the player's own install (`AssetFileReader`: a
+  minimal reader for serialized format 22 and the Unity 2022.3 Mesh layout; about 400 KB, 85-225 ms once per game
+  session), copies the vertex and index buffers into new readable Meshes and keeps them. Every read is checked: the
+  file header's Unity version must be the catalog's, the object must be a Mesh with the catalog's name and vertex
+  count, and blend shapes, compressed or streamed meshes are refused. An entry that fails is hidden from the browser
+  and logged once (Warn); a level that uses it gets the usual "no scenery" warning, and the rest still loads.
+- **Colours:** a library mesh is drawn with the loaded level's material of the same name (the FlatKit materials
+  `ColorAndLightManager` recolours per level: Trees, Mountain, Buildings, Enemy, Ground Patches), so it takes the host
+  map's colours. "Keep the donor map's colours" (cloning a material with the donor level's `Colorscheme`) is deferred:
+  the colorschemes live in each level's own file as MonoBehaviour data, which needs a type-tree-free reader for that
+  class too.
+- **Refs:** placed library items are ordinary `props` entries with `base: "mesh:<name>"`, optionally
+  `"mesh:<name>@<Map>"` should two maps ever ship a mesh by the same name (the catalog generator refuses that case
+  today). `SceneryLibrary.Resolve(scene, base)` looks in the host's own scenery first (so existing levels look the
+  same; also where a host-only mesh not in the library is found), then the library. `LevelOverlay` (play) and the
+  Studio (`StudioServices.PropResolver`) both use it. `.tfpack` and share codes are unchanged: they carry the string.
+- **Solid props block with their real shape.** Library meshes are readable, so `LayoutScene.SetSolid` gives them a
+  blocker child that uses the mesh itself (and a `MeshCollider`) instead of the bounding box; host meshes, which
+  aren't readable, keep the box. A curved ruin wall blocks only along the wall.
+- **Library tab** (`LibraryBrowser`, registered as `StudioServices.AssetBrowser`): chips "This map" (the Studio's
+  `HostSceneryBrowser`, passed through: this map's scenery and the pack's `asset:` meshes), "All maps", then one per
+  kind (Trees, Rocks, Ruins and walls, Buildings, Graveyard). Tiles are ordered by home map, then kind; the badge is
+  the home map's first three letters, and the tooltip lists the kind and the maps that use it. The text filter matches
+  name, kind and map names ("Moorweg" lists Moorweg's). A mesh the host also has is listed once. New props start at
+  most about 6 m across, like host scenery.
+- **Tile pictures** (`LibraryThumbs`): rendered on demand by an offscreen camera (three-quarter view, transparent
+  background, the level's own materials and sun), four per frame, cached as PNGs in
+  `BepInEx/PalaceBuilder/cache/thumbs/<map>/<mesh>.png` (per host map, since colours differ) and in memory. The
+  browser raises `Changed` once the queue drains.
+- Dev: `dev.py cmd "builder-library status | query [here|all|kind:<Kind>|-] [text] | place <mesh> [x z] | gallery
+  [spacing] | walkable <x> <z> | clear | thumb <mesh> | thumbs [reset]"`. Unit tests (`SceneryLibraryTests`) cover
+  the reader on a synthetic file, ref parsing, the catalog, and, where the game is installed, read every catalog mesh.
+
 ## Data-model changes (summary)
 
 All are additive except one, `DesignPack.CurrentVersion` 1 → 2: `Migrations.Steps[1]` moves `add.activator` and
@@ -664,7 +708,7 @@ All are additive except one, `DesignPack.CurrentVersion` 1 → 2: `Migrations.St
 | `groups[] {id, name, members[]}` | `LevelDef` (editor metadata) | W1 |
 | `spawnLines.add` applied (fields exist) | `LevelOverlay` | W3 |
 | `terrain {…}` | `LevelDef` (see "Terrain") | W4 |
-| `props[].base` kinds from the library | `PropDef.Base` | library effort |
+| `props[].base`: `"mesh:<name>[@<Map>]"` also resolves from the scenery library | `PropDef.Base` | W5 |
 
 The validator covers each, with paths so the Problems popup can select the object.
 
