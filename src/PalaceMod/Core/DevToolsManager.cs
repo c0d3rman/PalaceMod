@@ -62,7 +62,8 @@ namespace PalaceMod
         public override void Awake(Plugin plugin)
         {
             base.Awake(plugin);
-            enabled = Environment.GetEnvironmentVariable("PALACEMOD_DEV") == "1";
+            instance = this;
+            enabled =Environment.GetEnvironmentVariable("PALACEMOD_DEV") == "1";
             if (!enabled) return;
 
             Application.runInBackground = true;
@@ -103,29 +104,43 @@ namespace PalaceMod
                         id = line.Substring(1);
                         continue;
                     }
-                    bool ok;
-                    string text;
-                    try
-                    {
-                        text = Run(line.Split([' '], StringSplitOptions.RemoveEmptyEntries)) ?? "";
-                        ok = true;
-                        Log.Info($"Dev command done: {line}{(text.Length == 0 ? "" : $": {text}")}");
-                    }
-                    catch (Exception e)
-                    {
-                        text = e is ArgumentException or InvalidOperationException or FormatException ? e.Message : e.ToString();
-                        ok = false;
-                        Log.Warn($"Dev command failed: {line}: {text}");
-                    }
-                    if (id != null) WriteResponse(id, ok, text);
+                    string text = Execute(line, out bool ok);
+                    if (id != null) WriteResponse(DevDir, id, ok, text);
                 }
             }
         }
 
-        private static void WriteResponse(string id, bool ok, string text)
+        private static DevToolsManager instance;
+
+        /// <summary>Runs one command line as `dev.py cmd` does. The Agent bridge (Features/Builder/Agent) runs its own
+        /// channel through this too. Returns the result text; ok is false when the command threw.</summary>
+        internal static string Execute(string line, out bool ok)
+        {
+            string text;
+            try
+            {
+                if (instance == null) throw new InvalidOperationException("dev tools aren't loaded");
+                text = instance.Run(line.Split([' '], StringSplitOptions.RemoveEmptyEntries)) ?? "";
+                ok = true;
+                instance.Log.Info($"Dev command done: {line}{(text.Length == 0 ? "" : $": {Clip(text)}")}");
+            }
+            catch (Exception e)
+            {
+                text = e is ArgumentException or InvalidOperationException or FormatException ? e.Message : e.ToString();
+                ok = false;
+                instance?.Log.Warn($"Dev command failed: {line}: {text}");
+            }
+            return text;
+        }
+
+        // Long results (JSON dumps) are logged by their start only.
+        private static string Clip(string text) => text.Length <= 400 ? text : text.Substring(0, 400) + $"... ({text.Length} chars)";
+
+        /// <summary>Writes a command's result where the requester waits for it: "ok" or "error", then the text.</summary>
+        internal static void WriteResponse(string folder, string id, bool ok, string text)
         {
             if (id.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return;
-            string path = Path.Combine(DevDir, $"command-{id}.response");
+            string path = Path.Combine(folder, $"command-{id}.response");
             File.WriteAllText(path + ".tmp", $"{(ok ? "ok" : "error")}\n{text}");
             File.Delete(path);
             File.Move(path + ".tmp", path);

@@ -71,7 +71,7 @@ namespace PalaceMod
                 ("Scores", ["Unranked runs", "Bonus-safe saves"]),
                 ("Loadout randomizer", ["Loadout randomizer"]),
             ]),
-            ("Builder", [("Builder", ["Builder"])]),
+            ("Builder", [("Builder", ["Builder", "Agent bridge"])]),
             (OtherGroup, []),
             ("Mod", [
                 ("About & logs", ["Version badge", "Diagnostics"]),
