@@ -141,8 +141,11 @@ namespace PalaceMod.Builder.Studio
             state = State.Waiting;
             claimed = true;
             startFrame = Time.frameCount;
+            claimedAt = Time.realtimeSinceStartup;
             return true;
         }
+
+        private static float claimedAt;
 
         /// <summary>Leaves the Studio (the map stays loaded until the session ends).</summary>
         public static void Stop()
@@ -150,6 +153,7 @@ namespace PalaceMod.Builder.Studio
             ClearScene();
             StudioDock.Destroy();
             StudioDock.HidePlay();
+            StudioScene.DropLookCache();
             state = State.Off;
             session = null;
             draft = null;
@@ -229,13 +233,18 @@ namespace PalaceMod.Builder.Studio
         {
             var lv = Studio.Level ?? draft?.Pack.FindLevel(levelId);
             if (lv == null) { Notify.Show("The level was deleted", NotifyKind.Warning); BuilderServices.Sessions.End(); Stop(); return; }
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            float waited = (Time.realtimeSinceStartup - claimedAt) * 1000f;
+            int frames = Time.frameCount - startFrame;
             StudioScene.Enter(s);
+            long scene = clock.ElapsedMilliseconds;
             var castle = StudioScene.Castle;
             StudioCamera.Setup(StudioScene.Root, castle != null ? castle.Pos : UnityEngine.Object.FindObjectOfType<CameraRig>().transform.position);
             draft.Changed += OnDraftChanged;
             BuilderEditor.BindDraft(draft);
             StudioServices.AssetBrowser ??= new HostSceneryBrowser();
             state = State.Editing;
+            long ready = clock.ElapsedMilliseconds;
             Studio.SetMode(StudioMode.Edit);
             StudioScene.Reconcile(draft.Pack.FindLevel(levelId));
             Studio.RaiseItemsChanged();
@@ -244,7 +253,8 @@ namespace PalaceMod.Builder.Studio
             if (view != null) RestoreViewNow(view);
             else StudioCamera.Frame(StudioScene.Pickable.Where(i => i.Kind != StudioItemKind.Line).Select(i => i.Pos).ToList());
             StudioDock.Build();
-            Log.For<BuilderManager>().Info($"Studio on {s.name}: {StudioScene.Natives.Count} build slots, {StudioScene.Lines.Count} spawn lines, {StudioScene.PropBases.Count} scenery kinds");
+            Log.For<BuilderManager>().Info($"Studio on {s.name}: {StudioScene.Natives.Count} build slots, {StudioScene.Lines.Count} spawn lines, {StudioScene.PropBases.Count} scenery kinds; " +
+                $"waited {waited:0} ms / {frames} frames after the claim, scene {scene} ms ({StudioScene.LastTimings}), ready {ready} ms, all {clock.ElapsedMilliseconds} ms");
         }
 
         private static void OnDraftChanged(bool structural)

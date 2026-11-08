@@ -326,6 +326,9 @@ namespace PalaceMod.Builder.Studio
         private static void BuildStatus()
         {
             status.Clear();
+            // The line is shorter than a panel's padding allows: a text taller than its box shows nothing at all.
+            status.Body.offsetMin = new Vector2(16f, 2f);
+            status.Body.offsetMax = new Vector2(-16f, -2f);
             var body = status.Body;
             TextMeshProUGUI Make(string name, TextAlignmentOptions align, float minX, float maxX)
             {

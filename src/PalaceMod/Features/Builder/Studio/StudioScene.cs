@@ -69,18 +69,31 @@ namespace PalaceMod.Builder.Studio
 
         // ---- Enter / clear --------------------------------------------------------------------------------------
 
+        /// <summary>How long Enter's parts took (ms), for the log.</summary>
+        public static string LastTimings = "";
+
         public static void Enter(Scene s)
         {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
             Scene = s;
             Root = new GameObject("PalaceBuilder studio").transform;
             SceneManager.MoveGameObjectToScene(Root.gameObject, s);
-            looks = new GameObject("looks").transform;
-            looks.SetParent(Root, false);
-            looks.gameObject.SetActive(false);
+            // The slots' inert copies are most of the time it takes to open the editor, and test play reloads the same
+            // map every time: keep them across reloads of one host (they hold only meshes, materials and transforms).
+            if (lookCache == null || lookHost != s.name)
+            {
+                DropLookCache();
+                lookCache = new GameObject("PalaceBuilder studio looks").transform;
+                lookCache.gameObject.SetActive(false);
+                UnityEngine.Object.DontDestroyOnLoad(lookCache.gameObject);
+                lookHost = s.name;
+            }
+            looks = lookCache;
             markers = new LayoutMarkers(Root);
 
             var all = LayoutScene.Slots(s);
             HostSlots = LayoutScene.HostSlots(all);
+            long found = clock.ElapsedMilliseconds;
             foreach (var slot in all)
             {
                 if (natives.ContainsKey(slot.name)) continue; // the overlay also only knows the first of a name
@@ -95,10 +108,12 @@ namespace PalaceMod.Builder.Studio
                 if (!info.Castle)
                 {
                     slot.gameObject.SetActive(false);
-                    info.Look = LayoutScene.Proxy(slot.gameObject, looks, "look " + slot.name);
+                    var cached = looks.Find("look " + slot.name);
+                    info.Look = cached != null ? cached.gameObject : LayoutScene.Proxy(slot.gameObject, looks, "look " + slot.name);
                 }
                 natives[slot.name] = info;
             }
+            long proxies = clock.ElapsedMilliseconds;
             foreach (var line in LayoutScene.Lines(s).Where(l => l.canSpawnSmallGround || l.canSpawnBigGround || l.canSpawnFlying))
             {
                 var t = line.transform;
@@ -107,7 +122,20 @@ namespace PalaceMod.Builder.Studio
                 if (pts.Count == 0) pts.Add(t.position);
                 lines[line.name] = new NativeLine { Name = line.name, Center = LayoutScene.LineCenter(t), Points = pts, Flying = line.canSpawnFlying, Small = line.canSpawnSmallGround, Big = line.canSpawnBigGround };
             }
+            long lineMs = clock.ElapsedMilliseconds;
             propBases = LayoutScene.Props(s);
+            LastTimings = $"slots {found}, proxies {proxies - found}, lines {lineMs - proxies}, scenery {clock.ElapsedMilliseconds - lineMs}";
+        }
+
+        private static Transform lookCache;
+        private static string lookHost;
+
+        /// <summary>Forgets the kept slot copies (leaving the Studio).</summary>
+        public static void DropLookCache()
+        {
+            if (lookCache != null) UnityEngine.Object.Destroy(lookCache.gameObject);
+            lookCache = null;
+            lookHost = null;
         }
 
         public static void Clear()
