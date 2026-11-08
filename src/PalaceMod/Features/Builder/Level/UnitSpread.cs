@@ -23,6 +23,8 @@ namespace PalaceMod.Builder.Level
         /// <summary>How far past the walkable edge a moved unit is pushed in.</summary>
         public const float Inset = 0.8f;
         private const int Rings = 8;
+        /// <summary>Homes this close (m) are one spot: the same place in different upgrade choices.</summary>
+        public const float SameSpot = 0.05f;
 
         /// <summary>The nearest walkable point to (x, z) for unit i, or null when there is no ground at all.</summary>
         public delegate (float x, float z)? Nearest(int unit, float x, float z);
@@ -49,6 +51,15 @@ namespace PalaceMod.Builder.Level
             foreach (int i in off)
             {
                 var (hx, hz) = homes[i];
+                // Units on one spot (the same place in different upgrade choices: only one of them ever stands there)
+                // go to the same new spot.
+                int twin = -1;
+                foreach (int j in off)
+                {
+                    if (j == i) break;
+                    if (Dist(homes[j].x, homes[j].z, hx, hz) < SameSpot) { twin = j; break; }
+                }
+                if (twin >= 0) { result[i] = result[twin]; moved[i] = true; continue; }
                 var (nx, nz) = nearest(i, hx, hz).Value;
                 // Push in along the way from the home to the edge; keep the edge point if that leaves the ground.
                 float dx = nx - hx, dz = nz - hz, d = (float)Math.Sqrt(dx * dx + dz * dz);

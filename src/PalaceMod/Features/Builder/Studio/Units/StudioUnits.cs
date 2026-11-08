@@ -31,7 +31,8 @@ namespace PalaceMod.Builder.Studio.Units
 
         private static readonly Color OkColor = new(0.42f, 0.78f, 0.69f, 0.95f);
         private static readonly Color BadColor = new(0.95f, 0.30f, 0.26f, 0.98f);
-        private const float Size = 0.9f;
+        // Disc size: grows with the zoom like the slot rings, so it reads at every zoom (2 m at the default zoom).
+        private static float Size => Mathf.Max(1.5f, 0.55f * StudioScene.PickRadius);
 
         // ---- What a slot's units are --------------------------------------------------------------------------------
 

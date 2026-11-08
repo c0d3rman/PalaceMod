@@ -23,13 +23,17 @@ using UnityEngine.SceneManagement;
 */
 namespace PalaceMod.Builder.Level
 {
-    /// <summary>One unit of a training slot as the Studio shows it: where it stands relative to the slot.</summary>
+    /// <summary>Where some of a training slot's units stand, relative to the slot. A barracks holds one set of units
+    /// per upgrade choice (Knights, Spears, ...: 5 x 12 on an Outpost), and the sets share their spots, so a spot is
+    /// one place with every unit that stands there in some choice.</summary>
     internal sealed class UnitSpot
     {
         /// <summary>Metres from the slot's centre in the slot's frame (x right, z forward); y is the height difference.</summary>
         public float X, Y, Z;
         public GraphMask Mask;
         public string Name;
+        /// <summary>Indices into UnitHomes.Units of the units standing here.</summary>
+        public List<int> Members = [];
     }
 
     internal static class UnitHomes
@@ -55,18 +59,27 @@ namespace PalaceMod.Builder.Level
         public static GraphMask MaskOf(Component unit) =>
             unit != null && unit.GetComponent<Seeker>() is Seeker s ? s.graphMask : GraphMask.FromGraphName("Player Units S");
 
-        /// <summary>A slot's units relative to it (taken from the map's own slot, so the map's positions).</summary>
-        public static List<UnitSpot> Spots(BuildSlot slot)
+        /// <summary>A slot's unit spots relative to it, in order of their first unit (read before the units move, so from
+        /// the map's own slot: the map's positions).</summary>
+        public static List<UnitSpot> Spots(BuildSlot slot) => Spots(slot, Units(slot));
+
+        private static List<UnitSpot> Spots(BuildSlot slot, List<Hp> units)
         {
             var t = slot.transform;
             float yaw = t.eulerAngles.y;
-            return Units(slot).Select(u =>
+            var spots = new List<UnitSpot>();
+            for (int i = 0; i < units.Count; i++)
             {
-                var p = u.transform.position;
+                var p = units[i].transform.position;
                 var (x, z) = UnitSpread.ToSlot(t.position.x, t.position.z, yaw, p.x, p.z);
-                return new UnitSpot { X = x, Z = z, Y = p.y - t.position.y, Mask = MaskOf(u), Name = UnitName(u) };
-            }).ToList();
+                var same = spots.FirstOrDefault(sp => Mathf.Abs(sp.X - x) < UnitSpread.SameSpot && Mathf.Abs(sp.Z - z) < UnitSpread.SameSpot);
+                if (same == null) spots.Add(same = new UnitSpot { X = x, Z = z, Y = p.y - t.position.y, Mask = MaskOf(units[i]), Name = UnitName(units[i]) });
+                same.Members.Add(i);
+            }
+            return spots;
         }
+
+
 
         private static string UnitName(Hp u)
         {
@@ -75,21 +88,26 @@ namespace PalaceMod.Builder.Level
             return (cut > 0 ? n.Substring(0, cut) : n).Trim();
         }
 
-        /// <summary>Puts a slot's units at a level's own offsets (before Start). Returns how many moved.</summary>
+        /// <summary>Puts a slot's unit spots at a level's own offsets (one per spot, before Start). Returns how many
+        /// spots moved.</summary>
         public static int ApplyOffsets(BuildSlot slot, List<float[]> offsets)
         {
             if (slot == null || offsets == null || offsets.Count == 0) return 0;
             var units = Units(slot);
+            var spots = Spots(slot, units);
             var t = slot.transform;
             float yaw = t.eulerAngles.y;
             int n = 0;
-            for (int i = 0; i < units.Count && i < offsets.Count; i++)
+            for (int k = 0; k < spots.Count && k < offsets.Count; k++)
             {
-                var o = offsets[i];
+                var o = offsets[k];
                 if (o == null || o.Length < 2 || float.IsNaN(o[0]) || float.IsNaN(o[1])) continue;
                 var (x, z) = UnitSpread.ToWorld(t.position.x, t.position.z, yaw, Mathf.Clamp(o[0], -40f, 40f), Mathf.Clamp(o[1], -40f, 40f));
-                var ut = units[i].transform;
-                ut.position = new Vector3(x, ut.position.y, z);
+                foreach (int i in spots[k].Members)
+                {
+                    var ut = units[i].transform;
+                    ut.position = new Vector3(x, ut.position.y, z);
+                }
                 n++;
             }
             return n;
@@ -137,6 +155,10 @@ namespace PalaceMod.Builder.Level
             LastSettle = $"{moved} of {total} unit homes moved onto walkable ground{(where.Count > 0 ? ": " + string.Join(", ", where) : "")}";
             return moved;
         }
+
+        /// <summary>A started unit's original home (where it returns each morning), or null before its Start.</summary>
+        public static Vector3? HomeOf(Hp unit) =>
+            unit != null && unit.GetComponent<PathfindMovementPlayerunit>() is { } m && Started(m) ? OriginalRef(m) : null;
 
         private static bool Started(PathfindMovementPlayerunit m) => m != null && SeekerRef(m) != null;
 

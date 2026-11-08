@@ -275,7 +275,8 @@ stood (and were previewed, and appeared) in the water until they first walked.
   stays spread out. The unit's transform moves (its Start, the build preview and respawns use it); units that
   already started (a building loaded built) get `homePosition`/`homePositionOriginal` too. Logged with the rescan;
   `builder-units [live] | settle` (dev).
-- **Data:** `units: [[x, z], ...]` on a `buildSlots` edit or add: per unit in the game's order, metres from the
+- **Data:** `units: [[x, z], ...]` on a `buildSlots` edit or add: per unit spot (an Outpost holds 5 upgrade choices
+  x 12 units on 12 shared spots; units on one spot move together, and play moves them to one new spot), metres from the
   slot's centre in its frame (x right, z forward; turns with the slot); null entries and absent = the map's. Applied
   by `LevelOverlay` before Start; play's settle still runs after.
 - **Studio** (`Studio/Units/`): a selected or hovered training slot shows a disc per unit (verdigris); a unit on

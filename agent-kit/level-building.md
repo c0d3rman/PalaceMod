@@ -174,8 +174,8 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
 - Added slots are named `PalaceBuilder <id>` in the running game; `palace.py build`/plans accept the bare id.
 - **Training slots' units** (barracks, archery range, hero's quarter...): each unit stands at an offset from its
   building that moves and turns with the slot: a copy placed on a river bank can put them in the water. `units` on an
-  edit or add sets them: one `[x, z]` per unit in the order the reference lists them (`ref slots <map>` shows the
-  map's as `units`), metres from the slot's centre in its own frame (x right, z forward); `null` entries keep the
+  edit or add sets them: one `[x, z]` per unit spot in the order the reference lists them (`ref slots <map>` shows the
+  map's as `units`; each upgrade choice's units, Knights or Spears, share the same spots), metres from the slot's centre in its own frame (x right, z forward); `null` entries keep the
   map's. Whatever you set, play moves any unit home that is off walkable ground to the nearest free ground at level
   start, keeping them spread out; `check` warns about units off the ground, and `set_units` places them (`at` takes
   world points).

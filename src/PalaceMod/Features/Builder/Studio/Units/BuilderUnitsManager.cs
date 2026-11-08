@@ -42,8 +42,9 @@ namespace PalaceMod
             int off = spots.Count(s => !s.Ok);
             StudioDock.SmallHeader(page, "Units");
             string red = ModStyle.Hex(ModStyle.KindColor(NotifyKind.Error));
-            page.Row("Stand", off > 0 ? $"<color=#{red}>{off} of {spots.Count} off the ground</color>" : $"{spots.Count} on the ground",
-                "Where the building's units stand (the discs on the map). Drag a disc to move one. In play, units off walkable ground go to the nearest ground.");
+            const string tip = "Where the building's units stand (the discs on the map). Drag a disc to move one. In play, units off walkable ground go to the nearest ground.";
+            if (off > 0) page.Row("Off the ground", $"<color=#{red}>{off} of {spots.Count}</color>", tip);
+            else page.Row("On the ground", $"{spots.Count} of {spots.Count}", tip);
             if (off > 0)
                 page.Row("Move units onto ground", "", "Moves each unit in water, on blocked or steep ground to the nearest free ground.", () => StudioUnits.MoveOntoGround(items));
             if (items.Any(StudioUnits.HasCustom))
@@ -73,7 +74,7 @@ namespace PalaceMod
                             {
                                 var p = u.transform.position;
                                 bool on = UnitHomes.Nearest(p, UnitHomes.MaskOf(u)) is Vector3 n && new Vector2(n.x - p.x, n.z - p.z).magnitude <= UnitSpread.OnGround;
-                                return $"{F(p)}{(on ? "" : " OFF")}";
+                                return $"{F(p)}{(UnitHomes.HomeOf(u) is Vector3 h ? $" home {F(h)}" : "")}{(on ? "" : " OFF")}{(u.gameObject.activeInHierarchy ? " active" : "")}";
                             })));
                         return UnitHomes.LastSettle + "\n" + string.Join("\n", lines);
                     }

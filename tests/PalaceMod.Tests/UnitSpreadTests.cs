@@ -41,6 +41,15 @@ namespace PalaceMod.Tests
             }
         }
 
+        public static void UpgradeChoicesShareASpot()
+        {
+            // The same spot in two upgrade choices: one new spot for both, not pushed apart.
+            var placed = UnitSpread.Place([(3f, 0f), (5f, 1f), (3f, 0f), (5f, 1f)], Shore, out bool[] moved);
+            Assert.True(moved.All(m => m), "all moved");
+            Assert.True(placed[0] == placed[2] && placed[1] == placed[3], "twins together");
+            Assert.True(Dist(placed[0], placed[1]) >= UnitSpread.Spacing - 0.01f, "different spots apart");
+        }
+
         public static void NoGroundKeepsHome()
         {
             var placed = UnitSpread.Place([(1f, 1f)], (u, x, z) => null, out bool[] moved);

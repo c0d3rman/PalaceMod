@@ -951,7 +951,7 @@ class Ops:
 
     def op_set_units(self, op):
         """{"op":"set_units","slot":"barracks","units":[[x,z],...]}: where a training slot's units stand, metres from the
-        slot's centre in its frame (x right, z forward; turns with the slot), in the order `ref slots` lists them; null
+        slot's centre in its frame (x right, z forward; turns with the slot), one per unit spot as `ref slots` lists them; null
         entries keep the map's. "at": [[x,z],...] gives world points instead. "units": null resets to the map's."""
         lv = self.level(op)
         kind, e = self.find_slot_entry(lv, op["slot"])
