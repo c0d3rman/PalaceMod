@@ -889,6 +889,34 @@ the Place tool), `PickOnMap`, `AddViewToggle`, `AddDeleteGuard` (W3's "this slot
   open over it. Document it in CLAUDE.md's UI kit section.
 - `Core/Keybinds.cs` (additive): `ClaimExclusive`.
 
+**As built (W1):**
+
+- Files: `Studio/StudioShell.cs` (lifecycle, per-frame loop, keys, `IStudioShell`), `StudioScene.cs` (the scene as a
+  view of the level), `StudioEdits.cs` (every change, one undo step each), `StudioMath.cs` (pure logic, unit-tested in
+  `tests/PalaceMod.Tests/StudioTests.cs`), `StudioSelection.cs`, `StudioTools.cs`, `StudioCamera.cs`,
+  `StudioInput.cs` (pointer and modifiers; the dev command scripts drags through it), `StudioKeys.cs`, `StudioDock.cs`,
+  `StudioPalette.cs`, `StudioInspector.cs`, `StudioOutliner.cs`, `StudioMenus.cs`, `StudioLabels.cs`,
+  `HostSceneryBrowser.cs`, `StudioManager.cs`. Tool and top-bar icons: `branding/studio/draw_icons.py` →
+  `src/PalaceMod/Assets/studio_*.png`.
+- Keys that differ from the table above: Erase is **Shift+E** (E turns the view). WASD always pans; the arrow keys pan
+  only with nothing selected and otherwise nudge the selection by the snap step (Shift ×5) in the Select and Move
+  tools. Tab shows or hides the palette.
+- Groups: selecting a group selects its members, so `Studio.Selection` never holds `group:` keys. Clicking a member
+  selects the group; Alt-click selects the member alone.
+- The dock fades the game's HUD (`UIFrameManager.InGameUIContainer`) while editing.
+- X-ray draws the rings over scenery (their material's depth test). W3's overlay fades the scenery.
+- Play mode: panels registered with `Studio.AddPanel(id, StudioMode.Play, …)` show in a second dock on the right that
+  doesn't freeze the king. It becomes the active menu only while the pointer is on it, so the game keeps its input
+  otherwise. `Studio.PointerOverUI` covers both docks.
+- `Studio.AddPlaceHook(Action<LevelDef, string>)` runs inside the edit that places a slot or prop (Place, paste,
+  duplicate). `Studio.ItemPlaced` fires after it. On an empty base a new slot gets "needs castle level 1" first.
+- Not built yet: Home frames all, but there's no "hide" overlay in the outliner. Library tab is the host's scenery
+  until the cross-map library registers its browser. Spawns tab lists and selects the host's lines; adding a line is
+  W3's (`spawnLines.add`).
+- Dev: `builder-studio open|new|state|dock|select|tool|arm|cursor|click|drag|dragw|rclick|press|cam|delete|dup|copy|`
+  `paste|group|ungroup|frame|snap|cost|issues|check|play|leave|json`; `builder-level` forwards its editing
+  subcommands there. `keybinds press LeftCommand+Z` presses a chord.
+
 **Acceptance:**
 
 - Every key in the table works: Del or Backspace deletes, and no UndoUpgrade notice appears.

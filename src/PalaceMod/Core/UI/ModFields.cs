@@ -47,8 +47,11 @@ namespace PalaceMod
         private readonly TextMeshProUGUI valueText;
         private bool wrap;
 
-        internal ModField(ModRow row, string label, Func<string> value, bool arrows)
+        private readonly float indent;
+
+        internal ModField(ModRow row, string label, Func<string> value, bool arrows, float indent = ValueIndent)
         {
+            this.indent = indent;
             Row = row;
             Label = label;
             this.value = value;
@@ -60,7 +63,7 @@ namespace PalaceMod
             {
                 valueText.enableWordWrapping = false;
                 valueText.overflowMode = TextOverflowModes.Ellipsis;
-                valueText.margin = new Vector4(ValueIndent, 0f, 0f, 0f);
+                valueText.margin = new Vector4(indent, 0f, 0f, 0f);
             }
         }
 
@@ -109,7 +112,7 @@ namespace PalaceMod
                 valueText.enableWordWrapping = true;
                 valueText.overflowMode = TextOverflowModes.Overflow;
                 valueText.alignment = TextAlignmentOptions.TopLeft;
-                valueText.margin = new Vector4(ValueIndent, WrapPad, 0f, WrapPad);
+                valueText.margin = new Vector4(indent, WrapPad, 0f, WrapPad);
                 // Wrapped at the value's real width (rect minus margins), margins included.
                 // Before the first layout there's no width yet: estimate; RefitOnResize fits it again.
                 float textHeight;
@@ -118,7 +121,7 @@ namespace PalaceMod
                     valueText.ForceMeshUpdate();
                     textHeight = valueText.preferredHeight;
                 }
-                else textHeight = valueText.GetPreferredValues(shown, FallbackWidth - ValueIndent, 0f).y + 2f * WrapPad;
+                else textHeight = valueText.GetPreferredValues(shown, FallbackWidth - indent, 0f).y + 2f * WrapPad;
                 height = Mathf.Max(RowHeight, textHeight + 2f);
             }
             else
@@ -126,7 +129,7 @@ namespace PalaceMod
                 valueText.enableWordWrapping = false;
                 valueText.overflowMode = TextOverflowModes.Ellipsis;
                 valueText.alignment = TextAlignmentOptions.MidlineRight;
-                valueText.margin = new Vector4(ValueIndent, 0f, 0f, 0f);
+                valueText.margin = new Vector4(indent, 0f, 0f, 0f);
             }
             if (label != null)
             {
@@ -193,7 +196,7 @@ namespace PalaceMod
         {
             ModField field = null;
             var row = page.Row(label, "", tooltip, onApply == null ? null : () => onApply());
-            field = new ModField(row, label, value, arrows: true);
+            field = new ModField(row, label, value, arrows: true, page.FieldIndent);
             var repeat = new StepRepeat();
             row.Button.onEmptyNavigate.AddListener(direction =>
             {
@@ -249,7 +252,7 @@ namespace PalaceMod
         {
             ModField field = null;
             var row = page.Row(label, "", tooltip, () => ModTextInput.Begin(field, value() ?? "", onCommit, maxLength, multiline));
-            field = new ModField(row, label, display ?? (() => Placeholder(value())), arrows: false);
+            field = new ModField(row, label, display ?? (() => Placeholder(value())), arrows: false, page.FieldIndent);
             field.EnableWrap();
             field.Refresh();
             return field;

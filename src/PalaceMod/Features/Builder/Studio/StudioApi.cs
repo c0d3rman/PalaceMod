@@ -192,6 +192,9 @@ namespace PalaceMod.Builder.Studio
         /// <summary>The Library tab's browser; the shell defaults it to HostSceneryBrowser.</summary>
         public static IAssetBrowser AssetBrowser;
         public static IStudioTerrain Terrain;
+        /// <summary>The asset library's prop resolution (cross-map scenery): a PropBase for a PropDef base string in a
+        /// scene, or null to fall back to the host's own scenery.</summary>
+        public static Func<UnityEngine.SceneManagement.Scene, string, Level.PropBase> PropResolver;
     }
 
     /// <summary>The editor state F5 keeps: W1 captures and restores it, W2 stores it across the swap.</summary>
@@ -252,6 +255,7 @@ namespace PalaceMod.Builder.Studio
         void PickOnMap(string prompt, Func<string, bool> accept, Action<string> picked);
         void RefreshPanels();
         float Ground(Vector3 point);
+        bool PointerOverUI { get; }
     }
 
     internal static class Studio
@@ -289,6 +293,24 @@ namespace PalaceMod.Builder.Studio
         public static StudioViewState View;
 
         public static StudioViewState CaptureView() => Shell?.CaptureView();
+
+        /// <summary>The pointer is over a Studio panel or a popup (edit and play): world clicks shouldn't act.</summary>
+        public static bool PointerOverUI => Running && Shell?.PointerOverUI == true;
+
+        /// <summary>The pack an edit load runs with: a copy holding only the level (no wave set, units, assets or
+        /// requirements), so problems elsewhere in the pack never stop the layout from being edited.</summary>
+        public static DesignPack EditPack(DesignPack pack, string levelId)
+        {
+            var copy = PackSerializer.Clone(pack);
+            var only = copy.FindLevel(levelId) ?? throw new ArgumentException("no such level", nameof(levelId));
+            only.WaveSet = null;
+            copy.Units.Clear();
+            copy.WaveSets.Clear();
+            copy.Levels = [only];
+            copy.Requires = null;
+            copy.Assets?.Clear();
+            return copy;
+        }
 
         /// <summary>The ground under the pointer (or the dev cursor) in edit mode.</summary>
         public static Vector3? CursorGround => Mode == StudioMode.Edit ? Shell?.CursorGround : null;
@@ -479,6 +501,34 @@ namespace PalaceMod.Builder.Studio
                 catch (Exception e) { Log.For<BuilderManager>().Caught("Studio context items failed", e); }
             }
             return rows;
+        }
+
+        private static readonly List<Action<LevelDef, string>> placeHooks = [];
+
+        /// <summary>Runs inside the edit that places a slot or prop (Place tool, paste, duplicate), with the level and the
+        /// new item's key, so a change it makes (W3: auto-link) is part of the same undo step.</summary>
+        public static void AddPlaceHook(Action<LevelDef, string> hook) => placeHooks.Add(hook);
+
+        /// <summary>After a slot or prop was placed (its edit is done).</summary>
+        public static event Action<string> ItemPlaced;
+
+        internal static void RunPlaceHooks(LevelDef level, string key)
+        {
+            foreach (var hook in placeHooks)
+            {
+                try { hook(level, key); }
+                catch (Exception e) { Log.For<BuilderManager>().Caught("Studio place hook failed", e); }
+            }
+        }
+
+        internal static void RaiseItemPlaced(string key)
+        {
+            if (ItemPlaced == null) return;
+            foreach (Action<string> h in ItemPlaced.GetInvocationList())
+            {
+                try { h(key); }
+                catch (Exception e) { Log.For<BuilderManager>().Caught("Studio.ItemPlaced handler failed", e); }
+            }
         }
 
         /// <summary>Runs the delete guards; true if one took over.</summary>

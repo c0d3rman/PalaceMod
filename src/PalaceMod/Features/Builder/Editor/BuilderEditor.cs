@@ -23,7 +23,6 @@ namespace PalaceMod.Builder.Editor
         private static PackPage packPage;
         private static UnitPage unitPage;
         private static WavePage wavePage;
-        private static LevelPage levelPage;
 
         internal static PackDraft Draft { get; private set; }
 
@@ -36,7 +35,6 @@ namespace PalaceMod.Builder.Editor
             if (!CheckAvailable()) return;
             list ??= new PackListPage();
             list.Frame.Open();
-            BuilderEditorManager.FirstUseHint();
         }
 
         /// <summary>Opens a pack's editor (from the pack list, or directly from another menu).</summary>
@@ -53,7 +51,6 @@ namespace PalaceMod.Builder.Editor
             var manager = UIFrameManager.instance;
             for (int guard = 0; guard < 8 && !packPage.Frame.IsOpen && IsChildScreen(manager.ActiveFrame); guard++) manager.CloseActiveFrame();
             Show(packPage);
-            BuilderEditorManager.FirstUseHint();
         }
 
         internal static void OpenUnit(int index)
@@ -63,11 +60,14 @@ namespace PalaceMod.Builder.Editor
             Show(unitPage);
         }
 
+        /// <summary>Opens a level of the open pack in the Studio (on its map).</summary>
         internal static void OpenLevel(int index)
         {
-            levelPage ??= new LevelPage();
-            levelPage.Index = index;
-            Show(levelPage);
+            var lv = Draft != null && index >= 0 && index < Draft.Pack.Levels.Count ? Draft.Pack.Levels[index] : null;
+            if (lv == null) return;
+            // On success the editor stays up under the clouds; the scene transition closes it.
+            if (!Studio.Studio.Open(Draft, lv.Id, out string error))
+                Notify.Show("Can't open the Studio: " + error, NotifyKind.Error, 6f, key: "builder-editor");
         }
 
         internal static void OpenWaveSet(int index)
@@ -128,7 +128,7 @@ namespace PalaceMod.Builder.Editor
             foreach (var page in Pages) page?.MarkStale();
         }
 
-        private static IEnumerable<EditorPage> Pages => [list, packPage, unitPage, wavePage, levelPage];
+        private static IEnumerable<EditorPage> Pages => [list, packPage, unitPage, wavePage];
 
         /// <summary>Makes a draft the open one (the layout editor edits a level of it on the map).</summary>
         internal static void BindDraft(PackDraft draft)
@@ -209,7 +209,7 @@ namespace PalaceMod.Builder.Editor
         }
 
         private static bool IsChildScreen(UIFrame frame) =>
-            frame != null && (Picker.IsOpen || (unitPage != null && unitPage.Frame.Frame == frame) || (wavePage != null && wavePage.Frame.Frame == frame) || (levelPage != null && levelPage.Frame.Frame == frame));
+            frame != null && (Picker.IsOpen || (unitPage != null && unitPage.Frame.Frame == frame) || (wavePage != null && wavePage.Frame.Frame == frame));
 
         internal static void CloseAll()
         {
@@ -358,7 +358,6 @@ namespace PalaceMod.Builder.Editor
             if (level.Success)
             {
                 OpenLevel(int.Parse(level.Groups[1].Value));
-                levelPage.SelectPath(path);
                 return;
             }
             packPage?.SelectPath(path);
@@ -374,8 +373,7 @@ namespace PalaceMod.Builder.Editor
             if (list != null && list.Frame.Frame == active) return true;
             packId = drafts.FirstOrDefault(kv => kv.Value == Draft).Key;
             if (packId == null) return false;
-            if (levelPage != null && levelPage.Frame.Frame == active) path = $"levels[{levelPage.Index}]";
-            else if (unitPage != null && unitPage.Frame.Frame == active) path = $"units[{unitPage.Index}]";
+            if (unitPage != null && unitPage.Frame.Frame == active) path = $"units[{unitPage.Index}]";
             else if (wavePage != null && wavePage.Frame.Frame == active) path = $"waveSets[{wavePage.Index}]";
             else if (packPage != null && packPage.Frame.Frame == active) path = "";
             else return false;

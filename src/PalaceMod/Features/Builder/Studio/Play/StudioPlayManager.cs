@@ -301,6 +301,6 @@ namespace PalaceMod.Builder.Studio.Play
             Faster = Keybinds.Register(s, "play-faster", "Studio play: faster", new KeyboardShortcut(KeyCode.RightBracket), "In Studio test play: game speed up a step.", flags: KeybindFlags.None, context: c);
         }
 
-        public static string Label(Keybind k) => Level.Keys.Label(k);
+        public static string Label(Keybind k) => StudioKeys.Label(k);
     }
 }

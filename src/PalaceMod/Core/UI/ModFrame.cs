@@ -460,6 +460,10 @@ namespace PalaceMod
         /// <summary>The room the page has without scrolling (width, height), e.g. for a wide page's Custom area.</summary>
         public Vector2 Size { get; internal set; } = new(860f, 600f);
 
+        /// <summary>Space a field (Number, Stepper, TextInput...) keeps for its label before the value; narrow pages (a
+        /// docked panel) use less.</summary>
+        public float FieldIndent { get; set; } = ModField.ValueIndent;
+
         /// <summary>The frame showing the page (null in a ModPopup).</summary>
         public ModFrame Frame { get; internal set; }
 

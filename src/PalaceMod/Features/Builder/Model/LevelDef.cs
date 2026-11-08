@@ -29,6 +29,18 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("props")] public List<PropDef> Props { get; set; }
         /// <summary>Generated or edited ground (Model/TerrainDef.cs); null keeps the host's.</summary>
         [JsonProperty("terrain")] public TerrainDef Terrain { get; set; }
+        /// <summary>Editor groups (Studio metadata, ignored when playing).</summary>
+        [JsonProperty("groups")] public List<GroupDef> Groups { get; set; }
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>A named set of a level's objects the Studio selects together. Members are Studio item keys
+    /// ("slot:&lt;name&gt;", "add:&lt;id&gt;", "prop:&lt;id&gt;", "line:&lt;name&gt;").</summary>
+    public sealed class GroupDef
+    {
+        [JsonProperty("id")] public string Id { get; set; }
+        [JsonProperty("name")] public string Name { get; set; }
+        [JsonProperty("members")] public List<string> Members { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
