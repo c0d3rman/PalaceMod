@@ -3387,11 +3387,13 @@ def cmd_apply(env, args):
 def cmd_check(env, args):
     ref = Ref(env)
     path, data = load_pack(env, args.pack)
-    issues = check_pack(ref, data)
+    if args.level:
+        find_level(data, args.level)
+    issues = check_pack(ref, scope_levels(data, {args.level}) if args.level else data)
     result = {"pack": data.get("id"), "offline": issues}
     if args.live:
         g = Game(env)
-        result["game"] = g.agent(f"validate {data['id']}")
+        result["game"] = g.agent(f"validate {data['id']}" + (f" {args.level}" if args.level else ""))
     result["ok"] = not any(i["severity"] == "error" for i in issues) and (not args.live or result["game"].get("ok", False))
     out(result)
     if not result["ok"]:
@@ -3533,7 +3535,7 @@ def cmd_play(env, args):
     g = Game(env)
     _, data = load_pack(env, args.pack)
     find_level(data, args.level)
-    v = g.agent(f"validate {data['id']}")
+    v = g.agent(f"validate {data['id']} {args.level}")
     if not v.get("ok"):
         out(v)
         raise Fail("the game's validator found errors (above)")
@@ -3822,7 +3824,7 @@ def cmd_test(env, args):
 
 
 def cmd_play_quiet(g, data, level, timeout):
-    v = g.agent(f"validate {data['id']}")
+    v = g.agent(f"validate {data['id']} {level}")
     if not v.get("ok"):
         out(v)
         raise Fail("the game's validator found errors (above)")
@@ -3847,7 +3849,7 @@ def cmd_sandbox(env, args):
     g = Game(env)
     _, data = load_pack(env, args.pack)
     find_level(data, args.level)
-    v = g.agent(f"validate {data['id']}")
+    v = g.agent(f"validate {data['id']} {args.level}")
     if not v.get("ok"):
         out(v)
         raise Fail("the game's validator found errors (above)")
@@ -4015,6 +4017,7 @@ def main(argv=None):
 
     p = sub.add_parser("check", help="offline checks (+ --live: the game's validator)")
     p.add_argument("pack")
+    p.add_argument("level", nargs="?", help="--live: validate only this level (and its nights)")
     p.add_argument("--live", action="store_true")
 
     for name, fn_help in (("show", "the level as it will play: slots, requirements, lines"), ("economy", "gold curve of a greedy economy player"),

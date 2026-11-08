@@ -298,7 +298,7 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 | `list` | the library: levels (map, nights, where they came from, whether a preview was saved) and enemies (base, which levels use them) |
 | `export "<name>" <level,...> [--enemies a,b]` | through the game: a `.tfpack` with those levels, the extra enemies, and every enemy and asset they use (JSON: `written` path) |
 | `apply <pack> ops.json [--level L] [--dry-run] [--fresh]` | run ops; saves; prints offline errors/warnings. `--fresh` first empties the level (nights kept) so the same file can be re-applied |
-| `check <pack> [--live]` | offline checks; `--live` adds the game's validator (exit 1 on errors) |
+| `check <pack> [level] [--live]` | offline checks (of that level and its nights only, if given); `--live` adds the game's validator (exit 1 on errors) |
 | `show <pack> [level]` | the level as it will play: every slot, what it needs, costs, income, lines |
 | `render <pack> [level] -o f.png [--labels names\|costs\|reqs\|none] [--live]` | top-down picture; routes in one colour per line, named, lengths in the legend; offline they're an estimate, `--live` = real game render + the game's routes (level loaded) |
 | `economy <pack> [level] [--compare] [--report test.json]` | gold curve of a greedy all-economy player (assumes nothing is ever knocked out); vs the base map's vanilla; `--report`: what a saved `test` run actually received per dawn and which buildings were knocked out most |
