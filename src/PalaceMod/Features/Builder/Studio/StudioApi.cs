@@ -197,8 +197,20 @@ namespace PalaceMod.Builder.Studio
         /// <summary>The asset library's prop resolution (cross-map scenery): a PropBase for a PropDef base string in a
         /// scene, or null to fall back to the host's own scenery.</summary>
         public static Func<UnityEngine.SceneManagement.Scene, string, Level.PropBase> PropResolver;
+        /// <summary>Other maps' colour schemes (Library/MapColors).</summary>
+        public static IStudioColors Colors;
         /// <summary>The Enemy Studio (R2-C2 installs it). Null: callers fall back to the pack editor's unit page.</summary>
         public static IStudioEnemyEditor Enemies;
+    }
+
+    internal interface IStudioColors
+    {
+        /// <summary>The map a prop base's colours come from (a library prop's home map, or the host).</summary>
+        string DonorOf(UnityEngine.SceneManagement.Scene scene, string baseRef);
+        /// <summary>Draws a prop made from b in a map's colours (null: the level's).</summary>
+        void Paint(GameObject prop, Level.PropBase b, string map);
+        /// <summary>Gives the loaded level a map's colour scheme (null: the host's own).</summary>
+        void ApplyLevel(string map);
     }
 
     /// <summary>

@@ -47,10 +47,12 @@ Stages 3 to 7 repeat many times, so their actions are one or two inputs each, wi
 
 ```text
 Title / pause menu
-  └ Builder (home: packs)                      ModFrame, as today (PackListPage)
-      └ Pack (Units · Wave Sets · Levels · Pack · Problems)
-          ├ Levels row "Open"  ───────────────►  STUDIO (in-world, on the level's map)
-          └ "New level" → Start popup ────────►  STUDIO
+  └ Builder home (My Levels · My Enemies)      ModFrame, wide tabs of preview tiles (Designs/LibraryHome.cs)
+      ├ level tile ─────────────────────────►  STUDIO (in-world, on the level's map)
+      ├ "New level" → Start popup ──────────►  STUDIO
+      ├ enemy tile / "New enemy" ───────────►  ENEMY STUDIO (StudioServices.Enemies; else the unit page)
+      ├ right-click: Rename · Duplicate · Delete · Export
+      └ Import · Export (packs exist only here)
 STUDIO
   ├ Edit mode: toolbar · palette · inspector/outliner/level · top bar · status line
   ├ popups: context menu, requirement picker, chain preset, start/base, nights, problems, Studio menu
@@ -58,7 +60,7 @@ STUDIO
   └ F5 ⇄ Play mode: the level as it plays + sandbox panel
 ```
 
-Leaving the Studio (Studio menu → Leave) returns to the pack screen where it was opened (today's `EditorReturn`).
+Leaving the Studio (Studio menu → Leave) returns to the home (`EditorReturn`; `BuilderEditor.CurrentPlace` counts the home).
 
 ## The Studio (edit mode)
 
@@ -524,6 +526,18 @@ Studio level from above (framing its items) into `levels/<id>.png` on every save
 with `DesignLibrary.SavePreview(DesignKind.Enemy, id, texture)`. `DesignLibrary.Preview(kind, id)` loads a sprite,
 cached until the file changes.
 
+**Home** (`Designs/LibraryHome.cs`; `BuilderEditor.Open` opens it, the old pack list is `BuilderEditor.OpenPackList` for
+dev and installed packs). Two wide tabs, My Levels and My Enemies. A toolbar row (New, Import, Export, a search tile that
+types in place, Sort: Recent / Name / Map or Base) over a grid of 268×214 tiles: the saved snapshot (fallback: the map's
+thumbnail, or the base enemy's icon), the name, and one line of facts (map · nights; base · levels that use it).
+Click opens; right-click gives Open, Name, Duplicate, Export… (levels) or Used in (enemies), Delete… (to trash, with
+the levels that use an enemy named). Tiles of installed packs' levels and enemies follow under a header, dimmed; a
+click copies one into the library (with the enemies it needs). The Export popup picks levels and extra enemies (the
+ones the chosen levels use are listed as included) and saves a `.tfpack` (opens the exports folder) or copies a share
+code. In the Level Studio, the Studio menu's Share/Pack editor rows become Export… for library levels, and each spawn
+group in the nights page gets Edit enemy… / Customize enemy… / New enemy… (`Designs/EnemyEditing.cs`). Dev:
+`library home|open|enemy|new-enemy|rename|duplicate|delete|list|preview|export|code|import`.
+
 **Enemy Studio hook** (`StudioServices.Enemies`, `IStudioEnemyEditor.Open(draft, unitId | null, returnToLevelStudio,
 onReturn, out error)`): R2-C2 implements it; the Level Studio's spawn-group picker ("Edit enemy…", "New enemy…") and
 the home's enemy tiles call it. `DesignLibrary.NewEnemy(draft, baseRef, name)` adds a unit with a free id (one undo
@@ -877,9 +891,18 @@ placed on any map.
   and logged once (Warn); a level that uses it gets the usual "no scenery" warning, and the rest still loads.
 - **Colours:** a library mesh is drawn with the loaded level's material of the same name (the FlatKit materials
   `ColorAndLightManager` recolours per level: Trees, Mountain, Buildings, Enemy, Ground Patches), so it takes the host
-  map's colours. "Keep the donor map's colours" (cloning a material with the donor level's `Colorscheme`) is deferred:
-  the colorschemes live in each level's own file as MonoBehaviour data, which needs a type-tree-free reader for that
-  class too.
+  map's colours by default. **Original colours** (`Library/MapColors.cs`): the catalog also records where each main
+  map's `Colorscheme` asset is (`colorschemes`: all ten live in `sharedassets1.assets`, found through each level's
+  `ColorAndLightManager.colorscheme` reference by the generator). `AssetFileReader.ReadColorscheme` reads one from
+  the install (fixed layout: the MonoBehaviour header, then the colour fields in declaration order with
+  `dayLightColor` skipped as readonly and the particles prefab reference in between; checked by name and exact
+  size) into a new `Colorscheme`, cached for the session. A prop's `colors: "<Map>"` swaps each material
+  `ColorAndLightManager` recolours (found by reference on its fields) for a clone coloured from that scheme the way
+  `ApplyColorScheme` does it; the clones' outlines follow the host's sunlight through dusk and dawn
+  (`OnColorChange`). Inspector: "Colours" on any scenery selection toggles between "Level's" and the map it comes
+  from (the library entry's "@Map" or home map; the host for its own scenery). The level's `colors` (Level tab,
+  "Colours") gives the whole level another map's scheme through the game's own `EasySwitchEntireColorSchemeTo` (set
+  before `ColorAndLightManager.Start` in play), keeping the host's weather particles.
 - **Refs:** placed library items are ordinary `props` entries with `base: "mesh:<name>"`, optionally
   `"mesh:<name>@<Map>"` should two maps ever ship a mesh by the same name (the catalog generator refuses that case
   today). `SceneryLibrary.Resolve(scene, base)` looks in the host's own scenery first (so existing levels look the

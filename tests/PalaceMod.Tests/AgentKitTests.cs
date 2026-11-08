@@ -41,7 +41,9 @@ namespace PalaceMod.Tests
                  {"op": "water", "level": -1, "rect": {"min": [20, -20], "max": [30, 0]}},
                  {"op": "block", "circle": {"center": [-30, -30], "radius": 4}},
                  {"op": "paint", "material": "road", "line": {"points": [[0, -12], [0, -40]], "width": 4}},
-                 {"op": "add_prop", "id": "r1", "mesh": "Rock A", "at": [-20, 30]},
+                 {"op": "add_prop", "id": "r1", "mesh": "Rock A", "at": [-20, 30], "colors": "original"},
+                 {"op": "add_prop", "id": "r2", "mesh": "Rock A", "at": [-25, 35], "colors": "Frostsee"},
+                 {"op": "set", "path": "levels[0].colors", "value": "Totend"},
                  {"op": "waves", "startingGold": 9, "nights": [{"spawns": [{"unit": "E Melee", "count": 3, "line": "north", "gold": 4}]}]}
                 ]
                 """);
@@ -76,6 +78,9 @@ namespace PalaceMod.Tests
                 Assert.True(grid.CellAt(-30f, -30f, out int bx, out int bz) && grid.Blocked[grid.CellIndex(bx, bz)], "blocked cell");
                 Assert.True(grid.MaterialAt(0f, -30f) == GroundMaterial.Road, "road cell");
                 Assert.Equal(9, pack.FindWaveSet(level.WaveSet).StartingGold, "starting gold");
+                Assert.Equal("Totend", level.Colors, "level colours");
+                Assert.True(level.Props.First(x => x.Id == "r1").Colors == null, "original colours of the host's own scenery are the level's");
+                Assert.Equal("Frostsee", level.Props.First(x => x.Id == "r2").Colors, "prop colours");
             }
             finally
             {
