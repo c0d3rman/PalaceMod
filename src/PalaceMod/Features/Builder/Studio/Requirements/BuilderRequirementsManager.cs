@@ -36,7 +36,7 @@ namespace PalaceMod
         {
             var scene = SceneManager.GetActiveScene().name;
             if (scene != thumbScene) { thumbScene = scene; thumbAt = UnityEngine.Time.unscaledTime + 4f; return; }
-            if (thumbAt < 0f || UnityEngine.Time.unscaledTime < thumbAt) return;
+            if (thumbAt < 0f || UnityEngine.Time.unscaledTime < thumbAt || !Feature<BuilderManager>.On) return;
             thumbAt = -1f;
             if (scene.Contains(' ') || Builder.Studio.Start.Thumbnails.Has(scene) || !Builder.Studio.Start.StartPopup.Maps().Any(h => h.Scene == scene)) return;
             var level = Studio.Running ? Studio.Level : BuilderServices.Sessions.Current?.Level;
