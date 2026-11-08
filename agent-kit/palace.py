@@ -5,13 +5,18 @@ Made for coding agents. Python 3.8+, standard library only, any OS. Read level-b
 
     python3 palace.py where                        # find the game, packs folder and bridge
     python3 palace.py ref build                    # (game running, Agent bridge on) cache map + unit data
-    python3 palace.py new my.pack --name "My Pack"
-    python3 palace.py level my.pack gorge --host Nordfels --base cleared --waves empty
-    python3 palace.py apply my.pack ops.json       # JSON edit operations (see the guide)
-    python3 palace.py check my.pack                # offline checks; --live adds the game's validator
-    python3 palace.py render my.pack gorge -o map.png
-    python3 palace.py economy my.pack gorge ; python3 palace.py waves my.pack gorge
-    python3 palace.py test my.pack gorge --nights 1-3 --plan plan.json --shots shots/
+    python3 palace.py new gorge --host Nordfels --base cleared --waves empty   # a level in the player's library
+    python3 palace.py list                         # the library: levels and enemies
+    python3 palace.py apply library ops.json --level gorge   # JSON edit operations (see the guide)
+    python3 palace.py check library                # offline checks; --live adds the game's validator
+    python3 palace.py render library gorge -o map.png
+    python3 palace.py economy library gorge ; python3 palace.py waves library gorge
+    python3 palace.py test library gorge --nights 1-3 --plan plan.json --shots shots/
+    python3 palace.py export "Gorge Pack" gorge    # a .tfpack of levels (+ the enemies they use), through the game
+
+"library" is the player's design library (one file per level and per enemy); any level can spawn any library enemy by
+its id. Old pack ids still work: a pack moved into the library names the levels that came from it, and a pack folder
+under packs/ is read and written as before.
 
 Every command prints JSON and exits non-zero on failure (`test`: 1 when the run is lost or stuck).
 """
@@ -131,6 +136,10 @@ class Env:
     @property
     def packs(self):
         return self.need_game() / "PalaceBuilder" / "packs"
+
+    @property
+    def library(self):
+        return self.need_game() / "PalaceBuilder" / "library"
 
     @property
     def bridge(self):
@@ -414,25 +423,157 @@ class Grid:
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 
+LIBRARY_ID = "library"
+
+
+class LibraryRef:
+    """Stands in for a pack.json path: the player's library (levels/<id>.json, enemies/<id>.json, assets.json), seen as
+    one pack with the id "library". origin limits the levels to those that came from one migrated or imported pack."""
+
+    def __init__(self, root, origin=None):
+        self.root = Path(root)
+        self.origin = origin
+        self.snapshot = {}
+        self.meta = {}
+
+    def exists(self):
+        return True
+
+    def __str__(self):
+        return str(self.root) + (f" (levels from {self.origin})" if self.origin else "")
+
+
+def _item_files(root, kind):
+    d = Path(root) / kind
+    return sorted(d.glob("*.json")) if d.is_dir() else []
+
+
+def library_origins(root):
+    found = set()
+    for f in _item_files(root, "levels"):
+        try:
+            o = (json.loads(f.read_text(encoding="utf-8")).get("library") or {}).get("origin")
+        except (OSError, ValueError):
+            continue
+        if o:
+            found.add(o)
+    return found
+
+
+def load_library(ref):
+    data = {"format": "palace-builder", "version": PACK_VERSION, "id": LIBRARY_ID, "name": "My library", "assets": {},
+            "units": [], "waveSets": [], "levels": []}
+    for kind in ("levels", "enemies"):
+        for f in _item_files(ref.root, kind):
+            item = json.loads(f.read_text(encoding="utf-8"))
+            meta = item.get("library") or {}
+            if kind == "levels":
+                if ref.origin and meta.get("origin") != ref.origin:
+                    continue
+                lv = (item.get("levels") or [None])[0]
+                if lv is None:
+                    continue
+                lv["id"] = f.stem
+                sets = item.get("waveSets") or []
+                data["levels"].append(lv)
+                data["waveSets"].extend(sets)
+                ref.snapshot[("levels", f.stem)] = json.dumps([lv, sets], sort_keys=True)
+            else:
+                u = (item.get("units") or [None])[0]
+                if u is None:
+                    continue
+                u["id"] = f.stem
+                data["units"].append(u)
+                ref.snapshot[("enemies", f.stem)] = json.dumps(u, sort_keys=True)
+            ref.meta[(kind, f.stem)] = meta
+    af = ref.root / "assets.json"
+    if af.exists():
+        data["assets"] = json.loads(af.read_text(encoding="utf-8"))
+    ref.snapshot["assets"] = json.dumps(data["assets"], sort_keys=True)
+    return data
+
+
+def _write_json(path, obj):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(obj, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def save_library(ref, data):
+    """Writes the items that changed since load_library; items that were loaded and are gone go to library/trash."""
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    seen = set()
+    sets = {w.get("id"): w for w in data.get("waveSets") or []}
+    for lv in data.get("levels") or []:
+        if not ID_RE.match(lv.get("id") or ""):
+            raise Fail(f"level id {lv.get('id')!r}: 1-64 of a-z 0-9 . _ -")
+        own = [sets[lv["waveSet"]]] if lv.get("waveSet") in sets else []
+        key = ("levels", lv["id"])
+        seen.add(key)
+        if ref.snapshot.get(key) == json.dumps([lv, own], sort_keys=True):
+            continue
+        meta = dict(ref.meta.get(key) or {"created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+        meta["kind"] = "level"
+        if ref.origin and "origin" not in meta:
+            meta["origin"] = ref.origin
+        _write_json(ref.root / "levels" / (lv["id"] + ".json"), {"format": "palace-builder", "version": PACK_VERSION, "id": lv["id"],
+                    "name": lv.get("name") or lv["id"], "levels": [lv], "waveSets": own, "library": meta})
+        ref.snapshot[key] = json.dumps([lv, own], sort_keys=True)
+    for u in data.get("units") or []:
+        if not ID_RE.match(u.get("id") or ""):
+            raise Fail(f"unit id {u.get('id')!r}: 1-64 of a-z 0-9 . _ -")
+        key = ("enemies", u["id"])
+        seen.add(key)
+        if ref.snapshot.get(key) == json.dumps(u, sort_keys=True):
+            continue
+        meta = dict(ref.meta.get(key) or {"created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+        meta["kind"] = "enemy"
+        _write_json(ref.root / "enemies" / (u["id"] + ".json"), {"format": "palace-builder", "version": PACK_VERSION, "id": u["id"],
+                    "name": u.get("name") or u["id"], "units": [u], "library": meta})
+        ref.snapshot[key] = json.dumps(u, sort_keys=True)
+    for key in [k for k in ref.snapshot if isinstance(k, tuple) and k not in seen]:
+        kind, iid = key
+        f = ref.root / kind / (iid + ".json")
+        if f.exists():
+            (ref.root / "trash").mkdir(parents=True, exist_ok=True)
+            os.replace(f, ref.root / "trash" / f"{'level' if kind == 'levels' else 'enemy'}-{iid}-{stamp}.json")
+        del ref.snapshot[key]
+    assets = json.dumps(data.get("assets") or {}, sort_keys=True)
+    if assets != ref.snapshot.get("assets"):
+        _write_json(ref.root / "assets.json", data.get("assets") or {})
+        ref.snapshot["assets"] = assets
+
+
 def pack_path(env, pack):
+    if pack in (LIBRARY_ID, "lib"):
+        return LibraryRef(env.library)
     p = Path(pack)
     if p.suffix == ".json" and p.exists():
         return p
     if (p / "pack.json").exists():
         return p / "pack.json"
     if not ID_RE.match(pack):
-        raise Fail(f"{pack!r} isn't a pack id (1-64 of a-z 0-9 . _ -) or a pack.json path")
-    return env.packs / pack / "pack.json"
+        raise Fail(f"{pack!r} isn't a pack id (1-64 of a-z 0-9 . _ -), \"library\", or a pack.json path")
+    path = env.packs / pack / "pack.json"
+    if not path.exists() and env.library.is_dir() and pack in library_origins(env.library):
+        return LibraryRef(env.library, origin=pack)
+    return path
 
 
 def load_pack(env, pack):
     path = pack_path(env, pack)
+    if isinstance(path, LibraryRef):
+        return path, load_library(path)
     if not path.exists():
-        raise Fail(f"No pack at {path}. Create it with `palace.py new {pack}`.")
+        raise Fail(f"No pack at {path}. Make a library level with `palace.py new <level> --host <map>`.")
     return path, json.loads(path.read_text(encoding="utf-8"))
 
 
 def save_pack(path, data):
+    if isinstance(path, LibraryRef):
+        save_library(path, data)
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -2875,7 +3016,15 @@ def reference_markdown(ref):
 
 
 def cmd_new(env, args):
+    if args.host:
+        # The library model: a new level (its nights in the same file); enemies are shared by every level.
+        args.level, args.pack = args.pack, LIBRARY_ID
+        if not args.force and (env.library / "levels" / (args.level + ".json")).exists():
+            raise Fail(f"library level {args.level!r} exists (--force replaces it)")
+        return cmd_level(env, args)
     path = pack_path(env, args.pack)
+    if isinstance(path, LibraryRef):
+        raise Fail("the library always exists; add a level with `new <level> --host <map>`")
     if path.exists() and not args.force:
         raise Fail(f"{path} exists (--force to overwrite)")
     data = {"format": "palace-builder", "version": PACK_VERSION, "id": args.pack, "name": args.name or args.pack, "author": args.author or "",
@@ -2914,6 +3063,31 @@ def cmd_level(env, args):
     out({"level": lv["id"], "pack": str(path), "waveSet": lv.get("waveSet")})
 
 
+def cmd_list(env, args):
+    ref = LibraryRef(env.library)
+    data = load_library(ref)
+    used = {}
+    for lv in data["levels"]:
+        ws = find_waveset(data, lv.get("waveSet")) or {}
+        for n in ws.get("nights") or []:
+            for sp in n.get("spawns") or []:
+                u = (sp.get("unit") or "").replace("unit:", "")
+                used.setdefault(u, set()).add(lv["id"])
+    out({"library": str(env.library),
+         "levels": [{"id": l["id"], "name": l.get("name"), "host": l.get("host"), "base": l.get("base"),
+                     "nights": len((find_waveset(data, l.get("waveSet")) or {}).get("nights") or []),
+                     "origin": (ref.meta.get(("levels", l["id"])) or {}).get("origin"),
+                     "preview": (env.library / "levels" / (l["id"] + ".png")).exists()} for l in data["levels"]],
+         "enemies": [{"id": u["id"], "name": u.get("name"), "side": u.get("side", "enemy"), "base": u.get("base"),
+                      "usedBy": sorted(used.get(u["id"], []))} for u in data["units"]]})
+
+
+def cmd_export(env, args):
+    g = Game(env)
+    name = re.sub(r"[^A-Za-z0-9._-]+", "-", args.name).strip("-") or "levels"
+    out(g.agent(f"library export {name} {args.levels}" + (f" {args.enemies}" if args.enemies else "")))
+
+
 def read_ops(src):
     text = sys.stdin.read() if src == "-" else Path(src).read_text(encoding="utf-8")
     ops = json.loads(text)
@@ -2934,14 +3108,24 @@ def fresh_level(env, ref, data, level_id):
     return lv["id"]
 
 
+def scope_levels(data, level_ids):
+    """A view of a pack with only these levels and their wave sets (all units and assets)."""
+    levels = [l for l in data.get("levels") or [] if l.get("id") in level_ids]
+    sets = {l.get("waveSet") for l in levels}
+    return dict(data, levels=levels, waveSets=[w for w in data.get("waveSets") or [] if w.get("id") in sets])
+
+
 def cmd_apply(env, args):
     ref = Ref(env)
     path, data = load_pack(env, args.pack)
     if args.fresh:
         fresh_level(env, ref, data, args.level)
     ops = Ops(env, ref, data, args.level)
-    ops.run(read_ops(args.ops))
-    issues = [] if args.no_check else check_pack(ref, data)
+    ops_list = read_ops(args.ops)
+    ops.run(ops_list)
+    # In the library, only the edited levels (and the nights and enemies they use) are checked: the rest is other work.
+    touched = {o.get("level") or args.level for o in ops_list} - {None} if isinstance(path, LibraryRef) else set()
+    issues = [] if args.no_check else check_pack(ref, scope_levels(data, touched) if touched else data)
     errors = [i for i in issues if i["severity"] == "error"]
     if not args.dry_run:
         save_pack(path, data)
@@ -3511,12 +3695,22 @@ def main(argv=None):
     p.add_argument("-o", "--out")
     p.add_argument("--labels", default="names", choices=["names", "costs", "reqs", "none"])
 
-    p = sub.add_parser("new", help="create a pack")
-    p.add_argument("pack")
+    p = sub.add_parser("new", help="new <level> --host <map>: a level in the library (without --host: an old-style pack folder)")
+    p.add_argument("pack", metavar="level")
+    p.add_argument("--host", help="base map scene, e.g. Nordfels")
     p.add_argument("--name")
+    p.add_argument("--base", default="map", choices=["map", "cleared", "flat"])
+    p.add_argument("--waves", default="empty", choices=["empty", "vanilla", "none"])
     p.add_argument("--author")
     p.add_argument("--description")
     p.add_argument("--force", action="store_true")
+
+    sub.add_parser("list", help="the library's levels and enemies (offline)")
+
+    p = sub.add_parser("export", help="a .tfpack of library levels (+ every enemy and asset they use), through the game")
+    p.add_argument("name", help="the pack's name (also its file name)")
+    p.add_argument("levels", help="comma-separated level ids")
+    p.add_argument("--enemies", default="", help="comma-separated extra enemy ids")
 
     p = sub.add_parser("level", help="add a level to a pack")
     p.add_argument("pack")
