@@ -533,7 +533,9 @@ class Ops:
         self.log = []
 
     def level(self, op):
-        return find_level(self.data, op.get("level", self.level_id))
+        # "level" names the level; the water op's numeric "level" is its water height, not a level id.
+        lid = op.get("level") if isinstance(op.get("level"), str) else self.level_id
+        return find_level(self.data, lid)
 
     def ground_y(self, level, x, z):
         t = level.get("terrain")
@@ -1422,6 +1424,17 @@ class LevelGround:
                         row.append("w")
                     self.height.append(T.height_at(T.ox + (i + 0.5) * T.cell, T.oz + (j + 0.5) * T.cell))
                 self.kind.append(row)
+            # Large enemies need room: within ~4 m of a cliff, water or a blocked cell only small ones fit (measured:
+            # an 8 m ramp between cliffs is closed to the large graph, a 14 m one is open).
+            n = max(1, int(round(4.0 / T.cell)))
+            edge = [[k == "." for k in r] for r in self.kind]
+            for j in range(T.h):
+                for i in range(T.w):
+                    if self.kind[j][i] != "w":
+                        continue
+                    if any(edge[jj][ii] for jj in range(max(0, j - n), min(T.h, j + n + 1))
+                           for ii in range(max(0, i - n), min(T.w, i + n + 1))):
+                        self.kind[j][i] = "s"
         else:
             g = Grid(m["grid"])
             self.ox, self.oz, self.cell, self.w, self.h = g.ox, g.oz, g.cell, g.w, g.h

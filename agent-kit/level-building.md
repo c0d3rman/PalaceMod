@@ -290,7 +290,8 @@ his own damage (roughly one strong unit). Use `--god` to keep the king alive, `-
 ## 7. Terrain (base "flat")
 
 A flat base replaces the map's ground with a heightfield you sculpt; the sky, light and castle position stay the
-host's. The castle stands at its host position; keep the ground there at height 0.
+host's. The castle keeps its host x/z and stands on whatever height you give the ground there; slots snap to the
+ground too.
 
 - Grid: `origin` [x,z] is the min corner, `cell` metres (default 2), `size` [W,H] cells (each ≤ 400). Corner heights,
   metres relative to `y` (default: the castle's height), world height clamped to [-8, +30] m. The grid's edge is a
@@ -298,6 +299,13 @@ host's. The castle stands at its host position; keep the ground there at height 
 - Heights: `terrain` with `set` (flat plateau/basin to a height), `raise`/`lower` (add), `smooth`; `ramp` for slopes.
   Slopes steeper than ~32° are cliffs: unwalkable for ground units and the king, painted as rock. A plateau with one
   ramp is a choke point; fliers ignore it.
+- **Width matters.** Large enemies (ogres, rams, big spiders; and every spawn line with `large: true` is path-checked
+  for them) need about 12-14 m between cliffs, water or blocked cells: a 6 m-high plateau with an 8 m ramp tested
+  as closed to them, a 14 m ramp as open. Small enemies fit through narrower gaps. Make ramps and passes 14 m+ unless
+  you mean to keep large enemies out.
+- Example (tested): `{"op": "terrain", "mode": "set", "height": 6, "circle": {"center": [-4, 1], "radius": 22},
+  "falloff": 1}` then `{"op": "ramp", "from": [-4, -18], "to": [-4, -40], "width": 14, "fromHeight": 6, "toHeight": 0,
+  "falloff": 1}` on a flat Nordfels: a castle mesa with one southern ramp.
 - `paint`: looks only (road, sand, earth, grass shades, rock). `block`: invisible no-walk cells (works on any base, also
   on vanilla ground). `water`: unwalkable cells drawn as water, the ground dug under it.
 - Each level stores terrain compressed in the pack (a few KB); big terrain levels share as `.tfpack` files rather
