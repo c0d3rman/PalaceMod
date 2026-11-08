@@ -318,6 +318,7 @@ namespace PalaceMod.Builder.Studio
             var blocked = StudioScene.Routes.Where(r => !r.Reachable).Select(r => r.Line).ToList();
             if (blocked.Count > 0) list.Add(new Model.ValidationIssue(Model.Severity.Warning, prefix, "Blocked: " + string.Join(", ", blocked)));
             if (StudioServices.Terrain?.PathsStale == true) list.Add(new Model.ValidationIssue(Model.Severity.Warning, prefix, "Paths out of date"));
+            list.AddRange(Units.StudioUnits.Issues(prefix));
             return list;
         }
 

@@ -29,7 +29,7 @@ namespace PalaceMod
         }
 
         // Once per custom level start, after Start has run (slots placed, removed ones gone): rebuild the graphs with
-        // the new props and check every ground spawn line still reaches the castle.
+        // the new props, check every ground spawn line still reaches the castle, and put unit homes on walkable ground.
         private static void ScanAfterLevelStart()
         {
             LevelOverlay.ScanAfterFrame = -1;
@@ -39,7 +39,9 @@ namespace PalaceMod
             {
                 long ms = PathCheck.Rescan();
                 var routes = PathCheck.Check(scene);
-                Log.For<BuilderManager>().Info($"level start rescan took {ms} ms; paths: {PathCheck.Describe(routes)}");
+                // On the graphs the level plays on: barracks units standing in water or on a cliff get walkable homes.
+                UnitHomes.Settle(scene);
+                Log.For<BuilderManager>().Info($"level start rescan took {ms} ms; paths: {PathCheck.Describe(routes)}; {UnitHomes.LastSettle}");
                 var blocked = routes.Where(r => !r.Reachable).Select(r => r.Line).ToList();
                 if (blocked.Count > 0)
                     Notify.Show($"This layout blocks enemies from {string.Join(", ", blocked)}: they can't reach the castle", NotifyKind.Warning, 8f, "builder-paths");

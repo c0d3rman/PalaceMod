@@ -22,6 +22,8 @@ namespace PalaceMod.Builder.Studio
         public bool Castle, CanBase, CanMove, AddOn;
         public List<int> Costs;
         public GameObject Look;        // the hidden proxy template (blueprint look)
+        /// <summary>The units it trains, where the map has them (empty for most slots).</summary>
+        public List<UnitSpot> Units = [];
     }
 
     internal sealed class NativeLine
@@ -105,6 +107,8 @@ namespace PalaceMod.Builder.Studio
                     Costs = slot.OwnUpgrades.Select(u => u.cost).ToList(),
                 };
                 if (slot.ActivatorUpgradesThis) info.Costs = [];
+                try { info.Units = UnitHomes.Spots(slot); }
+                catch (Exception e) { Log.For<BuilderManager>().Caught($"Studio: reading {slot.name}'s units failed", e); }
                 if (!info.Castle)
                 {
                     slot.gameObject.SetActive(false);
