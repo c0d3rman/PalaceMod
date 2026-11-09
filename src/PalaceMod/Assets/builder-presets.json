@@ -111,7 +111,7 @@
         "when": { "type": "enum", "default": "day", "options": ["day", "night", "always"], "description": "When it can be used." },
         "repeat": { "type": "bool", "default": true, "description": "Can be pulled again." }
       },
-      "visual": { "mesh": "mesh:Lever" },
+      "visual": { "mesh": "mesh:Graveyard Wall Post" },
       "interact": { "prompt": "{prompt}", "cost": "{cost}", "when": "{when}", "repeat": "{repeat}", "radius": 3 },
       "rules": [ { "id": "pull", "when": "interact", "do": [ { "do": "signal", "name": "{signal}", "to": "{to}" } ] } ]
     },
@@ -138,7 +138,7 @@
         "angle": { "type": "number", "default": 90, "description": "How far it swings open, degrees." },
         "startOpen": { "type": "bool", "default": false, "description": "Starts open." }
       },
-      "visual": { "mesh": "mesh:Gate" },
+      "visual": { "mesh": "mesh:Totend Gate Segment" },
       "body": { "box": [4, 0.6], "height": 3, "solid": true },
       "mover": { "pose": { "open": { "rotY": "{angle}" }, "closed": { "rotY": 0 } } },
       "rules": [ { "id": "start", "when": "spawn", "if": "{startOpen}", "do": [ { "do": "signal", "name": "open", "to": "self" } ] } ]
@@ -152,7 +152,7 @@
         "mode": { "type": "enum", "default": "pingpong", "options": ["loop", "pingpong", "once"], "description": "How it travels." },
         "wait": { "type": "number", "default": 1, "min": 0, "description": "Seconds paused at each point." }
       },
-      "visual": { "mesh": "mesh:Wall" },
+      "visual": { "mesh": "mesh:Wall Segment lvl2" },
       "body": { "box": [4, 1], "height": 3, "solid": true },
       "mover": { "path": "{path}", "mode": "{mode}", "speed": "{speed}", "wait": "{wait}" }
     },
@@ -163,7 +163,7 @@
         "text": { "type": "text", "default": "Beware!", "description": "The message." },
         "range": { "type": "number", "default": 4, "min": 1, "description": "How near, metres." }
       },
-      "visual": { "mesh": "mesh:Sign" },
+      "visual": { "mesh": "mesh:Gravestone" },
       "rules": [ { "id": "read", "when": { "on": "near", "filter": "king", "range": "{range}" }, "cooldown": 10,
                    "do": [ { "do": "message", "text": "{text}" } ] } ]
     },
@@ -171,7 +171,7 @@
       "id": "gold-pickup", "name": "Gold pickup", "category": "Logic", "kind": "pickup",
       "description": "The king collects it for {amount} gold.",
       "params": { "amount": { "type": "number", "default": 5, "description": "Gold." } },
-      "visual": { "mesh": "mesh:Coin" },
+      "visual": { "mesh": "mesh:Stepping Stone" },
       "pickup": { "by": "king", "radius": 1.5, "magnet": 3 },
       "rules": [ { "id": "collect", "when": "pickup", "do": [ { "do": "gold", "amount": "{amount}", "at": "self" } ] } ]
     },
