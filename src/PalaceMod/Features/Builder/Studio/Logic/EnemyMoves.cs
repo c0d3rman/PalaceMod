@@ -28,6 +28,8 @@ namespace PalaceMod.Builder.Studio.Logic
             Targeting(page, owner);
             Movement(page, owner);
             Attacks(page, owner);
+            StudioDock.SmallHeader(page, "The king and attached things");
+            PartsPanel.UnitExtras(page, owner, OpenTemplatePicker);
         }
 
         // ---- Targeting ----------------------------------------------------------------------------------------------
@@ -82,7 +84,8 @@ namespace PalaceMod.Builder.Studio.Logic
 
         // ---- Movement -----------------------------------------------------------------------------------------------
 
-        private static readonly string[] Modes = [null, "pathfind", "direct", "hold", "path"];
+        private static readonly string[] Modes = [null, "pathfind", "direct", "hold", "path", "follow"];
+        private static readonly string[] Thens = ["pathfind", "hold", "destroy"];
 
         private static void Movement(ModPage page, LogicOwner owner)
         {
@@ -102,9 +105,28 @@ namespace PalaceMod.Builder.Studio.Logic
             }, "move:" + path);
             JToken Get(string path) => Node()["movement"]?.SelectToken(path);
             string mode = (string)Get("mode");
-            page.Choice("How", ["The base's own", "Finds a path", "Straight line", "Holds still", "Follows a path"], () => Math.Max(0, Array.IndexOf(Modes, mode)),
+            page.Choice("How", ["The base's own", "Finds a path", "Straight line", "Holds still", "Follows a path", "Walks with a leader"], () => Math.Max(0, Array.IndexOf(Modes, mode)),
                 i => Set("mode", Modes[i] == null ? null : new JValue(Modes[i]), "Set movement"),
-                tooltip: () => "Straight line suits flyers and ghosts; a path follows a placed path (@name).");
+                tooltip: () => "Straight line suits flyers and ghosts; a path follows a placed path (@name); a leader: walks in formation behind or beside another (a chain, an escort).");
+            if (mode == "follow")
+            {
+                var lp = new ParamUi { Name = "leader", Label = "Leader", Kind = ParamKind.Entity, Required = true, Desc = "Who it walks with: self.parent (what it's attached to), self.$leader, nearest('#captain')." };
+                LogicFields.Param(page, "   Leader", lp, () => Get("leader"), (v, l) => Set("leader", v, l), owner.Scope(null));
+                Number(page, "   Behind by (m)", "spacing", "Trails this far behind its leader (default 2).", Get, Set, owner.Scope(null));
+                void SetOffset(int ax, JToken v, string l) => owner.Edit(l, n =>
+                {
+                    if (n["movement"] is not JObject m) n["movement"] = m = new JObject();
+                    var arr = m["offset"] as JArray ?? new JArray(0, 0);
+                    while (arr.Count < 2) arr.Add(0);
+                    arr[ax] = v ?? 0;
+                    if (arr.All(t => t.Type is JTokenType.Integer or JTokenType.Float && (double)t == 0)) m.Remove("offset"); else m["offset"] = arr;
+                }, "move:offset" + ax);
+                Number(page, "   Slot right (m)", "offset[0]", "A fixed slot instead of a trail: metres to the leader's right…", Get, (_, v, l) => SetOffset(0, v, l), owner.Scope(null));
+                Number(page, "   Slot ahead (m)", "offset[1]", "…and ahead of it (negative: behind).", Get, (_, v, l) => SetOffset(1, v, l), owner.Scope(null));
+                Number(page, "   Catches up ×", "catchUp", "Speed multiplier while it's left behind (default 1.5).", Get, Set, owner.Scope(null));
+                page.Choice("   Without a leader", ["Goes its own way", "Holds still", "Disappears"], () => Math.Max(0, Array.IndexOf(Thens, (string)Get("then") ?? "pathfind")),
+                    i => Set("then", i == 0 ? null : new JValue(Thens[i]), "Set leaderless"), tooltip: () => "When its leader is gone or dead: it leads itself, stays, or is removed.");
+            }
             if (mode == "path")
             {
                 var pp = new ParamUi { Name = "path", Label = "Path", Kind = ParamKind.Entity, Desc = "A placed path: @name." };

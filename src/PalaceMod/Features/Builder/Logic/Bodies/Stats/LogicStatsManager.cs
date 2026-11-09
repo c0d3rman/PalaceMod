@@ -30,6 +30,8 @@ namespace PalaceMod
 
         /// <summary>A scripted `kill` is running (not a hit: damage modifiers and link damage shares skip it).</summary>
         internal static bool killing;
+        /// <summary>A hit already modified elsewhere (a link's damage share): this victim's modifiers don't apply again.</summary>
+        internal static int rawHits;
         private static int weaponDepth;
         private static readonly bool[] weaponSplash = new bool[8], weaponMagic = new bool[8];
 
@@ -261,7 +263,7 @@ namespace PalaceMod
             [HarmonyPriority(Priority.First)]
             private static bool Prefix(Hp __instance, ref float _amount, TaggedObject _damageComingFrom, ref bool __result)
             {
-                if (LogicWorld.Current == null || killing || _amount <= 0 || !Stats.AnyDamageMods) return true;
+                if (LogicWorld.Current == null || killing || rawHits > 0 || _amount <= 0 || !Stats.AnyDamageMods) return true;
                 if (__instance.HpValue <= 0) return true;
                 var vs = Stats.SheetOfGo(__instance.gameObject);
                 var asheet = _damageComingFrom != null ? Stats.SheetOfGo(_damageComingFrom.gameObject) : null;

@@ -471,6 +471,8 @@ night open).
   well (credited to the same attacker; a weak point with 2 doubles it); `damageToGroup` of the hit is split evenly
   over its whole linked group (`.group`: the root and every part, itself included), the rest × `damageKept` it takes
   itself. `damageToGroup: 1` is one shared pool; `damageKept: 0` with `damageToParent: 1` is a pure proxy hitbox.
+  Shares are dealt as they are: the receivers' own `damageTaken` doesn't apply again (a colossus immune to hits on
+  its body still bleeds through its weak points), `invulnerable` still does. A scripted `kill` isn't shared.
 - **Selectors.** `.parent`, `.children` (a set), `.root`, `.group` (a set): `self.children.len`, `count('#link and
   where(it.root == self.root)')`, `best('foe', 20, it.parent == none ? 1 : 0)`.
 - **Events.** `linked` / `unlinked` on the part (`other` the parent).

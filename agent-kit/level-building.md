@@ -845,7 +845,8 @@ the part, `to` the parent; `unlink` to let go):
 - Damage, applied inside the game's own hit: `damageToParent` × each hit it takes is dealt to its parent too, credited
   to the same attacker (2 = a weak point that doubles the hit); `damageToGroup` of each hit is shared evenly by its
   whole linked group (the root and all parts, itself included; 1 = one shared pool); `damageKept` is the part of the
-  rest it takes itself (0 with `damageToParent: 1` = a pure proxy hitbox).
+  rest it takes itself (0 with `damageToParent: 1` = a pure proxy hitbox). The receivers' own `damageTaken` doesn't
+  apply to a share again (a body immune to direct hits still bleeds through its weak points); `kill` isn't shared.
 - Read them with `.parent`, `.children` (a set), `.root`, `.group` (a set); events `linked` / `unlinked` on the part
   (`other` the parent). Selector example: `count('#link and where(it.root == self.root)')`.
 - An enemy-team `hittable` body is a real target for vanilla towers, troops and the king (weak points work); only

@@ -188,18 +188,20 @@ namespace PalaceMod
                 if (__state.Others != null && __state.Each > 0)
                 {
                     sharing++;
+                    LogicStatsManager.rawHits++;
                     try
                     {
                         foreach (var o in __state.Others)
-                            if (o.Alive && o.Hp() is { } hp && hp.HpValue > 0) hp.TakeDamage((float)__state.Each, __state.From, __state.ByPlayer, true);
+                            if (o.Alive && !o.Flags.Contains("invulnerable") && o.Hp() is { } hp && hp.HpValue > 0) hp.TakeDamage((float)__state.Each, __state.From, __state.ByPlayer, true);
                     }
-                    finally { sharing--; }
+                    finally { sharing--; LogicStatsManager.rawHits--; }
                 }
                 if (__state.ToParent > 0 && __state.Parent != null && __state.Parent.Alive && forwarding < 8 && __state.Parent.Hp() is { } php && php.HpValue > 0)
                 {
                     forwarding++;
-                    try { php.TakeDamage((float)__state.ToParent, __state.From, __state.ByPlayer, true); }
-                    finally { forwarding--; }
+                    LogicStatsManager.rawHits++;
+                    try { if (!__state.Parent.Flags.Contains("invulnerable")) php.TakeDamage((float)__state.ToParent, __state.From, __state.ByPlayer, true); }
+                    finally { forwarding--; LogicStatsManager.rawHits--; }
                 }
             }
         }
