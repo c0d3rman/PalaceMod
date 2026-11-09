@@ -306,3 +306,66 @@ class PlaceKindTests(unittest.TestCase):
                                                                                   "rules": [{"when": "pickup", "do": []}]}]}}]}
         issues = pl.validate_logic(pack, [])
         self.assertFalse([m for _, _, m in issues if "fires on" in m], issues)
+
+
+def validate_rule(do, names=None):
+    """LogicParamTests.Validate: one dusk rule doing `do`."""
+    root = {"format": "palace-builder", "version": 3, "id": "a.b", "levels": [{"id": "l", "host": "Nordfels", "logic": {
+        "vars": {"n": 0, "seen": []}, "rules": [{"when": "dusk", "do": do}]}}]}
+    return pl.validate_logic(root, [], schema=SCHEMA, names=names)
+
+
+def errs(issues):
+    return "\n    ".join(issue_str(i) for i in issues if i[0] == "error")
+
+
+class ParamFormTests(unittest.TestCase):
+    """LogicParamTests: params are read by ParamForms (the runtime's rule) in check too."""
+
+    def test_classify(self):
+        self.assertEqual(pl.classify_param("color", "glow", "#40c0ff"), ("Literal", "#40c0ff"))
+        self.assertEqual(pl.classify_param("color", "tint", "=$c"), ("Expression", "$c"))
+        self.assertEqual(pl.classify_param("slot", "slot", "it"), ("Expression", "it"))
+        self.assertEqual(pl.classify_param("slot", "slot", "add:h1")[0], "Literal")
+        self.assertEqual(pl.classify_param("bool", "visible", "=true"), ("Expression", "true"))
+        self.assertEqual(pl.classify_param("text", "text", "Hi {night}")[0], "Text")
+        self.assertEqual(pl.classify_param("signal", "name", "open")[0], "Text")
+        self.assertEqual(pl.classify_param("var", "name", "=x")[0], "Literal")
+        self.assertEqual(pl.classify_param("entities", "to", "all")[0], "Literal")
+        self.assertEqual(pl.classify_param("number", "amount", 3)[0], "Json")
+        self.assertEqual(pl.classify_param("actions", "then", [])[0], "Structured")
+
+    def test_colours(self):
+        for ok in ("#40c0ff", "40c0ff", "#4cf", "#40c0ff80", "red", "Orange", " grey "):
+            self.assertTrue(pl.parse_color(ok), ok)
+        for bad in ("", "#40c0f", "nope", "#ggg", None):
+            self.assertFalse(pl.parse_color(bad), bad)
+
+    def test_check_accepts_what_the_game_reads(self):
+        good = [
+            {"do": "setVisual", "glow": "#40c0ff", "tint": "red"},
+            {"do": "floatText", "text": "hi {night}", "color": "#4cf", "at": "vec(0, 0)"},
+            {"do": "setVisual", "tint": "='#40c0ff'", "glow": True},
+            {"do": "building", "slot": "=nearest('unbuilt')", "op": "build"},
+            {"do": "building", "target": "all('unbuilt and type:\"Defense Tower\"')", "op": "build"},
+        ]
+        for a in good:
+            self.assertEqual(errs(validate_rule([a])), "", a)
+        self.assertIn("must be a colour", errs(validate_rule([{"do": "setVisual", "glow": "#40c0fz"}])))
+
+    def test_effect_and_sound_names(self):
+        rule = [{"do": "effect", "fx": "spark"}, {"do": "sound", "sound": "coinSpnd"}, {"do": "effect", "fx": "SMOKE"}]
+        self.assertEqual(errs(validate_rule(rule)), "", "offline: not checked")
+        e = errs(validate_rule(rule, {"effects": ["smoke", "explosion"], "sounds": ["coinSpend"]}))
+        self.assertIn('no game effect "spark"', e)
+        self.assertIn('no game sound "coinSpnd"', e)
+        self.assertIn('did you mean "coinSpend"', e)
+        self.assertNotIn("SMOKE", e)
+
+    def test_foreach_as_and_outer(self):
+        ok = [{"do": "forEach", "in": "all('foe')", "as": "m", "actions": [
+            {"do": "listAdd", "target": "level", "name": "$seen", "value": "m"},
+            {"do": "listAdd", "target": "level", "name": "$seen", "value": "outer"}]}]
+        self.assertEqual(errs(validate_rule(ok)), "")
+        self.assertIn("already a name", errs(validate_rule([{"do": "forEach", "in": "all('foe')", "as": "night", "actions": []}])))
+        self.assertIn('"outer"', errs(validate_rule([{"do": "listAdd", "target": "level", "name": "$seen", "value": "outer"}])))

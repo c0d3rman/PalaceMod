@@ -21,6 +21,7 @@ import decimal
 import json
 import math
 import re
+import sys
 import unicodedata
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
@@ -38,7 +39,7 @@ ANY, NUMBER, BOOL, TEXT, POSITION, ENTITY, SET, LIST, TEMPLATE, LEVEL, EVENT, VO
 _TYPES = {ANY, NUMBER, BOOL, TEXT, POSITION, ENTITY, SET, LIST, TEMPLATE, LEVEL, EVENT, VOID}
 
 MAX_LENGTH = 8192
-MAX_DEPTH = 200
+MAX_DEPTH = 100
 ROLES = ["self", "subject", "other", "spawned", "it", "outer", "king", "castle", "level", "event"]
 # Filter.Prefixes / Filter.Includes
 FILTER_PREFIXES = ("is", "in", "has", "type", "include")
@@ -50,6 +51,10 @@ ENTITY_KIND_PLACES = ["prop", "projectile", "area", "pickup", "logic", "path", "
 TEAMS = ["player", "enemy", "neutral", "owner"]
 
 _MISSING = object()
+
+# The parser and checker recurse about a dozen frames per nesting level (MAX_DEPTH levels at most).
+if sys.getrecursionlimit() < 20 * MAX_DEPTH + 1000:
+    sys.setrecursionlimit(20 * MAX_DEPTH + 1000)
 
 
 # ---- C# compatibility helpers ---------------------------------------------------------------------------------

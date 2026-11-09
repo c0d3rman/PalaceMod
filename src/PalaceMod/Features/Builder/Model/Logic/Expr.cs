@@ -87,7 +87,7 @@ namespace PalaceMod.Builder.Model.Logic
         public const int MaxLength = 8192;
 
         /// <summary>The deepest an expression tree may nest (brackets, calls, chained operators).</summary>
-        public const int MaxDepth = 200;
+        public const int MaxDepth = 100;
 
         public static readonly HashSet<string> Roles = new(StringComparer.Ordinal)
         {
