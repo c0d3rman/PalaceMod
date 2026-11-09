@@ -62,6 +62,9 @@ All commands print JSON. Errors go to stderr as `{"error": "..."}` with exit cod
   upgrade. He presses "start night" when ready. Each night enemies spawn from **spawn lines** at the map's edges and
   walk (or fly) toward the player's buildings and the castle. The night ends when every enemy is dead; then dawn.
   The run is won after the last night. It is lost when the **castle** (its center building) is destroyed.
+  Vanilla fighting (units', towers' and the king's attacks) happens only at night, and the king builds only by day.
+  Every one of these rules can be changed per level: `logic.game` (12.9) sets how the level is won and lost, hides
+  the castle, holds a night open or ends it early, and lets fighting or building happen in either phase.
 - **Gold.** Buildings with income pay at dawn (houses +1 each, mills, mines, harbours, fields). Enemies drop gold
   (the spawn group's `gold`, spread over its enemies). A night's leftover gold carries over. Day 1 starts with the
   wave set's `startingGold`.
@@ -884,6 +887,29 @@ points, buildings and the castle included (`setStat` on `castle` with `"for": "n
   rule firings and 4000 actions per frame, chain depth 12, `every` ≥ 0.1 s, `wait` ≥ 0.05 s, `repeat` ≤ 100, sets ≤ 256.
   Over a cap the extra spawn or firing is skipped (the trace shows it). `logic.caps` raises them per level (warning).
 
+**Game rules** (`logic.game`, op `{"op": "logic", "game": {...}}`; Studio: Level panel > Game rules) change the
+game's own rules. Leave a rule out for vanilla. Each value is a literal or an expression the level reads again every
+frame, so rules switch with a variable (`"combat": "isNight or $flipped"`); enum rules take the word or `"=expr"`.
+
+| Rule | Vanilla | Values |
+|---|---|---|
+| `victory` | `lastNight` | `rules`: surviving the last night doesn't win; only `endLevel win` does. After the last night the day goes on (a new night replays the last one). |
+| `defeat` | `castle` | `rules`: the castle falling doesn't lose; only `endLevel lose` (or resigning) does. |
+| `castle` | `shown` | `hidden`: no castle. It counts as built (slots that need it open), is invisible and not solid, nothing targets or hurts it, selectors don't see it, and it can't lose the level. |
+| `holdNight` | `false` | A condition: while true the night doesn't end, even with no enemies left (`"count('#camp') > 0"`; `"$held < $goal"` keeps the last night's victory waiting). |
+| `endNight` | `false` | A condition: when it turns true at night, the night ends now, enemies alive or not (`"nightProgress >= 1 and count('is:boss') == 0"`). |
+| `survivors` | `stay` | What `endNight` does with the enemies left: `stay` (they stay on the map and count toward the next night) or `remove`. |
+| `combat` | `isNight` | A condition: when vanilla attacks (units, towers, the king) happen and the player's side can be hurt. `"true"`: fighting by day too; `"false"`: never. |
+| `build` | `isDay` | A condition: when the king can build and upgrade (the prompts open). `"true"`: at night too. |
+| `dayLength` | `0` | Seconds of day before night falls by itself (0: the player calls it). |
+
+Recipes: a custom win (hold a hill, escort a wagon): `victory: rules` + a rule that does `endLevel win`, and one that
+does `endLevel lose` on `waveCleared` of the last night if the goal wasn't met. A different vital object: `defeat:
+rules` (or `castle: hidden`) + `{"when": {"on": "death", "of": "#wagon"}, "do": [{"do": "endLevel", "result":
+"lose"}]}`. A spawner that would breed forever: `endNight` when the wave is dead, `survivors: stay`. Day/night swap:
+`combat: "isNight or $flipped"`, `build: "isDay or $flipped"`, raiders spawned by day with `spawn`/`spawnGroup`.
+`palace.py game cmd logic-game` prints the rules as the level sees them now.
+
 ### 12.10 Presets
 
 Use a preset in any rules list: `{ "preset": "split-on-death", "with": { "count": 3 } }` (its rules, vars, labels and
@@ -915,7 +941,7 @@ number). Errors in a preset's rules are reported at the place that uses it.
 | `attach` | `key`, `name`, `labels`, `vars`, `statuses`, `targeting` |
 | `king_action` | `id`, `name`, `when`, `cooldown`, `uses` |
 | `hud` | `id`, `text`, `icon`, `visible` |
-| `logic` | `seed`, `caps` |
+| `logic` | `seed`, `caps`, `game` (merged rule by rule; `null` puts one back to vanilla) |
 
 Units take `rules`, `vars`, `labels`, `targeting`, `movement`, `attacks`, `statuses` in the `unit` op, or rules later
 with `{"op": "rule", "on": "unit:<id>", ...}`.
@@ -943,6 +969,7 @@ with `{"op": "rule", "on": "unit:<id>", ...}`.
   change at runtime.
 - Three teams; vanilla units never attack `neutral` things (Builder targeting can).
 - Game tags are a fixed set; your own labels work through Builder targeting and filters.
+- The castle can be hidden (`logic.game.castle`) but not moved at runtime; place it where the level needs it.
 - No new scenes, lighting or arbitrary code. Pending `wait`s and Builder projectiles in flight aren't kept by
   savestates; keep state that matters in variables.
 
@@ -1056,4 +1083,5 @@ moveSpeed mult 1.2 for "night"` on `all('player and unit', 20)`.
 - Bound anything that repeats: `once`, `cooldown`, a variable counter or a `count(...)` cap, so a level can't snowball
   into the caps.
 - `repeat`/`forEach` bodies are `actions`, not `do`.
-- An enemy-team entity that should hold the night open needs `body.hittable` and `countsAsEnemy: true`.
+- An enemy-team entity that should hold the night open needs `body.hittable` and `countsAsEnemy: true`. To hold a
+  night on a condition instead (or to end one early), use `logic.game.holdNight` / `endNight` (12.9).
