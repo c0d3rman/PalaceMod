@@ -55,6 +55,19 @@ namespace PalaceMod
                         status = "started";
                         return "started";
                     case "status": return (job != null ? "running: " : "done: ") + status;
+                    case "replay":
+                    {
+                        // The real thing for a "pushed" escape: the king (his own movement on) stands at x y z, the slot is
+                        // built on top of him, and after a few seconds we look where he is. Everything is put back.
+                        if (job != null) return "already running: " + status;
+                        var ci = System.Globalization.CultureInfo.InvariantCulture;
+                        string id = args[1];
+                        var slot = Object.FindObjectsOfType<BuildSlot>(true).FirstOrDefault(b => Id(b) == id) ?? throw new ArgumentException("no slot " + id);
+                        var at = new Vector3(float.Parse(args[2], ci), float.Parse(args[3], ci), float.Parse(args[4], ci));
+                        job = Replay(slot, at);
+                        status = "replaying";
+                        return "started";
+                    }
                     case "inspect": return Inspect(string.Join(" ", args.Skip(1)));
                     case "colliders":
                     {
@@ -128,6 +141,33 @@ namespace PalaceMod
             }
         }
 
+        private static IEnumerator<float> Replay(BuildSlot slot, Vector3 at)
+        {
+            var a = new Analysis(null, 1f, false);
+            var pm = PlayerMovement.instance;
+            a.Init(pm);
+            var snap = a.TakeSnapPublic();
+            pm.TeleportTo(at);
+            yield return 0.5f;
+            var before = pm.transform.position;
+            Analysis.BuildPublic(slot);
+            var path = new List<string>();
+            for (int i = 0; i < 6; i++)
+            {
+                yield return 0.5f;
+                path.Add(V(pm.transform.position));
+            }
+            var end = pm.transform.position;
+            bool ground = Physics.Raycast(end + Vector3.up * 200f, Vector3.down, out var hit, 400f, 1 << LayerMask.NameToLayer("Ground"), QueryTriggerInteraction.Ignore);
+            status = $"finished: {slot.buildingName} {Id(slot)}: king stood at {V(before)}, after the build {string.Join(" ", path)}; " +
+                     $"moved {Vector3.Distance(new Vector3(before.x, 0, before.z), new Vector3(end.x, 0, end.z)):0.0} m sideways, {end.y - before.y:0.0} m up; " +
+                     $"top ground under him {(ground ? hit.point.y.ToString("0.0") : "none")}";
+            a.RestorePublic(snap);
+            pm.TeleportTo(before);
+        }
+
+        private static string V(Vector3 v) => $"({v.x:0.0},{v.y:0.0},{v.z:0.0})";
+
         private static string Inspect(string name)
         {
             var sb = new StringBuilder();
@@ -200,6 +240,17 @@ namespace PalaceMod
 
             public Analysis(string outFile, float cell, bool baselineOnly) { this.outFile = outFile; this.cell = cell; this.baselineOnly = baselineOnly; }
 
+            // For replay: the snapshot/build/restore machinery without a walk.
+            public void Init(PlayerMovement pm)
+            {
+                king = pm.transform;
+                cc = king.GetComponent<CharacterController>();
+                slots = Object.FindObjectsOfType<BuildSlot>(true).ToList();
+            }
+            public object TakeSnapPublic() => TakeSnap();
+            public void RestorePublic(object snap) => Restore((Snap)snap);
+            public static void BuildPublic(BuildSlot s) => Build(s);
+
             private long Key(Vector3 p) =>
                 ((long)(Mathf.RoundToInt(p.x / cell) + 32768) << 40) | ((long)(Mathf.RoundToInt(p.z / cell) + 32768) << 20) | (long)(Mathf.RoundToInt(p.y / 3f) + 512);
 
@@ -238,7 +289,9 @@ namespace PalaceMod
                 while (q.Count > 0)
                 {
                     var p = q.Dequeue();
-                    bool pushed = r.Pushed.Contains(Key(p)) || Overlaps(p);
+                    bool inside = !r.Pushed.Contains(Key(p)) && Overlaps(p);
+                    if (inside && pushOrigins.Count < 3) pushOrigins.Add(V(p));
+                    bool pushed = inside || r.Pushed.Contains(Key(p));
                     foreach (var d in Dirs)
                     {
                         var np = Probe(p, d * cell);
@@ -266,7 +319,7 @@ namespace PalaceMod
             private string statusPrefix = "";
             private Bounds? bound;
             private int escapedPushed, escapedWalked;
-            private readonly List<string> pushedExamples = new(), walkedExamples = new();
+            private readonly List<string> pushedExamples = new(), walkedExamples = new(), pushOrigins = new();
 
             private static string V(Vector3 v) => $"({v.x:0.0},{v.y:0.0},{v.z:0.0})";
 
@@ -456,7 +509,7 @@ namespace PalaceMod
                     int overlapping = root.R.Nodes.Values.Count(Overlaps);
                     log.AppendLine($"baseline nodes={root.R.Nodes.Count} overlapping={overlapping} (e.g. {lastOverlap}) pushed={root.R.Pushed.Count} escaped={escapedPushed + escapedWalked} probes={probes} t={sw.Elapsed.TotalSeconds:0.0}s");
                     escapedPushed = escapedWalked = 0;
-                    pushedExamples.Clear(); walkedExamples.Clear();
+                    pushedExamples.Clear(); walkedExamples.Clear(); pushOrigins.Clear();
 
                     foreach (var s in slots.OrderBy(s => s.transform.position.x))
                     {
@@ -506,10 +559,11 @@ namespace PalaceMod
                             int escP = escapedPushed, escW = escapedWalked;
                             string escText = escP + escW == 0 ? "" :
                                 $" ESCAPED={escP + escW} (walked {escW}{(walkedExamples.Count > 0 ? " e.g. " + string.Join(" ", walkedExamples) : "")}; " +
-                                $"pushed {escP}{(pushedExamples.Count > 0 ? " e.g. " + string.Join(" ", pushedExamples) : "")})";
+                                $"pushed {escP}{(pushedExamples.Count > 0 ? " e.g. " + string.Join(" ", pushedExamples) : "")}" +
+                                $"{(escP > 0 && pushOrigins.Count > 0 ? ", inside the building at " + string.Join(" ", pushOrigins) : "")})";
                             int esc = escP + escW;
                             escapedPushed = escapedWalked = 0;
-                            pushedExamples.Clear(); walkedExamples.Clear();
+                            pushedExamples.Clear(); walkedExamples.Clear(); pushOrigins.Clear();
                             Restore(snap);
                             yield return 0.3f;
                             next.Interactable = Interactable(next.R);
