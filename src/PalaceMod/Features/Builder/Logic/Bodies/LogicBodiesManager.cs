@@ -25,8 +25,12 @@ namespace PalaceMod
             LogicServices.Factory = EntityFactory.Instance;
             LogicServices.ExtraCandidates = (c, r, into) => VanillaProjectiles.Query(c.ToVector3(), r, into);
             LogicWorld.Polled += (w, t) => { corePolledAt = Time.time; Poll(t); };
-            LogicWorld.Started += _ => SessionChanged();
-            LogicWorld.Ending += _ => SessionChanged();
+            // Cleared when a world ends, never when one starts: Started fires after the level's places are built, and
+            // clearing then dropped every placed walkable deck, surface and space before its scan.
+            LogicWorld.Ending += _ => { SessionChanged(); cleared = true; };
+            GroundGraphs.Rasterizing += DeckOpenings.Apply;
+            // A level whose templates have walkable bodies may make decks at runtime: tiled ground graphs keep that cheap.
+            LogicWorld.Started += w => { if (w.Templates.Values.Any(t => (t?["body"] as Newtonsoft.Json.Linq.JObject)?.Value<bool?>("walkable") == true)) Walkables.PrepareRuntimeDecks(); };
             BodyActions.Register();
             LogicSaveState.Register("bodies", BodySave.Capture, BodySave.Restore);
             DevCommands.Register("logic-l2", "logic-l2 status | nav ... | act <action> [json] [self=<role>] [other=<role>] | build <template> <x> <z> [rotY] | signal <entity> <input> [value]   bodies (L2): spikes, actions with literal params, entities", args =>
@@ -59,13 +63,18 @@ namespace PalaceMod
             var w = LogicWorld.Current;
             if (w != world)
             {
+                // A world replaced without Ending (dev worlds): drop the old one's bodies state. A world that ended
+                // was cleared then, and the new one's places may already be registered.
+                if (world != null && !cleared) SessionChanged();
+                else ResetPolling();
                 world = w;
-                SessionChanged();
+                cleared = false;
             }
             if (w == null) return;
             // Cuts (solid bodies, decks, surfaces) only reach the graphs while the updater runs on an interval.
             BodyNav.UseMoverRate();
             Walkables.Tick();
+            Walkables.KingTick();
             Surfaces.Tick();
             // 10 Hz steps of game time: the core's (LogicWorld.Polled), or our own for a dev world it doesn't drive.
             if (Time.time - corePolledAt < 0.5f) return;
@@ -83,6 +92,14 @@ namespace PalaceMod
             AreaPoller.Step(time);
             foreach (var p in BuilderPickup.All.ToList()) if (p != null) p.Poll();
             BodyDev.FieldStep();
+        }
+
+        private bool cleared;
+
+        private void ResetPolling()
+        {
+            pollTimer = 0f;
+            pollTime = 0;
         }
 
         private void SessionChanged()
@@ -133,6 +150,12 @@ namespace PalaceMod
 
         [HarmonyPatch(typeof(GroundGraphs), nameof(GroundGraphs.Scan))]
         private static class Rescanned
+        {
+            private static void Postfix() => Surfaces.Rescanned();
+        }
+
+        [HarmonyPatch(typeof(GroundGraphs), nameof(GroundGraphs.UpdateArea))]
+        private static class AreaRescanned
         {
             private static void Postfix() => Surfaces.Rescanned();
         }

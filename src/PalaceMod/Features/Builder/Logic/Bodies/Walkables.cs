@@ -27,15 +27,44 @@ namespace PalaceMod.Builder.Logic.Bodies
             public readonly Dictionary<string, (GameObject ghost, NavmeshCut hide)> Ghosts = [];
             public Vector3 Size;
             public string Pose;
+            public bool InSpace;              // off the map: its own space graphs, no walls to open
+            public readonly List<DeckOpenings.Top> Tops = [];   // what the host graphs rasterize: the proxy, or the pose ghosts
         }
 
         private static readonly List<Deck> decks = [];
         private static bool scanPending;
+        private static bool settled;                 // the level's first frame has passed: later decks update their area
+        private static readonly List<Bounds> pendingAreas = [];
+
+        /// <summary>Tile size (m) of the ground graphs in a level that can make walkable bodies at runtime.</summary>
+        public const float TileMetres = 25.6f;
+
+        /// <summary>Margin (m) round a deck its area update rebuilds: ramps (up to 5.4 m) and the large units' radius (4 m).</summary>
+        private const float AreaMargin = 6f;
         private static Mesh box;
 
         public static int Count => decks.Count;
 
-        public static void Clear() { decks.Clear(); scanPending = false; }
+        public static void Clear() { decks.Clear(); scanPending = false; settled = false; pendingAreas.Clear(); DeckOpenings.Clear(); }
+
+        /// <summary>
+        /// The level can make walkable bodies (its templates have one): tile the ground graphs at the level-start scan, so a
+        /// deck that appears or goes later rebuilds only the tiles round it (tens of ms) instead of every graph (0.6-1.8 s).
+        /// </summary>
+        public static void PrepareRuntimeDecks()
+        {
+            var astar = AstarPath.active;
+            if (astar == null || GroundGraphs.Tiled) return;
+            var g = astar.data.graphs.OfType<RecastGraph>().FirstOrDefault(x => x.name != BodyNav.AirGraph);
+            if (g == null) return;
+            GroundGraphs.UseTiles(Mathf.Clamp(Mathf.RoundToInt(TileMetres / g.cellSize), 32, 512));
+            RequestScan();
+        }
+
+        /// <summary>The deck meshes on the host's graphs (DeckOpenings opens the walls under them).</summary>
+        public static IEnumerable<DeckOpenings.Top> NavTops() => decks.Where(d => !d.InSpace && d.Body != null).SelectMany(d => d.Tops).Where(t => t.Mesh != null);
+
+        public static Mesh BoxMesh() => Box();
 
         public static void Add(BuilderBody body, BuilderMover mover)
         {
@@ -55,6 +84,7 @@ namespace PalaceMod.Builder.Logic.Bodies
                     var ghost = MakeDeck(root.transform, size, body.Height, collider: false);
                     var hide = MakeHide(ghost, size);
                     d.Ghosts[kv.Key] = (root, hide);
+                    d.Tops.Add(new DeckOpenings.Top { Mesh = ghost });
                     // The pose it was placed in (else its first) is where it starts.
                     if (d.Pose == null || ((root.transform.position - body.transform.position).sqrMagnitude < 0.01f && Quaternion.Angle(root.transform.rotation, body.transform.rotation) < 1f))
                         d.Pose = kv.Key;
@@ -66,16 +96,34 @@ namespace PalaceMod.Builder.Logic.Bodies
                 var start = d.Ghosts[d.Pose].ghost.transform;
                 body.transform.SetPositionAndRotation(start.position, start.rotation);
             }
+            else d.Tops.Add(new DeckOpenings.Top { Mesh = d.Proxy, Live = true });
             decks.Add(d);
             // Off the map: its own space graphs (fast); on the map: the host graphs' one coalesced scan.
             var center = d.Ghosts.Count > 0 ? d.Ghosts.Values.First().ghost.transform.position : body.transform.position;
             if (Spaces.Outside(center))
             {
+                d.InSpace = true;
                 foreach (var g in d.Ghosts.Values) Spaces.Add(BodyVisual.Bounds(g.ghost));
                 if (d.Ghosts.Count == 0) Spaces.Add(new Bounds(body.transform.position + Vector3.up * body.Height, new Vector3(size.x, 1f, size.z) * body.transform.lossyScale.x));
             }
+            else if (settled && AstarPath.active != null) pendingAreas.Add(AreaOf(d));
             else RequestScan();
             Refresh(d);
+        }
+
+        /// <summary>What an area update for this deck rebuilds: its deck(s) and the margin round them.</summary>
+        private static Bounds AreaOf(Deck d)
+        {
+            Bounds? b = null;
+            foreach (var t in d.Tops)
+            {
+                if (!t.Update()) continue;
+                foreach (var c in t.Corners) { if (b is Bounds bb) { bb.Encapsulate(c); b = bb; } else b = new Bounds(c, Vector3.zero); }
+            }
+            var area = b ?? new Bounds(d.Body != null ? d.Body.transform.position : Vector3.zero, Vector3.one);
+            area.Expand(new Vector3(2f * AreaMargin, 0f, 2f * AreaMargin));
+            area.size = new Vector3(area.size.x, 60f, area.size.z);
+            return area;
         }
 
         private static GameObject MakeDeck(Transform parent, Vector3 size, float top, bool collider)
@@ -119,12 +167,31 @@ namespace PalaceMod.Builder.Logic.Bodies
                 Log.For<LogicBodiesManager>().Info($"spaces: {Spaces.Describe()}, scan {spaceMs} ms");
                 foreach (var d in decks) Refresh(d);
             }
-            if (!scanPending || AstarPath.active == null) return;
-            scanPending = false;
-            long ms = GroundGraphs.Scan();
-            Log.For<LogicBodiesManager>().Info($"walkable surfaces: {decks.Count} decks, {decks.Sum(d => d.Ghosts.Count)} pose ghosts, scan {ms} ms");
+            if (AstarPath.active == null) return;
+            bool first = !settled;
+            settled = true;
+            if (!scanPending && pendingAreas.Count == 0) return;
+            if (scanPending || first)
+            {
+                scanPending = false;
+                pendingAreas.Clear();
+                long ms = GroundGraphs.Scan();
+                Log.For<LogicBodiesManager>().Info($"walkable surfaces: {decks.Count} decks, {decks.Sum(d => d.Ghosts.Count)} pose ghosts, scan {ms} ms ({GroundGraphs.LastTimings}); {DeckOpenings.LastSummary}");
+            }
+            else
+            {
+                var areas = pendingAreas.ToArray();
+                pendingAreas.Clear();
+                long ms = GroundGraphs.UpdateArea(areas);
+                Log.For<LogicBodiesManager>().Info($"walkable surfaces: {decks.Count} decks, {GroundGraphs.LastTimings}{(GroundGraphs.Tiled ? "" : " (one-tile graphs: rebuilt whole)")}; {DeckOpenings.LastSummary}");
+            }
             foreach (var d in decks) Refresh(d);
+            var cut = DeckOpenings.Disconnected();
+            if (cut.Count > 0) Log.For<LogicBodiesManager>().Warn($"walkable decks off the castle's ground (small enemies' graph): {string.Join("; ", cut)}");
         }
+
+        /// <summary>Once a frame (after Tick): the king passes walls the decks opened while he's on one.</summary>
+        public static void KingTick() => DeckOpenings.Tick();
 
         /// <summary>Switch a deck's cuts to match its body's state and pose.</summary>
         public static void Refresh(Deck d)
@@ -155,6 +222,8 @@ namespace PalaceMod.Builder.Logic.Bodies
         {
             foreach (var d in decks.Where(d => d.Body == body).ToList())
             {
+                // Despawned mid-level: rebuild its area (the deck's triangles would stay walkable otherwise).
+                if (settled && body.Despawning && !d.InSpace && AstarPath.active != null) pendingAreas.Add(AreaOf(d));
                 if (d.Hide != null) Object.Destroy(d.Hide.gameObject);
                 foreach (var g in d.Ghosts.Values) if (g.ghost != null) Object.Destroy(g.ghost);
                 decks.Remove(d);
