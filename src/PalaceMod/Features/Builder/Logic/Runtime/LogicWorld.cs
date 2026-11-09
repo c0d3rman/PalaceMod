@@ -277,11 +277,11 @@ namespace PalaceMod.Builder.Logic
             switch (r.Event)
             {
                 case "every":
-                    ri.NextTime = Time + r.Phase + r.Seconds;
+                    ri.NextTime = LocalTime(e) + r.Phase + r.Seconds;
                     timers.Add(ri);
                     break;
                 case "after":
-                    ri.NextTime = Time + r.Seconds;
+                    ri.NextTime = LocalTime(e) + r.Seconds;
                     timers.Add(ri);
                     break;
                 case "near":
@@ -348,7 +348,7 @@ namespace PalaceMod.Builder.Logic
                 var l = Index(byEvent, r.Event);
                 if (!l.Contains(ri)) l.Add(ri);
                 if (r.Of != null) { l = Index(ofByEvent, r.Event); if (!l.Contains(ri)) l.Add(ri); }
-                if (r.Event == "every" && !timers.Contains(ri)) { ri.NextTime = Time + r.Seconds; timers.Add(ri); }
+                if (r.Event == "every" && !timers.Contains(ri)) { ri.NextTime = LocalTime(e) + r.Seconds; timers.Add(ri); }
                 if (r.Event == "near" && !nears.Contains(ri)) { ri.NearInside = []; nears.Add(ri); }
             }
             if (raiseSpawn) Raise("spawn", e, e.Owner, 0, null, null, 0);
@@ -621,6 +621,7 @@ namespace PalaceMod.Builder.Logic
             {
                 stepTime += StepSeconds;
                 stepCount++;
+                AdvanceClocks();
                 RunTimers(stepTime);
                 if (stepCount % 2 == 0)
                 {
@@ -684,8 +685,10 @@ namespace PalaceMod.Builder.Logic
         {
             if (timers.Count == 0) return;
             var game = LogicServices.Game;
+            double world = now;
             foreach (var ri in timers.ToArray())
             {
+                now = world - ri.Owner.Lag;   // the owner's own clock (its timeScale)
                 if (double.IsNaN(ri.NextTime) || ri.NextTime > now + 1e-9) continue;
                 var r = ri.Rule;
                 if (r.Event == "after") { ri.NextTime = double.NaN; timers.Remove(ri); }
@@ -702,6 +705,37 @@ namespace PalaceMod.Builder.Logic
                 ri.Ticks++;
                 queue.Enqueue(new LogicEvent { Name = r.Event, Subject = ri.Owner, Value = ri.Ticks, Seq = ++seq, Target = ri });
             }
+        }
+
+        /// <summary>The entity's own clock: world time minus what its `timeScale` held back. Its rule timers (`every`,
+        /// `after`, status rules included) and its rules' `wait`s and `repeat.every` run on it.</summary>
+        internal double LocalTime(LogicEntity e) => e == null ? Time : Time - e.Lag;
+
+        /// <summary>The entity's `timeScale` stat now (1 without a body or stats; never negative).</summary>
+        private static double ClockScale(LogicEntity e)
+        {
+            if (e?.Body == null || LogicServices.Stats == null) return 1;
+            double s;
+            try { s = LogicServices.Stats.Get(e, "timeScale"); }
+            catch (Exception ex) when (ex is LogicError or InvalidCastException or ArgumentException or NullReferenceException or KeyNotFoundException) { return 1; }
+            return double.IsNaN(s) || double.IsInfinity(s) ? 1 : Math.Max(0, s);
+        }
+
+        /// <summary>Once per step: every entity with a timer or a waiting task falls behind (or runs ahead of) the
+        /// world by (1 - timeScale) of the step. Sampled per step, so a status that comes and goes is integrated.</summary>
+        private void AdvanceClocks()
+        {
+            if (LogicServices.Stats == null) return;
+            foreach (var ri in timers) Advance(ri.Owner);
+            foreach (var t in waiting) Advance(t.Clock);
+        }
+
+        private void Advance(LogicEntity e)
+        {
+            if (e == null || e.LagStep == stepCount) return;
+            e.LagStep = stepCount;
+            double s = ClockScale(e);
+            if (s != 1) e.Lag += (1 - s) * StepSeconds;
         }
 
         private readonly List<LogicEntity> scratch = [];

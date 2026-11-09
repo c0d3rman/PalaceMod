@@ -529,8 +529,8 @@ namespace PalaceMod
                 }
             }
 
-            /// <summary>Writes a count for every collapsed message whose window has ended.</summary>
-            public static void Flush()
+            /// <summary>Writes a count for every collapsed message whose window has ended (all: every one, before an exit).</summary>
+            public static void Flush(bool all = false)
             {
                 List<Entry> due = null;
                 double now = clock.Elapsed.TotalSeconds;
@@ -538,7 +538,7 @@ namespace PalaceMod
                 {
                     foreach (var entry in entries.Values)
                     {
-                        if (entry.Suppressed == 0 || now < entry.WindowEnd) continue;
+                        if (entry.Suppressed == 0 || (now < entry.WindowEnd && !all)) continue;
                         (due ??= []).Add(new Entry { Suppressed = entry.Suppressed, Level = entry.Level, Name = entry.Name, Message = entry.Message });
                         entry.Suppressed = 0;
                         entry.WindowEnd = now + WindowSeconds;

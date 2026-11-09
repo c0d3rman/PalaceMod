@@ -9,11 +9,14 @@ using Object = UnityEngine.Object;
 
 /*
     Changing sides (docs/builder-engine.md, "Converting a team"). A unit's side is more than a tag (movement
-    component, attack priorities, materials), so a unit going to the player or enemy side is rebuilt as its
-    counterpart: the template's `counterpart` if it names one, else the catalog unit of the other side with the same
-    role (flying, melee or ranged; the plainest such unit). With keepLook the old body model rides on the new unit
-    (AssetVisuals' "another unit's model"). Going neutral keeps the unit's own brain and drops its team tags, so
-    vanilla AI ignores it; steering gives it an empty targeting list (it attacks nothing until rules say so).
+    component, attack and movement priorities, the weapon's friend-or-foe tags and splash layers, materials), so a
+    unit going to the player or enemy side is rebuilt as its counterpart: the template's `counterpart` if it names
+    one, else the catalog unit of the other side with the same role (flying, melee or ranged; the plainest such
+    unit). The counterpart is only the brain: with keepLook the old body model rides on the new unit (AssetVisuals'
+    "another unit's model"), and without a named counterpart its numbers come along too (CarryStats: max hp, move
+    speed, keep distance, aggro time, and per attack its cooldown, range and damage per hit, as a damage multiplier
+    on the counterpart's weapon). Going neutral keeps the unit's own brain and drops its team tags, so vanilla AI
+    ignores it; steering gives it an empty targeting list (it attacks nothing until rules say so).
 
     The LogicEntity survives a conversion (same id, name, vars, labels, rules): only its game object changes.
 */
@@ -99,6 +102,8 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
 
             GameObject prefab = null;
             string counterpart = (string)e?.Def?["counterpart"];
+            // Whose numbers the new body gets: the live unit, or (raised from the dead) its template.
+            GameObject statsFrom = counterpart != null ? null : go != null ? go : TemplatePrefab(e);
             if (counterpart != null)
             {
                 string why = "the unit factory isn't ready";
@@ -119,6 +124,11 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             made.name = made.name.Replace("(Clone)", "").Trim();
             if (!made.activeSelf) made.SetActive(true);   // Builder templates are kept inactive
             if (team == "enemy") Spawn.AdjustEnemyParametersAfterSpawn(made, false);
+            if (statsFrom != null)
+            {
+                string carried = CarryStats(statsFrom, made);
+                Log.For<LogicSteeringManager>().Debug($"convert {statsFrom.name} -> {prefab.name} brain, carried: {carried}");
+            }
             if (look != null && look != "vanilla:" + prefab.name)
             {
                 var notes = new List<string>();
@@ -130,6 +140,87 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
         }
 
         private static readonly List<Object> owned = [];
+
+        /// <summary>The prefab a unit entity was made from (its Builder template or vanilla unit), for a dead one's stats.</summary>
+        private static GameObject TemplatePrefab(LogicEntity e)
+        {
+            if (e?.Template == null) return null;
+            try { return BuilderServices.Units?.Resolve(BuilderServices.Sessions?.Current?.Pack, e.Template, out _); }
+            catch (Exception) { return null; }
+        }
+
+        /// <summary>
+        /// Gives <paramref name="to"/> (a counterpart just made) the numbers of <paramref name="from"/>: max hp, move speed,
+        /// keep distance, aggro time, and per attack (paired in order; extra ones pair with the first) its cooldown,
+        /// range (every target priority scaled so the longest is the old range) and damage per hit (the damage
+        /// multiplier that makes the new weapon's base hit equal the old one's). The base values are read without
+        /// Builder stat modifiers (StatWriter.BaseOf), so a status the unit carries applies once, on top. Returns a
+        /// summary for the log.
+        /// </summary>
+        internal static string CarryStats(GameObject from, GameObject to)
+        {
+            var src = StatWriter.Of(from);
+            var dst = StatWriter.Of(to);
+            if (src == null || dst == null) return "nothing to carry";
+            var notes = new List<string>();
+            double maxHp = StatWriter.BaseOf(src, "maxHp");
+            if (!double.IsNaN(maxHp) && dst.Hp != null && maxHp > 0) { dst.Hp.maxHp = (float)maxHp; notes.Add($"maxHp {maxHp:0}"); }
+            double speed = StatWriter.BaseOf(src, "moveSpeed");
+            if (!double.IsNaN(speed))
+            {
+                if (dst.EnemyMove != null) dst.EnemyMove.movementSpeed = (float)speed;
+                if (dst.UnitMove != null) dst.UnitMove.movementSpeed = (float)speed;
+                notes.Add($"speed {speed:0.##}");
+            }
+            double keep = StatWriter.BaseOf(src, "keepDistance");
+            if (!double.IsNaN(keep))
+            {
+                if (dst.EnemyMove != null) dst.EnemyMove.keepDistanceOf = (float)keep;
+                if (dst.UnitMove != null) dst.UnitMove.keepDistanceOf = (float)keep;
+            }
+            double aggro = StatWriter.BaseOf(src, "aggroTime");
+            if (!double.IsNaN(aggro))
+            {
+                if (dst.EnemyMove != null) dst.EnemyMove.agroTimeWhenAttackedByPlayer = (float)aggro;
+                if (dst.UnitMove != null) dst.UnitMove.agroTimeWhenAttackedByPlayer = (float)aggro;
+            }
+            if (src.Attacks.Length > 0)
+                for (int i = 0; i < dst.Attacks.Length; i++)
+                {
+                    var a = src.Attacks[Math.Min(i, src.Attacks.Length - 1)];
+                    var b = dst.Attacks[i];
+                    var one = StatWriter.Of(a.gameObject);
+                    one.Attacks = [a];
+                    double cd = StatWriter.BaseOf(one, "attackCooldown");
+                    if (!double.IsNaN(cd) && cd > 0) b.cooldownDuration = (float)cd;
+                    double range = StatWriter.BaseOf(one, "attackRange");
+                    float have = 0f;
+                    foreach (var tp in b.targetPriorities) if (tp != null) have = Mathf.Max(have, tp.range);
+                    if (!double.IsNaN(range) && range > 0 && have > 0)
+                        foreach (var tp in b.targetPriorities) if (tp != null) tp.range *= (float)(range / have);
+                    float hitFrom = BaseHit(a.weapon) * a.DamageMultiplyer, hitTo = BaseHit(b.weapon);
+                    if (hitFrom > 0f && hitTo > 0f) b.DamageMultiplyer = hitFrom / hitTo;
+                    if (i == 0) notes.Add($"attack cooldown {cd:0.##} s, range {range:0.#} m, hit {hitFrom:0.#}");
+                }
+            return string.Join(", ", notes);
+        }
+
+        /// <summary>A weapon's damage per hit against an ordinary foe: its direct damage (else its splash) modifiers that
+        /// need no tags beyond the target's side, applied as the game does ((n + added) x mult, in order).</summary>
+        internal static float BaseHit(Weapon w)
+        {
+            if (w == null) return 0f;
+            var mods = w.directDamage != null && w.directDamage.Count > 0 ? w.directDamage : w.splashDamage;
+            if (mods == null) return 0f;
+            float n = 0f;
+            foreach (var m in mods)
+            {
+                if (m == null) continue;
+                if (m.requiredTags != null && m.requiredTags.Any(t => t is not (TagManager.ETag.PlayerOwned or TagManager.ETag.EnemyOwned))) continue;
+                n = (n + m.damageAdded) * m.damageMultiplyer;
+            }
+            return n;
+        }
 
         private static string RoleOfTemplate(LogicEntity e)
         {
