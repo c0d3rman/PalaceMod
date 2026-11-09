@@ -31,6 +31,8 @@ namespace PalaceMod.Builder.Logic
             // it as the game's own enemy, not as a respawned Builder entity.
             e.Spawned = false;
             LogicGame.Register(e, gameObject);
+            // L2 adds the template's components (targeting, movement, attacks, statuses); `spawn` is only queued yet.
+            Bodies.BodyEvents.RaiseUnitSpawned(e, gameObject);
         }
 
         private void OnDestroy()

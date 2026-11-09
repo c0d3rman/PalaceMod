@@ -85,6 +85,7 @@ namespace PalaceMod.Builder.Logic
             foreach (var s in statuses ?? []) if ((string)s["id"] is { } sid) Statuses[sid] = s;
             foreach (var p in presets ?? []) if ((string)p["id"] is { } pid) Presets[pid] = p;
             logic ??= new JObject();
+            LevelLogic = logic;
 
             ulong seed = logic["seed"]?.Type is JTokenType.Integer ? (ulong)(long)logic["seed"] : StableHash(levelPath ?? "level");
             Random.Seed(seed);
@@ -96,6 +97,31 @@ namespace PalaceMod.Builder.Logic
                     Level.Vars[p.Name] = StartValue(p.Value, ctx, $"{levelPath}.logic.vars.{p.Name}");
 
             AttachRules(Level, logic["rules"] as JArray, $"{levelPath}.logic.rules");
+        }
+
+        /// <summary>The level's `logic` block as loaded (after preset expansion): hud, kingActions, ... for L2/L3.</summary>
+        public JObject LevelLogic { get; private set; } = new();
+
+        /// <summary>Evaluate an expression (level-script scope unless a context is given). Throws LogicError.</summary>
+        public Value Evaluate(string expr, LogicContext ctx = null) => LogicExpr.Compile(expr)(ctx ?? new LogicContext { World = this, Self = Level });
+
+        /// <summary>Interpolate text with {expr} parts (level-script scope unless a context is given). Throws LogicError.</summary>
+        public string Interpolate(string text, LogicContext ctx = null) => LogicExpr.Text(text)(ctx ?? new LogicContext { World = this, Self = Level });
+
+        /// <summary>Forget vanilla wraps whose object is gone (dead units), so the registry doesn't grow all night.</summary>
+        public int PurgeGone()
+        {
+            var gone = byId.Values.Where(e => !e.Spawned && e.Body != null && !e.Body.Exists && e.Rules.Count == 0).ToList();
+            foreach (var e in gone) Forget(e);
+            return gone.Count;
+        }
+
+        /// <summary>Drop queued `spawn` and `levelStart` events (a restored level is not a fresh start).</summary>
+        public void ClearQueuedSpawns()
+        {
+            var keep = queue.Where(e => e.Name is not ("spawn" or "levelStart")).ToList();
+            queue.Clear();
+            foreach (var e in keep) queue.Enqueue(e);
         }
 
         public static LogicCaps ReadCaps(JObject o)
@@ -565,8 +591,40 @@ namespace PalaceMod.Builder.Logic
                 }
             }
             RunLaterSignals();
+            RunDeferred();
             ResumeTasks();
             Drain();
+        }
+
+        private readonly Queue<(ActionList list, LogicContext ctx, Action action)> deferredRuns = new();
+
+        /// <summary>
+        /// Run an action list (in its context) at the next drain, under the budgets: for game callbacks outside the
+        /// drain (a projectile's `onImpact` from its Update). Safe to call any time while the world is current.
+        /// </summary>
+        public void Defer(ActionList list, LogicContext ctx) { if (list != null && list.Count > 0) deferredRuns.Enqueue((list, ctx, null)); }
+
+        /// <summary>Run arbitrary engine work at the next drain (counted as one rule firing).</summary>
+        public void Defer(Action action) { if (action != null) deferredRuns.Enqueue((null, null, action)); }
+
+        private void RunDeferred()
+        {
+            int n = deferredRuns.Count;
+            for (int i = 0; i < n && firingsThisFrame < Caps.FiringsPerFrame; i++)
+            {
+                var (list, ctx, action) = deferredRuns.Dequeue();
+                firingsThisFrame++;
+                try
+                {
+                    if (action != null) action();
+                    else RunList(list, ctx);
+                }
+                catch (Exception ex) when (ex is LogicError or InvalidCastException or ArgumentException or NullReferenceException)
+                {
+                    errors++;
+                    TraceAdd(ctx?.Self?.Id ?? "?", ctx?.RuleLabel, null, ctx?.Event?.Name, TraceOutcome.Error, ex.Message, 0, null);
+                }
+            }
         }
 
         /// <summary>Drain the queue (events actions raise land at the back and run now too), up to the budget.</summary>

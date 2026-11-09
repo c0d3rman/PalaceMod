@@ -195,6 +195,10 @@ namespace PalaceMod.Builder.Logic
 
         internal static readonly Dictionary<string, Func<LogicEntity, LogicEvent, bool>> Inputs = new(StringComparer.Ordinal);
 
+        /// <summary>The built-in inputs an entity accepts beyond enable/disable/toggle/destroy (movers' start/stop/
+        /// poses, areas' show/hide, ...), for the Wire tool. L2 installs it.</summary>
+        public static Func<LogicEntity, IEnumerable<string>> InputsOf = _ => Array.Empty<string>();
+
         /// <summary>
         /// A built-in input: a signal name an entity answers without a listener rule (movers' `start`/`open`, areas'
         /// `show`, ...). The handler returns true if the entity handled it (e.g. it has a mover). Several handlers may
@@ -278,6 +282,44 @@ namespace PalaceMod.Builder.Logic
         /// <summary>Raise an event from an action (goes to the back of the queue at Depth + 1).</summary>
         public void Raise(string name, LogicEntity subject, LogicEntity other = null, double value = 0, Vec? pos = null, string text = null) =>
             World.Raise(name, subject, other, value, pos, text, Depth + 1);
+    }
+
+    /// <summary>
+    /// The expression language for game code (component fields, filters in `hits`/`watch`/`by`/targeting).
+    /// Compiled once per source string and cached; the returned delegates are reusable across sessions. Compile
+    /// errors throw LogicError; evaluation errors throw LogicError too.
+    /// </summary>
+    public static class LogicExpr
+    {
+        /// <summary>An expression ("self.hpPct < 0.25", "100 * night"); a leading '=' is allowed.</summary>
+        public static Func<LogicContext, Value> Compile(string src, string path = null) =>
+            ExprCompiler.Compile(src != null && src.StartsWith("=") ? src.Substring(1) : src, path ?? "expression");
+
+        /// <summary>A filter ("foe and Building"); call with (ctx, candidate). `self` is ctx.Self; `it` the candidate.</summary>
+        public static Func<LogicContext, LogicEntity, bool> Filter(string src, string path = null) => ExprCompiler.CompileFilter(src, path ?? "filter");
+
+        /// <summary>Text with {expr} parts ("Pay {cost} to open"), or "=expr".</summary>
+        public static Func<LogicContext, string> Text(string src, string path = null)
+        {
+            if (src != null && src.StartsWith("="))
+            {
+                var e = Compile(src, path);
+                return ctx => Values.Format(e(ctx));
+            }
+            return ExprCompiler.CompileText(src, path ?? "text");
+        }
+
+        /// <summary>A context with self (and optionally it/other) in the current world, for evaluating from game code.</summary>
+        public static LogicContext Context(LogicEntity self, LogicEntity it = null, LogicEntity other = null) =>
+            new() { World = LogicWorld.Current, Self = self ?? LogicWorld.Current?.Level, It = it, Other = other };
+
+        /// <summary>Whether <paramref name="it"/> matches <paramref name="filter"/> as seen from <paramref name="self"/>.</summary>
+        public static bool Matches(string filter, LogicEntity self, LogicEntity it)
+        {
+            if (string.IsNullOrEmpty(filter)) return true;
+            if (it == null || LogicWorld.Current == null) return false;
+            return Filter(filter)(Context(self, it), it);
+        }
     }
 
     /// <summary>A rule-level runtime error: traced against the rule with its JSON path, never thrown into the game.</summary>
