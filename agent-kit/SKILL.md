@@ -23,8 +23,10 @@ Install: copy this folder (the one the mod writes to `<Thronefall>/BepInEx/Palac
    `new <level> --host <Map> --base cleared|flat|map` (a level in the player's library; `list` shows the library).
 4. Edit only through ops files: `apply library ops.json --level <level>`. Fix every `errors` entry it prints.
 5. Inspect: `render library <level> -o map.png --labels reqs`, `show`, `economy --compare`, `waves --compare`.
-6. Test in the game: `play` then `paths`; `test library <level> --plan plan.json --shots shots/`; read each night's
-   report (outcome, castle min HP, buildings knocked out). `render --live` for the real map with game routes.
+6. Test in the game: `play` then `paths`; `test library <level> --plan plan.json --shots shots/` (fast simulation:
+   a few seconds per night; keep `--speed` at 3 or less); read each night's report (outcome, castle min HP,
+   buildings knocked out). After editing only later nights, `test ... --from-night N` replays nights N.. from the
+   last full run's dawn state. `render --live` for the real map with game routes.
 7. Iterate until early nights are survivable with half the gold, late nights are close, and every lane reaches the
    castle.
 

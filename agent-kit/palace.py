@@ -23,6 +23,7 @@ Every command prints JSON and exits non-zero on failure (`test`: 1 when the run 
 import argparse
 import base64
 import copy
+import hashlib
 import heapq
 import json
 import math
@@ -3658,7 +3659,7 @@ def cmd_play(env, args):
     out({"status": g.status(), "loadWarnings": notes})
 
 
-def wait_night(g, timeout, night=None):
+def wait_night(g, timeout, night=None, poll=1.0):
     """Waits for the night's report. `night` (the number the `night` command started) guards against reading the
     previous night's finished report before the game has begun recording the new one."""
     deadline = time.time() + timeout
@@ -3666,7 +3667,7 @@ def wait_night(g, timeout, night=None):
         r = g.agent("report")
         if r.get("done") and (night is None or r.get("night") == night):
             return r
-        time.sleep(1.0)
+        time.sleep(poll)
     r = g.agent("report")
     r["outcome"] = r.get("outcome") or "timeout"
     st = g.status()
@@ -3837,14 +3838,131 @@ def night_line(rep, total):
     return s
 
 
+class ResumePoints:
+    """Savestates a full `test` takes at each dawn (before buying), so `test --from-night N` can replay only nights N..
+    after an edit. A state is only reused when nothing it depends on changed: the level (terrain, slots, props, spawn
+    lines, economy), the waves of nights before N and the library enemies they use, the plan's days before N (and its
+    options and king posts before N), and the test flags that change play (--free, --build, --gold, --god,
+    --invulnerable, --king, --carry, --save). Waves of nights N.. (and enemies only they use) and the plan from day N on
+    may change."""
+
+    FLAGS = ("free", "build", "gold", "god", "invulnerable", "king", "carry", "save")
+    WHY = {"level": "the level (terrain, slots, props, spawn lines, costs)", "waves": "the waves of the nights before it (or starting gold)",
+           "enemies": "library enemies used in the nights before it", "plan": "the plan's days before it (or its options or king posts)",
+           "flags": "test flags (--free/--build/--gold/--god/--invulnerable/--king/--carry/--save)", "assets": "the library's assets"}
+
+    def __init__(self, env, data, lv, plan_raw, args):
+        self.env, self.data, self.lv, self.plan_raw, self.args = env, data, lv, plan_raw, args
+        self.folder = env.need_game() / "PalaceMod" / "Agent" / "test-states" / f"{data['id']}--{lv['id']}"
+
+    def parts(self, n):
+        """What a state at the dawn before night n depends on, by part (each a JSON string)."""
+        ws = find_waveset(self.data, self.lv.get("waveSet")) or {}
+        early = (ws.get("nights") or [])[:n - 1]
+        used = {str(sp.get("unit", "")).split(":")[-1] for night in early for sp in night.get("spawns") or []}
+        enemies = sorted((u for u in self.data.get("units") or [] if u.get("id") in used), key=lambda u: u.get("id"))
+        plan = {k: v for k, v in self.plan_raw.items() if not str(k).isdigit() or int(k) < n}
+        if isinstance(plan.get("king"), dict):
+            plan["king"] = {k: v for k, v in plan["king"].items() if str(k).isdigit() and int(k) < n}
+        dump = lambda o: json.dumps(o, sort_keys=True)
+        return {
+            "level": dump(self.lv),
+            "waves": dump([{k: v for k, v in ws.items() if k != "nights"}, early]),
+            "enemies": dump(enemies),
+            "plan": dump(plan),
+            "flags": dump({f: getattr(self.args, f, None) for f in self.FLAGS}),
+            "assets": dump(self.data.get("assets") or {}),
+        }
+
+    def fingerprint(self, n):
+        return {k: hashlib.sha1(v.encode()).hexdigest()[:12] for k, v in self.parts(n).items()}
+
+    def state_name(self, n):
+        return f"test {self.data['id']}/{self.lv['id']} day {n}"
+
+    def path(self, n):
+        return self.folder / f"day{n}.json"
+
+    def save(self, g, n, carried, earlier):
+        """Saves the resume point for night n (now: the dawn before it). Returns a warning if it couldn't."""
+        name = self.state_name(n)
+        try:
+            g.raw(f"savestate delete {name}")
+        except Fail:
+            pass
+        try:
+            g.raw(f"savestate save {name}")
+        except Fail as e:
+            # E.g. savestates turned off: say so once, then stop trying for the rest of the run.
+            self.path(n).unlink(missing_ok=True)
+            self.args.states = False
+            return f"no resume states (from night {n} on): {e}"
+        _write_json(self.path(n), {
+            "state": name, "night": n, "taken": time.strftime("%Y-%m-%dT%H:%M:%S"), "fingerprint": self.fingerprint(n),
+            "carried": carried, "speed": self.args.speed, "fast": self.args.fast,
+            "nights": [{k: r.get(k) for k in ("night", "outcome", "seconds", "castle", "gold")} for r in earlier]})
+        return None
+
+    def check(self, n):
+        """The resume point for night n, or a Fail that says why it can't be used."""
+        if n < 2:
+            raise Fail("--from-night N needs N >= 2 (night 1 is a plain full test)")
+        f = self.path(n)
+        if not f.exists():
+            have = sorted(int(p.stem[3:]) for p in self.folder.glob("day*.json")) if self.folder.is_dir() else []
+            raise Fail(f"no resume state for night {n} of {self.lv['id']}" + (f" (have: nights {have})" if have else "") +
+                       ": run a full `test` first (it saves one at each dawn)")
+        meta = json.loads(f.read_text())
+        now = self.fingerprint(n)
+        changed = [k for k, v in now.items() if (meta.get("fingerprint") or {}).get(k) != v]
+        if changed and not self.args.force_resume:
+            raise Fail(f"the night-{n} resume state is stale, taken {meta.get('taken')} before a change to " +
+                       "; ".join(self.WHY[k] for k in changed) + ". Run a full test again (or --force-resume to use it anyway).")
+        return meta
+
+    def restore(self, g, meta, timeout):
+        g.raw(f"savestate load {meta['state']}")
+        n = meta["night"]
+        deadline = time.time() + timeout
+        time.sleep(1.0)
+        while time.time() < deadline:
+            try:
+                restoring = "restoring=True" in g.raw("savestate dump")
+                st = g.status()
+            except Fail:
+                time.sleep(0.5)
+                continue
+            if not restoring and st.get("inLevel") and not st.get("loading") and st.get("time") == "day" and st.get("night") == n:
+                return st
+            time.sleep(0.5)
+        raise Fail(f"the night-{n} resume state didn't finish loading within {timeout} s")
+
+
 def cmd_test(env, args):
     """Loads the level, then for each night: waits for the day's gold to land, buys the plan's (or --build's) items for
     that day, starts the night, waits for its end, records the report (and screenshots). Stops at a defeat. Nights
     before the first requested one are played too (catch-up), unless --catchup says otherwise."""
     g = Game(env)
+    if not args.fast:
+        return run_test(env, args, g)
+    # Fast simulation: the same fixed 1/60 s steps as a smooth 60 fps run at --speed, as fast as the CPU allows.
+    g.agent(f"fast on {args.fps:g}")
+    try:
+        return run_test(env, args, g)
+    finally:
+        try:
+            g.agent("fast off")
+        except Fail:
+            pass
+
+
+def run_test(env, args, g):
     _, data = load_pack(env, args.pack)
     lv = find_level(data, args.level)
-    plan = Plan(json.loads(Path(args.plan).read_text()) if args.plan else {}, carry=args.carry, save=args.save)
+    plan_raw = json.loads(Path(args.plan).read_text()) if args.plan else {}
+    plan = Plan(plan_raw, carry=args.carry, save=args.save)
+    resume = ResumePoints(env, data, lv, plan_raw, args) if (args.states or args.from_night) else None
+    resumed = resume.check(args.from_night) if args.from_night else None
     warnings = []
     slots, castle = {}, None
     try:
@@ -3860,25 +3978,29 @@ def cmd_test(env, args):
     if args.king:
         king_specs.setdefault(0, args.king)
     king_at = {n: king_point(spec, slots, castle) for n, spec in king_specs.items()}
-    if not args.no_load:
+    if not args.no_load or resumed:
         cmd_play_quiet(g, data, lv["id"], args.timeout_load)
+    if resumed:
+        resume.restore(g, resumed, args.timeout_load)
     st = g.status()
     total = st.get("nights", 0)
-    nights = parse_nights(args.nights, total)
+    nights = parse_nights(args.nights or (f"{args.from_night}-{total}" if resumed else None), total)
     if not nights:
         raise Fail("no nights to play")
+    if resumed and nights[0] < args.from_night:
+        raise Fail(f"--nights {args.nights}: starts before --from-night {args.from_night}")
     catchup = "none" if args.no_catchup else args.catchup
     if args.god:
         g.agent("god on")
     if args.invulnerable:
         g.agent("invulnerable on")
-    if args.gold is not None:
+    if args.gold is not None and not resumed:
         g.agent(f"gold {args.gold}")
     if args.speed:
         g.agent(f"speed {args.speed}")
     shots = Path(args.shots) if args.shots else None
     results, briefs, catchup_bought = [], [], []
-    carried = []
+    carried = [Plan.item(x, x.get("day", 0)) for x in resumed["carried"]] if resumed else []
     current = st.get("night", 1)
     first, last = nights[0], nights[-1]
     jump = first > current and catchup in ("free", "none")
@@ -3893,6 +4015,11 @@ def cmd_test(env, args):
         if st.get("state") in ("AfterMatchDefeat", "AfterMatchVictory"):
             break
         wait_settled(g)
+        if resume and args.states and n > 1 and not (resumed and n == args.from_night):
+            # Dawn before night n, the day's gold in, nothing bought yet: `--from-night n` starts here.
+            note = resume.save(g, n, carried, briefs + results)
+            if note:
+                warnings.append(note)
         items = carried + plan.days.get(n, [])
         bought, carried = buy_items(g, items, args.free, plan.carry, plan.save, n)
         if args.build == "all":
@@ -3913,7 +4040,7 @@ def cmd_test(env, args):
         if shots and n in nights:
             time.sleep(args.shot_after)
             mid = g.screenshot(shots / f"night{n}.png")
-        rep = wait_night(g, args.timeout, n)
+        rep = wait_night(g, args.timeout, n, poll=0.25 if args.fast else 1.0)
         rep["bought"] = bought
         if king:
             rep["kingPost"] = king
@@ -3965,6 +4092,9 @@ def cmd_test(env, args):
         report["warnings"] = warnings
     if briefs or catchup_bought:
         report["catchup"] = {"mode": catchup, "nights": briefs, "bought": catchup_bought}
+    if resumed:
+        report["resumedFrom"] = {"night": args.from_night, "state": resumed["state"], "taken": resumed["taken"],
+                                 "earlierNights": resumed.get("nights")}
     report["summary"] = [{"night": r.get("night"), "outcome": r.get("outcome"), "castleMin": (r.get("castle") or {}).get("minHp"),
                           "knockedOut": len((r.get("buildings") or {}).get("knockedOut") or []),
                           "bought": [f"{b.get('slot')} L{b.get('to')}" for b in r.get("bought", []) if b.get("ok")],
@@ -4231,12 +4361,23 @@ def main(argv=None):
     p.add_argument("--god", action="store_true", help="the king takes no damage")
     p.add_argument("--invulnerable", action="store_true", help="buildings and units take no damage")
     p.add_argument("--speed", type=float, default=3)
+    p.add_argument("--fast", action=argparse.BooleanOptionalAction, default=True,
+                   help="fast simulation (default on; --no-fast for real time): every frame advances the same fixed "
+                        "1/FPS s x --speed, frames run as fast as the CPU allows and aren't drawn, so the result doesn't "
+                        "depend on the machine's load")
+    p.add_argument("--fps", type=float, default=60, help="--fast: simulation frames per game second at 1x (default 60)")
     p.add_argument("--shots", help="folder for a screenshot of each night")
     p.add_argument("--shot-after", type=float, default=12, help="seconds into the night for the screenshot")
     p.add_argument("--timeout", type=float, default=420, help="seconds per night before giving up")
     p.add_argument("--timeout-load", type=float, default=120)
     p.add_argument("--no-load", action="store_true", help="continue the run already loaded")
     p.add_argument("--no-catchup", action="store_true", help="same as --catchup none")
+    p.add_argument("--from-night", type=int, metavar="N", help="start at the dawn before night N from the savestate a "
+                   "full test took there (only nights N.. replay); refused if the level, nights 1..N-1's waves or enemies, "
+                   "the plan's days 1..N-1 or the test flags changed since")
+    p.add_argument("--states", action=argparse.BooleanOptionalAction, default=True,
+                   help="save a resume state at each dawn for --from-night (default on)")
+    p.add_argument("--force-resume", action="store_true", help="--from-night: use the state even if it looks stale")
 
     p = sub.add_parser("edit", help="open the level in the in-game Studio")
     p.add_argument("pack")
