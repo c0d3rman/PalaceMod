@@ -299,6 +299,13 @@ coins fill a copy of a build slot's coin display. With `choices`, the game's upg
 (each choice also takes `description` and `icon`, an `asset:` sprite); the picked choice's cost is paid at once (a
 "not enough gold" notice otherwise) and `interact` fires with `event.choice`; Esc cancels without paying.
 
+Costs beyond gold: `"pay": [{ "var": "$bread", "amount": 1, "label": "bread" }]` (on the block or on a choice) costs
+level variables as well as (or instead of) `cost`: inventory as data. Everything is paid at once on the press; if
+anything is short nothing is paid, a "Not enough: 1 bread needed" notice shows and `interactRefused` fires (`other`
+the king, `event.name` what was short). `{cost}` in the prompt reads "2 gold + 1 bread" then. `amount` may be an `=`
+expression. Units carry `interact` too (a unit template, a placed or spawned unit, wave units): the interactor is a
+child of the unit, so the prompt follows it as it walks.
+
 **Projectiles in flight.** The game's own projectiles (`AimbotProjectile`: arrows, bolts, magic, boulders) are
 entities of kind `projectile` while they fly, made the first time an area or selector sees one; their `owner` is the
 shooter. `timeScale` and `projectileSpeed` scale their flight, drifts move them (a homing arrow re-aims, so wind bends
@@ -352,6 +359,15 @@ attack, vanilla towers and troops included (`setTargeting` on `all('player and T
   "home": "spawn"                     // "spawn" | a position | "@point"
 }
 ```
+
+`"mode": "follow"` walks in formation: `"leader": "self.parent"` (an entity expression, re-read 10 times a second),
+`"spacing": 1.6` (metres behind the leader, along the line from the leader to the follower: a trail, so a chain
+snakes) or `"offset": [x, z]` (a slot in the leader's frame, x right, z ahead: beside or behind), and `"catchUp": 1.5`
+(speed multiplier while it's more than `max(spacing, 1.5)` m from its slot). It walks there with the game's A* and
+avoidance, and re-paths when the slot moves 0.4 m. A trail slot is always behind the leader (by its model's
+heading): a follower that finds itself in front walks round. Without a live leader (none, dead, unlinked) `then` applies:
+`pathfind` (on its own: it becomes a leader), `hold` or `destroy`; a new leader is picked up again as soon as the
+expression names one.
 
 It is implemented on the game's own movement components (see "Runtime"), so pathfinding, avoidance and animation keep
 working. A ranged enemy that kites and prefers towers is just `targeting` plus `movement.keepDistance` plus `kite`.
@@ -433,6 +449,36 @@ necromancer, `subject` the dead foe, and `other` its killer. `range` is optional
 Without `of`, a rule hears only its owner's events. The level script must give `of` for entity events (filters there
 treat `foe`/`ally` as relative to the player).
 
+### Links
+
+Any entity (a unit, prop, area, hittable body, logic object) can be a **part** of another: a colossus's weak points,
+ladders on its legs, a rider on a beast, a shield in front of a bearer, the links of a chain. Parts are real separate
+entities: their own hitbox and hp, rules, statuses and look; towers, units and the king fight them like anything else
+(an enemy-team hittable body is a real target for the game's AI; `countsAsEnemy` only decides whether it holds the
+night open).
+
+- **Making one.** The `link` action (`target` the part, `to` the parent), or a template's `parts`: `[{ "entity":
+  "weak-point", "offset": [1.5, 4, 0], "name": "shoulder", "damageToParent": 2 }]`, spawned and linked when the
+  template appears (placed, spawned or in a wave; `name` becomes a label, `team` defaults to the parent's). Parts may
+  have parts (4 deep). The king, the castle and buildings can't be parts.
+- **Moving.** `follow: rigid` (default) puts the part at `offset` (x right, y up, z ahead) in the parent's frame every
+  frame, after the game's movement, and turns it with the parent (`rotY` relative); `position` moves it without
+  turning it; `none` makes it a relation only (it moves on its own, e.g. `movement: {mode: follow, leader:
+  self.parent}`). A rigid unit part doesn't walk (it still attacks). A unit's heading is its model's
+  (`Heading.Yaw`), so parts turn as it turns to walk or strike.
+- **Death.** `onParentDeath`: `die` (killed with it: `death` fires, credited to nobody), `drop` (unlinked and set on
+  the ground: its own movement resumes) or `stay` (unlinked where it is). A gone parent counts as dead.
+- **Damage.** On each hit a part takes (after damage modifiers): `damageToParent` × the hit goes to the parent as
+  well (credited to the same attacker; a weak point with 2 doubles it); `damageToGroup` of the hit is split evenly
+  over its whole linked group (`.group`: the root and every part, itself included), the rest × `damageKept` it takes
+  itself. A hit on the root is shared by the largest `damageToGroup` among its parts. `damageToGroup: 1` is one shared pool; `damageKept: 0` with `damageToParent: 1` is a pure proxy hitbox.
+  Shares are dealt as they are: the receivers' own `damageTaken` doesn't apply again (a colossus immune to hits on
+  its body still bleeds through its weak points), `invulnerable` still does. A scripted `kill` isn't shared.
+- **Selectors.** `.parent`, `.children` (a set), `.root`, `.group` (a set): `self.children.len`, `count('#link and
+  where(it.root == self.root)')`, `best('foe', 20, it.parent == none ? 1 : 0)`.
+- **Events.** `linked` / `unlinked` on the part (`other` the parent).
+- **Savestates** keep links made by `link`; a template's parts are rebuilt with their parent.
+
 ### Events
 
 Every event has `self` and `subject`. The table gives `other`, `event.value` and `event.pos` where they apply. Aliases
@@ -457,6 +503,8 @@ keep rules readable.
 | `arrive` / `end` | | (movers, path followers, `moveTo`) | — / point index |
 | `bump` | | (units) a knockback (`push`, or the game's own) was stopped short by something solid: a wall, a building, a solid body, a cliff, the map's edge | the building or body it hit (none for terrain) / metres of push left; `event.pos` where it stopped |
 | `pickup` / `interact` | | (pickups, interactables) | collector / king |
+| `interactRefused` | | (interactables) the king tried to use it without enough gold or `pay` items (`event.name`: what was short) | king / the gold cost |
+| `linked` / `unlinked` | | it became a part of a parent / stopped being one (`unlink`, or its parent died with `drop`/`stay`) | the parent |
 | `signal` | `name` | it receives the signal | sender / the signal's number (`event.name` is the signal's name) |
 | `varChanged` | `name` | one of its variables changes (or a level var, on the level script) | — / new value |
 | `statusStart` / `statusEnd` / `statusTick` | `status` (when watching one from outside) | a status starts, ends, or every `tick` seconds of the status | the applier / stacks |
@@ -574,6 +622,8 @@ which accepts an entity or a position.
 | | `setMovement` / `setTargeting` | a movement block / a targeting list, or `prepend`, `remove`, `for` (seconds; reverts after) |
 | | `taunt` | `toward` (an entity), `for`: forces the targets' aggro onto it (the game's agro mechanism) |
 | | `command` | `order` (`follow`/`hold`/`home`): player units, as the king's own commands |
+| **Links** | `link` | `to` (the parent), `offset` [x, y, z] in its frame, `rotY`, `follow` (`rigid`/`position`/`none`), `onParentDeath` (`die`/`drop`/`stay`), `damageToParent`, `damageToGroup`, `damageKept`: see "Links" |
+| | `unlink` | `release` (`drop`/`stay`), `children` (unlink its parts instead) |
 | **Logic** | `signal` | `name`, `to` (selector, or `"all"`), `value`, `delay` |
 | | `setVar` / `addVar` | `name` (a literal, so it's checked), `value` (on `target` for entity vars; level vars when `target` is `level` or the name has `$`) |
 | | `listAdd` / `listRemove` / `listClear` | `name`, `value` (add; or remove the first equal item), `index` (remove at): list vars of one element type (max 256 items, oldest dropped past that). Lists keep insertion order; sets from selectors are ordered by distance from the anchor, then entity id |
@@ -1505,7 +1555,11 @@ three (projectiles in flight, surfaces and spaces above), with no feature coded 
   list vars can hold: up to 256 sampled values, such as positions.
 - **King actions:** 3 keys. The day phase has no timer in Thronefall; `logic.game.dayLength` adds one.
 - **No arbitrary code**, by design. A missing verb needs a mod update; the registry's `since` makes that explicit.
-- **Savestates** don't keep pending `wait`s or Builder projectiles in flight.
+- **Savestates** don't keep pending `wait`s or Builder projectiles in flight. A template's parts come back rebuilt
+  (full hp), not as they were.
+- **Links.** A rigid part is placed, not simulated: it passes through walls with its parent, and a solid part re-cuts
+  the navmesh as it moves (keep moving parts not `solid`). Standing on a moving part is E2's riding (`Links.Moved`
+  fires after parts are placed each frame).
 
 ## Workstreams
 

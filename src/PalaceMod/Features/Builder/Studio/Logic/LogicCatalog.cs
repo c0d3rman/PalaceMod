@@ -90,7 +90,7 @@ namespace PalaceMod.Builder.Studio.Logic
     internal static class LogicCatalog
     {
         public static readonly string[] EventCategories = ["This", "Combat", "Time", "Night", "Nearby", "Areas", "Movement", "Buildings", "Gold", "King", "Signals", "Variables", "Level"];
-        public static readonly string[] ActionCategories = ["Make", "Health", "Stats", "Move", "Logic", "World", "Show", "End"];
+        public static readonly string[] ActionCategories = ["Make", "Health", "Stats", "Move", "Links", "Logic", "World", "Show", "End"];
 
         public static readonly List<EventUi> Events = [];
         public static readonly List<ActionUi> Actions = [];
@@ -154,6 +154,9 @@ namespace PalaceMod.Builder.Studio.Logic
             Ev("statusStart", "gains a status", "This", "A status starts on it.", other: "applier", value: "stacks", ps: ["status:status"]);
             Ev("statusEnd", "loses a status", "This", "A status ends (runs out or is removed).", other: "applier", value: "stacks", ps: ["status:status"]);
             Ev("statusTick", "status ticks", "This", "Every tick of a status it has.", other: "applier", value: "stacks", ps: ["status:status"]);
+            Ev("linked", "is linked to a parent", "This", "It becomes a part of another entity (link, a template's parts).", other: "parent");
+            Ev("unlinked", "is unlinked", "This", "It stops being a part (unlink, or its parent died and it dropped off).", other: "old parent");
+            Ev("interactRefused", "is refused (short of payment)", "King", "The king tried to use it without enough gold or items.", other: "king", value: "gold cost");
             Ev("targetChanged", "changes target", "Combat", "Its attack or move target changes.", other: "new target");
             Ev("built", "is built", "Buildings", "The player builds it (build slots).", value: "level", ps: ["level:number"]);
             Ev("upgraded", "is upgraded", "Buildings", "The player upgrades it.", value: "level", ps: ["level:number"]);
@@ -199,6 +202,9 @@ namespace PalaceMod.Builder.Studio.Logic
             Act("setTargeting", "Change targeting", "Move", "Change who {target} goes for", "Replaces or extends its target priorities.", ["targeting:json", "prepend:json", "remove:json", "for:number"], targeted: true);
             Act("taunt", "Taunt", "Move", "Make {target} attack {toward}", "Forces their aggro onto something.", ["toward:entity!*", "for:number=5*"], targeted: true);
             Act("command", "Order troops", "Move", "Order {target} to {order}", "Player units, as the king's own commands.", ["order:choice(follow|hold|home)!*"], targeted: true);
+            Act("link", "Attach as a part", "Links", "Attach {target} to {to}", "Makes it a part of another entity: it moves with it, may pass on its damage, and follows it in death.",
+                ["to:entity!*", "offset:position", "rotY:number", "follow:choice(rigid|position|none)=rigid*", "onParentDeath:choice(die|drop|stay)=die", "damageToParent:number", "damageToGroup:number", "damageKept:number"], targeted: true);
+            Act("unlink", "Detach", "Links", "Detach {target}", "It stops being a part (with children: its parts drop off).", ["release:choice(drop|stay)=drop*", "children:bool"], targeted: true);
             Act("signal", "Send a signal", "Logic", "Send {name} to {to}", "Sends a named signal (with an optional number).", ["name:signal!*", "to:target=self*", "value:expr", "delay:number"], common: true);
             Act("setVar", "Set a variable", "Logic", "Set {name} to {value}", "Sets a level or entity variable.", ["name:var!*", "value:expr!*"], targeted: true, common: true);
             Act("addVar", "Add to a variable", "Logic", "Add {value} to {name}", "Adds to a number variable.", ["name:var!*", "value:expr=1!*"], targeted: true, common: true);

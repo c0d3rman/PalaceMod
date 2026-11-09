@@ -300,7 +300,13 @@ namespace PalaceMod.Builder.Logic.Bodies
             var tags = tagged.Tags;
             tags.Clear();
             if (team == "player") tags.Add(TagManager.ETag.PlayerOwned);
-            else if (team == "enemy" && countsAsEnemy) tags.Add(TagManager.ETag.EnemyOwned);
+            else if (team == "enemy")
+            {
+                // The game's towers, units and king attack EnemyOwned things; only countsAsEnemy ones hold the night
+                // open (LogicLinksManager.EnemyCount leaves the others out of the game's enemy count).
+                tags.Add(TagManager.ETag.EnemyOwned);
+                if (!countsAsEnemy) EnemyBodies.Uncounted.Add(tagged);
+            }
             if (Flying) tags.Add(TagManager.ETag.Flying);
             // body.tags: extra game tags, so the game's AI treats it as one of its own kinds ("Building", "Tower",
             // "PlayerUnit"): vanilla enemies only pick targets by tags.

@@ -2137,6 +2137,9 @@ class _Walker:
             self.check_movement(_dict(u.get("movement")), p + ".movement", owner)
             self.check_attacks(_list(u.get("attacks")), p + ".attacks", owner)
             self.check_status_refs(u.get("statuses"), p + ".statuses")
+            if _dict(u.get("interact")) is not None:
+                self.check_interact(_dict(u.get("interact")), p + ".interact", self.scope(owner, None))
+            self.check_parts(_list(u.get("parts")), p + ".parts", self.scope(owner, None))
             if _s(u, "counterpart") is not None:
                 self.check_template(_s(u, "counterpart"), p + ".counterpart", self.scope(owner, None))
             self.check_rules(owner, lowered_rule_index(_list(u.get("rules")), _s(u, "id"), is_unit))
@@ -2783,7 +2786,19 @@ class _Walker:
             return
         scope = scope if scope is not None else self.scope(owner, None)
         mode = _s(m, "mode")
-        self.enum(mode, p + ".mode", ["pathfind", "direct", "hold", "path"])
+        self.enum(mode, p + ".mode", ["pathfind", "direct", "hold", "path", "follow"])
+        leader = _s(m, "leader")
+        if mode == "follow" and (leader is None or not leader.strip()):
+            self.error(p + ".leader", 'mode follow needs a leader (an entity expression, e.g. "self.parent")')
+        if leader is not None:
+            self.expression(leader, p + ".leader", scope, ENTITY, "leader")
+        self.num(_lnum(m.get("spacing")), p + ".spacing", scope, 0, 100)
+        self.num(_lnum(m.get("catchUp")), p + ".catchUp", scope, 1, 5)
+        off = m.get("offset")
+        if off is not None and not (isinstance(off, list) and len(off) == 2):
+            self.error(p + ".offset", "must be [x, z] in the leader's frame (x right, z ahead)")
+        if mode != "follow" and any(m.get(k) is not None for k in ("leader", "spacing", "offset", "catchUp")):
+            self.warn(p + ".leader", "leader, spacing, offset and catchUp only apply to mode follow")
         self.enum(_s(m, "then"), p + ".then", ["pathfind", "hold", "destroy"])
         path = _jt(m, "path")
         if mode == "path" and path is _MISSING:
@@ -2812,6 +2827,65 @@ class _Walker:
         home = m.get("home")
         if isinstance(home, str) and home != "spawn":
             self.expression(home, p + ".home", scope, POSITION, "home")
+
+    def check_interact(self, it, p, scope):
+        if _s(it, "prompt") is not None:
+            self.text(_s(it, "prompt"), p + ".prompt", scope.with_(extra_roles={"cost": NUMBER}))
+        self.num(_lnum(it.get("cost")), p + ".cost", scope, 0, 100000)
+        self.enum(_s(it, "when"), p + ".when", ["day", "night", "always"])
+        self.num(_lnum(it.get("radius")), p + ".radius", scope, 0.5, 30)
+        self.check_pay(_list(it.get("pay")), p + ".pay", scope)
+        choices = _list(it.get("choices"))
+        if choices is not None:
+            if len(choices) < 1 or len(choices) > 4:
+                self.error(p + ".choices", "1 to 4 choices")
+            ids = set()
+            for i, c in enumerate(choices):
+                cid = _s(c, "id")
+                if cid is None or cid in ids:
+                    self.error(f"{p}.choices[{i}].id", "each choice needs its own id")
+                else:
+                    ids.add(cid)
+                self.num(_lnum(c.get("cost")) if isinstance(c, dict) else None, f"{p}.choices[{i}].cost", scope, 0, 100000)
+                if isinstance(c, dict):
+                    self.check_pay(_list(c.get("pay")), f"{p}.choices[{i}].pay", scope)
+
+    def check_pay(self, pay, p, scope):
+        for i, x in enumerate(pay or []):
+            pp = f"{p}[{i}]"
+            v = _s(x, "var") if isinstance(x, dict) else None
+            if v is None or not v.startswith("$") or not _var_name_ok(v[1:]):
+                self.error(pp + ".var", 'needs a level variable: "$name"')
+                continue
+            if scope.level_vars is not None and v[1:] not in scope.level_vars:
+                self.error(pp + ".var", f'no level variable "{v[1:]}" (declare it in logic.vars)')
+            self.num(_lnum(x.get("amount")), pp + ".amount", scope, 0, 100000)
+
+    def check_parts(self, parts, p, scope):
+        if parts is None:
+            return
+        if len(parts) > 32:
+            self.error(p, "at most 32 parts")
+        for i, x in enumerate(parts):
+            pp = f"{p}[{i}]"
+            if not isinstance(x, dict):
+                self.error(pp, "is empty")
+                continue
+            ent = _s(x, "entity")
+            if ent is None:
+                self.error(pp + ".entity", "needs a template")
+            else:
+                self.check_template(ent, pp + ".entity", scope)
+            off = x.get("offset")
+            if off is not None and not (isinstance(off, list) and len(off) == 3):
+                self.error(pp + ".offset", "must be [x, y, z]")
+            self.enum(_s(x, "team"), pp + ".team", TEAMS)
+            self.enum(_s(x, "follow"), pp + ".follow", ["rigid", "position", "none"])
+            self.enum(_s(x, "onParentDeath"), pp + ".onParentDeath", ["die", "drop", "stay"])
+            for k, lo, hi in (("damageToParent", 0, None), ("damageToGroup", 0, 1), ("damageKept", 0, None)):
+                v = x.get(k)
+                if isinstance(v, (int, float)) and not isinstance(v, bool) and (v < lo or (hi is not None and v > hi)):
+                    self.error(f"{pp}.{k}", "must be 0..1" if hi is not None else "must be 0 or more")
 
     def check_path(self, path, p, scope):
         if path is _MISSING:
@@ -2996,23 +3070,8 @@ class _Walker:
             self.num(_lnum(pk.get("magnet")), p + ".pickup.magnet", scope, 0, 100)
         it = _dict(e.get("interact"))
         if it is not None:
-            if _s(it, "prompt") is not None:
-                self.text(_s(it, "prompt"), p + ".interact.prompt", scope.with_(extra_roles={"cost": NUMBER}))
-            self.num(_lnum(it.get("cost")), p + ".interact.cost", scope, 0, 100000)
-            self.enum(_s(it, "when"), p + ".interact.when", ["day", "night", "always"])
-            self.num(_lnum(it.get("radius")), p + ".interact.radius", scope, 0.5, 30)
-            choices = _list(it.get("choices"))
-            if choices is not None:
-                if len(choices) < 1 or len(choices) > 4:
-                    self.error(p + ".interact.choices", "1 to 4 choices")
-                ids = set()
-                for i, c in enumerate(choices):
-                    cid = _s(c, "id")
-                    if cid is None or cid in ids:
-                        self.error(f"{p}.interact.choices[{i}].id", "each choice needs its own id")
-                    else:
-                        ids.add(cid)
-                    self.num(_lnum(c.get("cost")) if isinstance(c, dict) else None, f"{p}.interact.choices[{i}].cost", scope, 0, 100000)
+            self.check_interact(it, p + ".interact", scope)
+        self.check_parts(_list(e.get("parts")), p + ".parts", scope)
         self.check_attacks(_list(e.get("attacks")), p + ".attacks", owner)
         self.check_targeting(_list(e.get("targeting")), p + ".targeting", owner)
         self.check_movement(_dict(e.get("movement")), p + ".movement", owner)

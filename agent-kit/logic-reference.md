@@ -138,6 +138,7 @@ Names an expression can use for entities in a rule.
 | Event | Params | other | event.value | Fires when |
 |---|---|---|---|---|
 | `interact` (unit/building/prop/projectile/area/pickup/logic/king) |  | king |  | (interactables) The king used it, after paying its cost. event.choice is the chosen id with choices. Fields: event.choice. |
+| `interactRefused` (unit/building/prop/projectile/area/pickup/logic/king) |  | king | number: the gold cost | (interactables) The king tried to use it but was short of gold or a `pay` item. event.name lists what was short. Fields: event.name. |
 | `kingAction` | `action`* | king |  | The player presses one of the level's action keys (logic.kingActions). Level script: no `of` needed. |
 
 ### Signals
@@ -159,6 +160,13 @@ Names an expression can use for entities in a rule.
 | `statusStart` | `status` | applier (applier = other) | number: stacks | A status starts on it. Fields: event.name. |
 | `statusEnd` | `status` | applier (applier = other) | number: stacks | A status ends (expiry or removal). Fields: event.name. |
 | `statusTick` | `status` | applier (applier = other) | number: stacks | Every `tick` seconds of a status (in a status's own rules: of that status). Fields: event.name. |
+
+### Links
+
+| Event | Params | other | event.value | Fires when |
+|---|---|---|---|---|
+| `linked` |  | parent |  | It was linked to a parent (`link`, a template's parts). `other` is the parent. |
+| `unlinked` |  | parent |  | It was unlinked from its parent (`unlink`, or the parent died with onParentDeath drop/stay). `other` is the old parent. |
 
 ### Buildings
 
@@ -382,6 +390,28 @@ Each action is `{"do": "<name>", ...params}`. `target` (where listed) is a selec
 
 - `target` (entities; default "self"): Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self.
 - `order` (enum; required; one of follow, hold, home): The order.
+
+### Links
+
+**`link`**: Links it to a parent as a part: it moves (and turns) with the parent every frame, may share its damage, and follows onParentDeath when the parent dies. Re-linking moves it to the new parent.
+
+- `target` (entities; default "self"): Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self.
+- `to` (entity; required): The parent.
+- `offset` (position): Where it sits in the parent's frame: [x, y, z], x right, y up, z ahead (default: where it is now).
+- `rotY` (number): Its yaw relative to the parent's (default: as it is now).
+- `follow` (enum; default "rigid"; one of rigid, position, none): rigid: moves and turns with the parent every frame; position: moves, keeps its own yaw; none: a relation only (it moves on its own, e.g. movement follow).
+- `onParentDeath` (enum; default "die"; one of die, drop, stay): When the parent dies: die with it, drop (unlinked, set on the ground) or stay (unlinked, left where it is).
+- `damageToParent` (number; default 0; 0..): This much of every hit it takes is dealt to the parent too (2 = double: a weak point).
+- `damageToGroup` (number; default 0; 0..1): This fraction of every hit is shared evenly by its whole linked group, itself included (1 = one shared pool).
+- `damageKept` (number; default 1; 0..): The fraction it takes itself, before the group share (0 = a pure proxy hitbox).
+
+  `{ "do": "link", "target": "spawned", "to": "self", "offset": [1.5, 4, 0], "damageToParent": 2 }`
+
+**`unlink`**: Unlinks it from its parent (or, with children, unlinks its parts).
+
+- `target` (entities; default "self"): Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self.
+- `release` (enum; default "drop"; one of drop, stay): drop: set it on the ground; stay: leave it where it is.
+- `children` (bool; default false): Unlink its parts instead of itself.
 
 ### Logic
 
@@ -663,6 +693,10 @@ Selector functions anchor at `self`; call them as methods (`castle.count('enemy'
 | entity | `.age` | number | Seconds since it appeared. |
 | entity | `.target` | entity | Its current attack/move target. |
 | entity | `.owner` | entity | Who spawned or launched it. |
+| entity | `.parent` | entity | The entity it is linked to (link, parts), or none. |
+| entity | `.children` | set | The entities linked to it (its parts). |
+| entity | `.root` | entity | The top of its link tree (itself when unlinked). |
+| entity | `.group` | set | Its whole linked group: the root and every part below it, itself included. |
 | entity | `.id` | text | Its entity id. |
 | entity | `.weapon` | text | Its current weapon's id ("vanilla:<weapon>"; the king's is his equipped weapon's auto attack), "none" when disarmed by setWeapon, or none. |
 | entity | `.moveSpeed` | number | Movement speed, m/s. (with modifiers) |
@@ -700,10 +734,10 @@ Selector functions anchor at `self`; call them as methods (`castle.count('enemy'
 What each JSON block accepts (a field not listed draws an "unknown field" warning). `key[]` is a list of that block, `key{}` a map of them.
 
 - **pack**: `format`, `version`, `id`, `name`, `author`, `description`, `gameVersion`, `requires`, `assets`, `units`, `waveSets`, `levels`, `entities`, `statuses`, `presets` (blocks: `units[]` → unit, `entities[]` → entity, `statuses[]` → status, `presets[]` → preset, `levels[]` → level)
-- **unit**: `id`, `side`, `base`, `name`, `description`, `visuals`, `stats`, `weapon`, `tags`, `labels`, `vars`, `targeting`, `movement`, `attacks`, `statuses`, `counterpart`, `rules` (blocks: `movement` → movement, `attacks[]` → attack)
+- **unit**: `id`, `side`, `base`, `name`, `description`, `visuals`, `stats`, `weapon`, `tags`, `labels`, `vars`, `targeting`, `movement`, `attacks`, `statuses`, `interact`, `parts`, `counterpart`, `rules` (blocks: `movement` → movement, `attacks[]` → attack, `interact` → interact, `parts[]` → part)
 - **level**: `id`, `name`, `description`, `host`, `waveSet`, `base`, `buildSlots`, `spawnLines`, `props`, `terrain`, `colors`, `groups`, `logic` (blocks: `logic` → logic)
-- **entity**: `id`, `kind`, `name`, `description`, `visual`, `body`, `team`, `countsAsEnemy`, `labels`, `vars`, `lifetime`, `maxAlive`, `projectile`, `mover`, `area`, `pickup`, `interact`, `attacks`, `targeting`, `movement`, `statuses`, `rules` (blocks: `visual` → visual, `body` → body, `projectile` → projectile, `mover` → mover, `area` → area, `pickup` → pickup, `interact` → interact, `attacks[]` → attack, `movement` → movement)
-- **place**: `id`, `entity`, `preset`, `with`, `pos`, `rotY`, `scale`, `active`, `points`, `kind`, `name`, `description`, `visual`, `body`, `team`, `countsAsEnemy`, `labels`, `vars`, `lifetime`, `maxAlive`, `projectile`, `mover`, `area`, `pickup`, `interact`, `attacks`, `targeting`, `movement`, `statuses`, `rules`, `_preset` (blocks: `visual` → visual, `body` → body, `projectile` → projectile, `mover` → mover, `area` → area, `pickup` → pickup, `interact` → interact, `attacks[]` → attack, `movement` → movement)
+- **entity**: `id`, `kind`, `name`, `description`, `visual`, `body`, `team`, `countsAsEnemy`, `labels`, `vars`, `lifetime`, `maxAlive`, `projectile`, `mover`, `area`, `pickup`, `interact`, `parts`, `attacks`, `targeting`, `movement`, `statuses`, `rules` (blocks: `visual` → visual, `body` → body, `projectile` → projectile, `mover` → mover, `area` → area, `pickup` → pickup, `interact` → interact, `attacks[]` → attack, `movement` → movement, `parts[]` → part)
+- **place**: `id`, `entity`, `preset`, `with`, `pos`, `rotY`, `scale`, `active`, `points`, `kind`, `name`, `description`, `visual`, `body`, `team`, `countsAsEnemy`, `labels`, `vars`, `lifetime`, `maxAlive`, `projectile`, `mover`, `area`, `pickup`, `interact`, `parts`, `attacks`, `targeting`, `movement`, `statuses`, `rules`, `_preset` (blocks: `visual` → visual, `body` → body, `projectile` → projectile, `mover` → mover, `area` → area, `pickup` → pickup, `interact` → interact, `attacks[]` → attack, `movement` → movement, `parts[]` → part)
 - **visual**: `icon`, `tint`, `colors`, `scale`, `mesh`, `meshScale`, `meshRotY`, `meshRotX`, `meshRotZ`, `meshOffset`, `meshLook`, `motion`, `texture`, `sounds`
 - **body**: `radius`, `height`, `box`, `solid`, `walkable`, `hittable`, `hp`, `flying`, `tags`
 - **projectile**: `speed`, `accel`, `homing`, `arc`, `gravity`, `spin`, `face`, `hits`, `hitRadius`, `pierce`, `onGround`, `range`
@@ -716,18 +750,20 @@ What each JSON block accepts (a field not listed draws an "unknown field" warnin
 - **rect**: `size`
 - **polygon**: `points`
 - **pickup**: `by`, `radius`, `magnet`, `consume`
-- **interact**: `prompt`, `cost`, `when`, `radius`, `repeat`, `choices` (blocks: `choices[]` → choice)
-- **choice**: `id`, `label`, `description`, `cost`, `icon`
+- **interact**: `prompt`, `cost`, `when`, `radius`, `repeat`, `pay`, `choices` (blocks: `choices[]` → choice, `pay[]` → pay)
+- **choice**: `id`, `label`, `description`, `cost`, `pay`, `icon` (blocks: `pay[]` → pay)
+- **pay**: `var`, `amount`, `label`
+- **part**: `entity`, `offset`, `rotY`, `team`, `name`, `follow`, `onParentDeath`, `damageToParent`, `damageToGroup`, `damageKept`
 - **attack**: `id`, `replace`, `cooldown`, `jitter`, `range`, `minRange`, `when`, `targeting`, `launch`, `weapon`, `do` (blocks: `launch` → launch)
 - **launch**: `entity`, `from`
-- **movement**: `mode`, `path`, `then`, `speed`, `keepDistance`, `kite`, `flee`, `wander`, `home`, `surfaces` (blocks: `kite` → kite, `flee` → flee, `wander` → wander)
+- **movement**: `mode`, `path`, `then`, `speed`, `keepDistance`, `kite`, `flee`, `wander`, `home`, `leader`, `spacing`, `offset`, `catchUp`, `surfaces` (blocks: `kite` → kite, `flee` → flee, `wander` → wander)
 - **kite**: `below`, `for`
 - **flee**: `when`, `from`, `to`
 - **wander**: `radius`
 - **status**: `id`, `name`, `description`, `icon`, `duration`, `stacking`, `maxStacks`, `tick`, `mods`, `flags`, `visual`, `rules` (blocks: `mods{}` → mod, `visual` → statusVisual)
 - **mod**: `mult`, `add`, `value`, `types`, `from`, `chance`, `when`, `toward`, `away`, `dir`, `speed`
 - **statusVisual**: `tint`, `fx`, `glow`
-- **preset**: `id`, `name`, `description`, `category`, `kind`, `params`, `vars`, `labels`, `rules`, `visual`, `body`, `team`, `countsAsEnemy`, `lifetime`, `maxAlive`, `projectile`, `mover`, `area`, `pickup`, `interact`, `attacks`, `targeting`, `movement`, `statuses` (blocks: `params{}` → presetParam)
+- **preset**: `id`, `name`, `description`, `category`, `kind`, `params`, `vars`, `labels`, `rules`, `visual`, `body`, `team`, `countsAsEnemy`, `lifetime`, `maxAlive`, `projectile`, `mover`, `area`, `pickup`, `interact`, `parts`, `attacks`, `targeting`, `movement`, `statuses` (blocks: `params{}` → presetParam)
 - **presetParam**: `type`, `default`, `min`, `max`, `options`, `description`
 - **logic**: `seed`, `vars`, `rules`, `places`, `attach`, `hud`, `kingActions`, `caps`, `game` (blocks: `places[]` → place, `attach{}` → attach, `hud[]` → hud, `kingActions[]` → kingAction, `caps` → caps, `game` → game)
 - **attach**: `name`, `labels`, `vars`, `statuses`, `targeting`, `rules`

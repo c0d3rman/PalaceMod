@@ -304,6 +304,8 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("area")] public AreaDef Area { get; set; }
         [JsonProperty("pickup")] public PickupDef Pickup { get; set; }
         [JsonProperty("interact")] public InteractDef Interact { get; set; }
+        /// <summary>Entities spawned and linked to it when it appears (Runtime/Links.cs).</summary>
+        [JsonProperty("parts")] public List<PartDef> Parts { get; set; }
         [JsonProperty("attacks")] public List<AttackDef> Attacks { get; set; }
         [JsonProperty("targeting")] public List<TargetingDef> Targeting { get; set; }
         [JsonProperty("movement")] public MovementDef Movement { get; set; }
@@ -475,6 +477,8 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("when")] public string When { get; set; }
         [JsonProperty("radius")] public LNum Radius { get; set; }
         [JsonProperty("repeat")] public bool? Repeat { get; set; }
+        /// <summary>Level variables paid too (items): [{ "var": "$bread", "amount": 1 }].</summary>
+        [JsonProperty("pay")] public List<PayDef> Pay { get; set; }
         /// <summary>Up to 4 choices shown in the game's upgrade-choice popup.</summary>
         [JsonProperty("choices")] public List<ChoiceDef> Choices { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
@@ -486,7 +490,41 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("label")] public string Label { get; set; }
         [JsonProperty("description")] public string Description { get; set; }
         [JsonProperty("cost")] public LNum Cost { get; set; }
+        [JsonProperty("pay")] public List<PayDef> Pay { get; set; }
         [JsonProperty("icon")] public string Icon { get; set; }
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>A cost in a level variable (an item count): paid with the gold, refused when short.</summary>
+    public sealed class PayDef
+    {
+        /// <summary>A level variable, "$name".</summary>
+        [JsonProperty("var")] public string Var { get; set; }
+        [JsonProperty("amount")] public LNum Amount { get; set; }
+        /// <summary>The word the prompt uses (default: the variable's name).</summary>
+        [JsonProperty("label")] public string Label { get; set; }
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>A part: an entity spawned and linked to its parent when the parent appears (Runtime/Links.cs).</summary>
+    public sealed class PartDef
+    {
+        /// <summary>The template.</summary>
+        [JsonProperty("entity")] public string Entity { get; set; }
+        /// <summary>[x, y, z] in the parent's frame: x right, y up, z ahead.</summary>
+        [JsonProperty("offset")] public float[] Offset { get; set; }
+        [JsonProperty("rotY")] public float? RotY { get; set; }
+        /// <summary>Default: the parent's team ("owner").</summary>
+        [JsonProperty("team")] public string Team { get; set; }
+        /// <summary>A label the part gets (#name), to tell parts apart.</summary>
+        [JsonProperty("name")] public string Name { get; set; }
+        /// <summary>"rigid" | "position" | "none".</summary>
+        [JsonProperty("follow")] public string Follow { get; set; }
+        /// <summary>"die" | "drop" | "stay".</summary>
+        [JsonProperty("onParentDeath")] public string OnParentDeath { get; set; }
+        [JsonProperty("damageToParent")] public float? DamageToParent { get; set; }
+        [JsonProperty("damageToGroup")] public float? DamageToGroup { get; set; }
+        [JsonProperty("damageKept")] public float? DamageKept { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
@@ -563,7 +601,7 @@ namespace PalaceMod.Builder.Model.Logic
 
     public sealed class MovementDef
     {
-        /// <summary>"pathfind" (default) | "direct" | "hold" | "path".</summary>
+        /// <summary>"pathfind" (default) | "direct" | "hold" | "path" | "follow".</summary>
         [JsonProperty("mode")] public string Mode { get; set; }
         /// <summary>For "path": "@pathName" or inline points.</summary>
         [JsonProperty("path")] public JToken Path { get; set; }
@@ -576,6 +614,14 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("wander")] public WanderDef Wander { get; set; }
         /// <summary>"spawn" | [x, y, z] | "@point".</summary>
         [JsonProperty("home")] public JToken Home { get; set; }
+        /// <summary>For "follow": the leader, an entity expression re-read 10 times a second ("self.parent").</summary>
+        [JsonProperty("leader")] public string Leader { get; set; }
+        /// <summary>For "follow": metres behind the leader (a trail), default 2.</summary>
+        [JsonProperty("spacing")] public LNum Spacing { get; set; }
+        /// <summary>For "follow": a slot [x, z] in the leader's frame (x right, z ahead) instead of the trail.</summary>
+        [JsonProperty("offset")] public float[] Offset { get; set; }
+        /// <summary>For "follow": speed multiplier while left behind (default 1.5).</summary>
+        [JsonProperty("catchUp")] public LNum CatchUp { get; set; }
         /// <summary>Per surface name: true (may walk it), false (may not), or a path cost multiplier.</summary>
         [JsonProperty("surfaces")] public Dictionary<string, JToken> Surfaces { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
