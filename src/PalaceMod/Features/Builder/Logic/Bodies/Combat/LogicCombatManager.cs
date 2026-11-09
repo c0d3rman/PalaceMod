@@ -26,6 +26,8 @@ namespace PalaceMod
             LogicWorld.Started += _ => { LogicWeapons.Reset(); Bumps.Reset(); };
             LogicWorld.Ending += _ => { LogicWeapons.Reset(); Bumps.Reset(); };
             LogicWorld.Polled += LogicWeapons.Poll;
+            // setWeapon swaps (copied, taken, timed) travel with savestates and retry day.
+            LogicSaveState.Register("weapons", LogicWeapons.CaptureSave, LogicWeapons.RestoreSave);
 
             DevCommands.Register("logic-weapons", "logic-weapons [name]   every game weapon: id, damage types, damage modifiers, what it leaves on impact, catalog users",
                 args => LogicWeapons.Dump(args.FirstOrDefault()));
@@ -161,6 +163,24 @@ namespace PalaceMod
                 if (!__state) return;
                 var tower = __instance.GetComponentInParent<TaggedObject>();
                 PushBurn(__instance, null, tower != null ? LogicGame.EntityOf(tower) : null);
+            }
+
+            private static void Finalizer(bool __state) { if (__state) LogicStatsManager.PopDamage(); }
+        }
+
+        /// <summary>
+        /// The game's stalled-night tiebreaker (TieBreaker): once a night has gone 30 s with no enemy dying, no building
+        /// falling, no boss alive and nothing left to spawn, it drains the first enemy-owned object at 5 HP/s until
+        /// something changes. Its ticks have no attacker; they carry the damage type "stalemate", so rules can tell them
+        /// apart and a status `damageTaken {mult: 0, types: ["stalemate"]}` can exempt a keeper.
+        /// </summary>
+        [HarmonyPatch(typeof(TieBreaker), "TieBreak")]
+        private static class StalemateTick
+        {
+            private static void Prefix(out bool __state)
+            {
+                __state = LogicWorld.Current != null;
+                if (__state) LogicStatsManager.PushDamage(new DamageInfo { Types = new HashSet<string>(StringComparer.Ordinal) { "stalemate" } });
             }
 
             private static void Finalizer(bool __state) { if (__state) LogicStatsManager.PopDamage(); }

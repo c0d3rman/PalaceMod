@@ -348,7 +348,13 @@ never opened a route.
 
 Events: `enter` / `exit` (`other` is the entity), `inside` (for each entity inside, after every full `tick` it has
 spent inside), `empty`, `occupied`.
-In filters, `in:@moat` tests membership. Areas poll on the world's 10 Hz steps and watch everything the selectors see,
+In filters, `in:@moat` tests membership, and `in:@<area template>` membership in any live area made from that
+template (one of many spawned slime pools), from the shape and where the entity stands now. Areas poll exits and
+`inside` ticks on the world's 10 Hz steps; entries are checked after every drain of the event queue
+(`LogicWorld.Settled`, at least once a frame, `AreaPoller.Settle`), so `enter` for an entity spawned into an area, an
+area laid under one, or one walking in runs in that same frame (a status applied on `enter` is on before the next
+frame's attacks; before, a tower could land a shot in the gap). `inside` first fires one full `tick` after entering.
+Areas watch everything the selectors see,
 including projectiles in flight (the game's own arrows too, see "Projectiles in flight"), so a field that slows,
 bends or turns arrows is an area plus `setStat timeScale`, `drift` or `taunt`.
 
@@ -855,7 +861,9 @@ That covers armour, dodges, "immune to arrows", "misses at long range" and "vuln
   usual unit's, else 60 % of the range; always under 90 % of it). `"none"` is an empty weapon whose `Weapon.Attack`
   is skipped (the swing still plays). A weapon from the other side (the king's bow on an enemy) hurts its new
   wielder's foes through the game rules' WielderSide/WielderRows patches. The first swap remembers the entity's own weapon for `"base"`; `for` restores
-  what it had before the first timed swap still running. Not kept by savestates.
+  what it had before the first timed swap still running. Savestates and retry day keep the swaps (part "weapons":
+  each holder's weapon id and base ranges, the remembered base and a running `for`, by entity id; the king and
+  towers are found again by scene path).
 - **Status rules** run with `self` = the carrier and `other` = whoever applied it. `statusEnd` fires on expiry and
   on removal.
 - **Timed `setStat`s** stack independently; give `key` to make a new one replace an earlier one with the same key.

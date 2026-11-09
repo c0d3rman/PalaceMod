@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Newtonsoft.Json.Linq;
 using PalaceMod.Builder.Logic.Bodies.Steering;
 using UnityEngine;
 
@@ -347,6 +348,91 @@ namespace PalaceMod.Builder.Logic.Bodies
                 rec.UntilPhase = null;
             }
             if (drop != null) foreach (var e in drop) records.Remove(e);
+        }
+
+        // ------------------------------------------------------------------ savestates ("weapons" part)
+
+        /*
+            Every entity setWeapon touched: the weapon (by id), base ranges and keep distance each of its holders has now,
+            plus its own ("base") and pre-timed-swap states and the timer, by entity id. Restore runs after the core
+            rebuilt the entities and their stats, and writes them back holder by holder (the holders' order is the
+            components' order, which a rebuild keeps).
+        */
+
+        private static JObject StateJson(State s)
+        {
+            var items = new JArray();
+            foreach (var (_, w, ranges, br, bd) in s.Items)
+                items.Add(new JObject { ["w"] = IdOf(w), ["ranges"] = new JArray(ranges.Select(r => (object)r)), ["br"] = br, ["bd"] = bd });
+            var o = new JObject { ["items"] = items };
+            if (s.Keep is float k) o["keep"] = k;
+            return o;
+        }
+
+        private static State StateFrom(JObject o, List<Holder> holders)
+        {
+            if (o == null) return null;
+            var s = new State { Keep = (float?)o["keep"] };
+            var items = o["items"] as JArray ?? [];
+            for (int i = 0; i < items.Count && i < holders.Count; i++)
+            {
+                var it = (JObject)items[i];
+                var w = (string)it["w"] is { } id ? Find(id) : null;
+                var ranges = (it["ranges"] as JArray ?? []).Select(x => (float)x).ToArray();
+                s.Items.Add((holders[i], w, ranges, (float?)it["br"] ?? 0, (float?)it["bd"] ?? 0));
+            }
+            return s;
+        }
+
+        public static JToken CaptureSave(LogicWorld world)
+        {
+            if (records.Count == 0) return null;
+            var all = new JObject();
+            foreach (var rec in records.Values)
+            {
+                var go = rec.E.Go();
+                if (go == null || rec.E.Destroyed || !rec.E.Exists) continue;
+                var o = new JObject { ["now"] = StateJson(Capture(go, Holders(go))), ["base"] = StateJson(rec.Base) };
+                if (rec.Before != null)
+                {
+                    o["before"] = StateJson(rec.Before);
+                    if (!double.IsPositiveInfinity(rec.Until)) o["left"] = rec.Until - world.Time;
+                    if (rec.UntilPhase != null) { o["phase"] = rec.UntilPhase; o["seen"] = rec.SeenOtherPhase; }
+                }
+                all[rec.E.Id] = o;
+            }
+            return all;
+        }
+
+        public static void RestoreSave(LogicWorld world, JToken state)
+        {
+            records.Clear();
+            if (state is not JObject all) return;
+            Dictionary<string, TaggedObject> scene = null;
+            foreach (var kv in all)
+            {
+                var e = world.Find(kv.Key);
+                // A game object (the king, a tower) is wrapped lazily: find it again by its scene path.
+                if (e == null && kv.Key.StartsWith(Prefix))
+                {
+                    scene ??= SaveStates.FindByPath<TaggedObject>();
+                    if (scene.TryGetValue(kv.Key.Substring(Prefix.Length), out var t) && t != null) e = LogicGame.EntityOf(t);
+                }
+                var go = e?.Go();
+                if (go == null || kv.Value is not JObject o) continue;
+                var holders = Holders(go);
+                if (holders.Count == 0) continue;
+                var rec = new Record { E = e, Base = StateFrom(o["base"] as JObject, holders) ?? Capture(go, holders) };
+                if (o["before"] is JObject b)
+                {
+                    rec.Before = StateFrom(b, holders);
+                    rec.Until = o["left"] is JValue left && left.Type != JTokenType.Null ? world.Time + (double)left : double.PositiveInfinity;
+                    rec.UntilPhase = (string)o["phase"];
+                    rec.SeenOtherPhase = (bool?)o["seen"] ?? false;
+                }
+                records[e] = rec;
+                if (StateFrom(o["now"] as JObject, holders) is { } now) Restore(e, now);
+            }
         }
 
         // ------------------------------------------------------------------ dev

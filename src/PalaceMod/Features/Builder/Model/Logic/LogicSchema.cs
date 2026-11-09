@@ -238,7 +238,7 @@ namespace PalaceMod.Builder.Model.Logic
             Ev("near", "Areas", "A matching entity comes within (or leaves) a range of it.", other: "entity",
                 ps: [P("filter", "filter", "What to watch for.", req: true), P("range", "number", "Metres.", req: true, min: 0),
                      P("edge", "enum", "Fire on entering, leaving, or both.", def: "enter", opts: ["enter", "exit", "both"])]);
-            Ev("enter", "Areas", "(areas) An entity matching the area's watch filter enters.", other: "entrant", owners: ["area"], aliases: A("entrant", "other"));
+            Ev("enter", "Areas", "(areas) An entity matching the area's watch filter enters. Same frame: an entity spawned into the area, an area laid under one, and one walking in (checked every frame) get it in that same frame, so a status applied on enter is on before the next frame's attacks. `inside` first fires one full tick after entering: pair it with enter for a status that holds while inside.", other: "entrant", owners: ["area"], aliases: A("entrant", "other"));
             Ev("exit", "Areas", "(areas) An entity leaves.", other: "entity", owners: ["area"]);
             Ev("inside", "Areas", "(areas) For each entity inside, after every full `tick` it has spent inside.", other: "entity", owners: ["area"]);
             Ev("empty", "Areas", "(areas) The last watched entity left.", owners: ["area"]);
@@ -697,7 +697,7 @@ namespace PalaceMod.Builder.Model.Logic
                 ("unbuilt", "An empty build slot (level 0). Naming it lets a selector see empty slots, which it otherwise skips."),
                 ("logic", "Logic objects."), ("line", "Spawn lines."), ("point", "Points."), ("path", "Paths."),
                 ("#label", "Has a label (#\"two words\" for a label with spaces)."), ("is:<template>", "Made from a template (is:goblin, is:vanilla:Ogre, is:'vanilla:E Ogre')."),
-                ("in:@area", "Inside an area (in:self inside this area)."),
+                ("in:@area", "Inside an area (in:self inside this area). @<area template>: inside any area made from it (e.g. any of many spawned pools), checked live."),
                 ("has:<status>", "Has a status."), ("type:<Kind>", "A building of that kind (type:Mill, type:\"Defense Tower\")."),
                 ("include:<what>", "Matches everything, but lets a selector also see what it skips by default: include:dead, include:disabled, include:unbuilt, include:self (repeat it for more)."),
                 ("where(expr)", "An expression over `it`."),
