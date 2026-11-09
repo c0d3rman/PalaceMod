@@ -238,7 +238,9 @@ class Game:
                 s = self.status_file()
                 if s is not None and s.get("running") is False:
                     request.unlink(missing_ok=True)
-                    raise Fail(f"The game isn't running: it exited while handling `{text}` (process {s.get('pid')} is gone).")
+                    raise Fail(f"The game isn't running: it exited while handling `{text}` (process {s.get('pid')} is gone). "
+                               "If it crashed, the game's Player.log (macOS: ~/Library/Logs/Grizzly Games/Thronefall/) "
+                               "has the details until the game starts again.")
         raise Fail(f"The game didn't answer `{text}` within {timeout} s (loading? check `palace.py game log`).")
 
     LOADS = ("play ", "sandbox ", "edit ", "vanilla ", "menu")
