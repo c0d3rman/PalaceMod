@@ -1,0 +1,41 @@
+using System.Linq;
+using HarmonyLib;
+using Pathfinding.Graphs.Navmesh;
+using PalaceMod.Builder.Logic.Bodies;
+
+/*
+    The behaviour engine's world verbs (docs/builder-engine.md, workstream L2): bodies (projectiles, movers, areas,
+    pickups, interactables, attacks), statuses and stats, steering, and the patches on the game's own projectiles and
+    pathfinding they need. Infrastructure: no settings of its own; it acts only in Builder sessions.
+*/
+namespace PalaceMod
+{
+    public class LogicBodiesManager : BaseManager
+    {
+        public override void Awake(Plugin plugin)
+        {
+            base.Awake(plugin);
+            DevCommands.Register("logic-l2", "logic-l2 nav ...   world-verb spikes and checks (L2)", args =>
+            {
+                string sub = args.FirstOrDefault() ?? "";
+                return sub switch
+                {
+                    "nav" => NavSpike.Run(args.Skip(1).ToArray()),
+                    _ => "logic-l2 nav ...",
+                };
+            });
+        }
+
+        public override void Update()
+        {
+            NavSpike.Tick();
+        }
+
+        [HarmonyPatch(typeof(NavmeshUpdates.NavmeshUpdateSettings), nameof(NavmeshUpdates.NavmeshUpdateSettings.ReloadDirtyTilesImmediately))]
+        private static class TimeCutReload
+        {
+            private static void Prefix() { NavSpike.CutTime.Start(); NavSpike.CutReloads++; }
+            private static void Postfix() => NavSpike.CutTime.Stop();
+        }
+    }
+}
