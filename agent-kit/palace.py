@@ -893,33 +893,69 @@ class Ops:
         return hit[1]
 
     def ground_y(self, level, x, z):
+        """The ground's height at a point, or None where the level has no ground: off a flat field, or outside the
+        host map's sampled area."""
         t = level.get("terrain")
         if t and level.get("base") == "flat":
             y = self.terrain_ro(level).height_at(x, z)
-            if y is not None:
-                return round(y, 2)
+            return None if y is None else round(y, 2)
         if t and t.get("heights"):
             T = self.terrain_ro(level)
             if T.sculpted_at(x, z):
                 return round(T.height_at(x, z), 2)
         grid = self.grid(level["host"])
-        if grid:
-            y = grid.height(x, z)
-            if y is not None:
-                return round(y, 2)
+        if grid and grid.index(x, z) is None:
+            return None
+        return self.fallback_y(level, x, z)
+
+    def fallback_y(self, level, x, z):
+        """A height where the level may have no ground (props, flyer-only lines): the host's sampled ground, else the
+        castle's height."""
+        grid = self.grid(level["host"])
+        y = grid.height(x, z) if grid else None
+        if y is not None:
+            return round(y, 2)
         castle = next((s for s in self.ref.map(level["host"])["slots"] if s.get("castle")), None)
         return castle["pos"][1] if castle else 0.0
 
-    def pos(self, level, op):
-        if op.get("pos"):
-            p = op["pos"]
-            if len(p) != 3:
-                raise Fail("pos is [x, y, z]")
-            return [round(float(v), 2) for v in p]
-        if op.get("at"):
-            x, z = op["at"]
-            return [round(float(x), 2), self.ground_y(level, x, z), round(float(z), 2)]
-        raise Fail(f"{op.get('op')}: give \"at\": [x, z] (height from the ground) or \"pos\": [x, y, z]")
+    def ground_bounds(self, level):
+        """(what, x0, z0, x1, z1): the area ground_y answers for."""
+        t = level.get("terrain")
+        if t and level.get("base") == "flat":
+            T = self.terrain_ro(level)
+            return "the flat field", T.ox, T.oz, T.ox + T.w * T.cell, T.oz + T.h * T.cell
+        g = self.grid(level["host"])
+        if g:
+            return f"{level['host']}'s ground", g.ox, g.oz, g.ox + g.w * g.cell, g.oz + g.h * g.cell
+        return None
+
+    @staticmethod
+    def numbers(v, n, field):
+        if not isinstance(v, (list, tuple)) or len(v) != n or not all(isinstance(c, (int, float)) and not isinstance(c, bool) and math.isfinite(c) for c in v):
+            raise Fail(f"{field} is {['', '', '[x, z]', '[x, y, z]'][n]} (numbers), not {json.dumps(v)}")
+        return [float(c) for c in v]
+
+    def point(self, level, x, z, field="at", strict=True):
+        """[x, z]'s ground height. Off the level's ground: a precise Fail when strict (slots, ground spawn lines), else
+        fallback_y (props and flyer-only lines may stand over the sea or past the field, like the maps' own)."""
+        y = self.ground_y(level, x, z)
+        if y is None and not strict:
+            return self.fallback_y(level, x, z)
+        if y is None:
+            what, x0, z0, x1, z1 = self.ground_bounds(level)
+            bad = ([f"x {x:g} is {'west' if x < x0 else 'east'} of it"] if not x0 <= x <= x1 else []) + \
+                  ([f"z {z:g} is {'south' if z < z0 else 'north'} of it"] if not z0 <= z <= z1 else [])
+            raise Fail(f"{field} [{x:g}, {z:g}] is off {what} (x {x0:g}..{x1:g}, z {z0:g}..{z1:g}): {' and '.join(bad) or 'outside it'}")
+        return y
+
+    def pos(self, level, op, strict=True):
+        if op.get("pos") is not None:
+            x, y, z = self.numbers(op["pos"], 3, "pos")
+            return [round(x, 2), round(y, 2), round(z, 2)]
+        if op.get("at") is not None:
+            x, z = self.numbers(op["at"], 2, "at")
+            return [round(x, 2), self.point(level, x, z, strict=strict), round(z, 2)]
+        raise Fail("give \"at\": [x, z] (height from the ground) or \"pos\": [x, y, z]")
 
     def run(self, ops):
         for i, op in enumerate(ops):
@@ -934,7 +970,9 @@ class Ops:
             except Fail as e:
                 raise Fail(f"ops[{i}] ({name}): {e}")
             except (KeyError, TypeError, ValueError, IndexError) as e:
-                raise Fail(f"ops[{i}] ({name}): bad or missing field: {e!r}")
+                what = f"missing field {e.args[0]!r}" if isinstance(e, KeyError) and e.args else f"bad field: {e}"
+                usage = (fn.__doc__ or "").strip().split("\n")[0]
+                raise Fail(f"ops[{i}] ({name}): {what}" + (f". Usage: {usage}" if usage else ""))
             self.log.append(r or name)
         self.resnap()
 
@@ -1138,11 +1176,14 @@ class Ops:
             a = math.radians(s.rot or 0)
             c, s_ = math.cos(a), math.sin(a)
             units = []
-            for pt in op["at"]:
+            if not isinstance(op["at"], list):
+                raise Fail("at is a list of world points [[x, z], ...] (or null entries)")
+            for i, pt in enumerate(op["at"]):
                 if pt is None:
                     units.append(None)
                     continue
-                dx, dz = float(pt[0]) - s.pos[0], float(pt[1]) - s.pos[2]
+                px, pz = self.numbers(pt, 2, f"at[{i}]")
+                dx, dz = px - s.pos[0], pz - s.pos[2]
                 units.append([dx * c - dz * s_, dx * s_ + dz * c])
         else:
             units = op.get("units")
@@ -1287,7 +1328,7 @@ class Ops:
         if pid in self.prop_ids(props)[2]:
             raise Fail(f"prop {pid!r} exists (to re-apply a whole ops file, `apply --fresh`)")
         base = self.prop_base(lv, op["mesh"])
-        prop = {"id": pid, "base": base, "pos": self.pos(lv, op), "rotY": float(op.get("rotY", 0)),
+        prop = {"id": pid, "base": base, "pos": self.pos(lv, op, strict=False), "rotY": float(op.get("rotY", 0)),
                 "scale": float(op.get("scale", 1)), "solid": bool(op.get("solid", True))}
         if (colors := self.prop_colors(lv, base, op.get("colors"))) is not None:
             prop["colors"] = colors
@@ -1357,9 +1398,10 @@ class Ops:
                 continue
             if any(math.hypot(x - a, z - b) < avoid for a, b in keep_clear):
                 continue
+            y = self.point(lv, x, z, strict=False)
             mesh = rng.choice(meshes)
             base = self.prop_base(lv, mesh)
-            prop = {"id": self.new_prop_id(props, mesh), "base": base, "pos": [round(x, 2), self.ground_y(lv, x, z), round(z, 2)],
+            prop = {"id": self.new_prop_id(props, mesh), "base": base, "pos": [round(x, 2), y, round(z, 2)],
                     "rotY": round(rng.uniform(0, 360), 1), "scale": round(rng.uniform(smin, smax), 2), "solid": bool(op.get("solid", True))}
             if (colors := self.prop_colors(lv, base, op.get("colors"))) is not None:
                 prop["colors"] = colors
@@ -1384,7 +1426,8 @@ class Ops:
             raise Fail("spawn line id: a-z 0-9 . _ -")
         if any(a.get("id") == lid for a in adds):
             raise Fail(f"spawn line {lid!r} exists (to re-apply a whole ops file, `apply --fresh`)")
-        adds.append({"id": lid, "pos": self.pos(lv, op), "rotY": float(op.get("rotY", 0)), "width": float(op.get("width", 10)),
+        ground_line = bool(op.get("ground", True)) or bool(op.get("large", True))   # flyer-only lines may sit off the ground
+        adds.append({"id": lid, "pos": self.pos(lv, op, strict=ground_line), "rotY": float(op.get("rotY", 0)), "width": float(op.get("width", 10)),
                      "ground": bool(op.get("ground", True)), "large": bool(op.get("large", True)), "flying": bool(op.get("flying", True))})
         return f"spawn line {lid}"
 
@@ -1395,7 +1438,7 @@ class Ops:
         for a in sl.get("add") or []:
             if a.get("id") == op["line"]:
                 if "at" in op or "pos" in op:
-                    a["pos"] = self.pos(lv, op)
+                    a["pos"] = self.pos(lv, op, strict=bool(op.get("ground", a.get("ground", True))) or bool(op.get("large", a.get("large", True))))
                 for k in ("rotY", "width", "ground", "large", "flying"):
                     if k in op:
                         a[k] = op[k]
@@ -1410,7 +1453,7 @@ class Ops:
             e = {"ref": op["line"]}
             edits.append(e)
         if "at" in op or "pos" in op:
-            e["pos"] = self.pos(lv, op)
+            e["pos"] = self.pos(lv, op, strict=False)   # the maps' own lines often start off their ground
         if "rotY" in op:
             e["rotY"] = float(op["rotY"])
         return f"moved host line {op['line']}"
@@ -1554,6 +1597,17 @@ class Ops:
             raise Fail("no terrain grid yet: start with {\"op\":\"terrain_init\"}")
         return lv, self.terrain_of(lv)
 
+    @staticmethod
+    def missed(t, shape, n):
+        """A note for a terrain op that changed nothing because its shape lies off the terrain grid."""
+        if n:
+            return ""
+        x0, z0, x1, z1 = shape.bounds()
+        X0, Z0, X1, Z1 = t.ox, t.oz, t.ox + t.w * t.cell, t.oz + t.h * t.cell
+        if x1 < X0 or x0 > X1 or z1 < Z0 or z0 > Z1:
+            return f" (the shape, x {x0:g}..{x1:g}, z {z0:g}..{z1:g}, is off the terrain grid: x {X0:g}..{X1:g}, z {Z0:g}..{Z1:g})"
+        return ""
+
     def op_terrain_init(self, op):
         """{"op":"terrain_init","origin":[x,z],"cell":2,"size":[W,H],"y":<castle height>}: a flat grid (heights 0 = y)."""
         lv = self.level(op)
@@ -1579,24 +1633,27 @@ class Ops:
         {"op":"terrain","mode":"set"|"raise"|"lower"|"smooth","height":4,"circle":{"center":[x,z],"radius":10},"falloff":4}
         Heights are metres relative to terrain.y (the castle's height by default)."""
         lv, t = self.terrain(op)
-        n = t.edit_heights(Shape.from_op(op), op.get("mode", "set"), float(op.get("height", 0)), float(op.get("falloff", 0)))
+        shape = Shape.from_op(op)
+        n = t.edit_heights(shape, op.get("mode", "set"), float(op.get("height", 0)), float(op.get("falloff", 0)))
         t.store(lv)
-        return f"terrain: {n} corners"
+        return f"terrain: {n} corners" + self.missed(t, shape, n)
 
     def op_ramp(self, op):
         """{"op":"ramp","from":[x,z],"to":[x,z],"width":6,"fromHeight":0,"toHeight":5,"falloff":2}: a straight slope."""
         lv, t = self.terrain(op)
-        n = t.ramp(op["from"], op["to"], float(op.get("width", 6)), float(op["fromHeight"]), float(op["toHeight"]), float(op.get("falloff", 2)))
+        a, b = self.numbers(op["from"], 2, "from"), self.numbers(op["to"], 2, "to")
+        n = t.ramp(a, b, float(op.get("width", 6)), float(op["fromHeight"]), float(op["toHeight"]), float(op.get("falloff", 2)))
         t.store(lv)
-        return f"ramp: {n} corners"
+        return f"ramp: {n} corners" + self.missed(t, Shape("line", {"points": [a, b], "width": float(op.get("width", 6))}), n)
 
     def op_paint(self, op):
         """{"op":"paint","material":"road"|"ground"|"high"|"low"|"earth"|"sand"|"rock", shape...}"""
         lv, t = self.terrain(op)
         mat = Terrain.MATERIALS.index(op["material"]) if op["material"] in Terrain.MATERIALS else int(op["material"])
-        n = t.paint_samples(Shape.from_op(op), mat)
+        shape = Shape.from_op(op)
+        n = t.paint_samples(shape, mat)
         t.store(lv)
-        return f"painted {n} samples ({Terrain.PAINT_RES}x{Terrain.PAINT_RES} per cell)"
+        return f"painted {n} samples ({Terrain.PAINT_RES}x{Terrain.PAINT_RES} per cell)" + self.missed(t, shape, n)
 
     def op_block(self, op):
         """{"op":"block","on":true, shape...}: cells ground units (and the king) can't enter; fliers can. Any base."""
@@ -1604,9 +1661,10 @@ class Ops:
         if not lv.get("terrain"):
             self.op_terrain_init({"level": lv["id"], "flat": False})
         t = self.terrain_of(lv)
-        n = t.paint_cells(Shape.from_op(op), "blocked", 1 if op.get("on", True) else 0)
+        shape = Shape.from_op(op)
+        n = t.paint_cells(shape, "blocked", 1 if op.get("on", True) else 0)
         t.store(lv)
-        return f"blocked {n} cells"
+        return f"blocked {n} cells" + self.missed(t, shape, n)
 
     def op_water(self, op):
         """{"op":"water","level":-1,"on":true, shape...}: water cells (unwalkable); the ground under them is dug to level-1."""
@@ -1628,7 +1686,7 @@ class Ops:
             t.store(lv)
             return f"water off: {n} cells, {n_fill} corners raised back to {float(op.get('height', 0)):g} m"
         t.store(lv)
-        return f"water {n} cells"
+        return f"water {n} cells" + self.missed(t, shape, n)
 
 
 # =====================================================================================================================
@@ -1636,6 +1694,9 @@ class Ops:
 # =====================================================================================================================
 
 class Shape:
+    EXAMPLES = {"circle": '{"center": [x, z], "radius": 10}', "rect": '{"min": [x, z], "max": [x, z]}',
+                "line": '{"points": [[x, z], ...], "width": 6}', "polygon": '{"points": [[x, z], [x, z], [x, z], ...]}'}
+
     def __init__(self, kind, spec, falloff=0.0):
         self.kind, self.spec, self.falloff = kind, spec, falloff
 
@@ -1644,7 +1705,24 @@ class Shape:
         f = float(op.get("falloff", 0))
         for k in ("circle", "rect", "line", "polygon"):
             if k in op:
-                return Shape(k, op[k], f)
+                s = op[k]
+                if not isinstance(s, dict):
+                    raise Fail(f"{k} is an object, e.g. {Shape.EXAMPLES[k]}")
+                need = {"circle": ("center", "radius"), "rect": ("min", "max"), "line": ("points",), "polygon": ("points",)}[k]
+                if missing := [n for n in need if n not in s]:
+                    raise Fail(f"{k} needs {', '.join(missing)}, e.g. {Shape.EXAMPLES[k]}")
+                for n in need:
+                    if n == "radius":
+                        Ops.numbers([s[n]], 1, f"{k}.radius")
+                    elif n == "points":
+                        pts = s[n]
+                        if not isinstance(pts, list) or len(pts) < (3 if k == "polygon" else 1):
+                            raise Fail(f"{k}.points is a list of at least {3 if k == 'polygon' else 1} [x, z]")
+                        for i, p in enumerate(pts):
+                            Ops.numbers(p, 2, f"{k}.points[{i}]")
+                    else:
+                        Ops.numbers(s[n], 2, f"{k}.{n}")
+                return Shape(k, s, f)
         raise Fail("give a shape: circle {center,radius} | rect {min,max} | line {points,width} | polygon {points}")
 
     def dist(self, x, z):
@@ -1968,13 +2046,8 @@ class Terrain:
         t["format"] = self.FORMAT
         rel = self.hts if self.host is None else [v - (hc or 0) for v, hc in zip(self.hts, self.host)]
         if any(rel):
-            out_ = bytearray()
-            prev = 0
-            for v in rel:
-                d = ((v - prev + 32768) % 65536) - 32768
-                out_ += struct.pack("<h", d)
-                prev = v
-            t["heights"] = b64deflate(out_)
+            deltas = [((v - prev + 32768) & 0xFFFF) - 32768 for v, prev in zip(rel, [0] + rel[:-1])]
+            t["heights"] = b64deflate(struct.pack(f"<{len(deltas)}h", *deltas))
         else:
             t.pop("heights", None)
         if any(self.materials):
@@ -3685,7 +3758,7 @@ def cmd_render(env, args):
 def cmd_paths(env, args):
     g = Game(env)
     if args.between:
-        x1, z1, x2, z2 = args.between
+        x1, z1, x2, z2 = coords(args.between, 4, "paths --between X1,Z1 X2,Z2")
         out(g.agent(f"reach {x1} {z1} {x2} {z2}", timeout=60))
         return
     r = g.agent("paths rescan" if args.rescan else "paths", timeout=60)
@@ -4104,11 +4177,24 @@ def cmd_enemy(env, args):
     out(result)
 
 
+def coords(values, n, usage):
+    """Numbers from command-line words: "x,z" pairs, single numbers, or a mix ("-42,10 5,6", "-42 10 5 6")."""
+    parts = [p for v in values or [] for p in str(v).strip().replace(",", " ").split()]
+    try:
+        nums = [float(p) for p in parts]
+    except ValueError:
+        nums = None
+    if nums is None or len(nums) != n:
+        raise Fail(f"{usage}: expected {n} numbers, got {' '.join(str(v).strip() for v in values or []) or 'none'!r} (e.g. -42,10; negative numbers are fine)")
+    return nums
+
+
 def cmd_spawn(env, args):
     g = Game(env)
     u = Ref(env).unit(args.unit) if not args.unit.startswith("vanilla:") else None
     unit = "vanilla:" + u["id"] if u else args.unit
-    where = f" line {args.line}" if args.line else (f" at {args.at[0]} {args.at[1]}" if args.at else "")
+    at = coords(args.at, 2, "spawn ... --at X,Z") if args.at else None
+    where = f" line {args.line}" if args.line else (f" at {at[0]:g} {at[1]:g}" if at else "")
     out(g.agent(f"spawn {unit.replace(' ', '_')} {args.count}" + (" elite" if args.elite else "") + where))
 
 
@@ -4122,10 +4208,7 @@ def cmd_cheat(env, args):
     elif args.what in ("kill", "heal", "endnight"):
         out(g.agent(args.what))
     elif args.what == "teleport":
-        parts = [p for v in args.value for p in v.strip().replace(",", " ").split()]
-        if len(parts) != 2:
-            raise Fail("cheat teleport X,Z (or X Z), e.g. cheat teleport -40,-10")
-        x, z = (float(p) for p in parts)
+        x, z = coords(args.value, 2, "cheat teleport X,Z")
         out(g.agent(f"teleport {x:g} {z:g}"))
     else:
         raise Fail("cheat god|invulnerable|infinitegold [on|off] | gold <n> | speed <x> | kill | heal | endnight | teleport <x,z>")
@@ -4254,8 +4337,9 @@ def main(argv=None):
     p = sub.add_parser("paths", help="the game's own path check (level loaded): each ground line's route to the castle")
     p.add_argument("--rescan", action="store_true")
     p.add_argument("--points", action="store_true", help="include each route's waypoints [[x, z], ...]")
-    p.add_argument("--between", nargs=4, type=float, metavar=("X1", "Z1", "X2", "Z2"),
-                   help="instead: whether each ground graph (small/large enemies, the king's) connects two points")
+    p.add_argument("--between", nargs="+", metavar="X,Z",
+                   help="instead: whether each ground graph (small/large enemies, the king's) connects two points: "
+                        "X1,Z1 X2,Z2 or X1 Z1 X2 Z2 (negative numbers are fine)")
 
     p = sub.add_parser("play", help="load the level in the game (a custom run: real gold)")
     p.add_argument("pack")
@@ -4320,7 +4404,7 @@ def main(argv=None):
     p.add_argument("count", nargs="?", type=int, default=1)
     p.add_argument("--elite", action="store_true")
     p.add_argument("--line", help="at a spawn line")
-    p.add_argument("--at", nargs=2, type=float, metavar=("X", "Z"))
+    p.add_argument("--at", nargs="+", metavar="X,Z", help="X,Z or X Z (negative numbers are fine)")
 
     p = sub.add_parser("cheat", help="god|invulnerable|infinitegold [on|off] | gold <n> | speed <x> | kill | heal | endnight | teleport <x,z>")
     p.add_argument("what")
