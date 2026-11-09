@@ -43,28 +43,7 @@
     "id": "ex18",
     "name": "Example 18: Blinking assassin",
     "host": "Nordfels",
-    "logic": {
-     "vars": {
-      "blinks": 0
-     },
-     "rules": [
-      {
-       "note": "fixture observer",
-       "when": {
-        "on": "hpBelow",
-        "of": "is:assassin",
-        "pct": 0.5
-       },
-       "do": [
-        {
-         "do": "addVar",
-         "name": "blinks",
-         "value": 1
-        }
-       ]
-      }
-     ]
-    }
+    "logic": {}
    }
   ]
  },
@@ -98,7 +77,7 @@
     ]
    },
    {
-    "expect": "$blinks == 1 and nearest('is:assassin', 300).dist(castle) < 16",
+    "expect": "nearest('is:assassin', 300).dist(castle) < 16",
     "within": 3
    }
   ]

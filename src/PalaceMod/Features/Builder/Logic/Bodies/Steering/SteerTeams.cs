@@ -155,6 +155,14 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             {
                 if (LogicSteeringManager.Deaths.TryGetValue(e, out var d)) { at = d.pos; rot = d.rot; }
                 else if (go == null) return;   // gone, and where it died isn't known: skipped
+                if (go != null)
+                {
+                    // the corpse is destroyed at the end of this frame: it must not take the entity with it
+                    at ??= go.transform.position; rot ??= go.transform.rotation;
+                    var ob = go.GetComponent<BuilderEntity>();
+                    if (ob != null) ob.Entity = null;
+                    LogicSteeringManager.Forget(go);
+                }
                 go = null;
             }
             float frac = (float)(hpPct ?? (alive && e.Body != null && e.Body.MaxHp > 0 ? e.Body.Hp / e.Body.MaxHp : 1));
@@ -174,14 +182,14 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             {
                 e.Game = made;
                 e.Body = new GameBody(made);
-                e.Destroyed = false;
                 if (e.Spawned || made.GetComponent<BuilderEntity>() != null || e.Def != null)
                 {
                     var nb = made.GetComponent<BuilderEntity>() ?? made.AddComponent<BuilderEntity>();
                     nb.Entity = e;
                 }
                 LogicGameWorld.Index(world, made, e);
-                if (world.Find(e.Id) == null) world.Add(e, vanilla: true);   // re-index only: its rules and vars are still on it
+                // a dead unit was forgotten: bring the same entity back (id, @name, its rule instances, vars, labels)
+                if (!alive || world.Find(e.Id) != e) world.Revive(e, raiseSpawn: false);
             }
             e.Team = team;
             var hp = made.GetComponent<Hp>();
@@ -225,6 +233,8 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             // the old one's runtime steering overrides carry over too
             var old = LogicSteeringManager.Get(go);
             if (old?.Targeting != null && made.Go() is { } mg) { var ns = LogicSteeringManager.For(made, mg); ns.Targeting ??= old.Targeting; }
+            // `@name` references follow the shape: the new entity takes the old one's name
+            if (!string.IsNullOrEmpty(e.Name)) world.Rename(made, e.Name);
             LogicSteeringManager.DestroySilently(e, go);
             return made;
         }

@@ -340,6 +340,7 @@ namespace PalaceMod.Builder.Model.Logic
                 var scope = Scope(owner, ev);
                 var w = r.When;
                 if (w.Of != null) FilterString(w.Of, p + ".when.of", scope);
+                if (w.Of != null && ev.OwnOnly) Error(p + ".when.of", $"\"{ev.Name}\" only hears its owner's own; put the rule on the entity itself");
                 // "range" is the `of` listener's radius, except on events that take a range param themselves (near).
                 bool ownRange = ev.Params.Any(x => x.Name == "range");
                 if (w.Range != null) Num(w.Range, p + ".when.range", scope, 0, null);
