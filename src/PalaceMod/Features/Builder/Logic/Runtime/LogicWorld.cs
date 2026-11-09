@@ -705,7 +705,7 @@ namespace PalaceMod.Builder.Logic
                 else
                 {
                     double next = r.Seconds;
-                    if (r.Jitter > 0) next += Random.Range(-r.Jitter, r.Jitter);
+                    if (r.Jitter > 0) next *= 1 + Random.Range(-r.Jitter, r.Jitter);   // a share of the interval, like attacks' jitter
                     ri.NextTime += Math.Max(0.1, next);
                     if (ri.NextTime <= now) ri.NextTime = now + Math.Max(0.1, r.Seconds);
                 }

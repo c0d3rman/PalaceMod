@@ -226,7 +226,7 @@ namespace PalaceMod.Builder.Model.Logic
             Ev("kill", "Combat", "Something it damaged died from that damage.", other: "victim", aliases: A("victim", "other"));
             Ev("every", "Time", "Periodically, from spawn (or level start).", value: LType.Number, valueMeaning: "the tick count (1, 2, ...)",
                 ps: [P("seconds", "number", "Seconds between firings (min 0.1).", req: true, min: 0.1),
-                     P("jitter", "number", "Random extra delay each time, 0..1 of seconds.", min: 0, max: 1),
+                     P("jitter", "number", "Each interval varies randomly by up to this share of seconds (0.2: ±20%).", min: 0, max: 1),
                      P("phase", "number", "Seconds before the first firing (default: seconds)."),
                      P("during", "enum", "Only at night, by day, or always.", def: "always", opts: ["always", "night", "day"])],
                 global: true, example: "{ \"when\": { \"on\": \"every\", \"seconds\": 8, \"during\": \"night\" }, \"do\": [...] }");

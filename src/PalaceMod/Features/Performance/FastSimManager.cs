@@ -3,6 +3,7 @@ using System.Collections;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using HarmonyLib;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -16,6 +17,10 @@ using UnityEngine.Rendering;
     While it's on, frames are drawn only about 10 times a wall-clock second (OnDemandRendering), and never in a
     headless (-batchmode) launch, where nobody can see them. Screenshots then come from the main camera rendered into a
     texture (no UI overlay), which also works headless.
+    A frame that isn't drawn never reaches its end-of-frame stage, so a WaitForEndOfFrame coroutine waits for the next
+    drawn frame (up to SkipInterval frames headless). The game uses one: PlayerMovement.TeleportTo turns the king's
+    CharacterController off and back on "at the end of the frame", so after any teleport the king couldn't move for
+    seconds (fake input such as `run` then did nothing). TeleportTo_Patch turns it back on the next frame instead.
 */
 namespace PalaceMod
 {
@@ -188,6 +193,32 @@ namespace PalaceMod
                 RenderTexture.active = previousActive;
                 RenderTexture.ReleaseTemporary(target);
                 if (texture != null) UnityEngine.Object.Destroy(texture);
+            }
+        }
+
+        /// <summary>Whether frames are being skipped (headless, or fast mode between preview frames).</summary>
+        private static bool SkippingFrames => Headless || On;
+
+        private static IEnumerator EnableNextFrame(CharacterController controller)
+        {
+            yield return null;
+            if (controller != null && !controller.enabled) controller.enabled = true;
+        }
+
+        [HarmonyPatch(typeof(PlayerMovement))]
+        private static class TeleportTo_Patch
+        {
+            [HarmonyPatch(nameof(PlayerMovement.TeleportTo)), HarmonyPostfix]
+            private static void TeleportTo(PlayerMovement __instance) => Resume(__instance);
+
+            [HarmonyPatch(nameof(PlayerMovement.SetTransformTo)), HarmonyPostfix]
+            private static void SetTransformTo(PlayerMovement __instance) => Resume(__instance);
+
+            private static void Resume(PlayerMovement king)
+            {
+                if (!SkippingFrames || king == null || !king.isActiveAndEnabled) return;
+                var controller = king.GetComponent<CharacterController>();
+                if (controller != null) king.StartCoroutine(EnableNextFrame(controller));
             }
         }
     }
