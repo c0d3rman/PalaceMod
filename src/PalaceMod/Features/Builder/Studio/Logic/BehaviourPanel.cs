@@ -39,7 +39,8 @@ namespace PalaceMod.Builder.Studio.Logic
         /// <summary>"This enemy affects the level": its rules give gold, change nights, end the level…</summary>
         private static void Badge(ModPage page, JObject node)
         {
-            var effects = LogicDoc.LevelEffects(node["rules"] as JArray);
+            var rules = (node["rules"] as JArray)?.ToObject<List<PalaceMod.Builder.Model.Logic.RuleDef>>() ?? [];
+            var effects = PalaceMod.Builder.Model.Logic.LevelEffects.Of(rules);
             if (effects.Count == 0) return;
             var row = page.Row(LogicFields.Tint("! Affects the level", LogicFields.WarnColor), null,
                 () => "Its rules reach beyond itself: " + string.Join(", ", effects) + ".\nShared with others, it does this in their levels too.");
