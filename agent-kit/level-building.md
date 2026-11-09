@@ -833,6 +833,14 @@ One small, pure language everywhere: conditions, numbers, selectors, positions.
 - **Positions**: an entity is its position wherever a position is wanted. `pointNear(p, r)` (a random walkable point),
   `ahead(e, d)`, `toward(a, b, d)`, `lerp(a, b, t)`, `dir(deg)` (0 = north, 90 = east), `angle(a, b)`,
   `spawnLine('Name')`; positions add, subtract and scale (`self.pos + dir(90) * 3`).
+- **The world under a point** (positions or entities): `groundY(p)` (height of the walkable ground: terrain, the map's
+  ground or a walkable deck), `walkable(p, who?)` (can something stand there: `'small'` ground enemies (default),
+  `'large'`, `'air'`, `'player'`, or a unit, which uses its own graphs and the surfaces it may walk), `ground(p)`
+  (`'grass' 'highGrass' 'lowGrass' 'earth' 'sand' 'road' 'rock' 'water' 'ice' 'blocked' 'deck' 'none'`; a cliff is
+  `'rock'`), `waterDepth(p)` (0 dry or frozen), `sight(a, b)` (a clear line 1.5 m up: no ground, cliff, wall,
+  building or solid body between), `raycast(a, b)` (where that line is blocked, or `none`), global `waterLevel`.
+  E.g. fire spreads only `where(ground(it) == 'grass')`; a pushed boulder stops where `not walkable(ahead(self, 1))`;
+  a unit drowns when `waterDepth(it) > 0.5`; a sniper fires only with `sight(self, it)`.
 - **Maths and logic**: `+ - * / %`, `== != < <= > >=`, `and or not` (also `&& || !`), `c ? a : b`, `min max abs floor
   ceil round clamp sqrt pow sin cos`, `rand()`, `rand(a, b)`, `randInt(a, b)`, `chance(p)` (seeded: the same events
   give the same results).
@@ -866,7 +874,7 @@ runs once per member and the other params are evaluated per member with `it` bou
 | Team, move | `convert` (switch side), `teleport`, `push` (knockback), `drift` (continuous pull/wind), `moveTo`, `setMovement`, `setTargeting` (`prepend`, `remove`, `for`), `taunt`, `command` (player units: follow/hold/home) |
 | Links | `link` (`to` a parent, `offset`, `follow`, `onParentDeath`, `damageToParent`, `damageToGroup`, `damageKept`), `unlink` (`release` drop/stay, `children`) |
 | Logic | `signal`, `setVar`, `addVar`, `listAdd`/`listRemove`/`listClear`, `addLabel`/`removeLabel`, `enableRule`/`disableRule`, `enable`/`disable`/`toggle`, `wait`, `if` (`cond`, `then`, `else`), `repeat` (`times`, `every`, `actions`), `forEach` (`in`, `actions`, `limit`), `choose` (`options: [{weight, do}]`), `stop` |
-| World | `gold` (give/take), `dropCoins`, `building` (build, upgrade, knockOut, repair, demolish, lock, unlock, setCost, setIncome a slot: `slot` is any expression giving a building or slot entity, `@name`, `it`, `$var`, `it.$slot`, `nearest('unbuilt and type:House')`, or a Studio key `"add:h1"`; without `slot` it acts on each `target`), `waves` (addSpawn, removeUnit, scaleCount, scaleHp, clearRemaining, startNight, endNight, skipNight), `endLevel` |
+| World | `terrain` (change the ground during play, below), `gold` (give/take), `dropCoins`, `building` (build, upgrade, knockOut, repair, demolish, lock, unlock, setCost, setIncome a slot: `slot` is any expression giving a building or slot entity, `@name`, `it`, `$var`, `it.$slot`, `nearest('unbuilt and type:House')`, or a Studio key `"add:h1"`; without `slot` it acts on each `target`), `waves` (addSpawn, removeUnit, scaleCount, scaleHp, clearRemaining, startNight, endNight, skipNight), `endLevel` |
 | Show | `effect`, `sound`, `message`, `floatText`, `setVisual`, `hud`, `shake`, `marker` |
 | End | `destroy` (`drops`, `effects`, `silent`): removes anything; a unit the logic spawned is removed outright, one of the game's own player troops is knocked out for good (no revive at dawn); buildings, the castle and the king are only knocked out |
 
@@ -881,6 +889,30 @@ passive half). `palace.py game cmd logic-weapons` lists every weapon id with its
 `limit` and `as` (a name for the member, 12.4). `setVar`/`addVar` write
 `self`'s variable unless `target` names another entity; a level variable is `"name": "$souls"` or `"target":
 "level"` (in the level script plain names are level variables).
+
+**Runtime terrain: `terrain`.** The ground itself changes during play; only the touched area is re-drawn and re-pathed
+(tens to a couple of hundred ms, so a few changes a night, not every tick).
+`{"do": "terrain", "op": ..., <where>, ...}` with `op`:
+
+- `raise` / `lower` (`amount` m), `set` (`height`, world y), `smooth`: heights, faded toward the edge by `softness`
+  (0..1, default 0.3; 0 = sheer cliffs). A deep `lower` is a real chasm (units and the king can't cross; they fall in).
+- `paint` (`material`: grass, highGrass, lowGrass, earth, sand, road, rock), `block` / `unblock`.
+- `water` / `dry`: cells become water (the bed is dug a metre under the water level) or land.
+- `freeze` / `thaw`: water becomes walkable ice at the water level (drawn pale blue; units and the king walk on it), or
+  water again. Things standing on ice that thaws are pushed ashore unless a rule kills them first.
+- `waterLevel` (`level`, world y; an expression like `"$tide"` works): the surface moves. Low ground joined to the
+  water floods (`flood: "all"` floods every cell under the level, `"none"` none) and ground it leaves dries.
+
+Where: `radius` (a circle at `at`, default self), `width` + `length` (+ `angle`), or `in: "@zone"` (an area's own
+shape, or a body's footprint). `waterLevel`, `freeze`, `thaw` and `dry` with no shape act on the whole field. `over`
+(seconds) animates heights and the water level; paths follow when it ends. Works on a flat field and on a map's own
+ground (the touched cells are then drawn by the terrain). Savestates keep the changed ground.
+
+```json
+{"do": "terrain", "op": "lower", "in": "@fault", "amount": 7, "softness": 0, "over": 1.5}
+{"do": "terrain", "op": "waterLevel", "level": "$tide", "over": 3}
+{"do": "terrain", "op": "freeze", "in": "@lake"}
+```
 
 ### 12.7 Components (what a template is)
 
@@ -932,7 +964,19 @@ placed in `logic.places`; spawned or destroyed at runtime it rebuilds the pathfi
 and then. Its top should be within 2.5 m of the ground it meets: an edge that touches walkable ground opens (with a
 ramp when the step is over 0.45 m), and the map's invisible walls or terrain water under it give way; every other
 edge gets an invisible rail, so units can't step off into the river. Let a bridge overlap each bank by 1 m or more,
-and make it over 8 m wide for large enemies (they keep 4 m from every edge).
+and make it over 8 m wide for large enemies (they keep 4 m from every edge). A deck placed lower than the ground it
+spans (e.g. with `at` over a river, whose bed is lower) is raised to rest on the highest ground under it; a place over
+open water floats on the surface (a raft).
+
+**Riding.** Whatever stands on a walkable body's top moves with it: the king and units are carried by a deck on a
+mover path, a spinning one, a teleported raft, a lift whose path climbs (`"path": [[x, 0, z], [x, 6, z]]`) or a
+walkable part linked to a moving unit. Pathing units are carried too but snap back to the ground's paths when they walk,
+so give riders `command hold` (troops) or `setMovement hold`: their hold point moves with the deck. Movers with `pose`s snap between poses (their poses are
+pre-scanned for paths) and carry riders at the snap.
+
+**Surfaces follow their area**: one placed `"active": false` and enabled later starts stopping units then, disabled it
+stops, and a moved or turned area re-tags where it is (`paths` and `paths --between` don't model surfaces; test them
+with a walking unit).
 
 ### 12.8 Statuses
 
@@ -1101,8 +1145,7 @@ Write one per mechanic you want to keep working, next to your ops, and re-run it
 
 - Vanilla arrows in flight aren't affected by `drift` or `timeScale` (Builder projectiles are).
 - Per-unit walkability is by surfaces (above), not by terrain: a "ladder" is an area surface only some units may
-  path through. Walkable movers snap between poses; they don't carry units while gliding. Terrain height doesn't
-  change at runtime.
+  path through (or `terrain block`). Gliding walkable movers carry riders, but the paths don't glide with them.
 - Three teams; vanilla units never attack `neutral` things (Builder targeting can). A weapon hurts its wielder's
   foes whatever side it was made for: a `neutral` unit's vanilla swing hurts whatever its targeting picks, and a
   copied or stolen weapon hurts the new owner's foes.
@@ -1158,7 +1201,26 @@ is:spore') < 40", "do": [{"do": "spawn", "entity": "=self.template", "at": "poin
 
 **Drawbridge on a lever**: a prop template with `"mover": {"pose": {"up": {"offset": [0, 4, 0]}, "down": {}}}` placed as
 `bridge`; a lever: `{"op": "place", "id": "lever", "preset": "lever", "with": {"signal": "up", "to": "@bridge"}, "at":
-[14, -6]}`; and on the bridge `{"when": "dusk", "do": [{"do": "signal", "name": "down", "to": "self"}]}`.
+[14, -6]}`; and on the bridge `{"when": "dusk", "do": [{"do": "signal", "name": "down", "to": "self"}]}`. For a
+crossing over water, give the bridge `"body": {"box": [12, 14], "height": 0.4, "walkable": true}` (long enough to
+overlap each bank by a metre or more) and switch it with `enable`/`disable`: on, it opens the route over the moat; off,
+the route goes round (and a rule can `kill` `all('enemy and unit and in:@deck')` first).
+
+**What changes where units can go at runtime**: `terrain` (heights, block, water, ice, water level), solid bodies
+(`enable`/`disable`, `teleport`, movers), walkable bodies (`enable`/`disable`, spawned or destroyed) and area surfaces
+(`enable`/`disable`, moved). All of them update the paths live.
+
+**Rising tide**: `{"when": "dawn", "do": [{"do": "addVar", "name": "$tide", "value": 1}, {"do": "terrain", "op":
+"waterLevel", "level": "$tide", "over": 3}]}` (low ground joined to the sea floods; enemies path round it). A slot
+under the new level: `"if": "@h1.y < $tide"` or `waterDepth(@h1) > 0` (once the water has spread).
+
+**Earthquake**: an area place `fault` along the crack; `{"do": "terrain", "op": "lower", "in": "@fault", "amount": 7,
+"softness": 0, "over": 1.5}` opens a real chasm, and a walkable bridge spawned over it (`"at": "vec(x, z)"`, the deck
+rests on the banks) reconnects the lane.
+
+**Frozen lake**: terrain water placed with the `water` op; on the lake's area `{"when": "dusk", "do": [{"do":
+"terrain", "op": "freeze", "in": "self"}]}`, `{"when": "dawn", "do": [{"do": "terrain", "op": "thaw", "in": "self"}]}`,
+and to break it `{"do": "kill", "target": "all('unit and in:self')"}` then `thaw`.
 
 **Aura**: a status `{"id": "warded", "duration": 1.2, "mods": {"damageTaken": {"mult": 0.7}}}` and on the bearer
 `{"when": {"on": "every", "seconds": 1}, "do": [{"do": "applyStatus", "status": "warded", "target": "all('ally and unit', 6)"}]}`.

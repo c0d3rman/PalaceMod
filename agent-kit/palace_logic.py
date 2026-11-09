@@ -3004,7 +3004,7 @@ class _Walker:
             self.num(_lnum(mv.get("speed")), p + ".mover.speed", scope, 0, 100)
             self.num(_lnum(mv.get("wait")), p + ".mover.wait", scope, 0, 600)
             if _b(body, "walkable") is True and mpath is not _MISSING:
-                self.warn(p + ".mover", "a walkable mover only snaps between poses; it can't glide along a path")
+                self.warn(p + ".mover", "a walkable mover gliding on a path carries the king and units standing on it, but paths are only on its deck where it started: pathing units on it snap back to the ground when they walk (riders should hold)")
             self.num(_lnum(mv.get("turnSpeed")), p + ".mover.turnSpeed", scope, 0, 3600)
             if _dict(mv.get("pose")) is not None and _dict(mv.get("poses")) is not None:
                 self.warn(p + ".mover.poses", 'give "pose" or "poses", not both ("poses" is ignored)')

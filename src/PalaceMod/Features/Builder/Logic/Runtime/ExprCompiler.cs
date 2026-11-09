@@ -180,6 +180,7 @@ namespace PalaceMod.Builder.Logic
                 "income" => _ => Value.Number(G().Income),
                 "enemiesAlive" => _ => Value.Number(G().EnemiesAlive),
                 "difficulty" => _ => Value.Number(G().Difficulty),
+                "waterLevel" => _ => Value.Number(WorldQueries.Service is { } wq && !double.IsNaN(wq.WaterLevel) ? wq.WaterLevel : 0),
                 "none" or "null" => _ => Value.None,
                 _ => ctx => ctx.Locals != null && ctx.Locals.TryGetValue(name, out var v) ? v : throw new LogicError($"unknown name \"{name}\""),
             };
@@ -455,6 +456,25 @@ namespace PalaceMod.Builder.Logic
                         double ang = ctx.World.Random.NextDouble() * Math.PI * 2, d = r * Math.Sqrt(ctx.World.Random.NextDouble());
                         return Value.Position(new Vec(p.X + (float)(Math.Sin(ang) * d), p.Y, p.Z + (float)(Math.Cos(ang) * d)));
                     };
+                case "groundY":
+                    return ctx => Value.Number(WorldQueries.Service?.GroundY(Pos(A0(ctx))) ?? 0);
+                case "walkable":
+                    return ctx =>
+                    {
+                        var p = Pos(A0(ctx));
+                        var who = args.Length > 1 ? A1(ctx) : Value.None;
+                        var unit = Values.ToEntity(who);
+                        string kind = unit == null && who.Kind != ValueKind.None ? Values.Format(who) : null;
+                        return Value.Bool(WorldQueries.Service?.Walkable(p, kind, unit) ?? true);
+                    };
+                case "ground":
+                    return ctx => Value.Text(WorldQueries.Service?.Ground(Pos(A0(ctx))) ?? "grass");
+                case "waterDepth":
+                    return ctx => Value.Number(WorldQueries.Service?.WaterDepth(Pos(A0(ctx))) ?? 0);
+                case "sight":
+                    return ctx => Value.Bool(WorldQueries.Service?.Raycast(Pos(A0(ctx)), Pos(A1(ctx))) == null);
+                case "raycast":
+                    return ctx => WorldQueries.Service?.Raycast(Pos(A0(ctx)), Pos(A1(ctx))) is Vec hit ? Value.Position(hit) : Value.None;
                 case "ahead":
                     return ctx =>
                     {

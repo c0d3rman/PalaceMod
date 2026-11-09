@@ -866,7 +866,7 @@ namespace PalaceMod.Builder.Model.Logic
                     Enum(mv.Mode, p + ".mover.mode", "loop", "pingpong", "once");
                     Num(mv.Speed, p + ".mover.speed", scope, 0, 100);
                     Num(mv.Wait, p + ".mover.wait", scope, 0, 600);
-                    if (e.Body?.Walkable == true && mv.Path != null) Warn(p + ".mover", "a walkable mover only snaps between poses; it can't glide along a path");
+                    if (e.Body?.Walkable == true && mv.Path != null) Warn(p + ".mover", "a walkable mover gliding on a path carries the king and units standing on it, but paths are only on its deck where it started: pathing units on it snap back to the ground when they walk (riders should hold)");
                     Num(mv.TurnSpeed, p + ".mover.turnSpeed", scope, 0, 3600);
                     if (mv.Pose != null && mv.Poses != null) Warn(p + ".mover.poses", "give \"pose\" or \"poses\", not both (\"poses\" is ignored)");
                     string poseKey = mv.Pose != null ? "pose" : "poses";
