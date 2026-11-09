@@ -40,6 +40,11 @@ namespace PalaceMod.Builder.Level
         public readonly bool[] Blocked;    // W*H
         public readonly bool[] Water;      // W*H
         public float WaterLevel = -1f;     // relative to Y
+        /// <summary>Runtime only (the `terrain` action; never in the pack): water cells frozen into walkable ice.</summary>
+        public readonly bool[] Frozen;     // W*H
+        /// <summary>Runtime only, on a map's own ground: cells a `terrain` action touched, drawn by the terrain even where
+        /// their height still matches the host's (paint, water and blocks show there).</summary>
+        public readonly bool[] Forced;     // W*H
 
         public TerrainGrid(int w, int h, float cell, float originX, float originZ, float y)
         {
@@ -50,7 +55,12 @@ namespace PalaceMod.Builder.Level
             Materials = new byte[w * PaintRes * h * PaintRes];
             Blocked = new bool[w * h];
             Water = new bool[w * h];
+            Frozen = new bool[w * h];
+            Forced = new bool[w * h];
         }
+
+        /// <summary>A water cell that isn't frozen.</summary>
+        public bool OpenWater(int i) => Water[i] && !Frozen[i];
 
         public int Corner(int x, int z) => z * (W + 1) + x;
         public int PaintW => W * PaintRes;
@@ -189,7 +199,7 @@ namespace PalaceMod.Builder.Level
         public bool Sculpted(int x, int z)
         {
             if (Host == null) return true;
-            bool moved = false;
+            bool moved = Forced[CellIndex(x, z)];
             for (int k = 0; k < 4; k++)
             {
                 int i = Corner(x + (k & 1), z + (k >> 1));
@@ -207,6 +217,8 @@ namespace PalaceMod.Builder.Level
             Array.Copy(Materials, g.Materials, Materials.Length);
             Array.Copy(Blocked, g.Blocked, Blocked.Length);
             Array.Copy(Water, g.Water, Water.Length);
+            Array.Copy(Frozen, g.Frozen, Frozen.Length);
+            Array.Copy(Forced, g.Forced, Forced.Length);
             return g;
         }
 

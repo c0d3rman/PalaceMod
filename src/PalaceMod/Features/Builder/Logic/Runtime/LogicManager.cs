@@ -240,6 +240,9 @@ namespace PalaceMod.Builder.Logic
             var pos = ReadPos(place["pos"] ?? place["at"]);
             if (place["pos"] is JArray { Count: 2 } && Physics.Raycast(new Vector3(pos.X, 200, pos.Z), Vector3.down, out var hit, 400, ~0, QueryTriggerInteraction.Ignore))
                 pos = new Vec(pos.X, hit.point.y, pos.Z);
+            // Over the terrain's water a thing sits on the surface (a raft, a bridge's deck), not on the bed.
+            if (place["pos"] is JArray { Count: 2 } && PalaceMod.Builder.Level.GroundLayer.TryWater(pos.ToVector3(), out float water) && water > pos.Y)
+                pos = new Vec(pos.X, water, pos.Z);
             float rotY = (float?)place["rotY"] ?? 0;
             var e = world.Describe(template, place, id, (string)place["team"], null);
             e.StaticPos = pos;

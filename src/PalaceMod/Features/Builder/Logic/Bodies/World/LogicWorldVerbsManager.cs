@@ -22,6 +22,10 @@ namespace PalaceMod
         {
             base.Awake(plugin);
             WorldVerbs.Register();
+            WorldQueries.Service = WorldQueryService.Instance;
+            TerrainVerbs.Register();
+            // A level whose rules change the terrain gets its grid and tiled graphs at the start (no stall later).
+            LogicWorld.Started += w => { if (UsesAction(w.LevelLogic, "terrain") || w.Templates.Values.Any(t => UsesAction(t, "terrain"))) TerrainVerbs.Prepare(); };
             WaveVerbs.Register();
             ShowVerbs.Register();
             LevelHud.Register();
@@ -36,14 +40,16 @@ namespace PalaceMod
                 ["buildings"] = WorldVerbs.Capture(),
                 ["waves"] = WaveVerbs.Capture(),
                 ["hud"] = LevelHud.Capture(),
+                ["terrain"] = TerrainVerbs.Capture(),
             }, (_, state) =>
             {
                 WorldSession.Sync();
                 WorldVerbs.Restore(state?["buildings"]);
                 WaveVerbs.Restore(state?["waves"]);
                 LevelHud.Restore(state?["hud"]);
+                TerrainVerbs.Restore(state?["terrain"]);
             });
-            DevCommands.Register("logic-world", "logic-world status | fx | sounds | hud   world and show actions (L2): state, the effect and sound catalogs", args =>
+            DevCommands.Register("logic-world", "logic-world status | fx | sounds | hud | terrain   world and show actions (L2): state, the effect and sound catalogs", args =>
             {
                 WorldSession.Sync();
                 return (args.FirstOrDefault() ?? "status") switch
@@ -51,6 +57,7 @@ namespace PalaceMod
                     "fx" => GameFx.Scan(),
                     "sounds" => string.Join(", ", GameFx.Sounds.Keys.OrderBy(k => k)),
                     "hud" => LevelHud.Status(),
+                    "terrain" => TerrainVerbs.Status(),
                     "slots" => WorldVerbs.DescribeSlots(),
                     "gallery" => ShowVerbs.Gallery(),
                     _ => $"world={(LogicWorld.Current != null ? "yes" : "no")} groups={WaveVerbs.Groups.Count} (left {WaveVerbs.Groups.Sum(g => g.Left)}) " +
@@ -76,7 +83,11 @@ namespace PalaceMod
             WaveVerbs.Tick(Time.deltaTime);
             ShowVerbs.Tick();
             LevelHud.Tick();
+            TerrainVerbs.Tick(Time.deltaTime);
         }
+
+        /// <summary>Whether a rules tree anywhere has an action {"do": name}.</summary>
+        private static bool UsesAction(JToken t, string name) => t != null && t.SelectTokens("..do").Any(d => d.Type == JTokenType.String && (string)d == name);
 
         public override void OnDestroy()
         {

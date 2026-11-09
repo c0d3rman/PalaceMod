@@ -435,6 +435,22 @@ namespace PalaceMod.Builder.Model.Logic
                 P("line", "text", "addSpawn/clearRemaining: the spawn line."), P("gold", "int", "addSpawn: coins each."), P("elite", "bool", "addSpawn: elite."),
                 P("value", "number", "scaleCount/scaleHp: the factor."),
             ], example: "{ \"do\": \"waves\", \"op\": \"addSpawn\", \"unit\": \"brute\", \"count\": \"night - 2\", \"line\": \"North\" }");
+            Act("terrain", "World", "Changes the ground during play: heights, paint, blocked cells, water, ice and the water level. Only the touched area is re-meshed and re-pathed.",
+            [
+                P("op", "enum", "What to do.", req: true, opts: ["raise", "lower", "set", "smooth", "paint", "block", "unblock", "water", "dry", "freeze", "thaw", "waterLevel"]),
+                P("at", "position", "The shape's centre.", def: "self"),
+                P("radius", "number", "A circle this wide (m).", min: 0.1),
+                P("width", "number", "A rectangle: across (m).", min: 0.1), P("length", "number", "A rectangle: along (m).", min: 0.1),
+                P("angle", "number", "The rectangle's turn (degrees, 0 = length runs north)."),
+                P("in", "entity", "Use an area's or a body's own shape instead (e.g. \"@fault\")."),
+                P("softness", "number", "0..1: how far in from the edge the change fades (heights; default 0.3).", min: 0, max: 1),
+                P("amount", "number", "raise/lower: metres.", def: 1),
+                P("height", "number", "set: the ground's new height (world y)."),
+                P("material", "enum", "paint: the paint.", opts: ["grass", "highGrass", "lowGrass", "earth", "sand", "road", "rock"]),
+                P("level", "number", "waterLevel: the water's new surface (world y)."),
+                P("flood", "enum", "waterLevel: which low ground fills: joined to the water (default), every cell under the level, or none.", opts: ["connected", "all", "none"]),
+                P("over", "number", "Seconds to animate heights or the water level (the paths follow at the end).", min: 0),
+            ], example: "{ \"do\": \"terrain\", \"op\": \"lower\", \"in\": \"@fault\", \"amount\": 6, \"softness\": 0, \"over\": 2 }");
             Act("endLevel", "World", "Ends the run.", [P("result", "enum", "Win or lose.", req: true, opts: ["win", "lose"]), P("message", "text", "Shown on the end screen.")]);
 
             // ---- Show -----------------------------------------------------------------------------------------
@@ -487,6 +503,7 @@ namespace PalaceMod.Builder.Model.Logic
             Named(Globals, "income", "The last dawn's payout.", LType.Number);
             Named(Globals, "enemiesAlive", "Enemies on the map.", LType.Number);
             Named(Globals, "difficulty", "The run's difficulty multiplier.", LType.Number);
+            Named(Globals, "waterLevel", "The terrain's water level (world y); 0 with no water. The `terrain` action's waterLevel op changes it.", LType.Number);
             Named(Globals, "none", "No entity (what a selector gives when nothing matches, or a role the event doesn't have): `other != none`.", LType.Any);
 
             // ---- Properties -----------------------------------------------------------------------------------
@@ -531,6 +548,13 @@ namespace PalaceMod.Builder.Model.Logic
             Fn("best", LType.Entity, "The match with the highest score (an expression over `it`).", ["filter", "number", "lazy"], method: true, example: "best('foe', 20, -it.hp)");
             Fn("count", LType.Number, "How many match within r metres (anywhere if omitted).", ["filter", "number?"], method: true, example: "count('enemy and in:self')");
             Fn("pointNear", LType.Position, "A random walkable point within r metres of p.", ["position", "number"]);
+            // World queries (Logic/Runtime/WorldQueries.cs): what is under a point, and what lies between two.
+            Fn("groundY", LType.Number, "Height of the walkable ground at p (terrain, the map's ground or a walkable deck).", ["position"], example: "groundY(self) < -3");
+            Fn("walkable", LType.Bool, "Whether something can stand at p. who: 'small' (ground enemies, default), 'large', 'air', 'player', or a unit (its own graph and surfaces).", ["position", "any?"], example: "walkable(ahead(self, 2), self)");
+            Fn("ground", LType.Text, "The ground at p: 'grass', 'highGrass', 'lowGrass', 'earth', 'sand', 'road', 'rock', 'water', 'ice', 'blocked', 'deck' or 'none'.", ["position"], example: "ground(it) == 'grass'");
+            Fn("waterDepth", LType.Number, "Metres of water over the ground at p (0 when dry or frozen).", ["position"], example: "waterDepth(it) > 0");
+            Fn("sight", LType.Bool, "Whether a straight line from a to b (1.5 m up) is clear of ground, cliffs, walls, buildings and solid props.", ["position", "position"], example: "sight(self, king)");
+            Fn("raycast", LType.Position, "Where the line from a to b (1.5 m up) first hits ground, a cliff, wall, building or solid prop; none if clear.", ["position", "position"]);
             Fn("ahead", LType.Position, "d metres ahead of e (along its facing).", ["entity", "number"]);
             Fn("toward", LType.Position, "d metres from a toward b.", ["position", "position", "number"]);
             Fn("lerp", LType.Any, "a + (b - a) * t, for numbers or positions.", ["any", "any", "number"]);

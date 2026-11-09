@@ -2098,6 +2098,122 @@
       "since": "1.0.0"
     },
     {
+      "name": "terrain",
+      "group": "World",
+      "description": "Changes the ground during play: heights, paint, blocked cells, water, ice and the water level. Only the touched area is re-meshed and re-pathed.",
+      "params": [
+        {
+          "name": "op",
+          "type": "enum",
+          "required": true,
+          "options": [
+            "raise",
+            "lower",
+            "set",
+            "smooth",
+            "paint",
+            "block",
+            "unblock",
+            "water",
+            "dry",
+            "freeze",
+            "thaw",
+            "waterLevel"
+          ],
+          "description": "What to do."
+        },
+        {
+          "name": "at",
+          "type": "position",
+          "default": "self",
+          "description": "The shape's centre."
+        },
+        {
+          "name": "radius",
+          "type": "number",
+          "min": 0.1,
+          "description": "A circle this wide (m)."
+        },
+        {
+          "name": "width",
+          "type": "number",
+          "min": 0.1,
+          "description": "A rectangle: across (m)."
+        },
+        {
+          "name": "length",
+          "type": "number",
+          "min": 0.1,
+          "description": "A rectangle: along (m)."
+        },
+        {
+          "name": "angle",
+          "type": "number",
+          "description": "The rectangle's turn (degrees, 0 = length runs north)."
+        },
+        {
+          "name": "in",
+          "type": "entity",
+          "description": "Use an area's or a body's own shape instead (e.g. \"@fault\")."
+        },
+        {
+          "name": "softness",
+          "type": "number",
+          "min": 0.0,
+          "max": 1.0,
+          "description": "0..1: how far in from the edge the change fades (heights; default 0.3)."
+        },
+        {
+          "name": "amount",
+          "type": "number",
+          "default": 1,
+          "description": "raise/lower: metres."
+        },
+        {
+          "name": "height",
+          "type": "number",
+          "description": "set: the ground's new height (world y)."
+        },
+        {
+          "name": "material",
+          "type": "enum",
+          "options": [
+            "grass",
+            "highGrass",
+            "lowGrass",
+            "earth",
+            "sand",
+            "road",
+            "rock"
+          ],
+          "description": "paint: the paint."
+        },
+        {
+          "name": "level",
+          "type": "number",
+          "description": "waterLevel: the water's new surface (world y)."
+        },
+        {
+          "name": "flood",
+          "type": "enum",
+          "options": [
+            "connected",
+            "all",
+            "none"
+          ],
+          "description": "waterLevel: which low ground fills: joined to the water (default), every cell under the level, or none."
+        },
+        {
+          "name": "over",
+          "type": "number",
+          "min": 0.0,
+          "description": "Seconds to animate heights or the water level (the paths follow at the end)."
+        }
+      ],
+      "example": "{ \"do\": \"terrain\", \"op\": \"lower\", \"in\": \"@fault\", \"amount\": 6, \"softness\": 0, \"over\": 2 }",
+      "since": "1.0.0"
+    },
+    {
       "name": "endLevel",
       "group": "World",
       "description": "Ends the run.",
@@ -2480,6 +2596,62 @@
       ],
       "returns": "position",
       "description": "A random walkable point within r metres of p."
+    },
+    {
+      "name": "groundY",
+      "args": [
+        "position"
+      ],
+      "returns": "number",
+      "description": "Height of the walkable ground at p (terrain, the map's ground or a walkable deck).",
+      "example": "groundY(self) < -3"
+    },
+    {
+      "name": "walkable",
+      "args": [
+        "position",
+        "any?"
+      ],
+      "returns": "bool",
+      "description": "Whether something can stand at p. who: 'small' (ground enemies, default), 'large', 'air', 'player', or a unit (its own graph and surfaces).",
+      "example": "walkable(ahead(self, 2), self)"
+    },
+    {
+      "name": "ground",
+      "args": [
+        "position"
+      ],
+      "returns": "text",
+      "description": "The ground at p: 'grass', 'highGrass', 'lowGrass', 'earth', 'sand', 'road', 'rock', 'water', 'ice', 'blocked', 'deck' or 'none'.",
+      "example": "ground(it) == 'grass'"
+    },
+    {
+      "name": "waterDepth",
+      "args": [
+        "position"
+      ],
+      "returns": "number",
+      "description": "Metres of water over the ground at p (0 when dry or frozen).",
+      "example": "waterDepth(it) > 0"
+    },
+    {
+      "name": "sight",
+      "args": [
+        "position",
+        "position"
+      ],
+      "returns": "bool",
+      "description": "Whether a straight line from a to b (1.5 m up) is clear of ground, cliffs, walls, buildings and solid props.",
+      "example": "sight(self, king)"
+    },
+    {
+      "name": "raycast",
+      "args": [
+        "position",
+        "position"
+      ],
+      "returns": "position",
+      "description": "Where the line from a to b (1.5 m up) first hits ground, a cliff, wall, building or solid prop; none if clear."
     },
     {
       "name": "ahead",
@@ -3086,6 +3258,11 @@
     {
       "name": "difficulty",
       "description": "The run's difficulty multiplier.",
+      "type": "number"
+    },
+    {
+      "name": "waterLevel",
+      "description": "The terrain's water level (world y); 0 with no water. The `terrain` action's waterLevel op changes it.",
       "type": "number"
     },
     {

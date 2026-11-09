@@ -973,6 +973,17 @@ class Ops:
             return None
         return self.fallback_y(level, x, z)
 
+    def water_y(self, level, x, z):
+        """The terrain's water surface over a water cell at a point, else None."""
+        t = level.get("terrain")
+        if not t or not t.get("water"):
+            return None
+        T = self.terrain_ro(level)
+        i, j = int((x - T.ox) // T.cell), int((z - T.oz) // T.cell)
+        if not (0 <= i < T.w and 0 <= j < T.h) or not T.water[j * T.w + i]:
+            return None
+        return T.y + T.water_level
+
     def fallback_y(self, level, x, z):
         """A height where the level may have no ground (props, flyer-only lines): the host's sampled ground, else the
         castle's height."""
@@ -1762,6 +1773,9 @@ class Ops:
                 d["pos"] = self.pos(lv, op, strict=False)
         else:
             d["pos"] = self.pos(lv, op, strict=False)
+            wy = self.water_y(lv, d["pos"][0], d["pos"][2]) if op.get("pos") is None else None
+            if wy is not None and wy > d["pos"][1]:
+                d["pos"][1] = round(wy, 2)   # over water a place floats on the surface (a raft, a bridge's deck)
         return f"place {d['id']} " + self._upsert(ensure(self.logic(op), "places", []), d)
 
     def op_remove_place(self, op):

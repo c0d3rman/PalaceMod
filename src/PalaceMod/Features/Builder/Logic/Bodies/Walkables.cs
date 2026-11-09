@@ -66,10 +66,17 @@ namespace PalaceMod.Builder.Logic.Bodies
 
         public static Mesh BoxMesh() => Box();
 
+        /// <summary>The decks that carry riders (DeckCarrier): every walkable body's own deck.</summary>
+        public static IEnumerable<Transform> LiveDecks()
+        {
+            foreach (var d in decks) if (d.Body != null && d.Proxy != null && d.Body.isActiveAndEnabled) yield return d.Proxy.transform;
+        }
+
         public static void Add(BuilderBody body, BuilderMover mover)
         {
             var size = body.Box is Vector2 b ? new Vector3(b.x, 0.3f, b.y) : new Vector3(body.Radius * 2f, 0.3f, body.Radius * 2f);
             var d = new Deck { Body = body, Size = size };
+            if (mover == null || mover.Poses.Count == 0) LiftOutOfGround(body, size);
             d.Proxy = MakeDeck(body.transform, size, body.Height, collider: true);
             d.Hide = MakeHide(d.Proxy, size);
             d.Hide.enabled = !body.isActiveAndEnabled;
@@ -98,6 +105,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             }
             else d.Tops.Add(new DeckOpenings.Top { Mesh = d.Proxy, Live = true });
             decks.Add(d);
+            DeckCarrier.Ensure();
             // Off the map: its own space graphs (fast); on the map: the host graphs' one coalesced scan.
             var center = d.Ghosts.Count > 0 ? d.Ghosts.Values.First().ghost.transform.position : body.transform.position;
             if (Spaces.Outside(center))
@@ -109,6 +117,37 @@ namespace PalaceMod.Builder.Logic.Bodies
             else if (settled && AstarPath.active != null) pendingAreas.Add(AreaOf(d));
             else RequestScan();
             Refresh(d);
+        }
+
+        /// <summary>
+        /// A deck whose top is under the ground somewhere in its footprint (a bridge placed at the river bed's height, or a
+        /// raft on the water whose ends lie on the banks) is buried there: the bank's ground covers it and the graphs
+        /// see a wall where it meets the bank. Such a deck is raised so its top is on the highest ground under it, which
+        /// is how a bridge rests on its banks. Decks wholly over water or lower ground keep their height.
+        /// </summary>
+        private static void LiftOutOfGround(BuilderBody body, Vector3 size)
+        {
+            var t = body.transform;
+            float top = t.position.y + body.Height * t.lossyScale.y, highest = float.MinValue;
+            var hits = new RaycastHit[8];
+            float hx = size.x / 2f, hz = size.z / 2f;
+            int nx = Mathf.Max(1, Mathf.CeilToInt(size.x)), nz = Mathf.Max(1, Mathf.CeilToInt(size.z));
+            for (int i = 0; i <= nx; i++)
+                for (int j = 0; j <= nz; j++)
+                {
+                    var p = t.TransformPoint(new Vector3(-hx + size.x * i / nx, 0f, -hz + size.z * j / nz));
+                    int n = Physics.RaycastNonAlloc(new Vector3(p.x, top + 40f, p.z), Vector3.down, hits, 120f, 1 << 6, QueryTriggerInteraction.Ignore);
+                    for (int k = 0; k < n; k++)
+                    {
+                        if (hits[k].collider.transform.IsChildOf(t) || hits[k].collider.name.Contains("walkable deck")) continue;
+                        if (hits[k].point.y > highest) highest = hits[k].point.y;
+                    }
+                }
+            if (highest == float.MinValue || highest <= top + 0.05f) return;
+            float lift = highest - top;
+            t.position += Vector3.up * lift;
+            if (body.Entity != null) body.Entity.StaticPos = t.position.ToVec();
+            Log.For<LogicBodiesManager>().Info($"walkable {body.name}: its deck was {lift:0.00} m under the ground it spans; raised to rest on it (top {highest:0.00} m)");
         }
 
         /// <summary>What an area update for this deck rebuilds: its deck(s) and the margin round them.</summary>
