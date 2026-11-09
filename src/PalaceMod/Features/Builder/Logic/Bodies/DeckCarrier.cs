@@ -71,6 +71,9 @@ namespace PalaceMod.Builder.Logic.Bodies
             {
                 var local = inv.MultiplyPoint3x4(r.position);
                 var to = now.MultiplyPoint3x4(local);
+                // Riders end on the top (one that stood a little under it, on the ground below a low deck, steps up).
+                float top = now.MultiplyPoint3x4(new Vector3(local.x, 0.5f, local.z)).y;
+                if (to.y < top) to.y = top;
                 var cc = r.GetComponent<CharacterController>();
                 if (cc != null) cc.enabled = false;
                 r.position = to;
@@ -81,7 +84,8 @@ namespace PalaceMod.Builder.Logic.Bodies
             }
         }
 
-        /// <summary>A point stands on the deck's top: inside its footprint, at most 0.3 m under and 1 m over the top.</summary>
+        /// <summary>A point stands on the deck's top: inside its footprint, at most 0.6 m under (a unit on the ground under a
+        /// low deck the graphs don't have there, a king half stepped up) and 1.5 m over the top.</summary>
         private static bool OnTop(Matrix4x4 inv, Vector3 p)
         {
             var l = inv.MultiplyPoint3x4(p);
@@ -89,7 +93,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             // The deck box is 0.3 m thick (local y -0.5..0.5); its top face is at local 0.5.
             var top = inv.inverse.MultiplyPoint3x4(new Vector3(l.x, 0.5f, l.z));
             float dy = p.y - top.y;
-            return dy > -0.3f && dy < 1f;
+            return dy > -0.6f && dy < 1.5f;
         }
     }
 }
