@@ -82,9 +82,11 @@ namespace PalaceMod
         {
             if (a == null || states.Count == 0 || !Live()) return null;
             // The state may sit on any ancestor: the unit or tower object, or an attached build slot's root (attach
-            // registers the slot, whose tower and AutoAttack are children of it).
+            // registers the slot, whose tower and AutoAttack are children of it). Not past a unit of its own: a
+            // barracks' squad lives under its slot and keeps the game's targeting, not the slot's.
             for (var t = a.transform; t != null; t = t.parent)
-                if (states.TryGetValue(t.gameObject.GetInstanceID(), out var st) && st.Go == t.gameObject) return st;
+                if (states.TryGetValue(t.gameObject.GetInstanceID(), out var st) && st.Go == t.gameObject)
+                    return t == a.transform || LogicGame.BelongsTo(a.gameObject, t, st.Entity) ? st : null;
             return null;
         }
 

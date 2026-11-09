@@ -24,7 +24,7 @@ namespace PalaceMod.Builder.Logic
             if (c == null) return null;
             var w = World;
             if (w == null) return null;
-            if (c.GetComponentInParent<BuilderEntity>() is { Entity: { } be }) return be;
+            if (LogicGame.OwningBuilder(c) is { Entity: { } be }) return be;
             if (!w.HasOfListeners(ev) && !w.HasListeners(ev)) return null;
             return LogicGame.EntityOf(c);
         }
@@ -38,7 +38,7 @@ namespace PalaceMod.Builder.Logic
         private static LogicEntity AttackerOf(Component from, bool wanted)
         {
             if (from == null) return null;
-            if (from.GetComponentInParent<BuilderEntity>() is { Entity: { } be }) return be;
+            if (LogicGame.OwningBuilder(from) is { Entity: { } be }) return be;
             if (!wanted) return null;
             var tagged = from as TaggedObject ?? from.GetComponentInParent<TaggedObject>();
             return tagged != null ? LogicGame.EntityOf(tagged) : null;
@@ -455,7 +455,7 @@ namespace PalaceMod.Builder.Logic
                         w.Raise("lineSpawn", lineEntity ?? w.Level, LogicGame.EntityOf(_taggedObject), 0, null, line);
                     }
                     // Vanilla objects' `spawn`, for `of` listeners (Builder entities raise their own on register).
-                    if (w.HasOfListeners("spawn") && _taggedObject.GetComponentInParent<BuilderEntity>() == null)
+                    if (w.HasOfListeners("spawn") && LogicGame.OwningBuilder(_taggedObject) == null)
                         w.Raise("spawn", LogicGame.EntityOf(_taggedObject), null, 0, null, null);
                 }
                 catch (Exception e) { Log.For<LogicManager>().Error("spawn hook", e); }
