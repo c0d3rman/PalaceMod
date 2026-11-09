@@ -428,12 +428,19 @@ namespace PalaceMod.Builder.Studio
             if (PaletteCollapsed) return;
             palette.Fill(page =>
             {
-                Tabs(page, PaletteTabs.Select(t => (t.id, t.id == "library" ? StudioServices.AssetBrowser?.Title ?? t.label : t.label)).ToList(), () => PaletteTab, id => { PaletteTab = id; dirtyPalette = true; }, 2);
+                var tabs = PaletteTabs.Select(t => (t.id, t.id == "library" ? StudioServices.AssetBrowser?.Title ?? t.label : t.label)).ToList();
+                tabs.AddRange(Studio.PaletteTabs.Select(t => (t.Id, t.Label)));
+                Tabs(page, tabs, () => PaletteTab, id => { PaletteTab = id; dirtyPalette = true; }, tabs.Count > 4 ? 3 : 2);
+                var extra = Studio.PaletteTabs.FirstOrDefault(t => t.Id == PaletteTab);
                 switch (PaletteTab)
                 {
                     case "slots": StudioPalette.Slots(page); break;
                     case "scenery": StudioPalette.Scenery(page); break;
                     case "spawns": StudioPalette.Spawns(page); break;
+                    case var _ when extra.Build != null:
+                        try { extra.Build(page); }
+                        catch (Exception e) { Log.For<BuilderManager>().Caught($"Studio palette tab {extra.Id} failed", e); }
+                        break;
                     default: StudioPalette.Library(page); break;
                 }
             });
