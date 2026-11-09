@@ -45,7 +45,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             var at = Need(p, "at", "teleport");
             var go = e.Go();
             if (go == null || !e.Exists) return;
-            if (e.Kind is "building" or "castle") throw new LogicError($"teleport: {e.Id} is a {e.Kind}; buildings don't move");
+            if (e.Kind is "building" or "castle") return;   // buildings don't move (skipped, as every verb skips members it can't act on)
             if (go.GetComponent<PlayerMovement>() is { } king) { king.TeleportTo(at); return; }
             var pm = go.GetComponent<PathfindMovement>();
             if (pm is PathfindMovementEnemy en) at = Flyer(go) ? new Vector3(en.GetNearestGroundPosition(at).x, at.y, en.GetNearestGroundPosition(at).z) : en.GetNearestGroundPosition(at);
@@ -134,8 +134,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
         private static SteerState Unit(LogicEntity e, string action)
         {
             var go = e.Go();
-            if (go == null) throw new LogicError($"{action}: {e.Id} has no body");
-            if (go.GetComponent<PathfindMovement>() == null) throw new LogicError($"{action}: {e.Id} isn't a unit that walks");
+            if (go == null || go.GetComponent<PathfindMovement>() == null) return null;   // not a walking unit: skipped
             return LogicSteeringManager.For(e, go);
         }
 
@@ -144,6 +143,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             var e = Target(p, "moveTo");
             if (!e.Alive) return;
             var st = Unit(e, "moveTo");
+            if (st == null) return;
             var g = p.Get("at");
             var order = new MoveToOrder
             {
@@ -165,6 +165,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
         {
             var e = Target(p, "setMovement");
             var st = Unit(e, "setMovement");
+            if (st == null) return;
             var fields = new JObject();
             if (p.Raw("movement") is JObject block) fields.Merge(block);
             foreach (var name in new[] { "mode", "path", "then", "speed", "keepDistance", "kite", "flee", "wander", "home" })
@@ -226,9 +227,10 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             var go = e.Go();
             if (go == null || !e.Alive) return;
             var pu = go.GetComponent<PathfindMovementPlayerunit>();
-            if (pu == null) throw new LogicError($"command: {e.Id} isn't a player unit");
+            if (pu == null) return;   // the king, enemies, buildings: skipped
             var cu = CommandUnits.instance;
             string order = p.Text("order", "follow");
+            if (order is not ("follow" or "hold" or "home")) throw new LogicError($"command order \"{order}\": expected follow, hold or home");
             bool commanded = cu != null && cu.PlayerUnitsCommanding.Contains(pu);
             switch (order)
             {

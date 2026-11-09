@@ -16,7 +16,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
         {
             if (e == null) return;
             var go = e.Go();
-            if (go == null) throw new LogicError($"setTargeting: {e.Id} has no body");
+            if (go == null) return;   // a body-less entity has nothing to aim: skipped
             var st = LogicSteeringManager.For(e, go) ?? throw new LogicError("setTargeting: no logic session");
             st.Targeting ??= new TargetingState();
             st.Targeting.Apply(targeting, seconds, LogicWorld.Current.Time);

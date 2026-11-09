@@ -320,6 +320,9 @@ working. A ranged enemy that kites and prefers towers is just `targeting` plus `
   with the same role: P Melee, P Archer or P Firewing for the player, E Melee, E Archer or E Flyer for the enemy.
   `team` may be an expression (`self.team`). Going `neutral` keeps the unit's own brain, drops its team tags and
   gives it an empty targeting list (it attacks nothing until a rule gives it targets).
+- **Members a verb can't act on are skipped**, not errors: `command` on anything but a player troop, `push`,
+  `moveTo` and `setMovement` on anything without the game's unit movement, `teleport` on buildings, `convert` on
+  anything but a unit. So `all('player and unit', 20)` (which includes the king) works.
 - **`replace`** keeps nothing unless `keep` says so. `hp` keeps the hp fraction, not the absolute value. `then` runs
   with `spawned` = the new entity.
 

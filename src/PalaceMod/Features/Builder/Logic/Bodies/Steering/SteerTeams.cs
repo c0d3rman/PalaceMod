@@ -148,13 +148,13 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             var world = LogicWorld.Current;
             var go = e.Go();
             bool alive = go != null && e.Alive;
-            if (e.Kind is "building" or "castle" or "king") throw new LogicError($"convert: {e.Id} is a {e.Kind}; only units change sides");
+            if (e.Kind is not "unit") return;   // only units change sides; the king, buildings and bodies are skipped
             if (alive && e.Team == team) return;
             Vector3? at = null; Quaternion? rot = null;
             if (!alive)
             {
                 if (LogicSteeringManager.Deaths.TryGetValue(e, out var d)) { at = d.pos; rot = d.rot; }
-                else if (go == null) throw new LogicError($"convert: {e.Id} is gone and where it died isn't known");
+                else if (go == null) return;   // gone, and where it died isn't known: skipped
                 go = null;
             }
             float frac = (float)(hpPct ?? (alive && e.Body != null && e.Body.MaxHp > 0 ? e.Body.Hp / e.Body.MaxHp : 1));
