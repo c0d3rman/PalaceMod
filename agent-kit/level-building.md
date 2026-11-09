@@ -366,7 +366,7 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 | Op | Fields |
 |---|---|
 | `level` | `name`, `description`, `base` (`cleared`/`flat`/null), `waveSet`, `host`, `colors` |
-| `add_slot` | `id`, `kind` (e.g. `"House"`, `"Defense Tower"`, `"Barracks"`; copies the host's slot of that kind, or places the game's standard one, base `building:<kind>`, when the host has none) or `from` (a host slot name), `at` [x,z] or `pos`, `rotY`, `requires` (shorthand), `upgradeCap`, `costs` [per level, null keeps] |
+| `add_slot` | `id`, `kind` (e.g. `"House"`, `"Defense Tower"`, `"Barracks"`; copies the host's slot of that kind, or places the game's standard one, base `building:<kind>`, when the host has none) or `from` (a host slot name), `at` [x,z] or `pos`, `rotY`, `requires` (shorthand), `upgradeCap`, `costs` [per level, null keeps], `pay` (item costs on its build prompt, below "Item costs on a build slot") |
 | `move_slot` | `slot` (added id, host name, `castle` can't move), `at`/`pos`, `rotY` |
 | `set_slot` | `slot` (or `castle`), `requires` (null = back to the map's), `upgradeCap`, `costs` |
 | `set_units` | `slot`, `units` [[x,z] in the slot's frame, null keeps that one] or `at` [[x,z] world points]; `units: null` = back to the map's |
@@ -730,6 +730,15 @@ stat, flag, filter term and built-in preset with its parameters. `palace.py logi
 `attach` keys are the Studio's item keys: `slot:<host slot name>` (names from `palace.py ref slots <map>`),
 `add:<id>` (a slot you added), `prop:<id>`, `line:<spawn line name>`, `castle`. Give an attached object a `name` to
 reach it from expressions as `@name`.
+
+**Item costs on a build slot** (wood, stone, any level variable): give the slot's attach a `pay` list,
+`[{"var": "$wood", "amount": 2, "label": "wood"}, {"var": "$stone", "amount": 3, "label": "stone", "level": 2}]`
+(`level`: 1 = the build, 2 = the first upgrade, ...; none = every build and upgrade). The game's own build prompt
+shows "Costs 2 wood + 3 stone" (with the gold when the slot also costs gold); a press while any item is short is
+refused with a notice before a coin is paid (and fires `interactRefused` on the slot); otherwise the items are taken
+exactly when the build or upgrade happens. `add_slot` takes `pay` directly; for a host slot use `attach` (`"key":
+"slot:<name>"`). A slot that costs only items: `"costs": [0, 0, 0]`. Only the king's purchase pays (`build` and
+`building` actions are free).
 
 A **place** (`logic.places[]`) is `{ "id", "entity": "<template>" | "preset": "<preset>", "with": {...} | "kind":
 "<kind>" + inline fields, "pos": [x, y, z], "rotY", "scale", "name", "active", "vars", "rules" }`. Its `id` (lowercase)
@@ -1109,7 +1118,7 @@ number). Errors in a preset's rules are reported at the place that uses it.
 | `remove_rule` | `on`, `id` |
 | `wire` | `from` (an `on` value), `event` (default `interact`), `to` (a place id/name or attach name), `input` (signal), `value`, `delay`, `do` (the target's listener, for an input that isn't built in) |
 | `var` | `name`, `value` (a level variable), or `on` + `name` + `value` (an entity default) |
-| `attach` | `key`, `name`, `labels`, `vars`, `statuses`, `targeting`, `light` |
+| `attach` | `key`, `name`, `labels`, `vars`, `statuses`, `targeting`, `light`, `interact`, `pay` (a build slot's item costs); any other field is an error (rules: the `rule` op with `on` = the key) |
 | `king_action` | `id`, `name`, `when`, `cooldown`, `uses` |
 | `hud` | `id`, `text`, `icon`, `visible` |
 | `logic` | `seed`, `caps`, `game` (merged rule by rule; `null` puts one back to vanilla) |

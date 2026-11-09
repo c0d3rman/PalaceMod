@@ -119,6 +119,33 @@ class Ops(unittest.TestCase):
         with self.assertRaisesRegex(palace.Fail, "at most 3"):
             ops.run([{"op": "king_action", "id": f"k{i}"} for i in range(3)])
 
+    def test_attach_keeps_interact_and_pay_and_rejects_unknown_fields(self):
+        data, ops = fresh()
+        pay = [{"var": "$wood", "amount": 2, "label": "wood", "level": 1}]
+        ops.run([{"op": "var", "name": "wood", "value": 0},
+                 {"op": "attach", "key": "slot:Tower 3", "name": "t3", "interact": {"prompt": "Pray", "cost": 1}, "pay": pay}])
+        a = data["levels"][0]["logic"]["attach"]["slot:Tower 3"]
+        self.assertEqual(a["interact"], {"prompt": "Pray", "cost": 1})
+        self.assertEqual(a["pay"], pay)
+        with self.assertRaisesRegex(palace.Fail, "attach doesn't take 'interract'"):
+            ops.run([{"op": "attach", "key": "castle", "interract": {}}])
+        with self.assertRaisesRegex(palace.Fail, "pay .* goes on a build slot"):
+            ops.run([{"op": "attach", "key": "line:West", "pay": pay}])
+        issues = logic_issues(data)
+        if issues is not None:
+            self.assertEqual([i for i in issues if i["severity"] == "error"], [])
+            self.assertEqual([i for i in issues if "unknown field" in i.get("message", "")], [])
+
+    def test_slot_pay_level_only_on_slots(self):
+        data, ops = fresh()
+        ops.run([{"op": "var", "name": "wood", "value": 0},
+                 {"op": "place", "id": "stall", "kind": "prop", "at": [0, 0],
+                  "interact": {"pay": [{"var": "$wood", "amount": 1, "level": 2}]}}])
+        issues = logic_issues(data)
+        if issues is None:
+            self.skipTest("palace_logic.py not present")
+        self.assertTrue(any("level is for a build slot's pay" in i["message"] for i in issues), issues)
+
     def test_migrates_v2_behaviours(self):
         pk = {"format": "palace-builder", "version": 2, "units": [{"id": "b", "behaviours": [{"type": "SpawnOnDeath", "unit": "m"}]}]}
         palace.migrate_pack(pk)

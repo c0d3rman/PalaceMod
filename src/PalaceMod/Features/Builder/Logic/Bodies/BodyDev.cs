@@ -134,12 +134,15 @@ namespace PalaceMod.Builder.Logic.Bodies
 
         private static float F(string s) => float.Parse(s, CultureInfo.InvariantCulture);
 
-        /// <summary>interact &lt;entity&gt; [holdFrames]: the king focuses it, presses interact and holds (pays) like the player.</summary>
+        /// <summary>interact &lt;entity&gt; [holdFrames]: the king focuses it, presses interact and holds (pays) like the
+        /// player. An entity without an interact block that is a build slot (attached) uses the slot's own build prompt.</summary>
         public static string Interact(string[] a)
         {
             var world = LogicWorld.Current;
             var e = a.Length > 0 ? world?.FindNamed(a[0].TrimStart('@')) ?? world?.Find(a[0]) : null;
-            var i = e?.Go()?.GetComponentInChildren<BuilderInteractor>();
+            var go = e?.Go();
+            InteractorBase i = go == null ? null : go.GetComponentInChildren<BuilderInteractor>();
+            if (i == null && go != null) i = go.GetComponentInChildren<BuildingInteractor>(true) ?? go.GetComponentInParent<BuildSlot>(true)?.buildingInteractor;
             var player = PlayerInteraction.instance;
             if (i == null || player == null) return "no interactable / no king";
             int frames = a.Length > 1 ? int.Parse(a[1]) : 600;
@@ -159,7 +162,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             return $"focused {f.GetType().Name} of {e?.Id ?? f.name}, prompt \"{f.ReturnTooltip()}\"";
         }
 
-        private static System.Collections.IEnumerator Hold(BuilderInteractor i, PlayerInteraction player, int frames)
+        private static System.Collections.IEnumerator Hold(InteractorBase i, PlayerInteraction player, int frames)
         {
             i.Focus(player);
             i.InteractionBegin(player);
