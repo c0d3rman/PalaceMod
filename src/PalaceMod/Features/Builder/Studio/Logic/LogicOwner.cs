@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Newtonsoft.Json.Linq;
+using PalaceMod.Builder.Editor;
 using PalaceMod.Builder.Model;
 using PalaceMod.Builder.Studio.Enemies;
 
@@ -25,6 +26,18 @@ namespace PalaceMod.Builder.Studio.Logic
 
         public static LogicOwner Unit(string unitId, string title) => new() { Kind = OwnerKind.Unit, Id = unitId, Title = title };
 
+        /// <summary>A non-unit template of the open draft (pack entities[]): the Entity Studio's thing.</summary>
+        public static LogicOwner Entity(string templateId, string title = null) =>
+            new() { Kind = OwnerKind.Entity, Id = templateId, Title = title ?? (string)LogicDoc.EntityNode(DraftPack, templateId)?["name"] ?? templateId };
+
+        /// <summary>A status of the open draft (pack statuses[]).</summary>
+        public static LogicOwner Status(string statusId) =>
+            new() { Kind = OwnerKind.Status, Id = statusId, Title = (string)LogicDoc.StatusNode(DraftPack, statusId)?["name"] ?? statusId };
+
+        /// <summary>The draft templates are edited in: the Enemy/Entity Studio's, else the Level Studio's.</summary>
+        public static PackDraft Draft => EnemyStudio.Draft ?? Studio.Draft;
+        public static DesignPack DraftPack => Draft?.Pack;
+
         /// <summary>The owner for a Studio item key: a place, or an attach on the level's own object.</summary>
         public static LogicOwner ForItem(string studioKey)
         {
@@ -46,11 +59,27 @@ namespace PalaceMod.Builder.Studio.Logic
         }
 
         public bool IsUnit => Kind == OwnerKind.Unit;
+        /// <summary>A template (a unit or a thing): edited outside any level, so no wires or @name.</summary>
+        public bool IsTemplate => Kind is OwnerKind.Unit or OwnerKind.Entity or OwnerKind.Status;
+
+        /// <summary>What the owner really is: a place's template merged under its own fields; else its node.</summary>
+        /// <summary>Whether it is one of these kinds or has one of these parts (events only some things have: an
+        /// area's enter, a mover's arrive).</summary>
+        public bool Has(IEnumerable<string> kindsOrParts)
+        {
+            var node = Effective();
+            string kind = Kind == OwnerKind.Place ? PlaceItems.KindOf(Read()) : (string)node?["kind"];
+            return kindsOrParts.Any(k => k == kind || node?[k] is JObject);
+        }
+
+        public JObject Effective() => Kind == OwnerKind.Place ? LogicDoc.Effective(DraftPack, Read()) : Read();
 
         /// <summary>The owner's node now (a copy; null if it has none yet).</summary>
         public JObject Read()
         {
             if (IsUnit) return EnemyStudio.Unit?.Id == Id ? LogicDoc.UnitNode(EnemyStudio.Unit) : LogicDoc.UnitNode(Studio.Draft?.Pack.Units.FirstOrDefault(u => u?.Id == Id));
+            if (Kind == OwnerKind.Entity) return LogicDoc.EntityNode(DraftPack, Id);
+            if (Kind == OwnerKind.Status) return LogicDoc.StatusNode(DraftPack, Id);
             var logic = LogicDoc.Logic(Studio.Level);
             return LogicDoc.Node(logic, Kind, Id, false);
         }
@@ -71,6 +100,15 @@ namespace PalaceMod.Builder.Studio.Logic
                     var draft = Studio.Draft;
                     draft?.Edit(label, p => { var u = p.Units.FirstOrDefault(x => x?.Id == Id); if (u != null) LogicDoc.EditUnit(u, change); }, structural: true, coalesce: coalesce);
                 }
+                LogicStudio.Changed();
+                return;
+            }
+            if (Kind is OwnerKind.Entity or OwnerKind.Status)
+            {
+                var d = Draft ?? throw new InvalidOperationException("no draft open");
+                string eid = Id;
+                bool status = Kind == OwnerKind.Status;
+                d.Edit(label, p => { if (status) LogicDoc.EditStatus(p, eid, change); else LogicDoc.EditEntity(p, eid, change); }, structural: true, coalesce: coalesce);
                 LogicStudio.Changed();
                 return;
             }

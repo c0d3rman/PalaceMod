@@ -22,16 +22,29 @@ namespace PalaceMod.Builder.Studio.Logic
         public static void Build(ModPage page, LogicOwner owner)
         {
             page.FieldIndent = Math.Min(page.FieldIndent, 150f);
+            // A template or status opened from here shows in place of the selection, with the way back on top.
+            var focus = LogicStudio.Focus;
+            if (focus != null && !focus.Equals(owner))
+            {
+                if (focus.Read() == null) LogicStudio.FocusOn(null);
+                else
+                {
+                    LogicFields.Action(page, "← " + Esc(owner == null || owner.Kind == OwnerKind.Level ? "This level" : owner.Title), () => LogicStudio.FocusOn(null), "Back to what's selected.");
+                    owner = focus;
+                }
+            }
             if (owner == null || owner.Kind == OwnerKind.Level) { Level(page); return; }
             var node = owner.Read() ?? new JObject();
-            StudioDock.SmallHeader(page, Esc(owner.Title));
-            if (owner.IsUnit) Badge(page, node);
+            StudioDock.SmallHeader(page, Esc(owner.Kind == OwnerKind.Status ? "Status: " + owner.Title : owner.Kind == OwnerKind.Entity ? "Thing: " + owner.Title : owner.Title));
+            if (owner.Kind == OwnerKind.Status) { StatusPanel.Build(page, owner); return; }
+            if (owner.IsTemplate) Badge(page, node);
             if (owner.Kind is OwnerKind.Attach or OwnerKind.Place) NameField(page, owner, node);
             LabelsField(page, owner);
             if (owner.Kind == OwnerKind.Place) PlaceFields(page, owner, node);
+            if (owner.Kind is OwnerKind.Place or OwnerKind.Entity) PartsPanel.Build(page, owner);
             Variables(page, owner, "Variables", "Numbers, yes/no, text or positions this thing keeps (self.$name).");
             Rules(page, owner, "Rules");
-            if (!owner.IsUnit) WireList(page, owner);
+            if (!owner.IsTemplate) WireList(page, owner);
         }
 
         // ---- Badge -------------------------------------------------------------------------------------------------
@@ -79,37 +92,6 @@ namespace PalaceMod.Builder.Studio.Logic
             page.Toggle("Starts on", () => !(owner.Read()?["active"]?.Type == JTokenType.Boolean && !(bool)owner.Read()["active"]),
                 v => owner.Edit(v ? "Start on" : "Start off", n => { if (v) n.Remove("active"); else n["active"] = false; }),
                 () => "Off: its rules, body and look wait until something sends it \"enable\".");
-            if (kind == "area")
-            {
-                var shape = node["area"]?["shape"] as JObject;
-                bool rect = shape?["rect"] != null;
-                page.Choice("Shape", ["Circle", "Rectangle"], () => rect ? 1 : 0, i => owner.Edit("Set shape", n => Area(n)["shape"] = i == 0
-                    ? new JObject { ["circle"] = new JObject { ["radius"] = 4 } } : new JObject { ["rect"] = new JObject { ["size"] = new JArray(4, 4) } }));
-                if (!rect)
-                    page.Number("Radius (m)", () => (float?)(owner.Read()?["area"]?["shape"]?["circle"]?["radius"]) ?? 4f,
-                        v => owner.Edit("Set radius", n => Area(n)["shape"] = new JObject { ["circle"] = new JObject { ["radius"] = Round(v) } }, "radius"), 0.5f, 60f, 0.5f);
-                else
-                {
-                    page.Number("Width (m)", () => (float?)(owner.Read()?["area"]?["shape"]?["rect"]?["size"]?[0]) ?? 4f,
-                        v => owner.Edit("Set size", n => SetRect(n, 0, v), "rect"), 0.5f, 120f, 0.5f);
-                    page.Number("Depth (m)", () => (float?)(owner.Read()?["area"]?["shape"]?["rect"]?["size"]?[1]) ?? 4f,
-                        v => owner.Edit("Set size", n => SetRect(n, 1, v), "rect"), 0.5f, 120f, 0.5f);
-                }
-                var watch = new ParamUi { Name = "watch", Label = "Watches", Kind = ParamKind.Filter, Default = "unit", Desc = "What it notices (a filter)." };
-                LogicFields.Param(page, "Watches", watch, () => owner.Read()?["area"]?["watch"], (v, l) => owner.Edit(l, n => { if (v == null) Area(n).Remove("watch"); else Area(n)["watch"] = v; }), owner.Scope(null),
-                    () => RuleEditor.OpenPicker("Watches…", p => RuleEditor.FilterPicker(p, (string)owner.Read()?["area"]?["watch"], f => owner.Edit("Set watches", n => Area(n)["watch"] = f), false)));
-                string[] shows = ["outline", "fill", "none"];
-                page.Choice("Shown", ["Outline", "Filled", "Hidden"], () => Math.Max(0, Array.IndexOf(shows, (string)owner.Read()?["area"]?["show"] ?? "outline")),
-                    i => owner.Edit("Set shown", n => Area(n)["show"] = shows[i]), tooltip: () => "How players see it in the level.");
-            }
-            if (node["interact"] is JObject)
-            {
-                page.TextInput("Prompt", () => (string)owner.Read()?["interact"]?["prompt"] ?? "", v => owner.Edit("Set prompt", n => ((JObject)n["interact"])["prompt"] = v ?? ""), () => "What the king sees. {cost} shows the price.");
-                page.Number("Cost (gold)", () => (float?)(owner.Read()?["interact"]?["cost"]) ?? 0f, v => owner.Edit("Set cost", n => { if (v <= 0) ((JObject)n["interact"]).Remove("cost"); else ((JObject)n["interact"])["cost"] = (int)v; }, "cost"), 0f, 999f);
-                string[] whens = ["day", "night", "always"];
-                page.Choice("Usable", ["By day", "At night", "Always"], () => Math.Max(0, Array.IndexOf(whens, (string)owner.Read()?["interact"]?["when"] ?? "always")),
-                    i => owner.Edit("Set usable", n => ((JObject)n["interact"])["when"] = whens[i]));
-            }
             if (kind == "path" && node["points"] is JArray pts)
             {
                 StudioDock.SmallHeader(page, "Points");
@@ -118,23 +100,10 @@ namespace PalaceMod.Builder.Studio.Logic
                     var pt = pts[i] as JArray;
                     StudioDock.Compact(page.Row($"Point {i + 1}", pt == null ? "" : $"x {(float)pt[0]:0.#}  z {(float)pt[pt.Count - 1]:0.#}"), false, 60f, page.Size.x);
                 }
+                page.Text(Dim("Drag the points on the map; Ctrl-click one to remove it, click a segment's middle to add one."));
                 LogicFields.Buttons(page, ("+ point", () => AddPathPoint(owner), "Adds a point after the last, 4 m on"),
                     ("− point", pts.Count > 2 ? () => owner.Edit("Remove point", n => ((JArray)n["points"]).Last.Remove()) : null, null));
             }
-        }
-
-        private static JObject Area(JObject n)
-        {
-            if (n["area"] is not JObject a) n["area"] = a = new JObject();
-            return a;
-        }
-
-        private static void SetRect(JObject n, int i, float v)
-        {
-            var a = Area(n);
-            var size = a["shape"]?["rect"]?["size"] as JArray ?? new JArray(4, 4);
-            size[i] = Round(v);
-            a["shape"] = new JObject { ["rect"] = new JObject { ["size"] = size } };
         }
 
         private static void AddPathPoint(LogicOwner owner) => owner.Edit("Add point", n =>
@@ -263,7 +232,33 @@ namespace PalaceMod.Builder.Studio.Logic
             Rules(page, level, "Level script");
             KingActions(page);
             Hud(page);
+            Templates(page);
             Caps(page);
+        }
+
+        /// <summary>The pack's things (non-unit templates) and statuses: each opens here (or in the Entity Studio).</summary>
+        private static void Templates(ModPage page)
+        {
+            var pack = LogicOwner.DraftPack;
+            if (pack == null) return;
+            StudioDock.SmallHeader(page, "Statuses");
+            if (pack.Statuses == null || pack.Statuses.Count == 0) page.Text(Dim("None. Buffs and debuffs: apply them with rules."));
+            foreach (var s in pack.Statuses ?? [])
+            {
+                if (s?.Id == null) continue;
+                string id = s.Id;
+                StudioDock.DetailRow(page, Esc(s.Name ?? id), Esc(StatusPanel.Describe(LogicDoc.StatusNode(pack, id))), false, null, () => LogicStudio.FocusOn(LogicOwner.Status(id)), () => "Click to edit it.");
+            }
+            LogicFields.Action(page, "+ status", () => { var id = StatusPanel.New(); if (id != null) LogicStudio.FocusOn(LogicOwner.Status(id)); }, "A timed modifier with its own rules (burning, warded...).");
+            StudioDock.SmallHeader(page, "Things");
+            if (pack.Entities == null || pack.Entities.Count == 0) page.Text(Dim("None. Projectiles, props and pickups to place, spawn or launch."));
+            foreach (var e in pack.Entities ?? [])
+            {
+                if (e?.Id == null) continue;
+                string id = e.Id;
+                StudioDock.DetailRow(page, Esc(e.Name ?? id), Esc($"{e.Kind ?? "prop"} · {id}"), false, null, () => LogicStudio.EditThing(id), () => "Click to edit it.");
+            }
+            LogicFields.Buttons(page, ("+ thing", () => LogicStudio.NewThing(null), "A projectile, prop, pickup or logic object template."));
         }
 
         private static void KingActions(ModPage page)
