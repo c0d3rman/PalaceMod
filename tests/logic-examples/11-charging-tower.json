@@ -46,7 +46,7 @@
       "bolts": 0
      },
      "attach": {
-      "slot:Tower 3": {
+      "slot:Defense Tower Variant (1)": {
        "name": "northTower",
        "vars": {
         "hits": 0
@@ -98,19 +98,13 @@
   ]
  },
  "play": {
-  "setup": "Build slot:Tower 3 first (`building` action), then enemies in range.",
+  "setup": "Build the castle and Nordfels' tower slot \"Defense Tower Variant (1)\" (needs castle level 1), then enemies in range.",
   "steps": [
    {
     "cmd": "agent build castle"
    },
    {
-    "do": [
-     {
-      "do": "building",
-      "slot": "slot:Tower 3",
-      "op": "build"
-     }
-    ]
+    "cmd": "agent build Defense_Tower_Variant_(1)"
    },
    {
     "cmd": "night"

@@ -699,7 +699,7 @@ stat, flag, filter term and built-in preset with its parameters. `palace.py logi
       "vars": { "souls": 0, "season": "'summer'" },   // level variables and start values
       "rules": [...],                                 // the level script: self is the level
       "places": [...],                                // objects placed on the map (templates, areas, paths, points, logic objects)
-      "attach": { "slot:Tower 3": { "name": "northTower", "vars": { "hits": 0 }, "rules": [...] },
+      "attach": { "slot:Defense Tower Variant (1)": { "name": "northTower", "vars": { "hits": 0 }, "rules": [...] },
                   "castle": { "rules": [...] } },     // logic on things the level already has
       "hud": [{ "id": "souls", "text": "Souls {$souls}/10" }],
       "kingActions": [{ "id": "horn", "name": "War horn" }],   // up to 3 extra keys for the player
@@ -971,10 +971,10 @@ is:spore') < 40", "do": [{"do": "spawn", "entity": "=self.template", "at": "poin
 15}]}`, spawned with `"team": "neutral"`; enemies prefer it: level rule `{"when": {"on": "spawn", "of": "enemy"}, "do":
 [{"do": "setTargeting", "target": "subject", "prepend": ["is:caravan"]}]}`.
 
-**Charging tower** (every fifth hit fires a bolt), on an attached slot:
-`{"op": "rule", "on": "slot:Tower 3", "rule": {"when": "hit", "do": [{"do": "addVar", "name": "hits", "value": 1},
+**Charging tower** (every fifth hit fires a bolt), on an attached slot (Nordfels' slot names: `palace.py ref slots Nordfels`):
+`{"op": "rule", "on": "slot:Defense Tower Variant (1)", "rule": {"when": "hit", "do": [{"do": "addVar", "name": "hits", "value": 1},
 {"do": "if", "cond": "self.$hits % 5 == 0", "then": [{"do": "launch", "entity": "bolt", "toward": "other", "pierce": -1}]}]}}`
-plus `{"op": "var", "on": "slot:Tower 3", "name": "hits", "value": 0}`.
+plus `{"op": "var", "on": "slot:Defense Tower Variant (1)", "name": "hits", "value": 0}`.
 
 **Volcano**: a logic place with `{"when": {"on": "every", "seconds": 12, "during": "night"}, "do": [{"do": "launch",
 "entity": "lava-rock", "toward": "pointNear(self, 15)"}]}`; `lava-rock` (projectile, `gravity`) on `impact` damages
