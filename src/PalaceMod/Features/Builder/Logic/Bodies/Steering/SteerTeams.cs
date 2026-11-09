@@ -101,9 +101,11 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             string counterpart = (string)e?.Def?["counterpart"];
             if (counterpart != null)
             {
-                var cr = ContentRef.Parse(counterpart);
-                prefab = cr.Kind == RefKind.Vanilla ? BuilderServices.Catalog?.FindUnit(cr.Id)?.Prefab : null;
-                if (prefab == null) return (null, $"counterpart \"{counterpart}\": only vanilla units can be counterparts until the factory is on main");
+                string why = "the unit factory isn't ready";
+                prefab = BuilderServices.Units?.Resolve(BuilderServices.Sessions?.Current?.Pack, counterpart, out why);
+                if (prefab == null) return (null, $"counterpart \"{counterpart}\": {why}");
+                bool enemyPrefab = prefab.GetComponentInChildren<TaggedObject>(true)?.Tags.Contains(TagManager.ETag.EnemyOwned) == true;
+                if (enemyPrefab != (team == "enemy")) return (null, $"counterpart \"{counterpart}\" is a {(enemyPrefab ? "enemy" : "player")} unit, not {team}");
             }
             else
             {
@@ -114,6 +116,8 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             }
 
             var made = Object.Instantiate(prefab, pos, r);
+            made.name = made.name.Replace("(Clone)", "").Trim();
+            if (!made.activeSelf) made.SetActive(true);   // Builder templates are kept inactive
             if (team == "enemy") Spawn.AdjustEnemyParametersAfterSpawn(made, false);
             if (look != null && look != "vanilla:" + prefab.name)
             {

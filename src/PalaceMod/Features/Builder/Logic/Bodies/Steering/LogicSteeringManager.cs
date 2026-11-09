@@ -35,6 +35,7 @@ namespace PalaceMod
             LogicServices.Targeting = TargetingService;
             LogicServices.TargetOf = TargetOf;
             BodyEvents.UnitSpawned += OnUnitSpawned;
+            Teams.Convert = (e, go, team) => SteerTeams.Convert(e, go, team);
             SteerActions.Register();
             LogicSaveState.Register("steering", SteerSave.Capture, SteerSave.Restore);
             DevCommands.Register("logic-steer", "logic-steer apply <role> <json> | state <role> | units   steering (L2): apply a unit template's targeting/movement/attacks to live units, inspect", SteerDev.Run);

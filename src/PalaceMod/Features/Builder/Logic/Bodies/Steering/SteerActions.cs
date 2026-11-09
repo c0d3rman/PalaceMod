@@ -200,7 +200,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             var e = Target(p, "taunt");
             var toward = p.Entity("toward") ?? throw new LogicError("taunt: `toward` must be an entity");
             double seconds = p.Number("for", 5);
-            if (e.Kind == "projectile") throw new LogicError("taunt: redirecting projectiles comes with Bodies' Projectiles.Redirect (not on main yet)");
+            if (e.Kind == "projectile") { Projectiles.Redirect(e, toward, null); return; }   // a decoy pulls arrows
             var go = e.Go();
             if (go == null || !e.Alive) return;
             var st = LogicSteeringManager.For(e, go);
