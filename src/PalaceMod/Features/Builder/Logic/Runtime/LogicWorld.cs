@@ -330,6 +330,38 @@ namespace PalaceMod.Builder.Logic
             foreach (var n in nears) n.NearInside?.Remove(e);
         }
 
+        /// <summary>
+        /// Bring a forgotten entity back (`convert` raising a dead unit, a respawn that keeps identity): clears
+        /// Destroyed, re-indexes its id, name and existing rule instances (timers and `near` restart from now), and
+        /// raises `spawn` if asked. Its vars, labels and rule state (once, cooldown) are kept.
+        /// </summary>
+        public void Revive(LogicEntity e, bool raiseSpawn = false)
+        {
+            e.Destroyed = false;
+            byId[e.Id] = e;
+            if (!string.IsNullOrEmpty(e.Name)) byName[e.Name] = e;
+            if (e.Spawned) { liveSpawned++; CountCap(e, +1); }
+            foreach (var ri in e.Rules)
+            {
+                var r = ri.Rule;
+                if (r.Event == null) continue;
+                var l = Index(byEvent, r.Event);
+                if (!l.Contains(ri)) l.Add(ri);
+                if (r.Of != null) { l = Index(ofByEvent, r.Event); if (!l.Contains(ri)) l.Add(ri); }
+                if (r.Event == "every" && !timers.Contains(ri)) { ri.NextTime = Time + r.Seconds; timers.Add(ri); }
+                if (r.Event == "near" && !nears.Contains(ri)) { ri.NearInside = []; nears.Add(ri); }
+            }
+            if (raiseSpawn) Raise("spawn", e, e.Owner, 0, null, null, 0);
+        }
+
+        /// <summary>Give an entity a (new) `@name`, taking it from whoever had it (`replace` carries the name over).</summary>
+        public void Rename(LogicEntity e, string name)
+        {
+            if (e.Name != null && byName.TryGetValue(e.Name, out var cur) && cur == e) byName.Remove(e.Name);
+            e.Name = name;
+            if (!string.IsNullOrEmpty(name)) byName[name] = e;
+        }
+
         /// <summary>After places and attaches exist: raise `levelStart`.</summary>
         public void BeginLevel()
         {
