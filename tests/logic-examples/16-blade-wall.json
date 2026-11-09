@@ -1,0 +1,106 @@
+{
+ "example": 16,
+ "title": "A rotating blade wall",
+ "doc": "Expressiveness check 16",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex16",
+  "name": "Example 16: Blade wall",
+  "entities": [
+   {
+    "id": "blade-wall",
+    "kind": "prop",
+    "visual": {
+     "mesh": "mesh:Wall"
+    },
+    "body": {
+     "box": [
+      6,
+      1
+     ],
+     "height": 2,
+     "solid": true
+    },
+    "mover": {
+     "spin": 90
+    },
+    "rules": [
+     {
+      "when": {
+       "on": "every",
+       "seconds": 0.5
+      },
+      "do": [
+       {
+        "do": "damage",
+        "target": "all('unit and not Flying', 3)",
+        "amount": 8
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "levels": [
+   {
+    "id": "ex16",
+    "name": "Example 16: Blade wall",
+    "host": "Nordfels",
+    "logic": {
+     "vars": {
+      "cuts": 0
+     },
+     "places": [
+      {
+       "id": "blades",
+       "entity": "blade-wall",
+       "pos": [
+        -4,
+        0,
+        -30
+       ]
+      }
+     ],
+     "rules": [
+      {
+       "note": "fixture observer",
+       "when": {
+        "on": "damaged",
+        "of": "unit",
+        "range": 4
+       },
+       "do": [
+        {
+         "do": "addVar",
+         "name": "cuts",
+         "value": 1
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "cmd": "night"
+   },
+   {
+    "do": [
+     {
+      "do": "spawn",
+      "entity": "vanilla:E Ogre",
+      "at": "vec(-4, -31)"
+     }
+    ]
+   },
+   {
+    "expect": "$cuts >= 1 and @blades.facing != 0",
+    "within": 5
+   }
+  ]
+ }
+}

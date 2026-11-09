@@ -39,7 +39,7 @@ from pathlib import Path
 
 VERSION = "1.0"
 HERE = Path(__file__).resolve().parent
-PACK_VERSION = 2
+PACK_VERSION = 3
 
 
 class Fail(Exception):
@@ -463,12 +463,45 @@ def library_origins(root):
     return found
 
 
+def migrate_pack(obj):
+    """Upgrades pack JSON in place to PACK_VERSION, as the mod's Migrations do (Model/PackSerializer.cs)."""
+    v = obj.get("version") if isinstance(obj.get("version"), int) else 0
+    if v < 2:
+        for lv in obj.get("levels") or []:
+            adds = ((lv.get("buildSlots") or {}).get("add")) or []
+            ids = {a.get("id") for a in adds if isinstance(a, dict)}
+            for a in adds:
+                act, lvl = a.pop("activator", None), a.pop("activatorLevel", None)
+                if isinstance(act, str) and "requires" not in a:
+                    a["requires"] = {"slot": "add:" + act if act in ids else act, "level": lvl if isinstance(lvl, int) else 0}
+    if v < 3:
+        # behaviours [{"type": "SpawnOnDeath", "unit": U}] -> a rule at the front of rules (the unit factory runs it
+        # on the game's own enemyToSpawnOnDeath, so it plays as before).
+        for u in obj.get("units") or []:
+            bs = u.pop("behaviours", None)
+            if not isinstance(bs, list):
+                continue
+            rules, unknown = [], []
+            for b in bs:
+                if isinstance(b, dict) and b.get("type") == "SpawnOnDeath" and isinstance(b.get("unit"), str):
+                    rules.append({"when": "death", "do": [{"do": "spawn", "entity": b["unit"], "at": "self", "elite": "inherit"}]})
+                else:
+                    unknown.append(b)
+            if unknown:
+                u["behaviours"] = unknown
+            if rules:
+                u["rules"] = rules + (u.get("rules") or [])
+    if v and v < PACK_VERSION:
+        obj["version"] = PACK_VERSION
+    return obj
+
+
 def load_library(ref):
     data = {"format": "palace-builder", "version": PACK_VERSION, "id": LIBRARY_ID, "name": "My library", "assets": {},
             "units": [], "waveSets": [], "levels": []}
     for kind in ("levels", "enemies"):
         for f in _item_files(ref.root, kind):
-            item = json.loads(f.read_text(encoding="utf-8"))
+            item = migrate_pack(json.loads(f.read_text(encoding="utf-8")))
             meta = item.get("library") or {}
             if kind == "levels":
                 if ref.origin and meta.get("origin") != ref.origin:
@@ -570,7 +603,7 @@ def load_pack(env, pack):
         return path, load_library(path)
     if not path.exists():
         raise Fail(f"No pack at {path}. Make a library level with `palace.py new <level> --host <map>`.")
-    return path, json.loads(path.read_text(encoding="utf-8"))
+    return path, migrate_pack(json.loads(path.read_text(encoding="utf-8")))
 
 
 def save_pack(path, data):

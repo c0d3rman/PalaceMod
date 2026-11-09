@@ -122,15 +122,15 @@ namespace PalaceMod.Builder
         {
             error = null;
             string key = pack.Id + "/" + def.Id;
-            // Rebuild when anything in the pack changed (a unit can reference others, e.g. through SpawnOnDeath).
+            // Rebuild when anything in the pack changed (a unit can reference others, e.g. by spawning on death).
             string hash = PackSerializer.WriteCompact(pack);
             // A scenery model is drawn with the loaded map's materials: rebuild it on each map.
             if (PalaceMod.Builder.Assets.AssetVisuals.SceneDependent(def.Visuals)) hash += "|scene " + SceneManager.GetActiveScene().handle;
             if (templates.TryGetValue(key, out var cached) && cached.template != null && cached.hash == hash) return cached.template;
-            if (!building.Add(key)) { error = $"unit {key} spawns itself (through SpawnOnDeath)"; return null; }
+            if (!building.Add(key)) { error = $"unit {key} spawns itself (through its spawn-on-death rule)"; return null; }
             try
             {
-                // Live clones may still point at the old template (SpawnOnDeath), so retire it until Clear().
+                // Live clones may still point at the old template (spawn on death), so retire it until Clear().
                 if (cached.template != null) owned.Add(cached.template);
                 var template = Build(pack, def, out error);
                 if (template == null) { templates.Remove(key); return null; }
@@ -181,8 +181,10 @@ namespace PalaceMod.Builder
             ApplyTags(go, def.Tags, inPlace);
             ApplyText(go, pack, def);
             ApplyVisuals(go, pack, def.Visuals, clones, notes);
-            foreach (var b in def.Behaviours ?? [])
-                ApplyBehaviour(go, pack, def, b, notes);
+            // A unit's simple spawn-on-death rule runs on the game's own machinery (Model/Logic/LogicLowering), so
+            // packs migrated from version 2's SpawnOnDeath behaviour play exactly as before.
+            if (Model.Logic.LogicLowering.LoweredSpawnOnDeath(def, Model.Logic.LogicLowering.IsUnitIn(pack)) is string onDeath)
+                ApplySpawnOnDeath(go, pack, onDeath, notes);
         }
 
         private static void ApplyStats(GameObject go, StatsDef s)
@@ -463,21 +465,11 @@ namespace PalaceMod.Builder
             }
         }
 
-        private void ApplyBehaviour(GameObject go, DesignPack pack, UnitDef def, BehaviourDef b, List<string> notes)
+        private void ApplySpawnOnDeath(GameObject go, DesignPack pack, string unit, List<string> notes)
         {
-            switch (b.Type)
-            {
-                case BehaviourTypes.SpawnOnDeath:
-                {
-                    var spawn = Resolve(pack, b.GetString("unit"), out string err);
-                    if (spawn == null) { notes.Add($"SpawnOnDeath: {err}"); return; }
-                    foreach (var hp in go.GetComponentsInChildren<Hp>(true)) hp.enemyToSpawnOnDeath = spawn;
-                    break;
-                }
-                default:
-                    notes.Add($"unknown behaviour {b.Type} ignored");
-                    break;
-            }
+            var spawn = Resolve(pack, unit, out string err);
+            if (spawn == null) { notes.Add($"spawn on death: {err}"); return; }
+            foreach (var hp in go.GetComponentsInChildren<Hp>(true)) hp.enemyToSpawnOnDeath = spawn;
         }
 
         /// <summary>One-line stat summary of a unit GameObject (template or live), for logs and `builder` commands.</summary>

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using PalaceMod.Builder.Model.Logic;
 
 namespace PalaceMod.Builder.Model
 {
@@ -50,7 +51,7 @@ namespace PalaceMod.Builder.Model
     public static class Validator
     {
         // TagManager.ETag names. Changing Flying or LargeUnit would also need a pathfinding graph change, which v1 doesn't do.
-        private static readonly HashSet<string> TagNames = new(Enum.GetNames(typeof(TagManager.ETag)));
+        private static readonly HashSet<string> TagNames = LogicSchema.Tags; // TagManager.ETag (pure C#, so tests can load it)
         private static readonly HashSet<string> MovementTags = ["Flying", "LargeUnit"];
 
         public static bool IsTag(string name) => TagNames.Contains(name);
@@ -169,19 +170,11 @@ namespace PalaceMod.Builder.Model
                         else if (MovementTags.Contains(t)) Error(p + ".tags", $"\"{t}\" changes how the unit paths and can't be added or removed yet; pick a base that has it");
                     }
                 }
-                for (int j = 0; j < (u.Behaviours?.Count ?? 0); j++)
-                {
-                    var bh = u.Behaviours[j];
-                    string bp = $"{p}.behaviours[{j}]";
-                    if (bh == null || !BehaviourTypes.All.Contains(bh.Type)) { Error(bp + ".type", $"unknown behaviour \"{bh?.Type}\" (known: {string.Join(", ", BehaviourTypes.All)})"); continue; }
-                    if (bh.Type == BehaviourTypes.SpawnOnDeath)
-                    {
-                        string unit = bh.GetString("unit");
-                        if (unit == null) Error(bp + ".unit", "needs a unit ref");
-                        else if (unit == u.Id || unit == "unit:" + u.Id) Error(bp + ".unit", "a unit can't spawn itself on death");
-                        else CheckUnitRef(unit, bp + ".unit", UnitSide.Enemy);
-                    }
-                }
+                if (u.Extra != null && u.Extra.ContainsKey("behaviours"))
+                    Error(p + ".behaviours", "unknown behaviour (behaviours are rules since pack version 3; see docs/builder-engine.md)");
+                // A unit's simple spawn-on-death rule runs on the game's own enemyToSpawnOnDeath (LogicLowering).
+                int lowered = LogicLowering.LoweredRuleIndex(u, LogicLowering.IsUnitIn(pack));
+                if (lowered >= 0) CheckUnitRef(LogicLowering.SpawnOnDeathUnit(u.Rules[lowered]), $"{p}.rules[{lowered}].do[0].entity", UnitSide.Enemy);
             }
 
             var waveIds = new HashSet<string>();
@@ -310,6 +303,7 @@ namespace PalaceMod.Builder.Model
                 if (!LevelBases.IsKnown(l.Base)) Error(p + ".base", $"must be \"{LevelBases.Cleared}\", \"{LevelBases.Flat}\" or absent");
                 CheckLevelRequirements(l, p);
             }
+            LogicValidator.Validate(pack, game, issues);
             return issues;
 
             // spawnLines.remove: host lines only, and no night of the level may spawn from one.

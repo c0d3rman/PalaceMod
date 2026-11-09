@@ -1,0 +1,83 @@
+{
+ "example": 8,
+ "title": "Shield-bearer aura",
+ "doc": "Expressiveness check 8",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex08",
+  "name": "Example 8: Shield aura",
+  "units": [
+   {
+    "id": "shieldbearer",
+    "base": "vanilla:E Defensive Melee Variant",
+    "name": "Shield-bearer",
+    "rules": [
+     {
+      "when": {
+       "on": "every",
+       "seconds": 1
+      },
+      "do": [
+       {
+        "do": "applyStatus",
+        "status": "warded",
+        "target": "all('ally and unit', 6)"
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "statuses": [
+   {
+    "id": "warded",
+    "duration": 1.2,
+    "stacking": "refresh",
+    "mods": {
+     "damageTaken": {
+      "mult": 0.7
+     }
+    },
+    "visual": {
+     "fx": "ward"
+    }
+   }
+  ],
+  "levels": [
+   {
+    "id": "ex08",
+    "name": "Example 8: Shield aura",
+    "host": "Nordfels",
+    "logic": {}
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "cmd": "night"
+   },
+   {
+    "do": [
+     {
+      "do": "spawn",
+      "entity": "shieldbearer",
+      "at": "vec(-4, -60)"
+     },
+     {
+      "do": "spawn",
+      "entity": "vanilla:E Melee",
+      "count": 3,
+      "at": "vec(-4, -60)",
+      "spread": 2
+     }
+    ]
+   },
+   {
+    "expect": "count('has:warded') >= 3",
+    "within": 4
+   }
+  ]
+ }
+}
