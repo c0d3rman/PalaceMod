@@ -114,6 +114,8 @@ namespace PalaceMod.Builder.Level
                 added++;
             }
             UnityEngine.Object.Destroy(holder);
+            // The game loaded its match save before these existed: let it save and load them too (retry day, savestates).
+            int loadedSlots = AddedSlotSaves.Join(scene, pack.Id, level.Id, clones.Select(c => (c.def.Id, c.slot.gameObject)));
 
             // Removals: deactivated before Start so the slot never registers; slots it unlocks never appear.
             var removals = new List<BuildSlot>();
@@ -175,7 +177,7 @@ namespace PalaceMod.Builder.Level
             ScanAfterFrame = Time.frameCount + 2;
             ScanHost = level.Host;
             Log.For<BuilderManager>().Info($"level {pack.Id}/{level.Id} on {level.Host}{(level.Base != null ? $" ({level.Base})" : "")}: {moved} slots moved, {added} added, {removed} removed, " +
-                $"{wired} requirements set, {lines} spawn lines moved, {newLines} added, {gone} removed, {props} props{(units > 0 ? $", {units} slots' units placed" : "")}{(hidden > 0 ? $", {hidden} scenery renderers hidden" : "")}");
+                $"{wired} requirements set, {lines} spawn lines moved, {newLines} added, {gone} removed, {props} props{(units > 0 ? $", {units} slots' units placed" : "")}{(loadedSlots > 0 ? $", {loadedSlots} added-slot save entities loaded" : "")}{(hidden > 0 ? $", {hidden} scenery renderers hidden" : "")}");
         }
 
         /// <summary>The empty base's look: the scenery hidden (and, for a flat field, the ground replaced).</summary>

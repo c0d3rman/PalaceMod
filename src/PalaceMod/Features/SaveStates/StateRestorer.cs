@@ -35,10 +35,13 @@ namespace PalaceMod
             else if (Busy) reason = "A savestate is already loading";
             else if (DayNightCycle.Instance == null || EnemySpawner.instance == null || LocalGamestate.Instance == null || SceneTransitionManager.instance == null)
                 reason = "Not in a level";
-            else if (state.Level != SceneManager.GetActiveScene().name) reason = $"That state is from {state.Level}";
+            else if (state.Scene != SceneManager.GetActiveScene().name) reason = $"That state is from {state.Scene}";
             else if (state.Level == StateUtil.TutorialScene) reason = "Savestates don't work in the tutorial";
             else if (LocalGamestate.SelectedGameMode != LocalGamestate.GameMode.Classic) reason = "Savestates only work in normal levels";
-            else if (StateUtil.CustomSession) reason = "Savestates don't work in custom (Builder) levels";
+            else if (StateUtil.StudioEditing) reason = "Savestates work in test play, not while editing";
+            // A custom level's states load only into the same level (its session re-applies it on the reload), and
+            // only while its nights and build slots still match.
+            else if (Builder.Model.LevelPin.Incompatible(state.Builder, StateUtil.BuilderPin) is string builderReason) reason = builderReason;
             else if (SceneTransitionManager.instance.SceneTransitionIsRunning || LocalMatchSaveLoad.CurrentlyLoadingMatch) reason = "The level is still loading";
             // After a defeat the level is still loaded, so a state can be loaded from the defeat screen like retry-day.
             else if (LocalGamestate.Instance.CurrentState is not (LocalGamestate.State.InMatch or LocalGamestate.State.AfterMatchDefeat)) reason = "The match is over";
@@ -105,7 +108,7 @@ namespace PalaceMod
                    PlayerInteraction.instance == null || TagManager.instance == null ||
                    LocalMatchSaveLoad.CurrentlyLoadingMatch || LocalGamestate.Instance.CurrentState != LocalGamestate.State.InMatch)
             {
-                if (Time.realtimeSinceStartup > deadline || SceneManager.GetActiveScene().name != data.level && !transitions.SceneTransitionIsRunning)
+                if (Time.realtimeSinceStartup > deadline || SceneManager.GetActiveScene().name != state.Scene && !transitions.SceneTransitionIsRunning)
                 {
                     Fail(state, "the level didn't come back", null);
                     yield break;
@@ -114,6 +117,12 @@ namespace PalaceMod
             }
             yield return null;
             yield return null;
+            // The reload re-entered the Builder session (it survives restarts of its host and re-applies its level).
+            if (state.Builder != null && StateUtil.BuilderPin?.Key != state.Builder.Key)
+            {
+                Fail(state, "the custom level didn't come back", null);
+                yield break;
+            }
 
             List<Action> deferred;
             try
@@ -144,10 +153,11 @@ namespace PalaceMod
             }
             Busy = false;
             if (!asLoadoutChange) SaveStates.Last = state;
-            Log.For<SaveStatesManager>().Info($"Loaded {state}; {Summary()}");
+            bool edited = Builder.Model.LevelPin.Edited(state.Builder, StateUtil.BuilderPin);
+            Log.For<SaveStatesManager>().Info($"Loaded {state}{(edited ? " (the custom level was edited since it was saved)" : "")}; {Summary()}");
             if (asLoadoutChange) Notify.Show("Loadout applied", NotifyKind.Success, key: "savestates");
             else if (retry != null) Notify.Show($"Retrying night {state.NightNumber}", NotifyKind.Success, key: "savestates");
-            else Notify.Show($"Loaded \"{state.Name}\"", NotifyKind.Success, key: "savestates");
+            else Notify.Show($"Loaded \"{state.Name}\"{(edited ? " (level edited since)" : "")}", NotifyKind.Success, key: "savestates");
             SaveStates.RaiseRestored(state);
         }
 
@@ -415,7 +425,8 @@ namespace PalaceMod
             {
                 foreach (var spawn in wave.spawns)
                 {
-                    var tagged = spawn.enemyPrefab != null && spawn.enemyPrefab.scene.isLoaded ? spawn.enemyPrefab.GetComponentInChildren<TaggedObject>(true) : null;
+                    var tagged = spawn.enemyPrefab != null && spawn.enemyPrefab.scene.isLoaded && !Builder.UnitFactory.IsTemplateObject(spawn.enemyPrefab)
+                        ? spawn.enemyPrefab.GetComponentInChildren<TaggedObject>(true) : null;
                     if (tagged != null)
                     {
                         string path = paths.Of(tagged.transform);
@@ -569,6 +580,8 @@ namespace PalaceMod
         {
             if (byName == null) Build();
             if (byName.TryGetValue(name, out var prefab)) return prefab;
+            // A Builder enemy no longer in tonight's waves (its template is still built).
+            if (Builder.UnitFactory.FindTemplate(name) is GameObject template) return byName[name] = template;
             foreach (var hp in Resources.FindObjectsOfTypeAll<Hp>())
             {
                 if (hp == null || hp.gameObject.scene.IsValid()) continue;
@@ -583,7 +596,8 @@ namespace PalaceMod
             byName = [];
             void Add(GameObject go)
             {
-                if (go == null || go.scene.IsValid() || byName.ContainsKey(go.name)) return;
+                // Prefabs, and Builder templates (custom enemies), which live in the loaded DontDestroyOnLoad scene.
+                if (go == null || go.scene.IsValid() && !Builder.UnitFactory.IsTemplateObject(go) || byName.ContainsKey(go.name)) return;
                 byName[go.name] = go;
                 foreach (var hp in go.GetComponentsInChildren<Hp>(true)) Add(hp.enemyToSpawnOnDeath);
             }
