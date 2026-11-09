@@ -24,6 +24,30 @@ namespace PalaceMod.Builder.Level
         /// <summary>Extra renderers to rasterize while scanning (the ground layer's own walls and air surface).</summary>
         public static readonly List<MeshRenderer> Extra = [];
 
+        /// <summary>Asks for a rescan in a moment (BuilderLevelManager runs it), e.g. once a copied bridge is
+        /// built and its deck is up.</summary>
+        public static void ScanSoon(string why)
+        {
+            ScanAt = Time.realtimeSinceStartup + 1.5f; // after the build animation (the deck grows in)
+            scanReason = why;
+        }
+
+        public static float ScanAt = -1f;
+        private static string scanReason;
+
+        /// <summary>Runs the rescan ScanSoon asked for, once its frame has come.</summary>
+        public static void RunPendingScan()
+        {
+            if (ScanAt < 0f || Time.realtimeSinceStartup < ScanAt) return;
+            ScanAt = -1f;
+            if (AstarPath.active == null) return;
+            long ms = Scan();
+            Log.For<BuilderManager>().Info($"rescan after {scanReason} was built: {ms} ms");
+        }
+
+        /// <summary>minRegionSize the ground graphs are rescanned with (see Scan).</summary>
+        private const float SmallRegion = 50f;
+
         /// <summary>Rescans every graph as baked. Returns the time it took in ms, or -1 without pathfinding.</summary>
         public static long Scan()
         {
@@ -56,7 +80,18 @@ namespace PalaceMod.Builder.Level
                     }
                 }
                 foreach (var r in Extra) if (r != null) ShowForScan(r, restore);
-                LowerMinRegion(astar, restore);
+                // The maps' graphs drop every region under minRegionSize (300000 on Uferwind: ~12000 m² at 0.2 m cells).
+                // The bake kept the islands anyway, but a one-tile rescan doesn't: Uferwind's bridge islands vanished, and
+                // so did both banks of a river dug through a map's own ground. Keep every region here; PruneIslands
+                // then drops what the bake didn't have (rock and wall tops).
+                foreach (var g in astar.data.graphs.OfType<RecastGraph>())
+                {
+                    if (g.name == "Enemy Units Air" || g.minRegionSize <= SmallRegion) continue;
+                    var graph = g;
+                    float before = graph.minRegionSize;
+                    graph.minRegionSize = SmallRegion;
+                    restore.Add(() => graph.minRegionSize = before);
+                }
                 astar.Scan();
             }
             finally
@@ -66,24 +101,6 @@ namespace PalaceMod.Builder.Level
             PruneIslands();
             MinimapRefresh.Rebuild();
             return sw.ElapsedMilliseconds;
-        }
-
-        /// <summary>Most maps bake with a huge recast `minRegionSize` (Totend: 300000 voxels, 12000 m² at 0.2 m), which
-        /// drops every connected walkable area smaller than that. A level whose walkable ground is a maze of lanes and
-        /// clearings (or a small island) falls under it and its graphs come out empty: every route "blocked". The
-        /// rescan keeps small areas instead (only specks under MinRegionVoxels go) and PruneIslands drops what isn't
-        /// joined to the castle or a spawn line.</summary>
-        private const int MinRegionVoxels = 400;
-
-        private static void LowerMinRegion(AstarPath astar, List<System.Action> restore)
-        {
-            foreach (var g in astar.data.graphs)
-            {
-                if (g is not RecastGraph rg || g.name == "Enemy Units Air" || rg.minRegionSize <= MinRegionVoxels) continue;
-                float old = rg.minRegionSize;
-                rg.minRegionSize = MinRegionVoxels;
-                restore.Add(() => rg.minRegionSize = old);
-            }
         }
 
         // The baked graphs' walkable node centres per graph, taken before the first rescan in a scene.
