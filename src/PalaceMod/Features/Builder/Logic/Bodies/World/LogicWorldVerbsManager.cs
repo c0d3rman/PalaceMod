@@ -52,6 +52,7 @@ namespace PalaceMod
                     "sounds" => string.Join(", ", GameFx.Sounds.Keys.OrderBy(k => k)),
                     "hud" => LevelHud.Status(),
                     "slots" => WorldVerbs.DescribeSlots(),
+                    "gallery" => ShowVerbs.Gallery(),
                     _ => $"world={(LogicWorld.Current != null ? "yes" : "no")} groups={WaveVerbs.Groups.Count} (left {WaveVerbs.Groups.Sum(g => g.Left)}) " +
                          $"hpScaled={WaveVerbs.HpMult.Count} locked={WorldVerbs.Locked.Count} {ShowVerbs.Status()}" +
                          (EnemySpawner.instance != null ? $" wave={EnemySpawner.instance.Wavenumber}/{EnemySpawner.instance.WaveCount} spawning={EnemySpawner.instance.SpawningInProgress} " +

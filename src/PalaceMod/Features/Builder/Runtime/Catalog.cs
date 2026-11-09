@@ -412,6 +412,16 @@ namespace PalaceMod.Builder
             return true;
         }
 
+        /// <summary>Short generic names for the most useful effects (the names the design doc's examples use).</summary>
+        public static readonly (string alias, string target)[] Aliases =
+        [
+            ("smoke", "Enemy Death FX"), ("dust_small", "Enemy Death FX Small"), ("dust_large", "Enemy Death FX Very Large"),
+            ("explosion", "Enemy Death FX Larger"), ("burst", "Enemy Death FX Large"), ("summon", "Player Revive particles"),
+            ("spikes", "SuccessfulStab"), ("slash", "KnightlySword"), ("hit", "Got Damage by Player FX"), ("fire_small", "Blood Wand Active Enemy"),
+            ("ward", "ArrowIntercept"), ("coins", "Coin Pick Up"), ("blood", "Blood Wand Recieve"), ("impact", "Fury Shot Impact"),
+            ("goo", "Slime Shot Impact"), ("ally_death", "Ally Death FX"),
+        ];
+
         // Other fields the game spawns visuals from.
         private static readonly (Type, string)[] MoreSources =
         [
@@ -460,6 +470,8 @@ namespace PalaceMod.Builder
                 for (int n = 2; effects.ContainsKey(id); n++) id = $"{pair.Key.name} #{n}";
                 effects[id] = new Fx { Id = id, Prefab = pair.Key, Source = pair.Value };
             }
+            foreach (var (alias, target) in Aliases)
+                if (effects.TryGetValue(target, out var t)) effects[alias] = new Fx { Id = alias, Prefab = t.Prefab, Source = "alias of " + target };
         }
 
         /// <summary>Dev: every effect with the game scripts it carries.</summary>

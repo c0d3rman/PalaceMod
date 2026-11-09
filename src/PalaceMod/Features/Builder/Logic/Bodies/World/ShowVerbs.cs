@@ -425,6 +425,27 @@ namespace PalaceMod.Builder.Logic.Bodies
             TickMarkers();
         }
 
+        /// <summary>Dev: every catalog effect at once on a grid around the king, each labelled with its index.</summary>
+        public static string Gallery()
+        {
+            var king = PlayerInteraction.instance != null ? PlayerInteraction.instance.transform.position : Vector3.zero;
+            var fx = GameFx.Effects.Values.Where(f => !f.Source.StartsWith("alias")).ToList();
+            var lines = new List<string>();
+            for (int i = 0; i < fx.Count; i++)
+            {
+                var at = king + new Vector3(-27f + (i % 7) * 9f, 0f, 12f - (i / 7) * 11f);
+                var go = Object.Instantiate(fx[i].Prefab, at, fx[i].Prefab.transform.rotation);
+                Object.Destroy(go, 10f);
+                var canvas = WorldOverlay.Canvas;
+                var label = GameWidgets.Text(canvas, "PalaceMod floatText", i.ToString(), ModStyle.BoldFont, 30f, ModStyle.Bright, TextAlignmentOptions.Center);
+                label.rectTransform.anchorMin = label.rectTransform.anchorMax = Vector2.zero;
+                label.rectTransform.sizeDelta = new Vector2(60f, 40f);
+                floaters.Add(new Floater { Label = label, World = at, Born = Time.time + 3f, Color = ModStyle.Bright });
+                lines.Add($"{i}: {fx[i].Id}");
+            }
+            return string.Join("\n", lines);
+        }
+
         public static string Status() =>
             $"floatTexts={floaters.Count} visuals={visuals.Count} (timed {visuals.Values.Count(v => v.Timed)}) markers={markers.Count} paints={paints.Count}";
     }
