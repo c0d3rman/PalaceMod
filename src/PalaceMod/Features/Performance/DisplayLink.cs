@@ -6,6 +6,12 @@ using System.Threading;
 /*
     Reads the main display's refresh timing from CoreVideo's CVDisplayLink, converted to Stopwatch ticks, so the frame
     pacer can line frames up with refreshes instead of only matching their rate.
+
+    The link must be stopped before the game quits. Its callback is a managed delegate, reached through a native thunk
+    that Mono frees when it shuts down; a link still running then calls freed memory on CoreVideo's thread
+    (EXC_BAD_ACCESS in CVDisplayLink::performIO), which macOS reports as "Thronefall quit unexpectedly". Stop()
+    runs from Application.quitting (Cmd+Q, Application.Quit, Unity's SIGTERM handler) and, as a backstop, from the
+    AppDomain's unload/exit events; CVDisplayLinkStop waits for a callback in progress to return.
 */
 namespace PalaceMod
 {
@@ -24,6 +30,7 @@ namespace PalaceMod
         [DllImport(CoreVideo)] private static extern int CVDisplayLinkCreateWithCGDisplay(uint display, out IntPtr link);
         [DllImport(CoreVideo)] private static extern int CVDisplayLinkSetOutputCallback(IntPtr link, OutputCallback callback, IntPtr context);
         [DllImport(CoreVideo)] private static extern int CVDisplayLinkStart(IntPtr link);
+        [DllImport(CoreVideo)] private static extern int CVDisplayLinkStop(IntPtr link);
         [DllImport(CoreVideo)] private static extern double CVDisplayLinkGetActualOutputVideoRefreshPeriod(IntPtr link);
         [DllImport(CoreGraphics)] private static extern uint CGMainDisplayID();
         [DllImport(LibSystem)] private static extern ulong mach_absolute_time();
@@ -34,6 +41,8 @@ namespace PalaceMod
         private static double machToStopwatch;
         private static long lastRefresh;
         private static long periodTicks;
+        private static volatile bool stopped;
+        private static int stopOnce;
 
         /// <summary>Stopwatch timestamp of the most recent display refresh, or 0 before the first one.</summary>
         public static long LastRefresh => Interlocked.Read(ref lastRefresh);
@@ -49,12 +58,25 @@ namespace PalaceMod
             if (CVDisplayLinkCreateWithCGDisplay(CGMainDisplayID(), out link) != 0 || link == IntPtr.Zero) return false;
             callback = OnRefresh;
             CVDisplayLinkSetOutputCallback(link, callback, IntPtr.Zero);
+            UnityEngine.Application.quitting += Stop;
+            AppDomain.CurrentDomain.DomainUnload += (_, _) => Stop();
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => Stop();
             return CVDisplayLinkStart(link) == 0;
+        }
+
+        /// <summary>Stops the link for good (the game is quitting). Safe to call more than once, from any thread.</summary>
+        public static void Stop()
+        {
+            stopped = true;
+            if (link == IntPtr.Zero || Interlocked.Exchange(ref stopOnce, 1) != 0) return;
+            CVDisplayLinkStop(link);
+            // Not released: the link object lives until the process ends, so nothing can reach a freed one.
         }
 
         // Runs on CoreVideo's display link thread once per refresh.
         private static unsafe int OnRefresh(IntPtr link, IntPtr now, IntPtr outputTime, ulong flagsIn, IntPtr flagsOut, IntPtr context)
         {
+            if (stopped) return 0;
             // CVTimeStamp: uint32 version, int32 videoTimeScale, int64 videoTime, uint64 hostTime, double rateScalar, int64 videoRefreshPeriod, ...
             ulong hostTime = *(ulong*)((byte*)now + 16);
             long stopwatchNow = Stopwatch.GetTimestamp();
