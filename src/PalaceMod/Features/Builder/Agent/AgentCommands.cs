@@ -27,7 +27,7 @@ namespace PalaceMod.Builder.Agent
         private const string Usage =
             "agent status | slots | catalog <file> | host <file> [cell] | packs | reload | validate <pack> [level] | library list|export|code|import ... | " +
             "play <pack> <level> | sandbox <pack> <level> [x z] | edit <pack> <level> | infinitegold on|off | spawn <unit> [count] [elite] [line <name>|at <x> <z>] | vanilla <scene> | menu | night [n] | endnight | report | build <slot|all> [level] [branch] [pay] | " +
-            "gold <n> | god on|off | invulnerable on|off | speed <x> | kill | heal | teleport <x> <z> | paths [rescan] | reach <x1> <z1> <x2> <z2> | " +
+            "gold <n> | god on|off | invulnerable on|off | speed <x> | fast on|off [fps] | kill | heal | teleport <x> <z> | paths [rescan] | reach <x1> <z1> <x2> <z2> | " +
             "share code <pack> [clipboard] | share export <pack> [path] | capture <file> [pixels] | screenshot <file>   agent bridge: JSON state, level tests, map dumps (see agent-kit/)";
 
         internal static void Register() => DevCommands.Register("agent", Usage, Run);
@@ -183,6 +183,17 @@ namespace PalaceMod.Builder.Agent
                 case "god": return Json(new JObject { ["result"] = DebugActions.SetGodMode(OnOff(args)) });
                 case "invulnerable": return Json(new JObject { ["result"] = DebugActions.SetInvulnerableKingdom(OnOff(args)) });
                 case "speed": return Json(new JObject { ["result"] = DebugActions.SetSpeed(F(Arg(args, 1))) });
+                case "fast":
+                {
+                    // fast [on|off] [fps]: fixed-step simulation as fast as the CPU allows (FastSimManager).
+                    if (args.Length > 1)
+                    {
+                        string mode = args[1].ToLowerInvariant();
+                        if (mode is not ("on" or "off")) throw new ArgumentException("usage: agent fast [on|off] [fps]");
+                        FastSimManager.Set(mode == "on", args.Length > 2 ? F(args[2]) : 60f);
+                    }
+                    return Json(FastStatus());
+                }
                 case "kill": return Json(new JObject { ["result"] = DebugActions.KillEnemies() });
                 case "heal": return Json(new JObject { ["result"] = DebugActions.HealAll() });
                 case "teleport":
@@ -227,8 +238,8 @@ namespace PalaceMod.Builder.Agent
                 case "screenshot":
                 {
                     string path = PathArg(args, 1);
-                    ScreenCapture.CaptureScreenshot(path);
-                    return Json(new JObject { ["writing"] = path });
+                    string how = FastSimManager.Screenshot(path);
+                    return Json(new JObject { ["writing"] = path, ["from"] = how });
                 }
                 default:
                     throw new ArgumentException("usage: " + Usage);
@@ -264,6 +275,7 @@ namespace PalaceMod.Builder.Agent
             o["nights"] = DebugActions.NightCount;
             o["gold"] = DebugActions.Gold;
             o["speed"] = DebugActions.Speed;
+            o["fast"] = FastStatus();
             o["godMode"] = DebugActions.GodMode;
             o["invulnerable"] = DebugActions.InvulnerableKingdom;
             var castle = CastleHp();
@@ -288,6 +300,12 @@ namespace PalaceMod.Builder.Agent
             o["report"] = NightRecorder.Summary();
             return o;
         }
+
+        private static JObject FastStatus() => new()
+        {
+            ["on"] = FastSimManager.On, ["fps"] = FastSimManager.Fps, ["headless"] = FastSimManager.Headless,
+            ["framesPerSecond"] = Math.Round(FastSimManager.FramesPerSecond),
+        };
 
         internal static Hp CastleHp()
         {

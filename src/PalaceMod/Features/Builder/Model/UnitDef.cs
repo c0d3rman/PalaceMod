@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using PalaceMod.Builder.Model.Logic;
 
 namespace PalaceMod.Builder.Model
 {
@@ -31,8 +32,23 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("stats")] public StatsDef Stats { get; set; }
         [JsonProperty("weapon")] public WeaponDef Weapon { get; set; }
         [JsonProperty("tags")] public TagEditDef Tags { get; set; }
-        /// <summary>Whitelisted behaviour modules, applied in order (see BehaviourTypes).</summary>
-        [JsonProperty("behaviours")] public List<BehaviourDef> Behaviours { get; set; }
+
+        // ---- Behaviour engine (docs/builder-engine.md; Model/Logic) ----
+        /// <summary>Labels filters test (#label).</summary>
+        [JsonProperty("labels")] public List<string> Labels { get; set; }
+        /// <summary>Entity variables and their start values.</summary>
+        [JsonProperty("vars")] public Dictionary<string, JToken> Vars { get; set; }
+        /// <summary>Who it attacks and walks toward (replaces the base's priorities).</summary>
+        [JsonProperty("targeting")] public List<TargetingDef> Targeting { get; set; }
+        [JsonProperty("movement")] public MovementDef Movement { get; set; }
+        /// <summary>Extra automatic attacks (the base's stay unless one has "replace": true).</summary>
+        [JsonProperty("attacks")] public List<AttackDef> Attacks { get; set; }
+        /// <summary>Statuses it starts with.</summary>
+        [JsonProperty("statuses")] public List<string> Statuses { get; set; }
+        /// <summary>The template `convert` turns it into (default: the other side's unit with the same role).</summary>
+        [JsonProperty("counterpart")] public string Counterpart { get; set; }
+        /// <summary>When / If / Then rules (and preset uses). Replaces version 2's "behaviours".</summary>
+        [JsonProperty("rules")] public List<RuleDef> Rules { get; set; }
 
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
@@ -41,8 +57,13 @@ namespace PalaceMod.Builder.Model
     {
         /// <summary>Night-preview / tooltip icon, "asset:&lt;key&gt;". Resolved by IAssetProvider; missing = base icon.</summary>
         [JsonProperty("icon")] public string Icon { get; set; }
-        /// <summary>Multiplies the unit's body colour, "#rrggbb". Elites still use the game's elite material.</summary>
+        /// <summary>Multiplies the unit's body colour, "#rrggbb": a subtle shift (the shade keeps the scheme's colour).</summary>
         [JsonProperty("tint")] public string Tint { get; set; }
+        /// <summary>Replaces colours outright, by part, each "#rrggbb": a piece of the model by its renderer's name ("Bow"),
+        /// a material by name, or "body" (every body material: the enemy or troop colour); the most specific wins. The lit colour becomes
+        /// this and the shade follows it the way the game's own scheme pairs them. Elites keep the colour (with the
+        /// elite outline).</summary>
+        [JsonProperty("colors")] public Dictionary<string, string> Colors { get; set; }
         /// <summary>Uniform scale factor relative to the base prefab (1 = unchanged). Visual only.</summary>
         [JsonProperty("scale")] public float? Scale { get; set; }
         /// <summary>Replacement body model (see ModelRef): "asset:&lt;key&gt;" of an imported OBJ/glTF file,
@@ -110,6 +131,9 @@ namespace PalaceMod.Builder.Model
             v?.MeshLook == LookOwn || v?.MeshLook == LookUnit ? v.MeshLook : Kind(v?.Mesh) == ModelKind.Asset ? LookUnit : LookOwn;
 
         public static string Scenery(string name) => "mesh:" + name;
+
+        /// <summary>The colors key for the unit's body material.</summary>
+        public const string BodyPart = "body";
         public static string Unit(string id) => "vanilla:" + id;
     }
 
@@ -173,25 +197,5 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("add")] public List<string> Add { get; set; } = [];
         [JsonProperty("remove")] public List<string> Remove { get; set; } = [];
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
-    }
-
-    /// <summary>A behaviour module: a type from BehaviourTypes plus its parameters (other JSON fields).</summary>
-    public sealed class BehaviourDef
-    {
-        [JsonProperty("type", Order = -10)] public string Type { get; set; }
-        /// <summary>The module's parameters, e.g. {"unit": "vanilla:E Slime"} for SpawnOnDeath.</summary>
-        [JsonExtensionData] public IDictionary<string, JToken> Params { get; set; } = new Dictionary<string, JToken>();
-
-        public string GetString(string key) => Params != null && Params.TryGetValue(key, out var v) && v.Type == JTokenType.String ? (string)v : null;
-        public float? GetFloat(string key) => Params != null && Params.TryGetValue(key, out var v) && (v.Type == JTokenType.Float || v.Type == JTokenType.Integer) ? (float)v : null;
-    }
-
-    /// <summary>Behaviour module types the runtime understands. Anything else is a validation error.</summary>
-    public static class BehaviourTypes
-    {
-        /// <summary>{"unit": unit ref} - spawns that unit where this one dies (like the game's slimes).</summary>
-        public const string SpawnOnDeath = "SpawnOnDeath";
-
-        public static readonly string[] All = [SpawnOnDeath];
     }
 }

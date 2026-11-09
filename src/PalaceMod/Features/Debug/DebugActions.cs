@@ -614,9 +614,9 @@ namespace PalaceMod
         public static bool LoadoutAvailable => InLevel && LocalGamestate.SelectedGameMode != LocalGamestate.GameMode.EternalTrial;
 
         /// <summary>Whether applying a loadout keeps the current moment: a savestate of now is loaded back with the new
-        /// loadout. Not in the tutorial or a Builder level, where savestates don't work.</summary>
+        /// loadout. Not in the tutorial or while the Builder Studio edits a level, where savestates don't work.</summary>
         public static bool LoadoutKeepsMoment =>
-            LocalGamestate.SelectedGameMode == LocalGamestate.GameMode.Classic && !StateUtil.CustomSession &&
+            LocalGamestate.SelectedGameMode == LocalGamestate.GameMode.Classic && !StateUtil.StudioEditing &&
             UnityEngine.SceneManagement.SceneManager.GetActiveScene().name != StateUtil.TutorialScene;
 
         /// <summary>Without LoadoutKeepsMoment: whether applying reloads today from the dawn save (true) or restarts the level.</summary>

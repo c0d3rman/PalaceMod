@@ -29,7 +29,8 @@ that pack. A folder under `packs/` (an installed pack) is read and written as be
 6. Look: `python3 palace.py render library <level-id> -o map.png --labels reqs` (then read the PNG), `show`,
    `economy --compare`, `waves --compare`.
 7. Test in the game: `python3 palace.py test library <level-id> --plan plan.json --shots shots/` (buys what a player
-   would, plays the nights at 3x speed, reports each night), or `play` / `sandbox` and drive it step by step.
+   would, plays the nights at 3x speed in fast simulation, reports each night), or `play` / `sandbox` and drive it
+   step by step. After editing only later nights' waves, `test ... --from-night N` replays just nights N.. .
    `render --live` draws your overlay on a real top-down picture and the game's own enemy routes.
 8. Iterate: change the ops file and `apply --fresh` it (the level is emptied back to what `level` made, its nights kept,
    then the whole file runs again; ops aren't idempotent, so a plain second `apply` of the same file fails at the first
@@ -91,6 +92,12 @@ All commands print JSON. Errors go to stderr as `{"error": "..."}` with exit cod
   grid, or your terrain). Use `"pos": [x, y, z]` only to force a height.
 - `rotY`: yaw in degrees around the vertical axis (copies keep their base's tilt). Turn buildings to face the
   lane they guard; for most buildings it is cosmetic.
+- Props can also tilt: `rotX` tips one about its own sideways axis (+ leans its front down; 90 lays an upright piece
+  on its back, e.g. a banner or insignia as a floor emblem), `rotZ` rolls it onto its side. Both are degrees
+  (-180..180), applied before `rotY` (so `rotY` stays its heading), and left out at 0. A solid prop's blocker tilts
+  with it; offline checks use the tilted bounding box's footprint, centred on the prop's position (a mesh whose pivot
+  is at its base sticks out further on one side; check a large tilted solid prop with `paths`). Lower a half-sunk
+  piece with `"pos": [x, y, z]`.
 - **Which way lines and walls run**: at `rotY` 0 a spawn line's segment, and a wall or gate copied from a host's
   "Gate Variant", runs **east-west** (along x), so it faces, or blocks, traffic moving north or south; at `rotY` 90 it
   runs north-south. To close an east-west pass, use `rotY` 90. A gate's length varies by host piece; check it with
@@ -156,6 +163,7 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
     "remove": ["Forest", "Right Bridge"]   // host lines taken off the map: no enemies, routes or markers
   },
   "props": [{ "id": "rock-1", "base": "mesh:Rock A", "pos": [x,y,z], "rotY": 0, "scale": 1.0, "solid": true,
+              "rotX": 90, "rotZ": 0,   // optional tilt (absent = 0): rotX tips it forward, rotZ rolls it
               "colors": "Totend" }],   // optional: keep that map's colours (absent = the level's)
   "terrain": { ... }                                  // section 7
 }
@@ -250,13 +258,35 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
 
 ```jsonc
 { "id": "brute", "side": "enemy", "base": "vanilla:E Ogre", "name": "Brute", "description": "...",
-  "visuals": { "tint": "#c9a227", "scale": 1.3 },
+  "visuals": { "colors": { "body": "#c9a227" }, "scale": 1.3 },
   "stats": { "maxHp": 300, "moveSpeed": 4, "attackCooldown": 1.6, "attackRange": 3, "keepDistance": 0, "aggroTime": 5 },
   "weapon": { "base": "inherit", "damageMult": 1.5,
               "damage": [{ "tags": [], "add": 6 }, { "tags": ["Building"], "mult": 3 }] },   // replaces the list
   "tags": { "add": ["ArmoredAgainstRanged"], "remove": [] },     // not Flying/LargeUnit: pick a base that has them
-  "behaviours": [{ "type": "SpawnOnDeath", "unit": "vanilla:E Slime" }] }
+  "rules": [{ "when": "death", "do": [{ "do": "spawn", "entity": "vanilla:E Slime", "at": "self", "elite": "inherit" }] }] }
 ```
+
+`rules` is the behaviour engine (see "Behaviour"): that one rule is "spawns a slime where it dies". Packs of version 2
+had `"behaviours": [{ "type": "SpawnOnDeath", "unit": ... }]`; reading them turns it into exactly that rule.
+
+**Colours.** `visuals.colors` replaces colours outright, per part: `"body"` is the unit's body (the enemy colour, all
+of it), any other key is one piece of the model (`"Bow"`, `"Helmet"`: its renderer's name) or one of its materials
+by name; the most specific wins. `builder-enemy parts` through the bridge lists the pieces, their materials and colours
+while the Enemy Studio is open. The lit side becomes the colour and the shaded side follows it the way the
+level's colour scheme pairs them; elites keep it with the elite outline. `visuals.tint` only multiplies the body's lit
+colour (a subtle shift): use `colors` for a new colour.
+
+```jsonc
+"visuals": { "colors": { "body": "#3a6ee8", "Bow": "#e8c23a" } }   // an archer base: blue, with a gold bow
+```
+
+**Ranged attacks.** A unit attacks with its weapon: a ranged one fires a projectile that homes on its target, a melee
+one hits at once. To make a ranged enemy, start from a ranged base (`ref enemies`: archers, mages) or set
+`weapon.base` to a ranged unit's weapon (`ref enemies` lists each base's weapon). Then `stats.attackRange` is how far
+it picks targets (metres), `weapon.projectileSpeed` how fast its shots fly, `stats.attackCooldown` the seconds between
+shots, `weapon.damage` the damage by target, and `stats.keepDistance` how close it walks before it stops (keep it
+below the range, or it stops out of reach). What it targets and how it moves come from the base unit (each vanilla
+enemy has its own target lists); they aren't editable yet.
 
 Stats are absolute (difficulty, elite and perks still multiply them). Ranges: maxHp 1-100000, moveSpeed 0-100,
 attackCooldown 0.05-120. Gold is set per spawn group, not per unit. `palace.py ref enemies` gives every base's stats
@@ -309,7 +339,7 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 | `play <pack> <level>` | load as a normal run (real gold); prints load warnings |
 | `sandbox <pack> <level> [--at X Z]` | Studio test play: unlimited gold, king at X,Z |
 | `edit <pack> <level>` | open the level in the in-game Studio (the player's editor: F5 there test-plays); it edits its own copy and Ctrl+S writes pack.json, so don't `apply` while the player has unsaved Studio changes |
-| `test <pack> <level> [--nights 1-3] [--plan p.json] [--carry] [--save] [--catchup play\|free\|none] [--free] [--king castle\|<slot>\|X,Z] [--build all] [--god] [--invulnerable] [--gold N] [--speed 3] [--shots dir] [--quiet]` | load, buy per plan each day once its gold is in, play nights, report each (one progress line per night on stderr) |
+| `test <pack> <level> [--nights 1-3] [--plan p.json] [--carry] [--save] [--catchup play\|free\|none] [--free] [--king castle\|<slot>\|X,Z] [--build all] [--god] [--invulnerable] [--gold N] [--speed 3] [--no-fast] [--from-night N] [--no-states] [--shots dir] [--quiet]` | load, buy per plan each day once its gold is in, play nights, report each (one progress line per night on stderr); fast simulation unless `--no-fast`; saves a resume state each dawn for `--from-night` |
 | `night [N] [--speed 3]` | start the next night (or jump to night N) and wait for its report |
 | `build <slot> [level] [branch] [--pay]` | build/upgrade now (free unless --pay); `castle`, an added id, or a host name; exit 1 if refused |
 | `enemy <id> [--difficulty D] [--elite] [--studio] [--fight N] [--portrait]` | a library enemy's numbers (offline: HP, damage per hit/second against buildings, the king and troops, troops' time to kill it); with the game: open it in the Enemy Studio, fight N copies in its arena, save its portrait |
@@ -318,6 +348,7 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 | `paths [--rescan] [--points]` | the game's own route from every ground line to the castle, on the graph its enemies use (`Enemy Units L` if the line spawns large ones): `length` m from the line itself, `at` (the line's middle), `start` (where that lands on walkable ground), `snap` (m between them) and a `warning` when the line is over 10 m off walkable ground; `--points` adds the waypoints `[[x, z], ...]`. `air`: each flier line's distance from the fliers' surface (at its worst point) and where its fliers start; `problems`: what the last rescan left wrong (an empty graph, a ground line with no route, a flier line off the surface; the game also logs these as a warning, and `check --live` fails on them while the level is loaded) |
 | `paths --between X1 Z1 X2 Z2` | whether each ground graph (small enemies, large enemies, the king's `Player Units S`) connects two points, and how far each point is from walkable ground |
 | `report` | the current or last night's report |
+| `game cmd "savestate save <name>"` / `"savestate load <name\|last\|quick>"` / `"savestate list"` / `"savestate dump"` / `"retrynight load"` | savestates of the level being played (`play`, `test`, `sandbox`): capture a moment (e.g. the dawn before the finale) and load it back to retest from there without replaying the run. Filed per level, not per host map. A load reloads the level (about a second; `dump` says `restoring=False` when done) with its terrain, layout, custom enemies and night progress. It refuses if the level's night count or build slots changed since the save; other edits (later nights' enemies, props, terrain) load |
 | `shot -o f.png` | screenshot of the game window |
 | `game status` / `game slots` / `game log` / `game menu` / `game cmd "<raw>"` | raw game access |
 | `share <pack> [--clipboard]` / `share <pack> --export [-o f.tfpack] [--force]` | share code (JSON; the clipboard only with `--clipboard`) / .tfpack file (`written`: its exact path; without `-o` a new numbered file in the game's `exports/` folder) |
@@ -333,7 +364,8 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 | `set_units` | `slot`, `units` [[x,z] in the slot's frame, null keeps that one] or `at` [[x,z] world points]; `units: null` = back to the map's |
 | `remove_slot` | `slot` |
 | `chain` | `slots` [ids/names], `mode` `tree`\|`nearest`\|`order`, `first` (requirement of the root(s), default `"castle"`), `every` N (order/nearest: every N-th link needs one more castle level instead) |
-| `add_prop` | `mesh`, `at`/`pos`, `rotY`, `scale`, `solid`, `colors` (a map or `original`), `id` (auto) |
+| `add_prop` | `mesh`, `at`/`pos`, `rotY`, `rotX`/`rotZ` (tilt), `scale`, `solid`, `colors` (a map or `original`), `id` (auto) |
+| `set_prop` | `id` or `ids`, then any of `at`/`pos`, `rotY`, `rotX`, `rotZ`, `scale`, `solid`, `colors` (null: the level's) |
 | `scatter` | `mesh` (name or list), `count`, shape (`circle`/`rect`/`line`/`polygon`), `spacing` (3), `avoid` (6 m from slots and lines), `scale` [min,max], `solid` (default true: solid scatter can close a lane; `false` for decoration), `colors`, `seed` |
 | `remove_prop` | `id` or `ids` |
 | `add_spawn_line` | `id`, `at`/`pos`, `rotY`, `width`, `ground`, `large`, `flying` |
@@ -405,6 +437,26 @@ income paid), then the full `nights` reports. Each night report:
   (the next morning once income and the night's coins are in: what the next day can spend).
 - `income`: the next dawn's `nominal` income (every building), `blocked` (knocked out that night) and `paid`.
 - `after`: the game status at that same moment (the next morning; the end screen after the last night).
+
+**Test fidelity and speed.** `test` runs in *fast simulation* by default: every frame advances the game by the same
+fixed step a smooth 60 fps game sees at `--speed` (1/60 s x 3 at the default 3x), and frames run back to back as fast
+as the computer allows, without drawing them (the game window shows a picture about 10 times a second). A 5-night
+test takes under a minute instead of several. The step matters: bigger steps (a high `--speed`, or a game held to a
+low frame rate because it's in the background or on battery) make defences do measurably better than in real play,
+so keep `--speed` at 3 or less (5 still matched real time in our tests; 8 did not). `--no-fast` plays in real time
+at `--speed` (for watching). Screenshots in fast mode are a render of the game camera: the 3D view without the HUD.
+The game has some randomness of its own; for a close call, run the test two or three times.
+
+**Resuming from a later night.** Every full `test` saves a savestate at each dawn (once that morning's gold is in,
+before buying). `test ... --from-night N` loads the one before night N and plays only nights N.. with the current
+plan's days N.., so after changing night 8's waves you replay nights 8-10 instead of all ten. It refuses (and says
+why) when the state no longer matches: the level itself (terrain, slots, props, spawn lines, costs), the waves of
+nights 1..N-1 (or starting gold), a library enemy used in those nights, the plan's days 1..N-1 (or its options and
+king posts), or the flags `--free --build --gold --god --invulnerable --king --carry --save` changed since. Waves
+of nights N.. (and enemies only they use) and the plan from day N on may change freely. The report's
+`resumedFrom.earlierNights` has the earlier nights from the run that saved the state. `--force-resume` uses a stale
+state anyway; `--no-states` skips saving them. It needs savestates to work in Builder levels (a game that can't save
+them says so once in the report's `warnings`).
 
 The king does nothing during `test` (he stands where he was, or where `--king` put him), so a defence that holds in `test` holds without the
 player's help; a real player adds his own damage (roughly one strong unit). Use `--god` to keep the king alive,
@@ -570,7 +622,8 @@ island with three causeways; if that's where yours is heading, check whether ano
 4. `test --plan` with a realistic plan for all nights: survives with some damage early, close calls late. If night
    1-3 are lost, they're too hard; if nothing is ever knocked out, too easy.
 5. `test --nights N --plan` to probe a late night: it plays the earlier nights first, so night N starts with a real
-   player's kingdom (slow; `--catchup free` jumps there with the earlier days built for free instead).
+   player's kingdom (`--catchup free` jumps there with the earlier days built for free instead). After a full run,
+   `test --from-night N` replays only nights N.. from that run's dawn state while you tune the late waves.
 6. Screenshots (`--shots`) of the first and last night: does it read well?
 
 ## 10. Troubleshooting

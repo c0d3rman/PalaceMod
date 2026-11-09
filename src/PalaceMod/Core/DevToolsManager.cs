@@ -88,7 +88,7 @@ namespace PalaceMod
             {
                 string output = File.ReadAllText(ScreenshotRequest).Trim();
                 File.Delete(ScreenshotRequest);
-                ScreenCapture.CaptureScreenshot(output);
+                FastSimManager.Screenshot(output);
                 Log.Debug($"Screenshot requested: {output}");
             }
 
