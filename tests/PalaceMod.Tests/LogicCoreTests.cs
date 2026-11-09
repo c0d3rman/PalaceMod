@@ -58,6 +58,19 @@ namespace PalaceMod.Tests
         public void Attach(LogicEntity e) { }
     }
 
+    /// <summary>Stats for the clock tests: only `timeScale`, set per entity.</summary>
+    internal sealed class FakeStats : IStatModifiers
+    {
+        public readonly Dictionary<LogicEntity, double> TimeScale = [];
+        public void Add(LogicEntity e, StatModifier m) { }
+        public double Get(LogicEntity e, string stat) => stat == "timeScale" ? (TimeScale.TryGetValue(e, out var s) ? s : 1) : double.NaN;
+        public int Stacks(LogicEntity e, string status) => 0;
+        public void ApplyStatus(LogicEntity e, string status, double? seconds, int stacks, LogicEntity source) { }
+        public void RemoveStatus(LogicEntity e, string status) { }
+        public JToken Capture(LogicEntity e) => null;
+        public void Restore(LogicEntity e, JToken state) { }
+    }
+
     public static class LogicCoreTests
     {
         private static LogicWorld NewWorld(string logicJson = "{}", string templatesJson = "{}")
@@ -384,6 +397,90 @@ namespace PalaceMod.Tests
             w.BeginLevel();
             w.Tick(0.016);
             Assert.True(w.Trace.Count(t => t.Outcome == TraceOutcome.Error) >= 2, "both errors traced: " + string.Join(" | ", w.Trace.Select(t => t.Message)));
+        }
+
+        private const string EveryRule = """[ { "when": { "on": "every", "seconds": 1 }, "do": [ { "do": "addVar", "name": "$n" } ] } ]""";
+
+        public static void TimeScaleSlowsStatusRuleTimers()
+        {
+            var w = NewWorld("""{ "vars": { "n": 0, "m": 0 } }""");
+            var stats = new FakeStats();
+            LogicServices.Stats = stats;
+            var slow = Place(w, """{ "id": "slow" }""", Vec.Zero);
+            var plain = Place(w, """{ "id": "plain" }""", Vec.Zero);
+            stats.TimeScale[slow] = 0.5;
+            // A status's rules are attached to the carrier (StatsService.AttachRules), so they run on its clock.
+            w.AttachRules(slow, JArray.Parse(EveryRule), "statuses.slowed.rules");
+            w.AttachRules(plain, JArray.Parse(EveryRule.Replace("$n", "$m")), "statuses.plain.rules");
+            Run(w, 4.05);
+            Assert.Equal(2.0, Num(w, "n"), "timeScale 0.5: `every 1` fires every 2 s");
+            Assert.Equal(4.0, Num(w, "m"), "an unscaled carrier fires every 1 s");
+            Run(w, 1.0);
+            Assert.Equal(2.0, Num(w, "n"), "not yet at 5.05 s");
+            Run(w, 1.0);
+            Assert.Equal(3.0, Num(w, "n"), "third at 6 s");
+            LogicServices.Stats = null;
+        }
+
+        public static void TimeScaleChangesMidTimerAndStops()
+        {
+            var w = NewWorld("""{ "vars": { "n": 0 } }""");
+            var stats = new FakeStats();
+            LogicServices.Stats = stats;
+            var e = Place(w, """{ "id": "u" }""", Vec.Zero);
+            w.AttachRules(e, JArray.Parse(EveryRule), "statuses.s.rules");
+            Run(w, 0.5);
+            stats.TimeScale[e] = 0;            // frozen half way: its timer holds
+            Run(w, 3);
+            Assert.Equal(0.0, Num(w, "n"), "timeScale 0 holds the timer");
+            stats.TimeScale[e] = 2;            // 0.5 s of its own time left = 0.25 s of world time
+            Run(w, 0.3);
+            Assert.Equal(1.0, Num(w, "n"), "resumes where it stopped, at double speed");
+            Run(w, 1.0);
+            Assert.Equal(3.0, Num(w, "n"), "then every 0.5 s");
+            LogicServices.Stats = null;
+        }
+
+        public static void TimeScaleSlowsWaitsAndAfter()
+        {
+            var w = NewWorld("""{ "vars": { "a": 0, "b": 0 } }""");
+            var stats = new FakeStats();
+            LogicServices.Stats = stats;
+            var e = Place(w, """{ "id": "u" }""", Vec.Zero);
+            stats.TimeScale[e] = 0.5;
+            w.AttachRules(e, JArray.Parse("""[ { "when": { "on": "after", "seconds": 0.5 }, "do": [ { "do": "setVar", "name": "$a", "value": 1 }, { "do": "wait", "seconds": 1 }, { "do": "setVar", "name": "$b", "value": 1 } ] } ]"""), "statuses.s.rules");
+            Run(w, 0.9);
+            Assert.Equal(0.0, Num(w, "a"), "after 0.5 at half speed hasn't fired at 0.9 s");
+            Run(w, 0.2);
+            Assert.Equal(1.0, Num(w, "a"), "fired by 1.1 s");
+            Run(w, 1.7);
+            Assert.Equal(0.0, Num(w, "b"), "wait 1 at half speed still running at 2.8 s");
+            Run(w, 0.3);
+            Assert.Equal(1.0, Num(w, "b"), "wait over by 3.1 s");
+            Assert.Equal(0.0, w.Level.Lag, "the level (no body) is never scaled");
+            LogicServices.Stats = null;
+        }
+
+        public static void TimeScaleSnapshotKeepsOwnTimeLeft()
+        {
+            const string place = """{ "id": "u", "rules": [ { "when": { "on": "every", "seconds": 1 }, "do": [ { "do": "addVar", "name": "$n" } ] } ] }""";
+            var w = NewWorld("""{ "vars": { "n": 0 } }""");
+            var stats = new FakeStats();
+            LogicServices.Stats = stats;
+            var e = Place(w, place, Vec.Zero);
+            stats.TimeScale[e] = 0.5;
+            Run(w, 1.5);                        // 0.75 s of its own time: 0.25 s left
+            var snap = w.Capture();
+            var w2 = NewWorld("""{ "vars": { "n": 0 } }""");
+            LogicServices.Stats = stats;
+            var e2 = Place(w2, place, Vec.Zero);
+            stats.TimeScale[e2] = 0.5;
+            w2.Restore(JObject.Parse(snap.ToString()));
+            Run(w2, 0.45);
+            Assert.Equal(0.0, Num(w2, "n"), "0.25 s of its own time is 0.5 s of world time");
+            Run(w2, 0.1);
+            Assert.Equal(1.0, Num(w2, "n"), "fires 0.5 s after the restore");
+            LogicServices.Stats = null;
         }
     }
 }
