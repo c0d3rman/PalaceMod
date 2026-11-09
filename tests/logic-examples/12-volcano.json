@@ -1,0 +1,168 @@
+{
+ "example": 12,
+ "title": "A volcano lobbing lava that leaves fire",
+ "doc": "Expressiveness check 12",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex12",
+  "name": "Example 12: Volcano",
+  "entities": [
+   {
+    "id": "lava-rock",
+    "kind": "projectile",
+    "visual": {
+     "mesh": "mesh:Rock A",
+     "meshScale": 0.3
+    },
+    "lifetime": 10,
+    "projectile": {
+     "speed": 12,
+     "gravity": 9.8,
+     "hits": "unit"
+    },
+    "rules": [
+     {
+      "when": "impact",
+      "do": [
+       {
+        "do": "damage",
+        "target": "all('unit', 3)",
+        "amount": 35,
+        "types": [
+         "fire"
+        ]
+       },
+       {
+        "do": "spawn",
+        "entity": "fire-area",
+        "at": "self"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "fire-area",
+    "kind": "area",
+    "lifetime": 5,
+    "area": {
+     "shape": {
+      "circle": {
+       "radius": 3
+      }
+     },
+     "show": "fill",
+     "color": "#d04010",
+     "tick": 1
+    },
+    "rules": [
+     {
+      "when": "inside",
+      "do": [
+       {
+        "do": "applyStatus",
+        "target": "other",
+        "status": "burning"
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "statuses": [
+   {
+    "id": "burning",
+    "name": "Burning",
+    "duration": 4,
+    "stacking": "refresh",
+    "tick": 1,
+    "visual": {
+     "tint": "#ff7020",
+     "fx": "fire_small"
+    },
+    "rules": [
+     {
+      "when": "statusTick",
+      "do": [
+       {
+        "do": "damage",
+        "amount": "3 * self.stacks('burning')",
+        "types": [
+         "fire"
+        ],
+        "source": "other"
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "levels": [
+   {
+    "id": "ex12",
+    "name": "Example 12: Volcano",
+    "host": "Nordfels",
+    "logic": {
+     "vars": {
+      "fires": 0
+     },
+     "places": [
+      {
+       "id": "volcano",
+       "kind": "logic",
+       "pos": [
+        -4,
+        0,
+        -40
+       ],
+       "rules": [
+        {
+         "when": {
+          "on": "every",
+          "seconds": 12,
+          "during": "night"
+         },
+         "do": [
+          {
+           "do": "launch",
+           "entity": "lava-rock",
+           "toward": "pointNear(self, 15)"
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "rules": [
+      {
+       "note": "fixture observer",
+       "when": {
+        "on": "spawn",
+        "of": "is:fire-area"
+       },
+       "do": [
+        {
+         "do": "addVar",
+         "name": "fires",
+         "value": 1
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "cmd": "night"
+   },
+   {
+    "expect": "$fires >= 1",
+    "within": 30
+   }
+  ]
+ }
+}

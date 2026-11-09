@@ -1,0 +1,107 @@
+{
+ "example": 15,
+ "title": "Escalation: shrines standing at dusk add a brute group",
+ "doc": "Expressiveness check 15",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex15",
+  "name": "Example 15: Escalation",
+  "units": [
+   {
+    "id": "brute",
+    "base": "vanilla:E Ogre",
+    "name": "Brute"
+   }
+  ],
+  "entities": [
+   {
+    "id": "shrine",
+    "kind": "prop",
+    "labels": [
+     "shrine"
+    ],
+    "visual": {
+     "mesh": "mesh:Rock A"
+    },
+    "body": {
+     "radius": 1,
+     "hittable": true,
+     "hp": 200
+    },
+    "team": "player"
+   }
+  ],
+  "levels": [
+   {
+    "id": "ex15",
+    "name": "Example 15: Escalation",
+    "host": "Nordfels",
+    "logic": {
+     "vars": {
+      "added": 0
+     },
+     "places": [
+      {
+       "id": "s1",
+       "entity": "shrine",
+       "pos": [
+        10,
+        0,
+        10
+       ]
+      },
+      {
+       "id": "s2",
+       "entity": "shrine",
+       "pos": [
+        -16,
+        0,
+        10
+       ]
+      }
+     ],
+     "rules": [
+      {
+       "when": "dusk",
+       "if": "night >= 4 and count('#shrine and alive') >= 2",
+       "do": [
+        {
+         "do": "waves",
+         "op": "addSpawn",
+         "night": "night",
+         "unit": "brute",
+         "count": "night - 2",
+         "line": "Main Bridge"
+        },
+        {
+         "do": "addVar",
+         "name": "added",
+         "value": 1
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "cmd": "skipnights 3"
+   },
+   {
+    "cmd": "night"
+   },
+   {
+    "expect": "$added == 1",
+    "within": 5
+   },
+   {
+    "expect": "count('is:brute') >= 2",
+    "within": 60
+   }
+  ]
+ }
+}

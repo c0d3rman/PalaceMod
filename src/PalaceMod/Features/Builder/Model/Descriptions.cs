@@ -202,13 +202,13 @@ namespace PalaceMod.Builder.Model
             ["Weapon"] = "Which weapon the unit attacks with. Another unit's weapon brings its projectile, damage lists and splash.",
         };
 
-        // ---- Behaviours (BehaviourTypes, UnitPage) -----------------------------------------------------------------
+        // ---- Behaviours (UnitPage) -----------------------------------------------------------------
 
         private const string SpawnOnDeathText = "When it dies, the chosen unit appears where it fell. The new one is elite if this one was, but skips the night's difficulty.";
 
         private static readonly Dictionary<string, string> BehaviourTexts = new()
         {
-            [BehaviourTypes.SpawnOnDeath] = SpawnOnDeathText,
+            ["SpawnOnDeath"] = SpawnOnDeathText,
             ["Spawns on death"] = SpawnOnDeathText,
         };
 

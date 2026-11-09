@@ -260,8 +260,11 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
   "weapon": { "base": "inherit", "damageMult": 1.5,
               "damage": [{ "tags": [], "add": 6 }, { "tags": ["Building"], "mult": 3 }] },   // replaces the list
   "tags": { "add": ["ArmoredAgainstRanged"], "remove": [] },     // not Flying/LargeUnit: pick a base that has them
-  "behaviours": [{ "type": "SpawnOnDeath", "unit": "vanilla:E Slime" }] }
+  "rules": [{ "when": "death", "do": [{ "do": "spawn", "entity": "vanilla:E Slime", "at": "self", "elite": "inherit" }] }] }
 ```
+
+`rules` is the behaviour engine (see "Behaviour"): that one rule is "spawns a slime where it dies". Packs of version 2
+had `"behaviours": [{ "type": "SpawnOnDeath", "unit": ... }]`; reading them turns it into exactly that rule.
 
 **Colours.** `visuals.colors` replaces colours outright, per part: `"body"` is the unit's body (the enemy colour, all
 of it), any other key is one piece of the model (`"Bow"`, `"Helmet"`: its renderer's name) or one of its materials
