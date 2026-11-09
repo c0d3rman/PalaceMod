@@ -3,7 +3,8 @@
 You are building a custom level for **Thronefall** (a minimalist tower-defence / kingdom builder) with the **PalaceMod**
 Builder. This guide plus `palace.py` (next to it) is everything you need: the data format, the game's rules and numbers,
 the tools, and how to test. `reference.md` holds the generated tables (maps, buildings, enemies, vanilla curves,
-scenery); `palace.py ref ...` prints the same data as JSON.
+scenery); `palace.py ref ...` prints the same data as JSON. Levels and enemies can also be **programmed** (rules, custom
+projectiles, areas, statuses, signals, variables): section 12, with every piece listed in `logic-reference.md`.
 
 Everything you make goes into the player's **library**: each level is one file (`library/levels/<id>.json`, the level
 and its nights) and each custom enemy is one file (`library/enemies/<id>.json`). Any level can spawn any library enemy by
@@ -297,7 +298,7 @@ the hit box and every stat you don't set):
 
 ```jsonc
 "visuals": {
-  "mesh": "mesh:Tree_02",          // a scenery mesh (`palace.py ref scenery`: any map's, drawn in the level's colours),
+  "mesh": "mesh:Cone Tree",          // a scenery mesh (`palace.py ref scenery`: any map's, drawn in the level's colours),
                                    // "vanilla:P Knight" (another unit's model, `ref enemies [--player]`),
                                    // or "asset:<key>" (an OBJ/glTF in the library's assets)
   "meshScale": 0.8,                // omit to fit it to the base's height
@@ -647,3 +648,379 @@ island with three causeways; if that's where yours is heading, check whether ano
 
 See `examples/` in this folder: `watchpost.ops.json` builds a complete small level on a cleared Nordfels from nothing,
 `watchpost.plan.json` is its test plan, and `watchpost.md` lists the exact commands and what they printed.
+
+## 12. Behaviour: rules, entities, statuses (the logic engine)
+
+Levels and enemies can be programmed. There is no list of features to pick from: you compose behaviour from a few
+generic pieces stored as data in the level and enemy JSON, and the game runs them. A homing tree, a necromancer, a
+drawbridge, a toll gate and a splitting slime are all the same pieces arranged differently. If you can describe a
+mechanic as "when X happens, if Y, do Z" on some object, you can build it.
+
+`logic-reference.md` (next to this guide, generated from the engine) lists every event, action, function, property,
+stat, flag, filter term and built-in preset with its parameters. `palace.py logic schema <event|action|fn|preset|...>
+<name>` prints one as JSON. Read this chapter for how the pieces fit; look details up there.
+
+### 12.1 The model
+
+- **Entities** are the things the engine knows: units (vanilla and custom), buildings, the king, the castle, coins, and
+  Builder objects: props, projectiles, areas, pickups, logic objects, paths and points.
+- **Templates** make entities. A custom unit (`units[]`) is a template; non-unit templates live in `entities[]` with
+  a `kind`: `prop`, `projectile`, `area`, `pickup` or `logic` (invisible, just carries rules).
+- **Rules** live on templates and placed objects: `when` an event happens (to the owner, or with `of` to others), `if`
+  conditions hold, `do` actions run in order.
+- Every rule sees **roles**: `self` (the owner; the level in the level script), `subject` (who the event happened to),
+  `other` (the counterpart: killer, victim, attacker, entrant, collector, sender), `event.value`, `event.pos`.
+- **Selectors** pick entities by filter and distance: `nearest('foe and Tower', 20)`, `all('ally and unit', 6)`,
+  `@gate1` (a placed object by name).
+- **Statuses** are timed, stacking modifier sets with their own rules: buffs, debuffs, auras, damage over time,
+  shields, stuns, invisibility.
+- **Signals** wire objects together: any rule can `signal` a name to an entity, a set or everyone; `signal` rules
+  listen. Every entity also takes built-in inputs (`enable`, `disable`, `toggle`, `destroy`, and per component
+  `open`/pose names, `start`, `stop`, `reverse`, `show`, `hide`, `lock`, `unlock`).
+- **Variables** hold state: level-wide (`$souls`) or per entity (`self.$gen`). They must be declared with a start value.
+- **Presets** are saved, parameterised rule sets (built-in ones include the logic objects Timer, Counter, Lever,
+  Pressure plate, Door, Spawner... and abilities like Split on death and Aura).
+
+### 12.2 Where logic lives
+
+```jsonc
+{
+  "units": [{ "id": "slime", "base": "vanilla:E Slime",            // a custom unit, as in section 5
+              "labels": ["goo"], "vars": { "gen": 0 },             // labels filters test (#goo); entity variables
+              "statuses": ["warded"],                               // statuses it starts with
+              "targeting": [...], "movement": {...}, "attacks": [...],
+              "rules": [...] }],
+  "entities": [{ "id": "tree-missile", "kind": "projectile", ... }], // non-unit templates
+  "statuses": [{ "id": "burning", ... }],
+  "presets":  [{ "id": "split-on-death", ... }],                    // your own presets (built-ins need no entry)
+  "levels": [{ "id": "...", ...,
+    "logic": {
+      "seed": 1234,                                   // optional: the logic random source (default: from the level id)
+      "vars": { "souls": 0, "season": "'summer'" },   // level variables and start values
+      "rules": [...],                                 // the level script: self is the level
+      "places": [...],                                // objects placed on the map (templates, areas, paths, points, logic objects)
+      "attach": { "slot:Tower 3": { "name": "northTower", "vars": { "hits": 0 }, "rules": [...] },
+                  "castle": { "rules": [...] } },     // logic on things the level already has
+      "hud": [{ "id": "souls", "text": "Souls {$souls}/10" }],
+      "kingActions": [{ "id": "horn", "name": "War horn" }],   // up to 3 extra keys for the player
+      "caps": { "entities": 600 }                     // raise the engine's caps (warning: may lag)
+    } }]
+}
+```
+
+`attach` keys are the Studio's item keys: `slot:<host slot name>` (names from `palace.py ref slots <map>`),
+`add:<id>` (a slot you added), `prop:<id>`, `line:<spawn line name>`, `castle`. Give an attached object a `name` to
+reach it from expressions as `@name`.
+
+A **place** (`logic.places[]`) is `{ "id", "entity": "<template>" | "preset": "<preset>", "with": {...} | "kind":
+"<kind>" + inline fields, "pos": [x, y, z], "rotY", "scale", "name", "active", "vars", "rules" }`. Its `id` (lowercase)
+or `name` is how expressions reach it (`@plate1`). Inline fields override the template's for that copy. `"active":
+false` places it switched off until something sends it `enable`. A path is `{ "id", "kind": "path", "points":
+[[x, z], ...] }`; a point is `{ "id", "kind": "point", "pos" }`.
+
+Templates and places can be used by every level; units with rules work wherever they spawn (waves, `spawn`,
+`spawnGroup`). Entities, statuses and presets are library items like enemies (`library/entities/`, `statuses/`,
+`presets/`), shared by all levels, and `export` copies the ones a level uses.
+
+### 12.3 Rules
+
+```jsonc
+{ "id": "split",                     // optional; needed by enableRule/disableRule
+  "when": "death",                   // or { "on": "every", "seconds": 8, "during": "night" }
+  "if": "self.$gen < 3",             // one bool expression, or a list (all must hold)
+  "do": [ ...actions... ],
+  "once": false,                     // at most once per owner per run
+  "cooldown": 0,                     // seconds before it can fire again for the same owner
+  "enabled": true,                   // false: off until enableRule
+  "note": "Splits into two smaller copies" }
+```
+
+- Without `of`, a rule hears only its owner's events. With `"of": "<filter>"` (and optional `"range"`) it hears that
+  event on any matching entity: `{ "on": "death", "of": "foe and unit", "range": 12 }` on a necromancer fires when a
+  foe dies within 12 m. Then `subject` is the one that died, `other` its killer, `self` still the necromancer.
+- The level script hears time and night events (`levelStart`, `every`, `dusk`, `dawn`, `waveCleared`, `goldChanged`,
+  `kingAction`, `signal`, `varChanged`...) directly; entity events (`death`, `damaged`, `spawn`, `enter`...) need `of`.
+  In the level script `foe`/`ally` mean enemy/player.
+- `near` takes its own `filter` and `range`: `{ "on": "near", "filter": "king", "range": 2 }`.
+- Event params narrow it: `{ "on": "signal", "name": "open" }`, `{ "on": "hpBelow", "pct": 0.5 }`, `{ "on": "dusk",
+  "night": 4 }`, `{ "on": "damaged", "min": 20 }`. Events with a value: `event.value` (damage, tick count, night...).
+- Rules run one frame after the event, in order; actions that raise events queue them after. Waits resume later.
+
+### 12.4 Expressions (the one formula language)
+
+One small, pure language everywhere: conditions, numbers, selectors, positions.
+
+- **Which fields are expressions.** A param whose type isn't text is an expression when it's a JSON string:
+  `"amount": 25` and `"amount": "night * 5"` both work; `"target": "all('foe', 3)"`. A **text** field (messages, HUD,
+  prompts) is literal text with `{expr}` parts (`"Souls {$souls}/10"`); start it with `=` to make the whole field an
+  expression. A **template** field (`spawn.entity`) is an id (`"goblin"`, `"vanilla:E Slime"`) unless it starts with
+  `=` (`"=self.template"`). Text inside an expression is quoted: `'summer'`, `count('foe')`.
+- **Literals**: `12`, `0.5`, `true`, `'text'`, `vec(x, z)` (a ground position), `vec(x, y, z)`.
+- **Names**: roles (`self subject other spawned it king castle level`), per-event aliases (`killer`, `victim`,
+  `attacker`, `target`, `entrant`, `collector`, `sender`...), `event.value` / `event.pos` / `event.name` /
+  `event.choice`, `@name` (a place or attached object), `@@id` (a template), `$var` (a level variable), `x.$var` (an
+  entity variable), globals (`night`, `isNight`, `isDay`, `time`, `nightTime`, `nightProgress`, `gold`, `income`,
+  `enemiesAlive`, `difficulty`, `nights`).
+- **Properties**: `.hp .maxHp .hpPct .alive .pos .x .y .z .facing .team .kind .template .labels .level .cost
+  .buildingType .age .target .owner .id`, every stat by name (`.moveSpeed`, `.damageMult`, `.income`...), methods
+  `.is('filter')`, `.dist(e)`, `.inside(@area)`, `.stacks('status')`; lists and sets: `.len .first .last .at(i)
+  .has(x)`.
+- **Selectors**: `nearest(f, r?)`, `farthest`, `weakest`, `strongest`, `random`, `all(f, r?)` (a set, nearest first),
+  `best(f, r, score)` (score is an expression over `it`), `count(f, r?)`. They anchor at `self`; call them as methods
+  to anchor elsewhere: `castle.count('enemy', 10)`, `other.nearest('ally')`. A selector never returns the anchor itself
+  or dead entities unless the filter says `self` / `dead`. No match is `none` (actions on none do nothing).
+- **Positions**: an entity is its position wherever a position is wanted. `pointNear(p, r)` (a random walkable point),
+  `ahead(e, d)`, `toward(a, b, d)`, `lerp(a, b, t)`, `dir(deg)` (0 = north, 90 = east), `angle(a, b)`,
+  `spawnLine('Name')`; positions add, subtract and scale (`self.pos + dir(90) * 3`).
+- **Maths and logic**: `+ - * / %`, `== != < <= > >=`, `and or not` (also `&& || !`), `c ? a : b`, `min max abs floor
+  ceil round clamp sqrt pow sin cos`, `rand()`, `rand(a, b)`, `randInt(a, b)`, `chance(p)` (seeded: the same events
+  give the same results).
+- **Waves**: `waveCount(n, filter?)`, `waveUnits(n)`, `strongestUnit(n)`.
+- **Types are checked** before the game runs (`palace.py check`): an unknown variable, a role the event doesn't have
+  (`other` in `levelStart`), a misspelled filter term or a number compared with text are errors with the column.
+
+### 12.5 Filters
+
+A filter is a string: `"foe and Building and not Wall"`, `"#lantern"`, `"in:@moat"`. Terms: teams `foe ally player
+enemy neutral` (foe/ally relative to `self`); kinds `unit building prop projectile area pickup coin king castle line
+point path logic self`; `melee ranged alive dead`; any game tag, case-sensitive (`Tower`, `Flying`, `Wall`, `Boss`,
+`Undead`...; see `logic-reference.md`); `#label`; `is:<template>`; `in:@area` / `in:self` (inside an area); `has:<status>`;
+`type:<building kind>` (`type:Mill`); `where(<expression over it>)`. Combine with `and or not ( )`.
+
+### 12.6 Actions
+
+Each action is `{ "do": "<name>", ...params }`. `target` (default `self`) is a selector; when it's a set the action
+runs once per member and the other params are evaluated per member with `it` bound (`"amount": "it.maxHp * 0.1"`).
+
+| Group | Actions |
+|---|---|
+| Make | `spawn` (any template; `then` runs with `spawned`), `launch` (a projectile template toward a target; `onImpact`), `spawnGroup` (a wave-style group that counts toward the night), `replace` (morph into another template) |
+| Health | `damage` (`amount`, `source` credited, `types` like `["fire"]`), `heal`, `kill`, `revive`, `setHp` |
+| Stats | `setStat` (`stat`, one of `value`/`add`/`mult`, `for` seconds or `"night"`/`"day"`), `applyStatus`, `removeStatus` |
+| Team, move | `convert` (switch side), `teleport`, `push` (knockback), `drift` (continuous pull/wind), `moveTo`, `setMovement`, `setTargeting` (`prepend`, `remove`, `for`), `taunt`, `command` (player units: follow/hold/home) |
+| Logic | `signal`, `setVar`, `addVar`, `listAdd`/`listRemove`/`listClear`, `addLabel`/`removeLabel`, `enableRule`/`disableRule`, `enable`/`disable`/`toggle`, `wait`, `if` (`cond`, `then`, `else`), `repeat` (`times`, `every`, `actions`), `forEach` (`in`, `actions`, `limit`), `choose` (`options: [{weight, do}]`), `stop` |
+| World | `gold` (give/take), `dropCoins`, `building` (build, upgrade, knockOut, repair, demolish, lock, unlock, setCost, setIncome a slot), `waves` (addSpawn, removeUnit, scaleCount, scaleHp, clearRemaining, startNight, endNight, skipNight), `endLevel` |
+| Show | `effect`, `sound`, `message`, `floatText`, `setVisual`, `hud`, `shake`, `marker` |
+| End | `destroy` (`drops`, `effects`, `silent`) |
+
+`repeat` and `forEach` take their body as `actions` (the key `do` already names the action). `setVar`/`addVar` write
+`self`'s variable unless `target` names another entity; a level variable is `"name": "$souls"` or `"target":
+"level"` (in the level script plain names are level variables).
+
+### 12.7 Components (what a template is)
+
+| Component | For | Key fields |
+|---|---|---|
+| `visual` | any | `mesh` (`mesh:<scenery>`, `vanilla:<unit>`, `asset:<key>`), `meshScale`, `tint`; null = invisible |
+| `body` | any | `radius` or `box: [w, d]`, `height`, `solid` (blocks ground units), `walkable` (a bridge or raft top), `hittable` + `hp`, `flying` |
+| `team` | any | `player`, `enemy`, `neutral` (vanilla AI ignores it), `owner` (the spawner's). `countsAsEnemy: true` keeps a hittable enemy-team entity holding the night open |
+| `lifetime`, `maxAlive` | any | seconds before `expire` + destroy; cap on live copies |
+| `projectile` | flying things | `speed`, `homing` 0..1, `arc`, `gravity`, `spin`, `face`, `hits` (filter), `hitRadius`, `pierce`, `onGround`, `range`; events `impact`, `expire` |
+| `mover` | moving props | `path` (`@path` or points), `mode` loop/pingpong/once, `speed`, `wait`, `spin`, `swing`, `running`, `pose` {name: {offset, rotY}}; inputs `start stop reverse goto` and each pose's name; events `arrive`, `end` |
+| `area` | zones | `shape` (`circle {radius}` / `rect {size: [w, d]}` / `polygon {points}`), `watch` (filter), `show`, `color`, `tick`; events `enter exit inside empty occupied`; filters `in:@area` |
+| `pickup` | collectibles | `by` (filter, e.g. `king`), `radius`, `magnet`, `consume`; event `pickup` |
+| `interact` | king-usable | `prompt` (`{cost}` shows the cost), `cost`, `when` day/night/always, `radius`, `repeat`, `choices` (up to 4 `{id, label, cost}`; `event.choice`); event `interact` |
+| `attacks` | turrets, units | `[{ "cooldown", "range", "targeting", "launch": {"entity", "from"} \| "weapon", "do", "replace", "when" }]`; the unit's base attacks stay unless `replace` |
+| `targeting` | attackers | ordered list of filters or `{filter, range, prefer, score}`; works on vanilla towers too (`setTargeting`) |
+| `movement` | units | `mode` pathfind/direct/hold/path, `path`, `then`, `speed`, `keepDistance`, `kite`, `flee`, `wander`, `home` |
+
+A number field may be an expression evaluated when the entity appears: `"hp": "=100 * night"`.
+
+### 12.8 Statuses
+
+```jsonc
+{ "id": "burning", "name": "Burning", "duration": 4, "stacking": "refresh",   // refresh | add | extend | ignore
+  "maxStacks": 5, "tick": 1,
+  "mods": { "moveSpeed": { "mult": 0.8 },                                   // per stack: mult compounds, add sums
+            "damageTaken": { "mult": 1.25, "types": ["fire"], "from": "foe", "chance": 1, "when": "dist > 10" } },
+  "flags": [],                       // stunned disarmed rooted untargetable invulnerable silenced noIncome
+  "visual": { "tint": "#ff7020", "fx": "fire_small" },
+  "rules": [{ "when": "statusTick", "do": [{ "do": "damage", "amount": "3 * self.stacks('burning')", "types": ["fire"], "source": "other" }] }] }
+```
+
+In a status's rules `self` is the carrier and `other` whoever applied it. `drift` is a mod too (`"drift": {"toward":
+"@well", "speed": 3}`). Vanilla damage carries types `melee`/`ranged`, `tower`, `king`, `splash`, `magic`.
+
+### 12.9 Variables, HUD, king actions, caps
+
+- Declare every variable with a start value: level ones in `logic.vars`, entity ones in the template's (or place's,
+  or attach's) `vars`. Values: a number, `true`/`false`, `"'text'"`, `"vec(x, z)"`, `[]` (a list), or `{"type":
+  "entity", "value": null}`. Using an undeclared one is an error. Changing one fires `varChanged`.
+- HUD lines show text with `{expr}` (`"Souls {$souls}/10"`, `"visible": "$souls > 0"`); the `hud` action changes them.
+- King actions (`logic.kingActions`, at most 3): `{ "id", "name", "when": "day", "cooldown", "uses": {"count", "per":
+  "day"|"night"|"run"} }`. The player presses Level action 1-3; the level script hears `{"on": "kingAction", "action":
+  "<id>"}`.
+- Caps keep levels playable: 300 live spawned entities (units 200, projectiles 400), 100 copies per template, 400
+  rule firings and 4000 actions per frame, chain depth 12, `every` ≥ 0.1 s, `wait` ≥ 0.05 s, `repeat` ≤ 100, sets ≤ 256.
+  Over a cap the extra spawn or firing is skipped (the trace shows it). `logic.caps` raises them per level (warning).
+
+### 12.10 Presets
+
+Use a preset in any rules list: `{ "preset": "split-on-death", "with": { "count": 3 } }` (its rules, vars, labels and
+components are merged in), or place a logic object: `{ "op": "place", "id": "t1", "preset": "timer", "with":
+{ "seconds": 10, "signal": "wave" }, "at": [x, z] }`. Built-ins (see `logic-reference.md` for params): `timer`,
+`counter`, `relay`, `gate`, `toggle-switch`, `random-router`, `spawner`, `lever`, `pressure-plate`, `door`,
+`moving-wall`, `sign`, `gold-pickup`, `hud-counter`, `split-on-death`, `spawn-on-death`, `aura`, `explode-near`,
+`multiply`, `regenerate`, `blink-away`.
+
+Your own preset: `{ "id", "name", "description": "Splits into {count} copies", "params": { "count": { "type":
+"number", "default": 2, "min": 1, "max": 6 } }, "vars": {...}, "rules": [...], ...components }`. `{param}` anywhere in
+its strings is replaced by the value; a string that is exactly `"{count}"` becomes the typed value (a number stays a
+number). Errors in a preset's rules are reported at the place that uses it.
+
+### 12.11 Ops
+
+| Op | Fields |
+|---|---|
+| `entity` | a whole EntityDef (`id`, `kind`, components, `rules`...): adds or replaces |
+| `status` / `preset` | a whole StatusDef / PresetDef |
+| `place` | `id`, `entity` \| `preset` + `with` \| inline `kind` + fields, `at` [x, z] (or `pos`), `rotY`, `scale`, `name`, `active`, `vars`, `rules`; a path takes `points` |
+| `remove_place` | `id` |
+| `rule` | `on`: `level` \| `unit:<id>` \| `entity:<id>` \| `status:<id>` \| `place:<id>` \| `slot:<name>` \| `add:<id>` \| `prop:<id>` \| `line:<name>` \| `castle`; `rule` (or `rules`): one with an existing `id` replaces it |
+| `remove_rule` | `on`, `id` |
+| `wire` | `from` (an `on` value), `event` (default `interact`), `to` (a place id/name or attach name), `input` (signal), `value`, `delay`, `do` (the target's listener, for an input that isn't built in) |
+| `var` | `name`, `value` (a level variable), or `on` + `name` + `value` (an entity default) |
+| `attach` | `key`, `name`, `labels`, `vars`, `statuses`, `targeting` |
+| `king_action` | `id`, `name`, `when`, `cooldown`, `uses` |
+| `hud` | `id`, `text`, `icon`, `visible` |
+| `logic` | `seed`, `caps` |
+
+Units take `rules`, `vars`, `labels`, `targeting`, `movement`, `attacks`, `statuses` in the `unit` op, or rules later
+with `{"op": "rule", "on": "unit:<id>", ...}`.
+
+### 12.12 Checking and testing behaviour
+
+1. `palace.py check library <level>` (also run by `apply`) checks every rule offline: unknown events and actions
+   (with "did you mean"), params, types, roles per event, variables, names, templates, statuses, filters, signal
+   loops, caps. Each issue has a JSON path and, for expressions, a column. `palace.py logic check` runs only these.
+2. In the game (`play` or `test` the level, then):
+   - `palace.py logic trace [n]`: the last rule firings (time, owner, rule, event, outcome; throttles and errors).
+   - `logic vars [selector]`, `logic entities [filter]`, `logic status`, `logic budget`.
+   - `logic eval "<expression>"` evaluates in the level script's scope: `logic eval "count('is:slime')"`.
+   - `logic do '<action JSON>'` runs actions as the level script, e.g. to set up a test:
+     `logic do '{"do":"spawn","entity":"necromancer","at":"vec(-4,-14)"}'`.
+   - `logic fire <signal> [to]`, `logic raise <event> <on> [other] [name] [value]` (selector arguments without spaces),
+     `logic set <var> <expr>`, `logic king <1-3>`.
+3. Test a mechanic deliberately: spawn what it needs with `logic do`, wait, assert with `logic eval`.
+
+### 12.13 Limits (what the engine can't do)
+
+- Vanilla arrows in flight aren't affected by `drift` or `timeScale` (Builder projectiles are).
+- No per-unit walkability: "only melee can climb this wall" is a teleport, not a path. Walkable movers snap between
+  poses; they don't carry units while gliding. Terrain height doesn't change at runtime.
+- Three teams; vanilla units never attack `neutral` things (Builder targeting can).
+- Game tags are a fixed set; your own labels work through Builder targeting and filters.
+- No new scenes, lighting or arbitrary code. Pending `wait`s and Builder projectiles in flight aren't kept by
+  savestates; keep state that matters in variables.
+
+### 12.14 Cookbook
+
+Each is plain data; adapt names and numbers. (Full, tested versions: `examples/behaviour.ops.json` builds several on
+one level.)
+
+**Hurls homing trees** (an enemy with a projectile attack):
+
+```jsonc
+{"op": "entity", "id": "tree-missile", "kind": "projectile", "visual": {"mesh": "mesh:Cone Tree", "meshScale": 0.4}, "lifetime": 6,
+ "projectile": {"speed": 9, "homing": 0.6, "arc": 0.2, "spin": [0, 0, 360], "hits": "foe"},
+ "rules": [{"when": "impact", "do": [{"do": "damage", "target": "all('foe', 2)", "amount": 25, "source": "self.owner"},
+                                     {"do": "effect", "fx": "dust_large", "at": "self"}]}]}
+{"op": "unit", "id": "treant", "base": "vanilla:E Ogre", "name": "Treant",
+ "attacks": [{"replace": true, "cooldown": 3, "range": 18, "targeting": ["foe and Building", "foe"],
+              "launch": {"entity": "tree-missile", "from": [0, 3, 0]}}]}
+```
+
+**Kills convert the victim**: `{ "when": "kill", "if": "other.is('unit and not king')", "do": [{ "do": "convert",
+"target": "other", "team": "=self.team", "hpPct": 0.5 }] }`
+
+**Multiplies every 8 s, capped**: `{ "when": {"on": "every", "seconds": 8, "during": "night"}, "if": "count('ally and
+is:spore') < 40", "do": [{"do": "spawn", "entity": "=self.template", "at": "pointNear(self, 2)"}] }`
+
+**Necromancer**: `{ "when": {"on": "death", "of": "foe and unit", "range": 12}, "if": "chance(0.3)", "do": [{"do":
+"spawn", "entity": "skeleton", "at": "subject"}] }`
+
+**Splitting slime**: `"rules": [{"preset": "split-on-death", "with": {"count": 2, "depth": 3}}]`
+
+**Spike plate** (an area that hurts enemies standing on it):
+
+```jsonc
+{"op": "place", "id": "plate1", "kind": "area", "at": [12, -4], "area": {"shape": {"rect": {"size": [4, 4]}}, "watch": "enemy", "show": "fill"},
+ "rules": [{"when": {"on": "every", "seconds": 1}, "if": "count('enemy and in:self') > 0",
+            "do": [{"do": "damage", "target": "all('unit and in:@plate1')", "amount": 30}, {"do": "effect", "fx": "spikes", "at": "self"}]}]}
+```
+
+**Drawbridge on a lever**: a prop template with `"mover": {"pose": {"up": {"offset": [0, 4, 0]}, "down": {}}}` placed as
+`bridge`; a lever: `{"op": "place", "id": "lever", "preset": "lever", "with": {"signal": "up", "to": "@bridge"}, "at":
+[14, -6]}`; and on the bridge `{"when": "dusk", "do": [{"do": "signal", "name": "down", "to": "self"}]}`.
+
+**Aura**: a status `{"id": "warded", "duration": 1.2, "mods": {"damageTaken": {"mult": 0.7}}}` and on the bearer
+`{"when": {"on": "every", "seconds": 1}, "do": [{"do": "applyStatus", "status": "warded", "target": "all('ally and unit', 6)"}]}`.
+
+**Kamikaze**: `"targeting": [{"filter": "king"}], "movement": {"mode": "direct"}` and `{"when": {"on": "near", "filter":
+"king", "range": 2}, "do": [{"do": "damage", "target": "all('foe', 3)", "amount": 40}, {"do": "destroy", "drops": true}]}`.
+
+**Merchant caravan**: a path place `{"id": "route", "kind": "path", "points": [[30, -10], [-4, -8]]}`, a unit with
+`"movement": {"mode": "path", "path": "@route", "then": "destroy"}` and `{"when": "end", "do": [{"do": "gold", "amount":
+15}]}`, spawned with `"team": "neutral"`; enemies prefer it: level rule `{"when": {"on": "spawn", "of": "enemy"}, "do":
+[{"do": "setTargeting", "target": "subject", "prepend": ["is:caravan"]}]}`.
+
+**Charging tower** (every fifth hit fires a bolt), on an attached slot:
+`{"op": "rule", "on": "slot:Tower 3", "rule": {"when": "hit", "do": [{"do": "addVar", "name": "hits", "value": 1},
+{"do": "if", "cond": "self.$hits % 5 == 0", "then": [{"do": "launch", "entity": "bolt", "toward": "other", "pierce": -1}]}]}}`
+plus `{"op": "var", "on": "slot:Tower 3", "name": "hits", "value": 0}`.
+
+**Volcano**: a logic place with `{"when": {"on": "every", "seconds": 12, "during": "night"}, "do": [{"do": "launch",
+"entity": "lava-rock", "toward": "pointNear(self, 15)"}]}`; `lava-rock` (projectile, `gravity`) on `impact` damages
+`all('unit', 3)` with `types: ["fire"]` and spawns `fire-area` (an area entity with `lifetime: 5`, `tick: 1`, rule
+`inside` → `applyStatus burning` to `other`).
+
+**Mercenary camp**: an area watching the king, `tick: 3`, rule `inside` if `isDay and gold >= 10`, `cooldown: 60`: `gold
+-10`, `spawn merc ×3 team player then command follow`; the merc template's rule `dawn → destroy silent`.
+
+**Revenge**: level rule `{"when": {"on": "damaged", "of": "castle"}, "cooldown": 5, "do": [{"do": "setStat", "target":
+"all('player and Tower')", "stat": "attackCooldown", "mult": 0.5, "for": 5}]}`.
+
+**Escalation**: `{"when": "dusk", "if": "night >= 4 and count('#shrine and alive') >= 2", "do": [{"do": "waves", "op":
+"addSpawn", "night": "night", "unit": "brute", "count": "night - 2", "line": "Main Bridge"}]}`.
+
+**Rotating blade wall**: a prop with `"mover": {"spin": 90}`, `"body": {"box": [6, 1], "solid": true}` and `every 0.5 →
+damage all('unit and not Flying', 3) 8`.
+
+**Lantern ghost** (invulnerable away from lanterns): status `veiled` with `flags: ["invulnerable"]`; on the ghost
+`every 0.5 → if count('#lantern', 8) == 0 then applyStatus veiled for 0.6`.
+
+**Blinks away once**: `{"when": {"on": "hpBelow", "pct": 0.5}, "once": true, "do": [{"do": "teleport", "at":
+"pointNear(castle, 10)"}, {"do": "heal", "amount": "self.maxHp * 0.3"}]}`.
+
+**Chain lightning**: a projectile `spark` with vars `{"jumps": 3, "power": 30}`; on `impact`: damage `other` by
+`self.$power`; if `self.$jumps > 0`, `launch spark from other toward nearest('foe and not has:shocked', 8)` with `then`
+setting `spawned`'s `jumps` to `self.$jumps - 1` and `power` to `self.$power * 0.7` (a short `shocked` status stops it
+jumping back).
+
+**Day/night shapeshifter**: `{"when": "dusk", "do": [{"do": "replace", "with": "werewolf", "keep": ["hp", "vars"]}]}`, and
+the mirror rule at `dawn` on the werewolf.
+
+**Toll gate**: a door place with `"interact": {"prompt": "Pay {cost} to open", "cost": 5, "when": "day"}` and rules
+`interact → signal open to self`, `dusk → signal closed to self`.
+
+**Soul objective**: `"vars": {"souls": 0}`, `"hud": [{"id": "souls", "text": "Souls {$souls}/10"}]`, level rules
+`{"when": {"on": "death", "of": "enemy and in:@ritual"}, "do": [{"do": "addVar", "name": "souls", "value": 1}]}` and
+`{"when": "varChanged", "if": "$souls >= 10", "once": true, "do": [{"do": "endLevel", "result": "win"}]}`.
+
+**War horn** (a king action): `{"op": "king_action", "id": "horn", "name": "War horn", "when": "day", "uses": {"count":
+1, "per": "day"}}` and a level rule on `{"on": "kingAction", "action": "horn"}`: `command follow` and `setStat
+moveSpeed mult 1.2 for "night"` on `all('player and unit', 20)`.
+
+### 12.15 Pitfalls
+
+- A text field is literal: `"text": "souls"` shows the word; `"text": "{$souls}"` shows the number. A non-text field
+  is an expression: `"value": "summer"` is an unknown name; write `"value": "'summer'"`.
+- `foe`/`ally` are relative to `self`; in the level script they mean enemy/player. A selector skips `self` and dead
+  entities unless the filter says `self`/`dead`.
+- The level script needs `of` for entity events; `other` exists only for events that have one (see the reference).
+- Declare variables first; set entity variables on the right `target` (`"target": "spawned"` inside `then`).
+- `@names` are place ids/names and attach names; give attached slots a `name` before wiring them.
+- Bound anything that repeats: `once`, `cooldown`, a variable counter or a `count(...)` cap, so a level can't snowball
+  into the caps.
+- `repeat`/`forEach` bodies are `actions`, not `do`.
+- An enemy-team entity that should hold the night open needs `body.hittable` and `countsAsEnemy: true`.

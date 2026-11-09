@@ -139,6 +139,22 @@ namespace PalaceMod.Tests
                 "agent-kit/logic-schema.json is out of date: UPDATE_LOGIC_SCHEMA=1 dotnet run --project tests/PalaceMod.Tests -- LogicSchemaFile");
         }
 
+        public static void DefsKeepUnknownFields()
+        {
+            string json = @"{""format"":""palace-builder"",""version"":3,""id"":""a.b"",""future"":1,""assets"":{},""waveSets"":[],
+                ""units"":[{""id"":""u"",""side"":""enemy"",""base"":""vanilla:E Melee"",""rules"":[{""when"":{""on"":""death"",""x"":1},""do"":[{""do"":""spawn"",""entity"":""u"",""y"":2}],""studio"":{""collapsed"":true}}],
+                            ""movement"":{""mode"":""direct"",""zz"":1},""targeting"":[""foe"",{""filter"":""king"",""w"":3}]}],
+                ""entities"":[{""id"":""e"",""kind"":""prop"",""q"":1,""body"":{""radius"":1,""r"":2},""area"":{""shape"":{""circle"":{""radius"":""=night"",""c"":1}}}}],
+                ""statuses"":[{""id"":""s"",""mods"":{""moveSpeed"":{""mult"":0.5,""m"":1}},""s2"":1}],
+                ""presets"":[{""id"":""p"",""params"":{""a"":{""type"":""number"",""pp"":1}},""movement"":{""mode"":""hold""}}],
+                ""levels"":[{""id"":""l"",""host"":""Nordfels"",""logic"":{""lx"":1,""places"":[{""id"":""a"",""kind"":""logic"",""pos"":[0.5,1.5,2.5],""px"":1}],
+                            ""attach"":{""castle"":{""name"":""c"",""ax"":1}},""hud"":[{""id"":""h"",""text"":""t"",""hx"":1}],""kingActions"":[{""id"":""k"",""kx"":1}],""caps"":{""entities"":10,""cx"":1}}}]}";
+            var pack = PackSerializer.Read(json, null);
+            var back = JObject.Parse(PackSerializer.WriteCompact(pack));
+            var want = JObject.Parse(json);
+            Assert.True(JToken.DeepEquals(want, back), "round trip:\n" + want + "\n---\n" + back);
+        }
+
         // ---- Migration and lowering --------------------------------------------------------------------------
 
         public static void MigratesSpawnOnDeathToARule()
@@ -198,6 +214,15 @@ namespace PalaceMod.Tests
             Assert.Equal("imp,ghost", string.Join(",", LogicRefs.TemplateRefs(u)), "refs");
             LogicRefs.Rewrite(u, r => r == "imp" ? "imp-2" : null);
             Assert.Equal("imp-2,ghost", string.Join(",", LogicRefs.TemplateRefs(u)), "rewritten");
+        }
+
+        public static void LevelEffectsFlagSharedEnemies()
+        {
+            RuleDef R(string j) => JObject.Parse(j).ToObject<RuleDef>();
+            Assert.Equal("", string.Join(",", LevelEffects.Of([R(@"{""when"":""death"",""do"":[{""do"":""spawn"",""entity"":""x""}]}")])), "a plain ability");
+            Assert.Equal("gold,hears death of enemy anywhere,level variable souls", string.Join(",", LevelEffects.Of([
+                R(@"{""when"":""death"",""do"":[{""do"":""gold"",""amount"":5}]}"),
+                R(@"{""when"":{""on"":""death"",""of"":""enemy""},""do"":[{""do"":""if"",""cond"":""true"",""then"":[{""do"":""addVar"",""name"":""$souls""}]}]}")])), "level effects");
         }
 
         // ---- Presets ------------------------------------------------------------------------------------------

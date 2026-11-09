@@ -12,7 +12,7 @@
     "id": "blade-wall",
     "kind": "prop",
     "visual": {
-     "mesh": "mesh:Wall"
+     "mesh": "mesh:Wall Segment lvl2"
     },
     "body": {
      "box": [

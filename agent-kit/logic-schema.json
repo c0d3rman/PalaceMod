@@ -1,5 +1,5 @@
 {
-  "version": "0.9.0",
+  "version": "1.0.0",
   "events": [
     {
       "name": "spawn",
@@ -13,7 +13,7 @@
       "owners": [
         "any"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "death",
@@ -29,7 +29,7 @@
         "any"
       ],
       "example": "{ \"when\": \"death\", \"do\": [{ \"do\": \"spawn\", \"entity\": \"goblin\", \"count\": 2, \"at\": \"self\" }] }",
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "damaged",
@@ -51,7 +51,7 @@
       "owners": [
         "any"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "healed",
@@ -67,7 +67,7 @@
       "owners": [
         "any"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "hpBelow",
@@ -88,7 +88,7 @@
       "owners": [
         "any"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "attack",
@@ -108,7 +108,7 @@
       "owners": [
         "any"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "hit",
@@ -124,7 +124,7 @@
       "owners": [
         "any"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "kill",
@@ -138,7 +138,7 @@
       "owners": [
         "any"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "every",
@@ -183,7 +183,7 @@
       ],
       "global": true,
       "example": "{ \"when\": { \"on\": \"every\", \"seconds\": 8, \"during\": \"night\" }, \"do\": [...] }",
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "after",
@@ -202,7 +202,7 @@
         "any"
       ],
       "global": true,
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "near",
@@ -238,7 +238,7 @@
       "owners": [
         "any"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "enter",
@@ -252,7 +252,7 @@
       "owners": [
         "area"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "exit",
@@ -263,7 +263,7 @@
       "owners": [
         "area"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "inside",
@@ -274,7 +274,7 @@
       "owners": [
         "area"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "empty",
@@ -284,7 +284,7 @@
       "owners": [
         "area"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "occupied",
@@ -295,7 +295,7 @@
       "owners": [
         "area"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "impact",
@@ -307,7 +307,7 @@
       "owners": [
         "projectile"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "expire",
@@ -317,7 +317,7 @@
       "owners": [
         "any"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "arrive",
@@ -329,7 +329,7 @@
       "owners": [
         "any"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "end",
@@ -339,7 +339,7 @@
       "owners": [
         "any"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "pickup",
@@ -353,7 +353,7 @@
       "owners": [
         "pickup"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "interact",
@@ -374,7 +374,7 @@
         "logic",
         "king"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "signal",
@@ -400,7 +400,7 @@
         "any"
       ],
       "global": true,
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "varChanged",
@@ -422,7 +422,7 @@
         "any"
       ],
       "global": true,
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "statusStart",
@@ -447,7 +447,7 @@
       "owners": [
         "any"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "statusEnd",
@@ -472,7 +472,7 @@
       "owners": [
         "any"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "statusTick",
@@ -497,7 +497,7 @@
       "owners": [
         "any"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "targetChanged",
@@ -511,7 +511,7 @@
       "owners": [
         "any"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "built",
@@ -529,7 +529,7 @@
       "owners": [
         "building"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "upgraded",
@@ -547,7 +547,7 @@
       "owners": [
         "building"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "repaired",
@@ -565,7 +565,7 @@
       "owners": [
         "building"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "coinDrop",
@@ -576,7 +576,7 @@
       "owners": [
         "coin"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "coinPickup",
@@ -587,7 +587,7 @@
       "owners": [
         "coin"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "lineSpawn",
@@ -604,7 +604,7 @@
       "owners": [
         "line"
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "levelStart",
@@ -615,7 +615,7 @@
         "any"
       ],
       "global": true,
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "dusk",
@@ -634,7 +634,7 @@
         "any"
       ],
       "global": true,
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "nightStart",
@@ -653,7 +653,7 @@
         "any"
       ],
       "global": true,
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "dawn",
@@ -672,7 +672,7 @@
         "any"
       ],
       "global": true,
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "day",
@@ -691,7 +691,7 @@
         "any"
       ],
       "global": true,
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "waveCleared",
@@ -704,7 +704,7 @@
         "any"
       ],
       "global": true,
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "goldChanged",
@@ -717,7 +717,7 @@
         "any"
       ],
       "global": true,
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "kingAction",
@@ -736,7 +736,7 @@
         "any"
       ],
       "global": true,
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "levelEnd",
@@ -760,7 +760,7 @@
         "any"
       ],
       "global": true,
-      "since": "0.9.0"
+      "since": "1.0.0"
     }
   ],
   "actions": [
@@ -831,7 +831,7 @@
         }
       ],
       "example": "{ \"do\": \"spawn\", \"entity\": \"=self.template\", \"count\": 2, \"at\": \"self\", \"spread\": 1.5 }",
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "launch",
@@ -906,7 +906,7 @@
           "description": "Run once it's launched, with `spawned` bound."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "spawnGroup",
@@ -956,7 +956,7 @@
           "description": "Coins each drops (default: the unit's)."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "replace",
@@ -999,7 +999,7 @@
           "description": "Run with `spawned` = the replacement."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "damage",
@@ -1043,7 +1043,7 @@
         }
       ],
       "example": "{ \"do\": \"damage\", \"target\": \"all('foe', 3)\", \"amount\": 25 }",
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "heal",
@@ -1064,7 +1064,7 @@
           "description": "Hit points."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "kill",
@@ -1083,7 +1083,7 @@
           "description": "Who is credited."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "revive",
@@ -1105,7 +1105,7 @@
           "description": "Hit points as a fraction of max."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "setHp",
@@ -1126,7 +1126,7 @@
           "description": "Hit points."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "setStat",
@@ -1187,7 +1187,7 @@
         }
       ],
       "example": "{ \"do\": \"setStat\", \"target\": \"all('player and Tower')\", \"stat\": \"attackCooldown\", \"mult\": 0.5, \"for\": 5 }",
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "applyStatus",
@@ -1225,7 +1225,7 @@
           "description": "Who applied it (`other` in its rules). Default self."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "removeStatus",
@@ -1251,7 +1251,7 @@
           "description": "Stacks to remove (default all)."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "convert",
@@ -1285,7 +1285,7 @@
         }
       ],
       "example": "{ \"do\": \"convert\", \"target\": \"other\", \"team\": \"=self.team\", \"hpPct\": 0.5 }",
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "teleport",
@@ -1305,7 +1305,7 @@
           "description": "Where."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "push",
@@ -1347,7 +1347,7 @@
           "description": "Seconds stunned."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "drift",
@@ -1394,7 +1394,7 @@
           "description": "Replaces an earlier drift with the same key."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "moveTo",
@@ -1429,7 +1429,7 @@
           "description": "After arriving."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "setMovement",
@@ -1454,7 +1454,7 @@
           "description": "Seconds; reverts after."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "setTargeting",
@@ -1489,7 +1489,7 @@
         }
       ],
       "example": "{ \"do\": \"setTargeting\", \"target\": \"subject\", \"prepend\": [\"is:caravan\"] }",
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "taunt",
@@ -1515,7 +1515,7 @@
           "description": "Seconds."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "command",
@@ -1540,7 +1540,7 @@
           "description": "The order."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "signal",
@@ -1574,7 +1574,7 @@
         }
       ],
       "example": "{ \"do\": \"signal\", \"name\": \"open\", \"to\": \"@gate1\" }",
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "setVar",
@@ -1600,7 +1600,7 @@
           "description": "Whose variable (default self; \"level\" for a level var)."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "addVar",
@@ -1626,7 +1626,7 @@
           "description": "Whose variable (default self; \"level\" for a level var)."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "listAdd",
@@ -1652,7 +1652,7 @@
           "description": "Whose variable."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "listRemove",
@@ -1682,7 +1682,7 @@
           "description": "Whose variable."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "listClear",
@@ -1702,7 +1702,7 @@
           "description": "Whose variable."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "addLabel",
@@ -1722,7 +1722,7 @@
           "description": "The label."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "removeLabel",
@@ -1742,7 +1742,7 @@
           "description": "The label."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "enableRule",
@@ -1762,7 +1762,7 @@
           "description": "The rule's id."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "disableRule",
@@ -1782,7 +1782,7 @@
           "description": "The rule's id."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "enable",
@@ -1796,7 +1796,7 @@
           "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "disable",
@@ -1810,7 +1810,7 @@
           "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "toggle",
@@ -1824,7 +1824,7 @@
           "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "wait",
@@ -1839,7 +1839,7 @@
           "description": "Seconds (min 0.05)."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "if",
@@ -1864,7 +1864,7 @@
         }
       ],
       "example": "{ \"do\": \"if\", \"cond\": \"self.$hits % 5 == 0\", \"then\": [...] }",
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "repeat",
@@ -1893,7 +1893,7 @@
           "description": "The actions (\"actions\", since \"do\" names the action itself)."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "forEach",
@@ -1920,7 +1920,7 @@
           "description": "At most this many (max 256)."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "choose",
@@ -1934,14 +1934,14 @@
           "description": "[{ \"weight\": 2, \"do\": [...] }, ...]"
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "stop",
       "group": "Logic",
       "description": "Ends this action list.",
       "params": [],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "gold",
@@ -1960,7 +1960,7 @@
           "description": "Show the coin effect here."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "dropCoins",
@@ -1982,7 +1982,7 @@
           "description": "Where."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "building",
@@ -2023,7 +2023,7 @@
           "description": "For build/upgrade: the upgrade choice (0-based)."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "waves",
@@ -2094,7 +2094,7 @@
         }
       ],
       "example": "{ \"do\": \"waves\", \"op\": \"addSpawn\", \"unit\": \"brute\", \"count\": \"night - 2\", \"line\": \"North\" }",
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "endLevel",
@@ -2117,7 +2117,7 @@
           "description": "Shown on the end screen."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "effect",
@@ -2143,7 +2143,7 @@
           "description": "Size."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "sound",
@@ -2162,7 +2162,7 @@
           "description": "Where (omit for UI sound)."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "message",
@@ -2194,7 +2194,7 @@
           "description": "How long."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "floatText",
@@ -2219,7 +2219,7 @@
           "description": "#rrggbb."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "setVisual",
@@ -2263,7 +2263,7 @@
           "description": "Seconds; reverts after."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "hud",
@@ -2292,7 +2292,7 @@
           "description": "Shown or hidden."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "shake",
@@ -2312,7 +2312,7 @@
           "description": "How long."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "marker",
@@ -2336,7 +2336,7 @@
           "description": "Seconds (omit: until it's gone)."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     },
     {
       "name": "destroy",
@@ -2368,7 +2368,7 @@
           "description": "No death event."
         }
       ],
-      "since": "0.9.0"
+      "since": "1.0.0"
     }
   ],
   "functions": [
@@ -3357,37 +3357,37 @@
       "unlock"
     ]
   },
-  "paramTypes": [
-    "number",
-    "int",
-    "bool",
-    "text",
-    "position",
-    "entity",
-    "entities",
-    "template",
-    "filter",
-    "status",
-    "rule",
-    "var",
-    "signal",
-    "label",
-    "enum",
-    "actions",
-    "options",
-    "targeting",
-    "movement",
-    "any",
-    "for",
-    "night",
-    "slot",
-    "types",
-    "keep",
-    "fx",
-    "sound",
-    "color",
-    "json"
-  ],
+  "paramTypes": {
+    "number": "a number, or an expression string (\"night * 2\")",
+    "int": "a whole number, or an expression string",
+    "bool": "true/false, or an expression string",
+    "text": "text with {expr} parts (\"Souls {$souls}/10\"); \"=expr\" makes the whole field an expression",
+    "position": "an expression giving a position or an entity (self, other, @name, vec(x, z), pointNear(self, 3)), or [x, y, z]",
+    "entity": "a selector expression giving one entity (self, other, @name, nearest('foe', 10))",
+    "entities": "a selector expression giving one entity or a set (all('foe', 6)); the action runs on each member with `it` bound",
+    "template": "a template id: a pack unit, a pack entity, or \"vanilla:<id>\"; \"=expr\" for an expression (\"=self.template\")",
+    "filter": "a filter string (\"foe and Building and not Wall\")",
+    "status": "a status id from the pack's statuses",
+    "rule": "a rule's id",
+    "var": "a variable name (declared in vars; \"$name\" or target \"level\" for a level variable)",
+    "signal": "a signal name (a built-in input or your own)",
+    "label": "a label name (without #)",
+    "enum": "one of the listed options",
+    "actions": "a nested list of actions",
+    "options": "[{ \"weight\": 2, \"do\": [actions] }, ...]",
+    "targeting": "a targeting list: filter strings or { \"filter\", \"range\", \"prefer\", \"score\" }",
+    "movement": "a movement block (mode, path, speed, keepDistance, kite, flee, wander, home)",
+    "any": "an expression of any type",
+    "for": "seconds, or \"night\" / \"day\" (until the next dawn / dusk)",
+    "night": "a night number expression, or \"current\"",
+    "slot": "a build slot: @name, a selector, or a Studio key (\"slot:Tower 3\", \"add:<id>\", \"castle\")",
+    "types": "a list of damage-type labels ([\"fire\"])",
+    "keep": "a list of the listed options",
+    "fx": "a game effect name",
+    "sound": "\"asset:<key>\" or a game sound",
+    "color": "\"#rrggbb\"",
+    "json": "a JSON block"
+  },
   "tags": [
     "AUTO_Alive",
     "AUTO_Commanded",
@@ -3961,7 +3961,7 @@
         }
       ],
       "visual": {
-        "mesh": "mesh:Lever"
+        "mesh": "mesh:Graveyard Wall Post"
       },
       "interact": {
         "prompt": "{prompt}",
@@ -4076,7 +4076,7 @@
         }
       ],
       "visual": {
-        "mesh": "mesh:Gate"
+        "mesh": "mesh:Totend Gate Segment"
       },
       "body": {
         "box": [
@@ -4133,7 +4133,7 @@
         }
       },
       "visual": {
-        "mesh": "mesh:Wall"
+        "mesh": "mesh:Wall Segment lvl2"
       },
       "body": {
         "box": [
@@ -4187,7 +4187,7 @@
         }
       ],
       "visual": {
-        "mesh": "mesh:Sign"
+        "mesh": "mesh:Gravestone"
       }
     },
     {
@@ -4217,7 +4217,7 @@
         }
       ],
       "visual": {
-        "mesh": "mesh:Coin"
+        "mesh": "mesh:Stepping Stone"
       },
       "pickup": {
         "by": "king",
