@@ -51,6 +51,7 @@
     <Compile Include="../../src/PalaceMod/Features/Economy/PlannerStore.cs" />
     <Compile Include="../../src/PalaceMod/Features/Economy/PlannerReach.cs" />
     <Compile Include="../../src/PalaceMod/Core/UI/NumberMath.cs" />
+    <Compile Include="../../src/PalaceMod/Core/UI/ColorMath.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/TerrainDef.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Level/GroundCodec.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Level/PaintOutline.cs" />

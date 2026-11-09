@@ -121,7 +121,7 @@ or the edge.
 | Move | G | Grab: the selection follows the cursor. Click commits; Esc or a right click (without a drag) cancels. X/Z lock an axis, and arrow keys nudge by theking <x> <z> | walk <dx> <dz> <s> | probe <x> <z> [y] [r] | snap | scan | grid | encode | save <pack> | clear`.
 `host` puts a sculptable grid on the map's own ground; `walk` moves the king through his CharacterController (what he
 can climb); `probe` lists the colliders he meets around a point. `save` writesstep (Shift ×5). |
-| Rotate | R | Turns the selection about its centre by mouse. `,` and `.` step by the turn step (they also work in Select). |
+| Rotate | R | Turns the selection about its centre by mouse. `,` and `.` step by the turn step (they also work in Select). X switches to Tilt and Z to Roll (again, or Esc, back to Turn; the status line shows it): dragging or `,`/`.` then tips scenery about its own sideways (Tilt) or forward (Roll) axis, in place; slots and lines don't tilt. The Inspector has Tilt and Roll fields for scenery. |
 | Place | (palette) | A ghost of the kind follows the cursor. Click places. Shift keeps placing. `,`/`.` turn the ghost. |
 | Link | K | Click dependents (or use the selection), then click their prerequisite: a slot or the castle. See "Requirements". |
 | Terrain | T | The terrain brushes (see "Terrain"). |
@@ -1083,18 +1083,54 @@ settings-shaped page. Code: `Features/Builder/Studio/Enemies/`. An enemy is stil
   - **Look:** the model source, chips Units / Scenery / Imported plus a filter. Scenery tiles use the library's thumbnails;
     Units the unit icons; Imported the pack's mesh assets. Click sets `visuals.mesh`; the first tile "Base model"
     clears it.
-- **Inspector (right, 340 px), tabs** (all rows the pack editor's, reused from `UnitPage` so validation markers,
-  typing, base values and reset work the same):
+- **Inspector (right, 460 px), tabs.** Stats and Abilities are the pack editor's rows (`UnitPage`); Attack, Tags and
+  Look's colours are the Studio's own (`EnemyPanels.cs`), made for the narrow panel: short labels, and values that
+  wrap beside or under their label instead of running over it.
   - **Stats:** name, id, description, hit points, move speed, attack cooldown, range, keep distance, chase time.
-  - **Attack:** weapon, damage multiplier, projectile speed, damage and splash modifiers.
-  - **Tags:** add/remove; movement (Flying, Large) shown read-only from the base. Hover descriptions everywhere come
-    from `Model/Descriptions.cs` (R2-A).
-  - **Look:** size, tint, icon, the model source with Fit (auto / scale), offset X/Y/Z, turn X/Y/Z, materials (own /
-    enemy: the enemy material takes tint and the elite look), motion (auto / bob / none), texture, sounds.
-  - **Abilities:** behaviours (spawns on death) and what the base unit already does.
+  - **Attack:** the weapon (its picker groups weapons into ranged, which fire a homing projectile, and melee),
+    damage ×, projectile speed (ranged only), range, cooldown and keep distance (with a warning when keep distance is
+    beyond the range), then Damage and Splash: one row per modifier, "vs <targets>" and its amount; apply opens a
+    popup with the modifier's targets, bonus, multiplier and Remove. Without an own list the weapon's rows show dimmed
+    with "Edit damage" to copy them.
+  - **Tags:** the tags it spawns with as chips (base tags plain, added ones lit, removed base tags struck through and
+    dimmed; click removes or restores; hover: the tag's description from `Model/Descriptions.cs`). Below, an Add
+    filter and suggestion chips grouped by meaning (Defence, Fighting, Kind, Rarely useful); tags the game sets itself
+    (AUTO_*, groups, curses) and player-side ones aren't offered. Contradicting pairs (armoured and vulnerable vs
+    ranged, melee and ranged fighter, both sides) are flagged under the chips and on the suggestion's hover. Movement
+    tags (Flying, Large) come from the base.
+  - **Look:** Colours (below), size, the model source with Fit (auto / scale), offset X/Y/Z (-50 to 50 m in 0.05 m
+    steps, typed or stepped), turn X/Y/Z, materials (own / enemy), motion (auto / bob / none).
+  - **Abilities:** behaviours (spawns on death). The behaviour engine is being designed separately; the game's own
+    components it can build on are catalogued in `docs/enemy-behaviour-research.md`.
+- **Tooltips** never cover the stage: the inspector's and readout's show over the palette, the palette's and arena's
+  over the inspector (`ModTooltip.Zone`).
 - **Readout (bottom right):** effective HP at the arena's night difficulty, damage per hit and DPS against a building,
   a knight and the king, and time to kill (and hits) by each tower kind on the map at each level. During a fight:
   elapsed time, enemies alive, defenders standing, damage dealt each way, and the result.
+
+### Colours
+
+- **Why a tint barely showed:** the units' FlatKit toon material draws the lit side in `_BaseColor` and the shaded side
+  in `_ColorDim`, and the level's colour scheme sets both (`ColorAndLightManager.ApplyColorScheme`: enemy light is a
+  pale pink, enemy mid a deep red). A tint multiplied only `_BaseColor`, so the shaded half, often most of a small unit
+  under the top-down camera, stayed the scheme's red; and elites lost it to the shared elite material.
+- `visuals.colors` (`{"body": "#3a6ee8", "<material>": "#rrggbb"}`) replaces a part's colour: `_BaseColor` becomes it and
+  `_ColorDim` the shade the scheme would pair with it (`ColorMath.ShadeFor`: the source pair's brightness ratio,
+  saturation change and hue turn, scaled by how colourful the new colour is, so a grey stays grey). Keys, most
+  specific first: a piece of the model by its renderer's name ("Bow", "Helmet"; vanilla enemies draw every piece with
+  the one `Enemy` material, so pieces are how an archer gets a gold bow), a material by name, then "body" (every body
+  material: `Enemy`, `Player*`, `Ally*`). The Look tab lists Body, other materials, then each named piece. The
+  clones keep their source's name; `BuilderEliteLook` swaps an elite's shared elite material for the recoloured clone's
+  elite twin (same colours, yellow outline) on Start and fixes the hit flash's remembered material. Clones are
+  re-painted after every scheme change and daylight outline update (`UnitFactory.ResyncTints`).
+- `visuals.tint` stays as the subtle option: it multiplies the body's lit colour and half-way its shade.
+- The Look tab lists one row per part (the body first) with its swatch; apply opens `ModColorPicker` (Core/UI): a
+  saturation/brightness square and hue bar (click or drag), was/now swatches, a hex field, the level's palette (the
+  colour scheme's enemy, ally, king, building, ground, tree, rock... colours) and the map's own colours (its materials'
+  base colours, deduplicated, sorted by hue). Edits are live (one undo step per part while dragging); "Original colour"
+  clears it. The picker is generic: `ModColorPicker.Open(title, current, changed, near, allowNone, extra)`.
+- Dev: `builder-enemy color <part> <#hex|->`, `builder-enemy parts` (the model's renderers, materials and their
+  lit/shade colours), `builder-enemy picker`.
 
 ### Stage and camera
 
@@ -1141,9 +1177,22 @@ settings-shaped page. Code: `Features/Builder/Studio/Enemies/`. An enemy is stil
 
 ### Arena fight
 
-- Fight (F5, or the button) spawns `count` (1-50) copies 16 m from the stage, made like the game's `Spawn` makes them
-  (the arena difficulty on hit points and damage, the elite material; no coins), and the chosen defenders (catalog
-  player units, default 3 swordsmen and 3 archers) in an arc on the stage. Every arena unit gets a `BuilderArenaUnit`
+- **Its own ground** (`ArenaZone`): a fight builds a flat 44 m stone platform east of every pathfinding graph's
+  bounds (so outside the level, opened from a level or from the library alike) with a `GridGraph` of its own
+  ("PalaceBuilder Arena", flat, no collision checks), scanned alone. Every arena unit's `Seeker` and backup graph are
+  pointed at it before its Start (when the movement scripts copy the mask into their nearest-node constraint), so they
+  path and snap on the platform only. The game's target searches know only where the searcher stands, so while the
+  zone exists `TargetPriority`/`TagManager` `Find*` calls remember that point and `FindAllTaggedObjectsWithTags` drops
+  whatever is on the other side of the zone's edge (80 m): arena enemies can't pick the king, the castle or a building,
+  and the level's troops and towers never see the fight. The turntable is hidden during the fight and the camera frames
+  the platform; Stop, an edit that rebuilds the template, or Back removes the units, the graph and the platform, shows
+  the turntable and frames the model again. The level's own graphs are never rescanned.
+  Checked headless on Nordfels from a Level Studio: the platform at (223, 8, -31), every arena unit inside it, the king
+  where he stood and outside it, the turntable hidden during the fight and back after Stop; 3 elite purple Racers kept
+  their colour with the yellow elite outline.
+- Fight (F5, or the button) spawns `count` (1-50) copies 16 m from the defenders, made like the game's `Spawn` makes
+  them (the arena difficulty on hit points and damage, the elite material; no coins), and the chosen defenders
+  (catalog player units, default 3 swordsmen and 3 archers) in an arc. Every arena unit gets a `BuilderArenaUnit`
   marker; enemies an arena enemy spawns on death are marked too. Attack scripts of marked units run as at night;
   unmarked ones don't.
 - Defenders hold their spot (their home is where they stand); enemies target what their priorities find nearest, which
@@ -1165,9 +1214,10 @@ settings-shaped page. Code: `Features/Builder/Studio/Enemies/`. An enemy is stil
   Cmd/Ctrl+S, F5 Fight, Space turntable, W walk preview, F frame, Home reset view.
 - Dev: `builder-enemy level [unit] | library [unit] | new [base] | state | dock | press <tile> | select <unit> | tab
   <palette> [panel] [look source] | set <field> <value> | look <ref|base> | fit <scale|-> | offset x y z | rot x y z |
-  material own|unit | motion auto|bob|none | walk on|off | fight [n] | stop | readout | portrait | orbit <yaw> <pitch>
-  <dist> | spin <deg> | undo | redo | save | back`.
-- Not built: a building (a slot's built look) as the body; towers and walls are in the scenery library already.
+  material own|unit | motion auto|bob|none | color <part> <#hex|-> | parts | picker | walk on|off | fight [n] | stop |
+  readout | portrait | orbit <yaw> <pitch> <dist> | spin <deg> | undo | redo | save | back`.
+- Not built: a building (a slot's built look) as the body; towers and walls are in the scenery library already. Towers
+  as arena defenders (they live inside building prefabs with slots).
 
 ## Data-model changes (summary)
 

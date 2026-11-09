@@ -41,8 +41,13 @@ namespace PalaceMod.Builder.Model
     {
         /// <summary>Night-preview / tooltip icon, "asset:&lt;key&gt;". Resolved by IAssetProvider; missing = base icon.</summary>
         [JsonProperty("icon")] public string Icon { get; set; }
-        /// <summary>Multiplies the unit's body colour, "#rrggbb". Elites still use the game's elite material.</summary>
+        /// <summary>Multiplies the unit's body colour, "#rrggbb": a subtle shift (the shade keeps the scheme's colour).</summary>
         [JsonProperty("tint")] public string Tint { get; set; }
+        /// <summary>Replaces colours outright, by part, each "#rrggbb": a piece of the model by its renderer's name ("Bow"),
+        /// a material by name, or "body" (every body material: the enemy or troop colour); the most specific wins. The lit colour becomes
+        /// this and the shade follows it the way the game's own scheme pairs them. Elites keep the colour (with the
+        /// elite outline).</summary>
+        [JsonProperty("colors")] public Dictionary<string, string> Colors { get; set; }
         /// <summary>Uniform scale factor relative to the base prefab (1 = unchanged). Visual only.</summary>
         [JsonProperty("scale")] public float? Scale { get; set; }
         /// <summary>Replacement body model (see ModelRef): "asset:&lt;key&gt;" of an imported OBJ/glTF file,
@@ -110,6 +115,9 @@ namespace PalaceMod.Builder.Model
             v?.MeshLook == LookOwn || v?.MeshLook == LookUnit ? v.MeshLook : Kind(v?.Mesh) == ModelKind.Asset ? LookUnit : LookOwn;
 
         public static string Scenery(string name) => "mesh:" + name;
+
+        /// <summary>The colors key for the unit's body material.</summary>
+        public const string BodyPart = "body";
         public static string Unit(string id) => "vanilla:" + id;
     }
 

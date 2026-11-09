@@ -146,17 +146,23 @@ namespace PalaceMod.Builder.Level
         private static string Readable(string mesh) => mesh.Replace('_', ' ').Trim();
 
         /// <summary>A prop: a plain mesh object in the host scene, a solid obstacle when solid.</summary>
-        public static GameObject MakeProp(Scene scene, PropBase b, string name, Vector3 pos, float yaw, float scale, bool solid)
+        public static GameObject MakeProp(Scene scene, PropBase b, string name, Vector3 pos, float yaw, float scale, bool solid, float tiltX = 0f, float tiltZ = 0f)
         {
             var go = new GameObject(AddedPrefix + name);
             if (scene.IsValid()) SceneManager.MoveGameObjectToScene(go, scene);
             go.AddComponent<MeshFilter>().sharedMesh = b.Mesh;
             go.AddComponent<MeshRenderer>().sharedMaterials = b.Materials;
-            go.transform.SetPositionAndRotation(pos, Quaternion.Euler(0f, yaw, 0f) * b.Upright);
+            go.transform.SetPositionAndRotation(pos, PropRotation(b, yaw, tiltX, tiltZ));
             go.transform.localScale = b.Scale * scale;
             SetSolid(go, solid);
             return go;
         }
+
+        /// <summary>A placed prop's rotation (PropDef rotX/rotY/rotZ): stood upright like the host's own copies, tilted
+        /// about its own sideways (x) and forward (z) axes, then turned to its heading. Its solid blocker is a child, so
+        /// it tilts with it.</summary>
+        public static Quaternion PropRotation(PropBase b, float yaw, float tiltX = 0f, float tiltZ = 0f) =>
+            Quaternion.Euler(tiltX, yaw, tiltZ) * b.Upright;
 
         internal const string BlockerName = AddedPrefix + "blocker";
         private static Mesh blockerMesh;
