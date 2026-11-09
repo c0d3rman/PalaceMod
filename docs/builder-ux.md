@@ -1287,7 +1287,7 @@ view restored on Back) or on its own arena, one undo history with the draft, the
   press started editing and presses Enter, `rows` lists what can be pressed; they work for enemies too.
 - Checked in a pool instance, by presses alone: library → kind picker → Projectile → Look › filter "Cone" → Cone Tree
   → Scale 0.4, Turn X 90 → Parts › Speed 10, Homing 0.9, Arc 0.3, Spin Z 540, Name "Homing tree" → Behaviour › + rule
-  › "This hits (as a shot)" › + action › Damage › Target "what it hit" › Amount 30 → Launch at a moving dummy: hit once
+  › "This hits (as a shot)" › + action › Damage › Target "The thing it hit" › Amount 30 → Launch at a moving dummy: hit once
   after 16.1 m in 1.5 s, dummy took 30. Then Pup › Moves › + attack › Pick a thing › Homing tree, Edit… (← Enemy back
   to Pup), and from a Level Studio (ex01): open tree-missile, Scale 0.5, launch, Back to the level with "Set model
   scale" as the level draft's undo step.

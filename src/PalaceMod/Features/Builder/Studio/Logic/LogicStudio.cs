@@ -120,14 +120,11 @@ namespace PalaceMod.Builder.Studio.Logic
         {
             var draft = LogicOwner.Draft;
             if (draft == null) return null;
-            string id = null;
-            draft.Edit("New thing", p =>
-            {
-                p.Entities ??= [];
-                var taken = new HashSet<string>(p.Entities.Select(e => e.Id).Concat(p.Units.Select(u => u.Id)).Where(x => x != null));
-                id = LogicDoc.NameFor(kind ?? "thing", taken);
-                p.Entities.Add(new PalaceMod.Builder.Model.Logic.EntityDef { Id = id, Kind = kind ?? "prop", Name = "New " + (kind ?? "thing") });
-            }, structural: true);
+            // No kind: the Entity Studio's kind picker, when it can open here.
+            if (kind == null && StudioServices.Entities != null && Studio.Running && Studio.Draft == draft && !EnemyStudio.Running
+                && StudioServices.Entities.Open(draft, null, null, null, out _)) return null;
+            // A new thing with its kind's starting parts (Entities.ThingKinds), one undo step.
+            string id = Entities.EntityStudio.Create(draft, kind ?? "prop");
             Changed();
             if (id != null) EditThing(id);
             return id;
