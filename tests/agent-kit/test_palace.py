@@ -148,5 +148,61 @@ class Tilt(unittest.TestCase):
         self.assertAlmostEqual(r({"base": "mesh:Disc", "rotX": 90, "rotZ": 90}), 10.0, places=3)
 
 
+class LogicPlacesRender(unittest.TestCase):
+    PACK = {
+        "entities": [{"id": "door", "kind": "prop", "body": {"box": [4, 0.6]}, "mover": {"pose": {"open": {"rotY": 90}, "closed": {"rotY": 0}}}},
+                     {"id": "cart", "kind": "prop", "body": {"radius": 1.5}, "mover": {"path": "@road"}}],
+    }
+    PLACES = [
+        {"kind": "area", "id": "pit", "pos": [10, 0, 0], "area": {"shape": {"circle": {"radius": 4}}, "show": "fill", "color": "#0020ff"}},
+        {"kind": "area", "id": "strip", "pos": [0, 0, 0], "rotY": 90, "area": {"shape": {"rect": {"size": [10, 2]}}}},
+        {"id": "road", "kind": "path", "points": [[0, 0], [10, 0]]},
+        {"id": "gate", "entity": "door", "pos": [5, 0, 5], "rotY": 0},
+        {"id": "c1", "name": "wagon", "entity": "cart", "pos": [0, 0, 0]},
+        {"id": "plate", "preset": "pressure-plate", "with": {"size": 2}, "pos": [-10, 0, 0]},
+        {"id": "spot", "kind": "point", "pos": [3, 0, -3], "active": False},
+    ]
+
+    def places(self):
+        lv = {"id": "t", "host": "Test", "logic": {"places": self.PLACES}}
+        return {q["id"]: q for q in palace.logic_places(dict(self.PACK, levels=[lv]), lv)}, lv
+
+    def test_resolves_templates_presets_and_paths(self):
+        q, _ = self.places()
+        self.assertEqual(q["pit"]["area"]["color"], (0, 32, 255))
+        self.assertEqual(q["pit"]["area"]["shape"], ("circle", (10.0, 0.0, 4.0)))
+        # rotY 90 turns the 10 m side from x onto z.
+        xs = [round(x, 6) for x, _ in q["strip"]["area"]["shape"][1]]
+        zs = [round(z, 6) for _, z in q["strip"]["area"]["shape"][1]]
+        self.assertEqual((min(xs), max(xs), min(zs), max(zs)), (-1, 1, -5, 5))
+        self.assertEqual(q["gate"]["kind"], "prop")
+        self.assertEqual(len(q["gate"]["poses"]), 1)                 # the open pose; closed is where it stands
+        self.assertEqual(q["c1"]["path"], [(0, 0), (10, 0)])        # mover path through @road
+        self.assertEqual(q["c1"]["label"], "wagon")
+        self.assertEqual(q["plate"]["kind"], "area")                 # from the preset
+        self.assertEqual(q["plate"]["area"]["color"], (0x8a, 0x7a, 0x5a))
+        self.assertFalse(q["spot"]["active"])
+
+    def test_render_draws_them(self):
+        import tempfile
+        ref = FakeRef()
+        ref._map["slots"][0].update(kind="Castle", upgrades=[])
+        ref._map["spawnLines"] = []
+
+        def pixel(places):
+            lv, _ = level()
+            lv["logic"] = {"places": places}
+            with tempfile.TemporaryDirectory() as d:
+                res = palace.render(ref, dict(self.PACK, levels=[lv]), lv, Path(d) / "r.png", labels="none", px=400)
+                img = palace.read_png(res["written"])
+            w = res["world"]
+            x = int((10 - w["minX"]) / (w["maxX"] - w["minX"]) * img.w)
+            y = int(img.h - (0 - w["minZ"]) / (w["maxZ"] - w["minZ"]) * img.h) + 6   # inside the pit, off the road
+            return tuple(img.px[(y * img.w + x) * 3:(y * img.w + x) * 3 + 3])
+
+        bare, drawn = pixel([{"id": "far", "kind": "point", "pos": [-15, 0, 0]}]), pixel(self.PLACES)   # same framing
+        self.assertGreater(drawn[2] - drawn[0], bare[2] - bare[0] + 40, (bare, drawn))   # tinted by the pit's blue fill
+
+
 if __name__ == "__main__":
     unittest.main()
