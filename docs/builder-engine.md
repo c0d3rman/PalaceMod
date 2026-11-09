@@ -262,7 +262,9 @@ e.g. with `destroy`).
 instead, and `event.choice` is the chosen id: a loan of 100, 250 or
 500, or "rebuild as tower / house". It fires `interact` (`other` is the king) after the cost is
 paid; with `cost` it uses the game's own pay-hold interaction. The prompt shows in the game's own tooltip, and the
-coins fill a copy of a build slot's coin display. `choices` isn't built yet (the validator warns).
+coins fill a copy of a build slot's coin display. With `choices`, the game's upgrade-choice popup opens on interact
+(each choice also takes `description` and `icon`, an `asset:` sprite); the picked choice's cost is paid at once (a
+"not enough gold" notice otherwise) and `interact` fires with `event.choice`; Esc cancels without paying.
 
 **Projectiles in flight.** The game's own projectiles (`AimbotProjectile`: arrows, bolts, magic, boulders) are
 entities of kind `projectile` while they fly, made the first time an area or selector sees one; their `owner` is the
@@ -355,6 +357,9 @@ working. A ranged enemy that kites and prefers towers is just `targeting` plus `
   with the same role: P Melee, P Archer or P Firewing for the player, E Melee, E Archer or E Flyer for the enemy.
   `team` may be an expression (`self.team`). Going `neutral` keeps the unit's own brain, drops its team tags and
   gives it an empty targeting list (it attacks nothing until a rule gives it targets).
+- **Members a verb can't act on are skipped**, not errors: `command` on anything but a player troop, `push`,
+  `moveTo` and `setMovement` on anything without the game's unit movement, `teleport` on buildings, `convert` on
+  anything but a unit. So `all('player and unit', 20)` (which includes the king) works.
 - **`replace`** keeps nothing unless `keep` says so. `hp` keeps the hp fraction, not the absolute value. `then` runs
   with `spawned` = the new entity.
 
@@ -666,7 +671,7 @@ Using a preset is an entry in `rules`: `{ "preset": "split-on-death", "with": { 
 the pack is compiled, with `{param}` substituted as a typed value, so the validator checks the result with paths
 into the preset. Presets can also carry components (`"movement"`, `"area"`, ...), merged under the entity's own.
 
-- **Built-in presets** ship in the DLL (`Assets/builder-presets.json`) and are just data. They include the logic
+- **Built-in presets** ship in the DLL (`Assets/logic-presets.json`) and are just data. They include the logic
   objects: Timer, Counter, Relay (delay), Gate (AND of N signals), Toggle, Random router, Spawner, Lever (interact),
   Pressure plate (area), Moving wall (mover), Door (poses), Sign (message), Pickup (gold).
 - **Library presets** live in `PalaceBuilder/library/presets/<id>.json`, next to levels and enemies (R2-C1's store).
@@ -688,7 +693,7 @@ into the preset. Presets can also carry components (`"movement"`, `"area"`, ...)
   the typed value; inside a longer string the value is inserted as text (an `=expr` value as `(expr)`). Preset vars,
   labels and components merge under the owner's own. Every produced rule carries `_src` (the JSON path of its use,
   e.g. `units[1].rules[0] (preset split-on-death).rules[0]`), which errors and the trace show. Lookup: the pack's
-  presets, then the library's (`Presets.Library`), then the built-ins (`Assets/builder-presets.json`, 21 presets).
+  presets, then the library's (`Presets.Library`), then the built-ins (`Assets/logic-presets.json`, 21 presets).
 - **Library.** Entities, statuses and presets are library items like enemies (`library/entities|statuses|presets/<id>.json`,
   `Model/LibraryStore.Logic.cs`): workspaces and the composed pack hold all of them, `SaveWorkspace` writes changed
   ones, `Export` copies those the exported levels and enemies use (following template, status and preset references
@@ -955,7 +960,7 @@ limits), and `reference.md` gets the generated schema.
   panel, not ModPopups: popups can't scroll, and lists of 50 actions must. Esc closes the picker, then the editor.
 - **Fields**: numbers step with the arrows and take a typed number or formula; formulas and filters are checked as
   you type by the engine's `ExprChecker` (the error shows under the field, with its column); entity fields offer the
-  event's roles, `@names`, Pick on the map (names the thing if it has no name), Nearest / Every… within / Random /
+  event's roles, `@names`, Pick on the map (gives the thing a name such as `tower-3` if it has none; place ids are `counter1`, `pressure-plate1`), Nearest / Every… within / Random /
   Weakest / Strongest / Farthest (a team + kind + extra-terms filter builder), and a typed formula.
 - **Params come from `LogicSchema`** (`LogicSchemaBridge`): the Studio keeps only phrasing, picker categories and
   which fields a card shows; an event or action only the registry has still gets a plain card.
@@ -1406,7 +1411,7 @@ public static class LogicSaveState { static void Register(string id, Func<LogicW
   - `Model/Validation.cs` logic checks (additive);
   - the `Model/UnitDef.cs` and `LevelDef.cs` fields;
   - the `PackSerializer` migration 2 → 3;
-  - `Assets/builder-presets.json` (the built-in logic objects and common presets);
+  - `Assets/logic-presets.json` (the built-in logic objects and common presets);
   - the presets kind in `Model/LibraryStore.cs` (additive, coordinated with R2-C1);
   - `builder dump` → `logic-schema.json`;
   - `agent-kit/palace.py` (ops, the `logic` commands, the Python expression port);

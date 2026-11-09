@@ -266,7 +266,7 @@ namespace PalaceMod.Tests
 
         public static void BuiltInPresetsAllValidate()
         {
-            Assert.Null(Presets.BuiltInError, "builder-presets.json loads");
+            Assert.Null(Presets.BuiltInError, "logic-presets.json loads");
             Assert.True(Presets.BuiltIn.Count >= 15, "built-ins: " + Presets.BuiltIn.Count);
             foreach (var preset in Presets.BuiltIn)
             {
@@ -372,6 +372,21 @@ namespace PalaceMod.Tests
             Has(issues, "statuses[0].mods.moveSped: unknown stat \"moveSped\" (did you mean \"moveSpeed\"?)");
             Has(issues, "statuses[0].mods.moveSpeed: needs exactly one of mult, add or value");
             Has(issues, "statuses[0].flags[0]: unknown flag \"stuned\" (did you mean \"stunned\"?)");
+        }
+
+        public static void PlaceTakesItsTemplatesKind()
+        {
+            var issues = ValidateLevel(@"{ ""places"": [{ ""id"": ""g"", ""entity"": ""gem"", ""pos"": [0,0,0], ""rules"": [{ ""when"": ""pickup"", ""do"": [] }] }] }",
+                @"{ ""entities"": [{ ""id"": ""gem"", ""kind"": ""pickup"", ""pickup"": { ""by"": ""king"" } }] }");
+            Assert.True(!issues.Any(i => i.Message.Contains("fires on")), string.Join("\n", issues));
+        }
+
+        public static void UnknownFieldsAndBodyTags()
+        {
+            var issues = ValidateLevel(@"{ ""bogus"": 1, ""places"": [{ ""id"": ""t"", ""kind"": ""prop"", ""pos"": [0,0,0], ""body"": { ""hitable"": true, ""hittable"": true, ""tags"": [""Biulding""] } }] }");
+            Has(issues, "warning levels[0].logic.bogus: unknown field \"bogus\"");
+            Has(issues, "warning levels[0].logic.places[0].body.hitable: unknown field \"hitable\" (did you mean \"hittable\"?)");
+            Has(issues, "error levels[0].logic.places[0].body.tags[0]: unknown game tag \"Biulding\" (did you mean \"Building\"?)");
         }
 
         public static void ValidatorWarnsOnSignalLoops()

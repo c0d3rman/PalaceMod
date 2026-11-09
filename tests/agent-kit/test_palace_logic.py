@@ -286,3 +286,23 @@ class LoweringTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnknownFieldTests(unittest.TestCase):
+    def test_unknown_fields_and_body_tags(self):
+        pack = {"format": "palace-builder", "version": 3, "id": "a.b", "levels": [{"id": "l", "host": "Nordfels", "logic": {
+            "bogus": 1, "places": [{"id": "t", "kind": "prop", "pos": [0, 0, 0], "body": {"hitable": True, "hittable": True, "tags": ["Biulding"]}}]}}]}
+        issues = pl.validate_logic(pack, [])
+        text = [f"{s} {p}: {m}" for s, p, m in issues]
+        self.assertIn('warning levels[0].logic.bogus: unknown field "bogus" (it\'s kept but does nothing)', text)
+        self.assertTrue(any('body.hitable: unknown field "hitable" (did you mean "hittable"?)' in t for t in text), text)
+        self.assertTrue(any('body.tags[0]: unknown game tag "Biulding" (did you mean "Building"?)' in t for t in text), text)
+
+
+class PlaceKindTests(unittest.TestCase):
+    def test_place_takes_its_templates_kind(self):
+        pack = {"format": "palace-builder", "version": 3, "id": "a.b", "entities": [{"id": "gem", "kind": "pickup", "pickup": {"by": "king"}}],
+                "levels": [{"id": "l", "host": "Nordfels", "logic": {"places": [{"id": "g", "entity": "gem", "pos": [0, 0, 0],
+                                                                                  "rules": [{"when": "pickup", "do": []}]}]}}]}
+        issues = pl.validate_logic(pack, [])
+        self.assertFalse([m for _, _, m in issues if "fires on" in m], issues)

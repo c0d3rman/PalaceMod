@@ -699,7 +699,7 @@ stat, flag, filter term and built-in preset with its parameters. `palace.py logi
       "vars": { "souls": 0, "season": "'summer'" },   // level variables and start values
       "rules": [...],                                 // the level script: self is the level
       "places": [...],                                // objects placed on the map (templates, areas, paths, points, logic objects)
-      "attach": { "slot:Tower 3": { "name": "northTower", "vars": { "hits": 0 }, "rules": [...] },
+      "attach": { "slot:Defense Tower Variant (1)": { "name": "northTower", "vars": { "hits": 0 }, "rules": [...] },
                   "castle": { "rules": [...] } },     // logic on things the level already has
       "hud": [{ "id": "souls", "text": "Souls {$souls}/10" }],
       "kingActions": [{ "id": "horn", "name": "War horn" }],   // up to 3 extra keys for the player
@@ -761,14 +761,16 @@ One small, pure language everywhere: conditions, numbers, selectors, positions.
   `event.choice`, `@name` (a place or attached object), `@@id` (a template), `$var` (a level variable), `x.$var` (an
   entity variable), globals (`night`, `isNight`, `isDay`, `time`, `nightTime`, `nightProgress`, `gold`, `income`,
   `enemiesAlive`, `difficulty`, `nights`).
-- **Properties**: `.hp .maxHp .hpPct .alive .pos .x .y .z .facing .team .kind .template .labels .level .cost
-  .buildingType .age .target .owner .id`, every stat by name (`.moveSpeed`, `.damageMult`, `.income`...), methods
+- **Properties**: `.hp .maxHp .hpPct .alive .elite .pos .x .y .z .facing .team .kind .template .labels .level .cost
+  .buildingType .age .target .owner .id` (`.maxHp` is the live value, after the night's difficulty and elite; `@@x.hp`
+  is the template's catalog value), every stat by name (`.moveSpeed`, `.damageMult`, `.income`...), methods
   `.is('filter')`, `.dist(e)`, `.inside(@area)`, `.stacks('status')`; lists and sets: `.len .first .last .at(i)
   .has(x)`.
 - **Selectors**: `nearest(f, r?)`, `farthest`, `weakest`, `strongest`, `random`, `all(f, r?)` (a set, nearest first),
   `best(f, r, score)` (score is an expression over `it`), `count(f, r?)`. They anchor at `self`; call them as methods
   to anchor elsewhere: `castle.count('enemy', 10)`, `other.nearest('ally')`. A selector never returns the anchor itself
-  or dead entities unless the filter says `self` / `dead`. No match is `none` (actions on none do nothing).
+  or dead entities unless the filter says `self` / `dead`. No match is `none` (actions on none do nothing); test it with
+  `other != none`. A role the event doesn't have is `none` too.
 - **Positions**: an entity is its position wherever a position is wanted. `pointNear(p, r)` (a random walkable point),
   `ahead(e, d)`, `toward(a, b, d)`, `lerp(a, b, t)`, `dir(deg)` (0 = north, 90 = east), `angle(a, b)`,
   `spawnLine('Name')`; positions add, subtract and scale (`self.pos + dir(90) * 3`).
@@ -783,7 +785,7 @@ One small, pure language everywhere: conditions, numbers, selectors, positions.
 
 A filter is a string: `"foe and Building and not Wall"`, `"#lantern"`, `"in:@moat"`. Terms: teams `foe ally player
 enemy neutral` (foe/ally relative to `self`); kinds `unit building prop projectile area pickup coin king castle line
-point path logic self`; `melee ranged alive dead`; any game tag, case-sensitive (`Tower`, `Flying`, `Wall`, `Boss`,
+point path logic self`; `melee ranged alive dead elite`; any game tag, case-sensitive (`Tower`, `Flying`, `Wall`, `Boss`,
 `Undead`...; see `logic-reference.md`); `#label`; `is:<template>`; `in:@area` / `in:self` (inside an area); `has:<status>`;
 `type:<building kind>` (`type:Mill`); `where(<expression over it>)`. Combine with `and or not ( )`.
 
@@ -812,19 +814,25 @@ runs once per member and the other params are evaluated per member with `it` bou
 | Component | For | Key fields |
 |---|---|---|
 | `visual` | any | `mesh` (`mesh:<scenery>`, `vanilla:<unit>`, `asset:<key>`), `meshScale`, `tint`; null = invisible |
-| `body` | any | `radius` or `box: [w, d]`, `height`, `solid` (blocks ground units), `walkable` (a bridge or raft top), `hittable` + `hp`, `flying` |
+| `body` | any | `radius` or `box: [w, d]` (w across its facing, d along it; turns with `rotY`), `height`, `solid` (blocks ground units: a cut in the ground pathfinding, also when spawned at runtime, ~0.25 s to update; units on it are pushed out), `walkable` (a bridge or raft top), `hittable` + `hp` (at 0 hp it's destroyed: `death` fires, it can't be revived), `flying`, `tags` (game tags for a hittable body: `["Building"]` makes vanilla enemies attack it like a building; without tags they ignore it unless `setTargeting` points them at it) |
 | `team` | any | `player`, `enemy`, `neutral` (vanilla AI ignores it), `owner` (the spawner's). `countsAsEnemy: true` keeps a hittable enemy-team entity holding the night open |
 | `lifetime`, `maxAlive` | any | seconds before `expire` + destroy; cap on live copies |
 | `projectile` | flying things | `speed`, `homing` 0..1, `arc`, `gravity`, `spin`, `face`, `hits` (filter), `hitRadius`, `pierce`, `onGround`, `range`; events `impact`, `expire` |
-| `mover` | moving props | `path` (`@path` or points), `mode` loop/pingpong/once, `speed`, `wait`, `spin`, `swing`, `running`, `pose` {name: {offset, rotY}}; inputs `start stop reverse goto` and each pose's name; events `arrive`, `end` |
-| `area` | zones | `shape` (`circle {radius}` / `rect {size: [w, d]}` / `polygon {points}`), `watch` (filter), `show`, `color`, `tick`; events `enter exit inside empty occupied`; filters `in:@area` |
+| `mover` | moving props | `path` (`@path` or points), `mode` loop/pingpong/once, `speed`, `wait`, `spin`, `swing`, `running`, `pose` (or `poses`) {name: {`offset` [x,y,z] or world `pos`, `rotY`}}, `turnSpeed` (deg/s, 90); inputs `start stop reverse goto` and each pose's name; events `arrive`, `end`. A walkable mover snaps between poses |
+| `area` | zones | `shape` (`circle {radius}` / `rect {size: [w, d]}` / `polygon {points}`), `watch` (filter), `show`, `color`, `tick`, `surface` (below); events `enter exit inside empty occupied`; filters `in:@area` |
 | `pickup` | collectibles | `by` (filter, e.g. `king`), `radius`, `magnet`, `consume`; event `pickup` |
-| `interact` | king-usable | `prompt` (`{cost}` shows the cost), `cost`, `when` day/night/always, `radius`, `repeat`, `choices` (up to 4 `{id, label, cost}`; `event.choice`); event `interact` |
+| `interact` | king-usable | `prompt` (`{cost}` shows the cost), `cost`, `when` day/night/always, `radius`, `repeat`, `choices` (up to 4 `{id, label, description, cost, icon}`: the game's upgrade-choice popup; the chosen cost is paid and `event.choice` is its id); event `interact` |
 | `attacks` | turrets, units | `[{ "cooldown", "range", "targeting", "launch": {"entity", "from"} \| "weapon", "do", "replace", "when" }]`; the unit's base attacks stay unless `replace` |
 | `targeting` | attackers | ordered list of filters or `{filter, range, prefer, score}`; works on vanilla towers too (`setTargeting`) |
-| `movement` | units | `mode` pathfind/direct/hold/path, `path`, `then`, `speed`, `keepDistance`, `kite`, `flee`, `wander`, `home` |
+| `movement` | units | `mode` pathfind/direct/hold/path, `path`, `then`, `speed`, `keepDistance`, `kite`, `flee`, `wander`, `home`, `surfaces` |
 
 A number field may be an expression evaluated when the entity appears: `"hp": "=100 * night"`.
+
+**Surfaces (who may walk where).** An area with `"surface": "mud"` or `{"name": "ladder", "allow": "melee", "cost": 1}`
+becomes a named pathfinding surface: only units matching `allow` path through it, and `cost` multiplies its path cost
+(2 = units avoid it unless it's much shorter). A unit's `movement.surfaces` overrides per unit: `{"ladder": true,
+"mud": 3, "ice": false}`. At most 31 surface names per level. A `body.walkable` object (a bridge, a raft) should be
+placed in `logic.places`: spawned at runtime it costs a pathfinding rescan of about a second.
 
 ### 12.8 Statuses
 
@@ -838,7 +846,8 @@ A number field may be an expression evaluated when the entity appears: `"hp": "=
   "rules": [{ "when": "statusTick", "do": [{ "do": "damage", "amount": "3 * self.stacks('burning')", "types": ["fire"], "source": "other" }] }] }
 ```
 
-In a status's rules `self` is the carrier and `other` whoever applied it. `drift` is a mod too (`"drift": {"toward":
+In a status's rules `self` is the carrier and `other` whoever applied it. `damageTaken` works on anything with hit
+points, buildings and the castle included (`setStat` on `castle` with `"for": "night"` is a one-night shield). `drift` is a mod too (`"drift": {"toward":
 "@well", "speed": 3}`). Vanilla damage carries types `melee`/`ranged`, `tower`, `king`, `splash`, `magic`.
 
 ### 12.9 Variables, HUD, king actions, caps
@@ -906,8 +915,9 @@ with `{"op": "rule", "on": "unit:<id>", ...}`.
 ### 12.13 Limits (what the engine can't do)
 
 - Vanilla arrows in flight aren't affected by `drift` or `timeScale` (Builder projectiles are).
-- No per-unit walkability: "only melee can climb this wall" is a teleport, not a path. Walkable movers snap between
-  poses; they don't carry units while gliding. Terrain height doesn't change at runtime.
+- Per-unit walkability is by surfaces (above), not by terrain: a "ladder" is an area surface only some units may
+  path through. Walkable movers snap between poses; they don't carry units while gliding. Terrain height doesn't
+  change at runtime.
 - Three teams; vanilla units never attack `neutral` things (Builder targeting can).
 - Game tags are a fixed set; your own labels work through Builder targeting and filters.
 - No new scenes, lighting or arbitrary code. Pending `wait`s and Builder projectiles in flight aren't kept by
@@ -964,10 +974,10 @@ is:spore') < 40", "do": [{"do": "spawn", "entity": "=self.template", "at": "poin
 15}]}`, spawned with `"team": "neutral"`; enemies prefer it: level rule `{"when": {"on": "spawn", "of": "enemy"}, "do":
 [{"do": "setTargeting", "target": "subject", "prepend": ["is:caravan"]}]}`.
 
-**Charging tower** (every fifth hit fires a bolt), on an attached slot:
-`{"op": "rule", "on": "slot:Tower 3", "rule": {"when": "hit", "do": [{"do": "addVar", "name": "hits", "value": 1},
+**Charging tower** (every fifth hit fires a bolt), on an attached slot (Nordfels' slot names: `palace.py ref slots Nordfels`):
+`{"op": "rule", "on": "slot:Defense Tower Variant (1)", "rule": {"when": "hit", "do": [{"do": "addVar", "name": "hits", "value": 1},
 {"do": "if", "cond": "self.$hits % 5 == 0", "then": [{"do": "launch", "entity": "bolt", "toward": "other", "pierce": -1}]}]}}`
-plus `{"op": "var", "on": "slot:Tower 3", "name": "hits", "value": 0}`.
+plus `{"op": "var", "on": "slot:Defense Tower Variant (1)", "name": "hits", "value": 0}`.
 
 **Volcano**: a logic place with `{"when": {"on": "every", "seconds": 12, "during": "night"}, "do": [{"do": "launch",
 "entity": "lava-rock", "toward": "pointNear(self, 15)"}]}`; `lava-rock` (projectile, `gravity`) on `impact` damages

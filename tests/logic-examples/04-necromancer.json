@@ -68,13 +68,13 @@
      {
       "do": "spawn",
       "entity": "necromancer",
-      "at": "vec(-4, -14)"
+      "at": "vec(20, 10)"
      },
      {
       "do": "spawn",
       "entity": "vanilla:P Melee",
       "count": 12,
-      "at": "vec(-4, -14)",
+      "at": "vec(20, 10)",
       "spread": 3,
       "team": "player"
      }

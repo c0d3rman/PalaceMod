@@ -67,6 +67,7 @@ Names an expression can use for entities in a rule.
 | `income` | number | The last dawn's payout. |
 | `enemiesAlive` | number | Enemies on the map. |
 | `difficulty` | number | The run's difficulty multiplier. |
+| `none` | any | No entity (what a selector gives when nothing matches, or a role the event doesn't have): `other != none`. |
 
 ## Events
 
@@ -631,6 +632,7 @@ Selector functions anchor at `self`; call them as methods (`castle.count('enemy'
 | entity | `.maxHp` | number | Maximum hit points. |
 | entity | `.hpPct` | number | hp / maxHp, 0..1. |
 | entity | `.alive` | bool | Not dead (a knocked-out building is not alive). |
+| entity | `.elite` | bool | An elite enemy (the game's elite flag). |
 | entity | `.pos` | position | Its position. |
 | entity | `.x` | number | Its x. |
 | entity | `.y` | number | Its y (height). |
@@ -674,6 +676,47 @@ Selector functions anchor at `self`; call them as methods (`castle.count('enemy'
 | event | `.name` | text | signal: the name; varChanged: the var; status events: the status. |
 | event | `.choice` | text | interact with choices: the chosen id. |
 | event | `.result` | text | levelEnd: 'win' or 'lose'. |
+
+## Fields of each block
+
+What each JSON block accepts (a field not listed draws an "unknown field" warning). `key[]` is a list of that block, `key{}` a map of them.
+
+- **pack**: `format`, `version`, `id`, `name`, `author`, `description`, `gameVersion`, `requires`, `assets`, `units`, `waveSets`, `levels`, `entities`, `statuses`, `presets` (blocks: `units[]` → unit, `entities[]` → entity, `statuses[]` → status, `presets[]` → preset, `levels[]` → level)
+- **unit**: `id`, `side`, `base`, `name`, `description`, `visuals`, `stats`, `weapon`, `tags`, `labels`, `vars`, `targeting`, `movement`, `attacks`, `statuses`, `counterpart`, `rules` (blocks: `movement` → movement, `attacks[]` → attack)
+- **level**: `id`, `name`, `description`, `host`, `waveSet`, `base`, `buildSlots`, `spawnLines`, `props`, `terrain`, `colors`, `groups`, `logic` (blocks: `logic` → logic)
+- **entity**: `id`, `kind`, `name`, `description`, `visual`, `body`, `team`, `countsAsEnemy`, `labels`, `vars`, `lifetime`, `maxAlive`, `projectile`, `mover`, `area`, `pickup`, `interact`, `attacks`, `targeting`, `movement`, `statuses`, `rules` (blocks: `visual` → visual, `body` → body, `projectile` → projectile, `mover` → mover, `area` → area, `pickup` → pickup, `interact` → interact, `attacks[]` → attack, `movement` → movement)
+- **place**: `id`, `entity`, `preset`, `with`, `pos`, `rotY`, `scale`, `active`, `points`, `kind`, `name`, `description`, `visual`, `body`, `team`, `countsAsEnemy`, `labels`, `vars`, `lifetime`, `maxAlive`, `projectile`, `mover`, `area`, `pickup`, `interact`, `attacks`, `targeting`, `movement`, `statuses`, `rules`, `_preset` (blocks: `visual` → visual, `body` → body, `projectile` → projectile, `mover` → mover, `area` → area, `pickup` → pickup, `interact` → interact, `attacks[]` → attack, `movement` → movement)
+- **visual**: `icon`, `tint`, `colors`, `scale`, `mesh`, `meshScale`, `meshRotY`, `meshRotX`, `meshRotZ`, `meshOffset`, `meshLook`, `motion`, `texture`, `sounds`
+- **body**: `radius`, `height`, `box`, `solid`, `walkable`, `hittable`, `hp`, `flying`, `tags`
+- **projectile**: `speed`, `accel`, `homing`, `arc`, `gravity`, `spin`, `face`, `hits`, `hitRadius`, `pierce`, `onGround`, `range`
+- **mover**: `path`, `mode`, `speed`, `wait`, `spin`, `swing`, `running`, `pose`, `poses`, `turnSpeed` (blocks: `swing` → swing, `pose{}` → pose, `poses{}` → pose)
+- **swing**: `angle`, `speed`
+- **pose**: `offset`, `pos`, `rotY`, `scale`
+- **area**: `shape`, `watch`, `show`, `color`, `tick`, `surface` (blocks: `shape` → shape)
+- **shape**: `circle`, `rect`, `polygon` (blocks: `circle` → circle, `rect` → rect, `polygon` → polygon)
+- **circle**: `radius`
+- **rect**: `size`
+- **polygon**: `points`
+- **pickup**: `by`, `radius`, `magnet`, `consume`
+- **interact**: `prompt`, `cost`, `when`, `radius`, `repeat`, `choices` (blocks: `choices[]` → choice)
+- **choice**: `id`, `label`, `description`, `cost`, `icon`
+- **attack**: `id`, `replace`, `cooldown`, `jitter`, `range`, `minRange`, `when`, `targeting`, `launch`, `weapon`, `do` (blocks: `launch` → launch)
+- **launch**: `entity`, `from`
+- **movement**: `mode`, `path`, `then`, `speed`, `keepDistance`, `kite`, `flee`, `wander`, `home`, `surfaces` (blocks: `kite` → kite, `flee` → flee, `wander` → wander)
+- **kite**: `below`, `for`
+- **flee**: `when`, `from`, `to`
+- **wander**: `radius`
+- **status**: `id`, `name`, `description`, `icon`, `duration`, `stacking`, `maxStacks`, `tick`, `mods`, `flags`, `visual`, `rules` (blocks: `mods{}` → mod, `visual` → statusVisual)
+- **mod**: `mult`, `add`, `value`, `types`, `from`, `chance`, `when`, `toward`, `away`, `dir`, `speed`
+- **statusVisual**: `tint`, `fx`, `glow`
+- **preset**: `id`, `name`, `description`, `category`, `kind`, `params`, `vars`, `labels`, `rules`, `visual`, `body`, `team`, `countsAsEnemy`, `lifetime`, `maxAlive`, `projectile`, `mover`, `area`, `pickup`, `interact`, `attacks`, `targeting`, `movement`, `statuses` (blocks: `params{}` → presetParam)
+- **presetParam**: `type`, `default`, `min`, `max`, `options`, `description`
+- **logic**: `seed`, `vars`, `rules`, `places`, `attach`, `hud`, `kingActions`, `caps` (blocks: `places[]` → place, `attach{}` → attach, `hud[]` → hud, `kingActions[]` → kingAction, `caps` → caps)
+- **attach**: `name`, `labels`, `vars`, `statuses`, `targeting`, `rules`
+- **hud**: `id`, `text`, `icon`, `visible`
+- **kingAction**: `id`, `name`, `icon`, `when`, `cooldown`, `uses` (blocks: `uses` → uses)
+- **uses**: `count`, `per`
+- **caps**: `entities`, `units`, `projectiles`, `perTemplate`, `firingsPerFrame`, `actionsPerFrame`
 
 ## Stats
 
@@ -726,6 +769,7 @@ Combine with `and`, `or`, `not` and parentheses.
 - `ranged`: Ranged fighters.
 - `alive`: Alive.
 - `dead`: Dead or knocked out.
+- `elite`: Elite enemies.
 - `logic`: Logic objects.
 - `line`: Spawn lines.
 - `point`: Points.
