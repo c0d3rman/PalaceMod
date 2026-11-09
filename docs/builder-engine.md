@@ -209,7 +209,33 @@ the scan; switched off, its footprint is a hole unless its deck is higher than a
 - Node tags work as per-unit walkability: a dual NavmeshCut splits the navmesh along an area's outline, a
   `GraphUpdateObject` (no physics) tags the triangles inside (under 35 ms), and a unit whose `Seeker.traversableTags`
   and snap constraint exclude that tag stops at the edge (within about 1 m: RVO avoidance pushes the front row in),
-  while units without the limit walk through. See `body.walkTag` and `movement.walk`.
+  while units without the limit walk through. See "Surfaces" below.
+
+**Surfaces** (per-unit walkability): an area with `surface` makes its ground a named surface.
+
+```jsonc
+"area": { "shape": { "rect": { "size": [30, 4] } },
+          "surface": { "name": "ladder", "allow": "melee", "cost": 1 } }   // or just "surface": "ladder"
+"movement": { "surfaces": { "ladder": true, "mud": 3, "lava": false } }  // a unit's own override: allow, cost, forbid
+```
+
+- A dual NavmeshCut splits the ground graphs along the area's outline, and the triangles inside get one of 31 A*
+  node tags (one per surface name per level).
+- `allow` (a filter, default everything) says who may walk it; `cost` multiplies the path cost for those who may
+  (roads below 1, mud above 1).
+- A unit that may not walk it never paths over it and isn't snapped onto it: its Seeker's traversable tags and its
+  movement's snap constraint leave the tag out, and it walks to the nearest point it can reach. Every unit gets its
+  mask when it spawns (vanilla wave units too, while any surface exists) and again when a surface appears, moves or
+  goes; tags are re-applied after every graph rescan.
+- Combined with a walkable body this is "only melee can climb the wall" (a walkable rampart whose area surface
+  allows `melee`), "flyers only" (`allow: "Flying"`), toll roads, and slow ground that some units avoid.
+
+**Spaces** (a separate arena): walkable bodies placed outside the host map's graphs (an arena 300 m off the map, a
+dream stage, a boss room) get pathfinding of their own. Each ground graph is duplicated as `PalaceBuilder space
+<graph>`, bounded to those decks and scanned on its own (small, so fast), and every unit's graph masks gain the copies,
+so the same unit walks on the map or in a space. `teleport` moves units and the king between them, and the camera
+follows the king. The fliers' graph isn't copied: fliers in a space need `movement.mode: "direct"`. The space is empty
+apart from what the level places there (props, areas, lights come from the map's own scheme).
 
 **`area`**: a zone that detects what's inside it.
 
@@ -222,7 +248,9 @@ the scan; switched off, its footprint is a hole unless its deck is higher than a
 
 Events: `enter` / `exit` (`other` is the entity), `inside` (for each entity inside, after every full `tick` it has
 spent inside), `empty`, `occupied`.
-In filters, `in:@moat` tests membership.
+In filters, `in:@moat` tests membership. Areas poll on the world's 10 Hz steps and watch everything the selectors see,
+including projectiles in flight (the game's own arrows too, see "Projectiles in flight"), so a field that slows,
+bends or turns arrows is an area plus `setStat timeScale`, `drift` or `taunt`.
 
 **`pickup`**: `{ "by": "king", "radius": 1.5, "magnet": 4 }` (`by` is a filter: `"king"`, `"player and unit"`).
 It fires `pickup` (`other` is the collector), then destroys itself unless `"consume": false` (then a rule decides,
@@ -233,7 +261,14 @@ e.g. with `destroy`).
 "cost" }`; each `cost` replaces the top-level one and may be an `=` expression) shows the game's upgrade-choice popup
 instead, and `event.choice` is the chosen id: a loan of 100, 250 or
 500, or "rebuild as tower / house". It fires `interact` (`other` is the king) after the cost is
-paid; with `cost` it uses the game's own pay-hold interaction.
+paid; with `cost` it uses the game's own pay-hold interaction. The prompt shows in the game's own tooltip, and the
+coins fill a copy of a build slot's coin display. `choices` isn't built yet (the validator warns).
+
+**Projectiles in flight.** The game's own projectiles (`AimbotProjectile`: arrows, bolts, magic, boulders) are
+entities of kind `projectile` while they fly, made the first time an area or selector sees one; their `owner` is the
+shooter. `timeScale` and `projectileSpeed` scale their flight, drifts move them (a homing arrow re-aims, so wind bends
+its path), `taunt` on one sends it at a new target (it then damages that target with the shooter's weapon) or at a
+point (it lands there and hits nothing), and `destroy` removes it. Builder projectiles take the same verbs.
 
 **`attacks`**: an automatic attack, like the game's `AutoAttack` but generic. A unit's base attacks stay unless
 `"replace": true`.
@@ -1188,8 +1223,8 @@ ambiguities, which were also fixed in the text.
 | 10 | Plague cart | Yes | trail areas with lifetime; `noIncome`; `damageTaken {mult 0, types [ranged, tower]}` |
 | 11 | Collapse tiles | Yes | an area preset using `in:self`, a blocker and a stun status; reset at `dawn` |
 | 12 | Swap totem | Yes | position vars + two `teleport`s |
-| 13 | Time-dilation field | Partly | `timeScale` on units and Builder projectiles; vanilla arrows in flight aren't slowed |
-| 14 | Siege ladder: only melee climb the wall | Partly | no per-unit walkability; a teleport or a ramp for everyone |
+| 13 | Time-dilation field | Yes (was Partly) | `timeScale` on units and on every projectile in the area, the game's arrows included |
+| 14 | Siege ladder: only melee climb the wall | Yes (was Partly) | a walkable rampart whose area `surface` allows `melee` |
 | 15 | Dawn bell income streak | Yes | `dawn` + `income` + a streak var |
 | 16 | Mimic chests | Yes | `interact` + `choose`; mimics with explode-on-`near` |
 | 17 | Seasons: ice, income, spreading fire | Yes | walkable ice enabled in winter; `income` on `type:Mill`; fire spreads by status to `#flammable` |
@@ -1200,30 +1235,35 @@ ambiguities, which were also fixed in the text.
 | 22 | Decoy banner | Yes | `taunt` all enemies toward it for 8 s |
 | 23 | Reverse spawn at 80 % of the night | Yes | `nightProgress` → `waves clearRemaining` (current) + `spawnGroup at @inner` |
 | 24 | Cursed coins | Yes | `coinDrop` counter → `addLabel cursed`; `coinPickup` of `#cursed` → gold + `taunt` |
-| 25 | Wind gusts | Partly | flyers and Builder projectiles `drift`; vanilla arrows don't |
+| 25 | Wind gusts | Yes (was Partly) | `drift` on flyers and every projectile in flight, the game's arrows included |
 | 26 | Shapeshifting shrine | Yes | cycling var; area `inside` applies the state's status |
 | 27 | Rain | Yes | slow status; modifier `when: dist > 15` with `chance`; `income` on mills |
 | 28 | Reclaimed ruins | Yes | interact `choices` with costs from `.cost`; locked slots unlocked by `choose`; vanilla AI ignores a neutral "haunted" ruin |
-| 29 | Dream stage | Partly | a walled-off arena on the same map; no second scene |
+| 29 | Dream stage | Yes (was Partly) | an off-map space (walkable floor placed past the map's edge) and `teleport`; not a second scene |
 | 30 | Loan banker | Yes | `choices` 100/250/500; dusk check → collector targeting `where(it.income > 0)` |
 
-The remaining "partly" items all hit the same three engine limits: vanilla projectiles, per-unit walkability and
-scenes. None of the mechanics needed a feature coded for it.
+The four "partly" items hit three engine limits: vanilla projectiles, per-unit walkability and scenes. L2 lifted all
+three (projectiles in flight, surfaces and spaces above), with no feature coded for any mechanic.
 
 ## Known limits
 
 - **Movement physics is limited.**
   - Units ride a walkable mover only when it snaps between poses, not while it glides.
-  - There is no per-unit walkability (one navmesh per size class, as in the game), so "only melee can climb this wall"
-    is a teleport, not a path.
+  - Walkable bodies must exist when the level starts (places): one spawned at runtime costs a ~1 s rescan (the
+    validator warns). A body switched off or a pose not taken is hidden by a cut, not removed: a deck over walkable
+    ground hides that ground in both states.
+  - Per-unit walkability is by surface (31 names per level), not per triangle; RVO avoidance can push the front row
+    of a blocked crowd about 1 m into a surface it may not walk.
   - Terrain height doesn't change at runtime; walkable props and blockers change where units can go.
-- **Vanilla projectiles in flight** (the game's `AimbotProjectile`) aren't affected by `timeScale`, `drift` or
-  redirection. Builder projectiles are.
+  - Spaces have no fliers' graph; fliers there fly straight.
+- **Projectiles in flight**: the game's own are entities only while they fly, and a redirected one still deals its
+  shooter's weapon damage; it can't gain Builder `impact` rules (use an area or `near` on it instead).
 - **Team model.** There are three teams. There's no "hostile to all": Builder targeting can make a thing attack
   both sides, but vanilla AI sees only `PlayerOwned`/`EnemyOwned`, so vanilla units never attack a neutral. A converted unit uses the other side's nearest equivalent brain.
 - **Game tags are a closed set** (51 `ETag`s, kept in a 64-bit field). Vanilla AI only targets by them, so labels
   work only through Builder targeting, which can be set on any attacker (Builder units, vanilla units and towers).
-- **No new scenes, no fog or lighting changes** beyond the level's colour scheme and tints. Recording is only what
+- **No new scenes, no fog or lighting changes** beyond the level's colour scheme and tints (a separate arena is an
+  off-map space on the same scene). Recording is only what
   list vars can hold: up to 256 sampled values, such as positions.
 - **King actions:** 3 keys. The day phase has no timer in Thronefall, so "shorter day" has no meaning.
 - **No arbitrary code**, by design. A missing verb needs a mod update; the registry's `since` makes that explicit.

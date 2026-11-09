@@ -115,7 +115,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             var pack = BuilderServices.Sessions.Current?.Pack;
             var prefab = BuilderServices.Units.Resolve(pack, e.Template, out error);
             if (prefab == null) return false;
-            pos = LayoutScene.Ground(pos);
+            pos = BodyGround.Below(pos, out float groundY) ? new Vector3(pos.x, groundY, pos.z) : LayoutScene.Ground(pos);
             var go = Object.Instantiate(prefab, pos, Quaternion.Euler(0f, rotY, 0f));
             go.name = go.name.Replace("(Clone)", "").Trim();
             bool enemySide = go.GetComponentInChildren<TaggedObject>()?.Tags.Contains(TagManager.ETag.EnemyOwned) == true;
