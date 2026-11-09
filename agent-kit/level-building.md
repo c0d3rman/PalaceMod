@@ -67,6 +67,8 @@ All commands print JSON. Errors go to stderr as `{"error": "..."}` with exit cod
   and towers stay idle. Building and upgrading are refused at night ("Only during the day"). A night ends the moment
   its spawning is done and no enemy is left, so anything a level wants to do "after the wave" must happen before the
   last enemy dies or hold the night open (section 12.16).
+- **All of these are only the defaults.** `logic.game` (12.9) sets per level how it is won and lost, hides the
+  castle, holds a night open or ends it early, and lets fighting or building happen in either phase.
 - **Gold.** Buildings with income pay at dawn (houses +1 each, mills, mines, harbours, fields). Enemies drop gold
   (the spawn group's `gold`, spread over its enemies). A night's leftover gold carries over. Day 1 starts with the
   wave set's `startingGold`.
@@ -336,8 +338,8 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 | `new <level> --host M [--base map\|cleared\|flat] [--waves empty\|vanilla\|none] [--name N] [--force]` | a new library level (`--base flat` also runs a default `terrain_init`; `--force` replaces it). `level library <level> --host M ...` is the same; `new <pack>` without `--host` / `level <pack> ...` still make an old-style pack folder |
 | `list` | the library: levels (map, nights, where they came from, whether a preview was saved) and enemies (base, which levels use them) |
 | `export "<name>" <level,...> [--enemies a,b]` | through the game: a `.tfpack` with those levels, the extra enemies, and every enemy and asset they use (JSON: `written` path) |
-| `apply <pack> ops.json [--level L] [--dry-run] [--fresh]` | run ops; saves; prints offline errors/warnings. `--fresh` first empties the level (nights kept) so the same file can be re-applied |
-| `check <pack> [level] [--live]` | offline checks (of that level and its nights only, if given); `--live` adds the game's validator (exit 1 on errors) |
+| `apply <pack> ops.json [--level L] [--dry-run] [--fresh]` | run ops; saves; prints offline errors/warnings of the edited level(s) and the shared items they use (each with its `file`; see 12.2). `--fresh` first empties the level (nights kept) so the same file can be re-applied. The game sees the change at once: `play` right after `apply` loads it |
+| `check <pack> [level] [--live]` | offline checks of that level, its nights and the shared items it uses (without a level: every level that way, then the items no level uses); `--live` adds the game's validator, scoped the same way (exit 1 on errors) |
 | `show <pack> [level]` | the level as it will play: every slot, what it needs, costs, income, lines |
 | `render <pack> [level] -o f.png [--labels names\|costs\|reqs\|none] [--live]` | top-down picture; routes in one colour per line, named, lengths in the legend; offline they're an estimate, `--live` = real game render + the game's routes (level loaded). Also draws `logic.places` (templates and presets resolved): areas in their shape and `color` (dashed when `show: none`), paths with direction chevrons, bodies' footprints (a mover's path, other poses and a spin's reach dashed), points and logic objects as diamonds; labelled by `name` or `id`, "(off)" when `active: false` |
 | `economy <pack> [level] [--compare] [--report test.json]` | gold curve of a greedy all-economy player (harbours grow and mines run dry each dawn as in the game; assumes nothing is ever knocked out); vs the base map's vanilla; `--report`: what a saved `test` run actually received per dawn and which buildings were knocked out most |
@@ -350,7 +352,7 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 | `build <slot> [level] [branch] [--pay]` | build/upgrade now (free unless --pay); `castle`, an added id, or a host name; exit 1 if refused |
 | `enemy <id> [--difficulty D] [--elite] [--studio] [--fight N] [--portrait]` | a library enemy's numbers (offline: HP, damage per hit/second against buildings, the king and troops, troops' time to kill it); with the game: open it in the Enemy Studio, fight N copies in its arena, save its portrait |
 | `spawn <unit> [count] [--elite] [--line L \| --at X Z]` | spawn enemies now |
-| `cheat god\|invulnerable\|infinitegold [on\|off]`, `cheat gold N`, `cheat speed X`, `cheat kill`, `cheat heal`, `cheat endnight`, `cheat teleport X,Z` (or `X Z`; negatives are fine) | test helpers |
+| `cheat god\|invulnerable\|infinitegold [on\|off]`, `cheat gold N`, `cheat speed X`, `cheat kill`, `cheat heal`, `cheat endnight`, `cheat teleport X,Z` (or `X Z`; negatives are fine) | test helpers. `god`: the king takes no damage; `invulnerable`: every player unit and building takes none, rule `damage` and `kill` included. Both last until turned off or the next `play`/`sandbox`/`edit` load |
 | `paths [--rescan] [--points]` | the game's own route from every ground line to the castle, on the graph its enemies use (`Enemy Units L` if the line spawns large ones): `length` m from the line itself, `at` (the line's middle), `start` (where that lands on walkable ground), `snap` (m between them) and a `warning` when the line is over 10 m off walkable ground; `--points` adds the waypoints `[[x, z], ...]`. `air`: each flier line's distance from the fliers' surface (at its worst point) and where its fliers start; `problems`: what the last rescan left wrong (an empty graph, a ground line with no route, a flier line off the surface; the game also logs these as a warning, and `check --live` fails on them while the level is loaded) |
 | `paths --between X1 Z1 X2 Z2` | whether each ground graph (small enemies, large enemies, the king's `Player Units S`) connects two points, and how far each point is from walkable ground |
 | `report` | the current or last night's report |
@@ -387,7 +389,8 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 | `paint` | `material` `ground`\|`high`\|`low`\|`earth`\|`sand`\|`road`\|`rock`, shape; painted per 1 m sample and drawn with smooth edges; any base |
 | `block` | `on` (true), shape: ground units and the king can't enter; works on any base |
 | `water` | `level` (m relative to y, default -1), `on`, shape; digs the ground to level-1 m. `on: false` makes the cells land again and raises the dug ground back to `height` (default 0; `fill: false` keeps it dug) |
-| `set` | `path`, `value` (or `delete: true`): raw edit. `level.` starts in the op's level (`"level.colors"`), `nights.` in its wave set (`"nights.startingGold"`); `levels[i]`/`waveSets[i]` index the whole pack, and in the library (every level) must be the op's own |
+| `set` | `path`, `value` (or `delete: true`): raw edit. `level.` starts in the op's level (`"level.colors"`), `nights.` in its wave set (`"nights.startingGold"`); `levels[i]`/`waveSets[i]` index the whole pack, and in the library (every level) must be the op's own; `[id=x]` picks a list item by id (`"entities[id=fire].rules[0].if"`, the form `check` reports) |
+| `remove_unit`, `rename_unit`, ... | delete or rename shared units, entities, statuses and presets (section 12.11) |
 
 Shapes: `"circle": {"center": [x,z], "radius": r}`, `"rect": {"min": [x,z], "max": [x,z]}`,
 `"line": {"points": [[x,z], ...], "width": w}`, `"polygon": {"points": [[x,z], ...]}`; `"falloff": m` softens edges.
@@ -730,6 +733,22 @@ Templates and places can be used by every level; units with rules work wherever 
 `spawnGroup`). Entities, statuses and presets are library items like enemies (`library/entities/`, `statuses/`,
 `presets/`), shared by all levels, and `export` copies the ones a level uses.
 
+**Shared templates and the level they run in.** A unit, entity, status or preset is checked in the context of each
+level that uses it: a level uses an item when its logic, nights, slots or an item it uses names it (by id, `is:`,
+`@@`, `has:`, or a quoted id in an expression), transitively. An item no level uses is checked alone, its level
+references unchecked. So a template may read a level's `$vars` and `@names`, and that only matters in the levels
+that use it: `apply`, `check`, `play` and `test` of another level never report it or refuse to load because of it.
+At run time `$var` and `@name` in a template resolve against the level being played; a missing one is an error in
+`logic trace` naming the name and the template (`this level has no variable "$next" ... (in template "pillar" ...)`),
+and a unit's `movement.path: "@route"` the level lacks is traced the same way. Every issue `apply`/`check` print names
+its library `file` (`entities/pillar.json`), the `level` it was found in for a shared item, and a `path` that names the
+item by id (`entities[id=pillar].rules[0].if`), which the `set` op takes as is. For a template meant for many levels,
+keep level names out of it (pass them in `vars`, use a preset with params, or `signal` the level).
+
+A library item that can't be read is skipped with a warning naming its file; a broken item (one that names a template
+the library doesn't have) is an error only for the levels that use it, and the Studio still opens those levels (the
+log warns by file). Delete or rename shared items with the `remove_*` / `rename_*` ops (12.11).
+
 ### 12.3 Rules
 
 ```jsonc
@@ -885,6 +904,29 @@ stats.
   rule firings and 4000 actions per frame, chain depth 12, `every` ≥ 0.1 s, `wait` ≥ 0.05 s, `repeat` ≤ 100, sets ≤ 256.
   Over a cap the extra spawn or firing is skipped (the trace shows it). `logic.caps` raises them per level (warning).
 
+**Game rules** (`logic.game`, op `{"op": "logic", "game": {...}}`; Studio: Level panel > Game rules) change the
+game's own rules. Leave a rule out for vanilla. Each value is a literal or an expression the level reads again every
+frame, so rules switch with a variable (`"combat": "isNight or $flipped"`); enum rules take the word or `"=expr"`.
+
+| Rule | Vanilla | Values |
+|---|---|---|
+| `victory` | `lastNight` | `rules`: surviving the last night doesn't win; only `endLevel win` does. After the last night the day goes on (a new night replays the last one). |
+| `defeat` | `castle` | `rules`: the castle falling doesn't lose; only `endLevel lose` (or resigning) does. |
+| `castle` | `shown` | `hidden`: no castle. It counts as built (slots that need it open), is invisible and not solid, nothing targets or hurts it, selectors don't see it, and it can't lose the level. |
+| `holdNight` | `false` | A condition: while true the night doesn't end, even with no enemies left (`"count('#camp') > 0"`; `"$held < $goal"` keeps the last night's victory waiting). |
+| `endNight` | `false` | A condition: when it turns true at night, the night ends now, enemies alive or not (`"nightProgress >= 1 and count('is:boss') == 0"`). |
+| `survivors` | `stay` | What `endNight` does with the enemies left: `stay` (they stay on the map and count toward the next night) or `remove`. |
+| `combat` | `isNight` | A condition: when vanilla attacks (units, towers, the king) happen and the player's side can be hurt. `"true"`: fighting by day too; `"false"`: never. |
+| `build` | `isDay` | A condition: when the king can build and upgrade (the prompts open). `"true"`: at night too. |
+| `dayLength` | `0` | Seconds of day before night falls by itself (0: the player calls it). |
+
+Recipes: a custom win (hold a hill, escort a wagon): `victory: rules` + a rule that does `endLevel win`, and one that
+does `endLevel lose` on `waveCleared` of the last night if the goal wasn't met. A different vital object: `defeat:
+rules` (or `castle: hidden`) + `{"when": {"on": "death", "of": "#wagon"}, "do": [{"do": "endLevel", "result":
+"lose"}]}`. A spawner that would breed forever: `endNight` when the wave is dead, `survivors: stay`. Day/night swap:
+`combat: "isNight or $flipped"`, `build: "isDay or $flipped"`, raiders spawned by day with `spawn`/`spawnGroup`.
+`palace.py game cmd logic-game` prints the rules as the level sees them now.
+
 ### 12.10 Presets
 
 Use a preset in any rules list: `{ "preset": "split-on-death", "with": { "count": 3 } }` (its rules, vars, labels and
@@ -907,6 +949,8 @@ number). Errors in a preset's rules are reported at the place that uses it.
 | `status` / `preset` | a whole StatusDef / PresetDef |
 | `place` | `id`, `entity` \| `preset` + `with` \| inline `kind` + fields, `at` [x, z] (or `pos`), `rotY`, `scale`, `name`, `active`, `vars`, `rules`; a path takes `points` |
 | `remove_place` | `id` |
+| `remove_unit` / `remove_entity` / `remove_status` / `remove_preset` | `id`; refuses while a level or another item names it (the error lists them) unless `"force": true`; the file goes to `library/trash/` |
+| `rename_unit` / `rename_entity` / `rename_status` / `rename_preset` | `from`, `to`: a new id, rewriting every reference in every level and shared item (spawns, nights, `entity`, `status`, `preset`, `is:`/`@@`/`has:` and quoted ids in expressions); refuses, changing nothing, if another kind has the same id or a reference it can't rewrite remains (it lists them). The display `name` stays |
 | `rule` | `on`: `level` \| `unit:<id>` \| `entity:<id>` \| `status:<id>` \| `place:<id>` \| `slot:<name>` \| `add:<id>` \| `prop:<id>` \| `line:<name>` \| `castle`; `rule` (or `rules`): one with an existing `id` replaces it |
 | `remove_rule` | `on`, `id` |
 | `wire` | `from` (an `on` value), `event` (default `interact`), `to` (a place id/name or attach name), `input` (signal), `value`, `delay`, `do` (the target's listener, for an input that isn't built in) |
@@ -914,7 +958,7 @@ number). Errors in a preset's rules are reported at the place that uses it.
 | `attach` | `key`, `name`, `labels`, `vars`, `statuses`, `targeting` |
 | `king_action` | `id`, `name`, `when`, `cooldown`, `uses` |
 | `hud` | `id`, `text`, `icon`, `visible` |
-| `logic` | `seed`, `caps` |
+| `logic` | `seed`, `caps`, `game` (merged rule by rule; `null` puts one back to vanilla) |
 
 Units take `rules`, `vars`, `labels`, `targeting`, `movement`, `attacks`, `statuses` in the `unit` op, or rules later
 with `{"op": "rule", "on": "unit:<id>", ...}`.
@@ -983,6 +1027,7 @@ Write one per mechanic you want to keep working, next to your ops, and re-run it
   change at runtime.
 - Three teams; vanilla units never attack `neutral` things (Builder targeting can).
 - Game tags are a fixed set; your own labels work through Builder targeting and filters.
+- The castle can be hidden (`logic.game.castle`) but not moved at runtime; place it where the level needs it.
 - No new scenes, lighting or arbitrary code. Pending `wait`s and Builder projectiles in flight aren't kept by
   savestates; keep state that matters in variables.
 - No world queries beyond entities: expressions can't ask for the ground height at a point (`vec(x, z).y` is 0, not
@@ -1103,19 +1148,19 @@ moveSpeed mult 1.2 for "night"` on `all('player and unit', 20)`.
 - Bound anything that repeats: `once`, `cooldown`, a variable counter or a `count(...)` cap, so a level can't snowball
   into the caps.
 - `repeat`/`forEach` bodies are `actions`, not `do`.
-- An enemy-team entity that should hold the night open needs `body.hittable` and `countsAsEnemy: true`.
+- An enemy-team entity that should hold the night open needs `body.hittable` and `countsAsEnemy: true`. To hold a
+  night on a condition instead (or to end one early), use `logic.game.holdNight` / `endNight` (12.9).
 
 ### 12.16 How the game and the engine behave (facts to design around)
 
 **Day and night.**
 
-- The game's own attacks only fire at night (section 3). Builder damage doesn't care: the `damage` action, status
-  ticks, projectile `impact` rules and Builder `attacks` with `"when": "day"` or `"always"` hurt by day too. A daytime
-  raid is enemies whose damage comes from those, not from their vanilla weapons.
-- The player can't build or upgrade at night (the game refuses with "Only during the day").
-- A night ends in the frame its spawning is finished and no enemy is left. A hittable enemy-team entity with
-  `countsAsEnemy: true` (a "keeper", e.g. an invisible logic body) counts as an enemy: while it lives the night stays
-  open, so rules can still act after the wave; `destroy` it to let dawn come.
+- By default the game's own attacks only fire at night and building only works by day (section 3); `logic.game`
+  `combat` and `build` (12.9) change both. Builder damage never depended on it: the `damage` action, status ticks,
+  projectile `impact` rules and Builder `attacks` with `"when": "day"` or `"always"` hurt by day too.
+- A night ends in the frame its spawning is finished and no enemy is left. Two ways to keep it going after the wave:
+  `logic.game.holdNight` (a condition), or a hittable enemy-team entity with `countsAsEnemy: true` (a "keeper"), which
+  counts as an enemy while it lives; `destroy` it to let dawn come.
 - `waves endNight` stops the spawning and removes every enemy at once, silently (no `death` events, no drops, no
   gold), keepers included; the night then ends. `waves skipNight` works only by day, and not when the coming night
   is the last.

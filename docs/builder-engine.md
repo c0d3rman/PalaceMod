@@ -697,6 +697,26 @@ That covers armour, dodges, "immune to arrows", "misses at long range" and "vuln
 registered in `Awake` so they get Controls-screen rows). The key fires `kingAction` with that id, and the HUD shows
 the action with its cooldown.
 
+### Game rules
+
+`logic.game` makes the game's own rules data (GameRulesDef; LogicSchema.GameRules is the list the validators, the
+Studio's Level panel > Game rules, `palace.py logic doc` and `logic schema game` read). Each value is a literal or an
+expression over the level scope, re-read every frame, so a level switches a rule through a variable instead of an
+action per rule. Without the block every patch is a no-op (`Logic/Bodies/World/LogicGameRulesManager.cs`).
+
+| Rule | Vanilla | How it's done |
+|---|---|---|
+| `victory` (`lastNight` \| `rules`) | `lastNight` | `LocalGamestate.SetState(AfterMatchVictory)` is vetoed unless `endLevel` is the caller (`GameRules.EndingByRule`). |
+| `defeat` (`castle` \| `rules`) | `castle` | `LocalGamestate.OnVitalObjectKill` is skipped; resigning still loses. |
+| `castle` (`shown` \| `hidden`) | `shown` | Built for free if unbuilt, then renderers, colliders, navmesh cuts (area graph update) and interactors off, removed from the TagManager, skipped by selectors (`GamePhase.HiddenCastle`), damage vetoed, can't lose. |
+| `holdNight` (bool) | `false` | `DayNightCycle.Update` sees the spawner as spawning while it holds (like spawnGroup's KeepNightOpen); the last night's victory waits with it. |
+| `endNight` (bool) / `survivors` (`stay` \| `remove`) | `false` / `stay` | Edge-triggered once per night: `GameRules.EndNight` (also `waves endNight`, whose `survivors` defaults to `remove`) stops spawning, drops spawnGroups, removes or keeps the enemies left and calls `SwithToDay`. |
+| `combat` (bool) | `isNight` | `AutoAttack*.Update` and `ManualAttack.TryToAttack` run with the day/night state switched to what the rule wants (`GamePhase.Switch`, restored in a finalizer; `isNight` still reads the truth meanwhile). By day the dawn's `SetAllUnitsWithTagInvulnerable(true)` is skipped, and toggled when the rule flips mid-day. |
+| `build` (bool) | `isDay` | `BuildingInteractor.UpdateInteractionState` runs switched likewise; the dusk's forced "no prompt" is redone after `OnDusk`; prompts refresh when the rule flips. |
+| `dayLength` (number) | `0` | Night falls that many seconds after sunrise (not after the last night). |
+
+`logic-game` (dev command; `palace.py game cmd logic-game`) prints the rules as evaluated now.
+
 ### Presets
 
 ```jsonc
@@ -950,6 +970,22 @@ units[1].rules[0].do[0].entity: "=self.template" is a template, but "count" expe
 Unknown actions or events are errors: "unknown action "pull" (made with a newer PalaceMod?)". The schema's `since`
 fields fill `requires.palaceMod` on save, so an older mod refuses the pack with the right message.
 
+**Shared items are checked where they're used** (`Model/Logic/LevelScope.cs`; `palace.py` `level_scope`). The
+library's units, entities, statuses and presets are shared by every level, and a template may name the level it runs
+in (`$vars`, `@names`). A level uses an item when its logic, nights, slots or an item it uses names it (whole-string
+ids, `unit:` refs, `is:`/`@@`/`has:` and quoted ids in text), transitively. A library level is validated as
+`LevelScope.For(library, level)`: that level, its nights and the items it uses, so each template is checked in that
+level's context and nothing else in the library can block it (library play, `agent validate/play`, session launch,
+Studio edit and test loads). The whole library (`agent validate library`, `palace.py check library`) is each level that
+way, then the unused items alone (level references unchecked), deduplicated. `LevelScope.Attribute` reports each issue
+with its library `File` (`entities/fire.json`), the `Level` it was found in for a shared item, and a path naming the
+item by id (`entities[id=fire].rules[0].if`; a level's own paths start with `level.`, its nights' with `nights.`).
+A Studio edit load (`TestPacks.Edit`) keeps the units the level's logic names, and a broken shared item there is a
+logged warning by file instead of a refusal, so the layout always opens. At run time a template's `$var` and `@name`
+resolve against the level being played; a missing level variable, or a name the level never declared nor any entity
+had, is a `LogicError` naming it and the template (`ExprCompiler.TemplateNote`); a unit's `movement.path: "@x"` the
+level lacks is traced the same way (`LogicWorld.ReportError`). A declared name whose entity is gone stays `none`.
+
 ## Authoring
 
 ### Agents (`palace.py`)
@@ -967,6 +1003,8 @@ New ops (JSON, as the existing ones):
 | `var` | `name`, `value` (level) or `on` + `name` + `value` (entity default) |
 | `attach` | `key`, `name`, `labels` |
 | `king_action` | `id`, `name`, `when`, `cooldown`, `uses` |
+| `remove_unit` / `_entity` / `_status` / `_preset` | `id`, `force`: refuses while anything names it (lists the users) |
+| `rename_unit` / `_entity` / `_status` / `_preset` | `from`, `to`: rewrites every reference, or refuses listing what it can't rewrite |
 
 Commands:
 
@@ -1409,7 +1447,7 @@ three (projectiles in flight, surfaces and spaces above), with no feature coded 
 - **No new scenes, no fog or lighting changes** beyond the level's colour scheme and tints (a separate arena is an
   off-map space on the same scene). Recording is only what
   list vars can hold: up to 256 sampled values, such as positions.
-- **King actions:** 3 keys. The day phase has no timer in Thronefall, so "shorter day" has no meaning.
+- **King actions:** 3 keys. The day phase has no timer in Thronefall; `logic.game.dayLength` adds one.
 - **No arbitrary code**, by design. A missing verb needs a mod update; the registry's `since` makes that explicit.
 - **Savestates** don't keep pending `wait`s or Builder projectiles in flight.
 
