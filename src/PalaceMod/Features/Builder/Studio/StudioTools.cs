@@ -291,7 +291,7 @@ namespace PalaceMod.Builder.Studio
         private Vector3 center;
         private float angle;
         /// <summary>0 turn (about the up axis), 1 tilt (props' own x), 2 roll (props' own z). X and Z toggle it.</summary>
-        public int Axis { get; private set; }
+        public int Axis { get; set; }
 
         public string AxisLabel => Axis == 1 ? "Tilt" : Axis == 2 ? "Roll" : null;
 
