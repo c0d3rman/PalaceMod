@@ -493,11 +493,17 @@ namespace PalaceMod.Builder.Level
                 pr.shadowCastingMode = ShadowCastingMode.Off;
                 pr.receiveShadows = true;
 
-                // Walls over faces too steep to walk: the king's collider only (no renderer, so the graphs don't see
-                // them; they already leave steep ground out).
-                var k = Part($"cliff walls {x0 / ChunkCells},{z0 / ChunkCells}", ObstacleLayerIndex);
+                // Walls over faces too steep to walk: the king's collider, and walls for the ground graphs too (an
+                // invisible renderer, so they're rasterized). The graphs leave steep ground out by itself, but their
+                // erosion (agent radius) only stops at a span with a missing neighbour, and a steep face's voxels are
+                // neighbours wherever it drops less than the graph's climb per 0.2 m voxel: a 6 m raised ramp
+                // carried the large graph (radius 2-4 m) right to its edges. A column over the face is a wall.
+                // The fliers' graph is scanned without them (GroundGraphs.Scan), like blocked cells.
+                var k = Part(LayoutScene.CliffWallsPrefix + $"{x0 / ChunkCells},{z0 / ChunkCells}", ObstacleLayerIndex);
                 c.Walls = NewMesh(k.name);
                 c.WallsCollider = k.AddComponent<MeshCollider>();
+                k.AddComponent<MeshFilter>().sharedMesh = c.Walls;
+                k.AddComponent<MeshRenderer>().forceRenderingOff = true;   // enabled so the scanner takes it, never drawn
 
                 var w = Part($"water {x0 / ChunkCells},{z0 / ChunkCells}", WaterLayerIndex);
                 c.Water = NewMesh(w.name);

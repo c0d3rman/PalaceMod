@@ -79,7 +79,35 @@ namespace PalaceMod.Builder.Model
         private static readonly Dictionary<int, Action<JObject>> Steps = new()
         {
             [1] = MoveActivatorsToRequires,
+            [2] = BehavioursToRules,
         };
+
+        /// <summary>2 -> 3: each unit's behaviours [{"type": "SpawnOnDeath", "unit": U}] become a rule at the front of
+        /// its rules, {"when": "death", "do": [{"do": "spawn", "entity": U, "at": "self", "elite": "inherit"}]}, which
+        /// the unit factory still runs on the game's own Hp.enemyToSpawnOnDeath (Logic/LogicLowering), so it plays
+        /// the same. Behaviours of other types (none were ever valid) are kept under "behaviours" for the validator.</summary>
+        internal static void BehavioursToRules(JObject root)
+        {
+            if (root["units"] is not JArray units) return;
+            foreach (var unit in units.OfType<JObject>())
+            {
+                if (unit["behaviours"] is not JArray behaviours) { unit.Remove("behaviours"); continue; }
+                var rules = new List<JToken>();
+                var unknown = new JArray();
+                foreach (var b in behaviours)
+                {
+                    if (b is JObject o && (string)o["type"] == "SpawnOnDeath" && o["unit"]?.Type == JTokenType.String)
+                        rules.Add(Logic.LogicLowering.SpawnOnDeathJson((string)o["unit"]));
+                    else unknown.Add(b);
+                }
+                unit.Remove("behaviours");
+                if (unknown.Count > 0) unit["behaviours"] = unknown;
+                if (rules.Count == 0) continue;
+                var existing = unit["rules"] as JArray ?? new JArray();
+                for (int i = rules.Count - 1; i >= 0; i--) existing.Insert(0, rules[i]);
+                unit["rules"] = existing;
+            }
+        }
 
         /// <summary>1 -> 2: an added slot's "activator" (a host slot name or another added slot's id) and
         /// "activatorLevel" become "requires": { "slot": name | "add:&lt;id&gt;", "level" }.</summary>

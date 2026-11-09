@@ -15,8 +15,8 @@ using UnityEngine.SceneManagement;
     - scenery is hidden here: every renderer of the host is turned off unless it only draws with the map's ground,
       water and road materials (ColorAndLightManager's), or belongs to the castle, a build slot, the enemy spawner, a
       unit, the camera or UI. Colliders on hidden objects go too, so the king walks through where trees stood. The
-      map's invisible walls stay, so its boundary holds. MeshFusion combining is turned off before it runs (it would
-      otherwise merge hidden sources back into visible chunks).
+      map's invisible walls stay, so its boundary holds, and so does its fliers' surface. MeshFusion combining is
+      turned off before it runs (it would otherwise merge hidden sources back into visible chunks).
 */
 namespace PalaceMod.Builder.Level
 {
@@ -92,6 +92,11 @@ namespace PalaceMod.Builder.Level
                 {
                     var walls = Traverse.Create(c).Field("invisibleWalls").GetValue<GameObject>();
                     if (walls != null) keepRoots.Add(walls.transform);
+                    // The fliers' surface: inactive in play (never drawn), but its renderers are enabled, and a rescan
+                    // rasterizes them. Hiding them left the fliers' graph a few scraps (Uferwind: 20 nodes instead of
+                    // 816), so fliers from most of the map's sea started at those scraps, or nowhere.
+                    var flyer = Traverse.Create(c).Field("flyerSurface").GetValue<GameObject>();
+                    if (flyer != null) keepRoots.Add(flyer.transform);
                 }
             }
 

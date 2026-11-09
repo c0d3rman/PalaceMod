@@ -1,0 +1,277 @@
+{
+  "_comment": "Built-in presets (docs/builder-engine.md, \"Presets\"). Plain data: the Studio's Logic palette and agents use them by id, e.g. {\"preset\": \"timer\", \"with\": {\"seconds\": 5}} in a place, or {\"preset\": \"split-on-death\"} in a rules list. tests/ validates every one.",
+  "presets": [
+    {
+      "id": "timer", "name": "Timer", "category": "Logic", "kind": "logic",
+      "description": "Sends \"{signal}\" every {seconds} s ({during}). Inputs: enable, disable, toggle.",
+      "params": {
+        "seconds": { "type": "number", "default": 5, "min": 0.1, "description": "Seconds between signals." },
+        "signal": { "type": "signal", "default": "tick", "description": "The signal it sends." },
+        "to": { "type": "entities", "default": "all", "description": "Who receives it (\"all\" = every listener)." },
+        "during": { "type": "enum", "default": "always", "options": ["always", "night", "day"], "description": "When it runs." }
+      },
+      "rules": [ { "id": "timer", "when": { "on": "every", "seconds": "{seconds}", "during": "{during}" },
+                   "do": [ { "do": "signal", "name": "{signal}", "to": "{to}", "value": "event.value" } ] } ]
+    },
+    {
+      "id": "counter", "name": "Counter", "category": "Logic", "kind": "logic",
+      "description": "Counts \"{input}\" signals; at {target} it sends \"{signal}\" and starts again.",
+      "params": {
+        "input": { "type": "signal", "default": "count", "description": "The signal it counts." },
+        "target": { "type": "number", "default": 3, "min": 1, "description": "How many to count." },
+        "signal": { "type": "signal", "default": "done", "description": "Sent when it reaches the target." },
+        "to": { "type": "entities", "default": "all", "description": "Who receives it." }
+      },
+      "vars": { "count": 0 },
+      "rules": [
+        { "id": "count", "when": { "on": "signal", "name": "{input}" }, "do": [ { "do": "addVar", "name": "count", "value": 1 } ] },
+        { "id": "reach", "when": { "on": "varChanged", "name": "count" }, "if": "self.$count >= {target}",
+          "do": [ { "do": "setVar", "name": "count", "value": 0 }, { "do": "signal", "name": "{signal}", "to": "{to}" } ] }
+      ]
+    },
+    {
+      "id": "relay", "name": "Relay (delay)", "category": "Logic", "kind": "logic",
+      "description": "Passes \"{input}\" on as \"{signal}\" after {seconds} s.",
+      "params": {
+        "input": { "type": "signal", "default": "in", "description": "The signal it listens for." },
+        "seconds": { "type": "number", "default": 1, "min": 0, "description": "Delay." },
+        "signal": { "type": "signal", "default": "out", "description": "The signal it sends." },
+        "to": { "type": "entities", "default": "all", "description": "Who receives it." }
+      },
+      "rules": [ { "id": "relay", "when": { "on": "signal", "name": "{input}" },
+                   "do": [ { "do": "signal", "name": "{signal}", "to": "{to}", "value": "event.value", "delay": "{seconds}" } ] } ]
+    },
+    {
+      "id": "gate", "name": "Gate (AND)", "category": "Logic", "kind": "logic",
+      "description": "Sends \"{signal}\" once it has heard each of \"{a}\" and \"{b}\" (then resets).",
+      "params": {
+        "a": { "type": "signal", "default": "a", "description": "First input." },
+        "b": { "type": "signal", "default": "b", "description": "Second input." },
+        "signal": { "type": "signal", "default": "open", "description": "Sent when both arrived." },
+        "to": { "type": "entities", "default": "all", "description": "Who receives it." }
+      },
+      "vars": { "gotA": false, "gotB": false },
+      "rules": [
+        { "id": "a", "when": { "on": "signal", "name": "{a}" }, "do": [ { "do": "setVar", "name": "gotA", "value": "true" } ] },
+        { "id": "b", "when": { "on": "signal", "name": "{b}" }, "do": [ { "do": "setVar", "name": "gotB", "value": "true" } ] },
+        { "id": "both", "when": "varChanged", "if": "self.$gotA and self.$gotB",
+          "do": [ { "do": "setVar", "name": "gotA", "value": "false" }, { "do": "setVar", "name": "gotB", "value": "false" },
+                  { "do": "signal", "name": "{signal}", "to": "{to}" } ] }
+      ]
+    },
+    {
+      "id": "toggle-switch", "name": "Toggle", "category": "Logic", "kind": "logic",
+      "description": "Each \"{input}\" flips it, sending \"{on}\" or \"{off}\".",
+      "params": {
+        "input": { "type": "signal", "default": "flip", "description": "The signal that flips it." },
+        "on": { "type": "signal", "default": "on", "description": "Sent when it turns on." },
+        "off": { "type": "signal", "default": "off", "description": "Sent when it turns off." },
+        "to": { "type": "entities", "default": "all", "description": "Who receives it." }
+      },
+      "vars": { "on": false },
+      "rules": [ { "id": "flip", "when": { "on": "signal", "name": "{input}" }, "do": [
+        { "do": "setVar", "name": "on", "value": "not self.$on" },
+        { "do": "if", "cond": "self.$on", "then": [ { "do": "signal", "name": "{on}", "to": "{to}" } ],
+                                          "else": [ { "do": "signal", "name": "{off}", "to": "{to}" } ] } ] } ]
+    },
+    {
+      "id": "random-router", "name": "Random router", "category": "Logic", "kind": "logic",
+      "description": "Passes \"{input}\" on as \"{a}\" or \"{b}\" at random ({chanceA} for the first).",
+      "params": {
+        "input": { "type": "signal", "default": "in", "description": "The signal it listens for." },
+        "a": { "type": "signal", "default": "left", "description": "One output." },
+        "b": { "type": "signal", "default": "right", "description": "The other output." },
+        "chanceA": { "type": "number", "default": 0.5, "min": 0, "max": 1, "description": "Chance of the first output." },
+        "to": { "type": "entities", "default": "all", "description": "Who receives it." }
+      },
+      "rules": [ { "id": "route", "when": { "on": "signal", "name": "{input}" }, "do": [
+        { "do": "if", "cond": "chance({chanceA})", "then": [ { "do": "signal", "name": "{a}", "to": "{to}" } ],
+                                                    "else": [ { "do": "signal", "name": "{b}", "to": "{to}" } ] } ] } ]
+    },
+    {
+      "id": "spawner", "name": "Spawner", "category": "Logic", "kind": "logic",
+      "description": "On \"{input}\", spawns {count} {unit} here.",
+      "params": {
+        "input": { "type": "signal", "default": "spawn", "description": "The signal that spawns." },
+        "unit": { "type": "template", "default": "vanilla:E Racer", "description": "What it spawns." },
+        "count": { "type": "number", "default": 1, "min": 1, "max": 100, "description": "How many." },
+        "spread": { "type": "number", "default": 2, "min": 0, "description": "Scatter radius." }
+      },
+      "rules": [ { "id": "spawn", "when": { "on": "signal", "name": "{input}" },
+                   "do": [ { "do": "spawn", "entity": "{unit}", "count": "{count}", "at": "self", "spread": "{spread}" } ] } ]
+    },
+    {
+      "id": "lever", "name": "Lever", "category": "Logic", "kind": "logic",
+      "description": "The king pulls it ({when}) to send \"{signal}\".",
+      "params": {
+        "prompt": { "type": "text", "default": "Pull the lever", "description": "Shown when the king is near." },
+        "signal": { "type": "signal", "default": "pulled", "description": "The signal it sends." },
+        "to": { "type": "entities", "default": "all", "description": "Who receives it." },
+        "cost": { "type": "number", "default": 0, "min": 0, "description": "Gold the king pays." },
+        "when": { "type": "enum", "default": "day", "options": ["day", "night", "always"], "description": "When it can be used." },
+        "repeat": { "type": "bool", "default": true, "description": "Can be pulled again." }
+      },
+      "visual": { "mesh": "mesh:Lever" },
+      "interact": { "prompt": "{prompt}", "cost": "{cost}", "when": "{when}", "repeat": "{repeat}", "radius": 3 },
+      "rules": [ { "id": "pull", "when": "interact", "do": [ { "do": "signal", "name": "{signal}", "to": "{to}" } ] } ]
+    },
+    {
+      "id": "pressure-plate", "name": "Pressure plate", "category": "Logic", "kind": "area",
+      "description": "Sends \"{pressed}\" when a {watch} steps on it and \"{released}\" when it's empty.",
+      "params": {
+        "size": { "type": "number", "default": 3, "min": 0.5, "description": "Width of the square plate." },
+        "watch": { "type": "filter", "default": "unit or king", "description": "What presses it." },
+        "pressed": { "type": "signal", "default": "pressed", "description": "Sent when something steps on." },
+        "released": { "type": "signal", "default": "released", "description": "Sent when it's empty again." },
+        "to": { "type": "entities", "default": "all", "description": "Who receives them." }
+      },
+      "area": { "shape": { "rect": { "size": ["{size}", "{size}"] } }, "watch": "{watch}", "show": "fill", "color": "#8a7a5a" },
+      "rules": [
+        { "id": "press", "when": "occupied", "do": [ { "do": "signal", "name": "{pressed}", "to": "{to}" } ] },
+        { "id": "release", "when": "empty", "do": [ { "do": "signal", "name": "{released}", "to": "{to}" } ] }
+      ]
+    },
+    {
+      "id": "door", "name": "Door", "category": "Logic", "kind": "prop",
+      "description": "A solid door. Signals \"open\" and \"closed\" swing it (poses).",
+      "params": {
+        "angle": { "type": "number", "default": 90, "description": "How far it swings open, degrees." },
+        "startOpen": { "type": "bool", "default": false, "description": "Starts open." }
+      },
+      "visual": { "mesh": "mesh:Gate" },
+      "body": { "box": [4, 0.6], "height": 3, "solid": true },
+      "mover": { "pose": { "open": { "rotY": "{angle}" }, "closed": { "rotY": 0 } } },
+      "rules": [ { "id": "start", "when": "spawn", "if": "{startOpen}", "do": [ { "do": "signal", "name": "open", "to": "self" } ] } ]
+    },
+    {
+      "id": "moving-wall", "name": "Moving wall", "category": "Logic", "kind": "prop",
+      "description": "A solid wall that moves along a path ({mode}) at {speed} m/s. Inputs: start, stop, reverse.",
+      "params": {
+        "path": { "type": "entity", "default": "@path", "description": "A placed path (@name)." },
+        "speed": { "type": "number", "default": 2, "min": 0, "description": "m/s." },
+        "mode": { "type": "enum", "default": "pingpong", "options": ["loop", "pingpong", "once"], "description": "How it travels." },
+        "wait": { "type": "number", "default": 1, "min": 0, "description": "Seconds paused at each point." }
+      },
+      "visual": { "mesh": "mesh:Wall" },
+      "body": { "box": [4, 1], "height": 3, "solid": true },
+      "mover": { "path": "{path}", "mode": "{mode}", "speed": "{speed}", "wait": "{wait}" }
+    },
+    {
+      "id": "sign", "name": "Sign", "category": "Logic", "kind": "prop",
+      "description": "Shows \"{text}\" when the king comes near.",
+      "params": {
+        "text": { "type": "text", "default": "Beware!", "description": "The message." },
+        "range": { "type": "number", "default": 4, "min": 1, "description": "How near, metres." }
+      },
+      "visual": { "mesh": "mesh:Sign" },
+      "rules": [ { "id": "read", "when": { "on": "near", "filter": "king", "range": "{range}" }, "cooldown": 10,
+                   "do": [ { "do": "message", "text": "{text}" } ] } ]
+    },
+    {
+      "id": "gold-pickup", "name": "Gold pickup", "category": "Logic", "kind": "pickup",
+      "description": "The king collects it for {amount} gold.",
+      "params": { "amount": { "type": "number", "default": 5, "description": "Gold." } },
+      "visual": { "mesh": "mesh:Coin" },
+      "pickup": { "by": "king", "radius": 1.5, "magnet": 3 },
+      "rules": [ { "id": "collect", "when": "pickup", "do": [ { "do": "gold", "amount": "{amount}", "at": "self" } ] } ]
+    },
+    {
+      "id": "hud-counter", "name": "HUD counter", "category": "Logic", "kind": "logic",
+      "description": "Each \"{input}\" adds 1 to the level variable ${var}; at {target} it sends \"{signal}\".",
+      "params": {
+        "var": { "type": "var", "default": "count", "description": "A level variable (declare it in logic.vars)." },
+        "input": { "type": "signal", "default": "add", "description": "The signal that counts." },
+        "target": { "type": "number", "default": 10, "min": 1, "description": "The goal." },
+        "signal": { "type": "signal", "default": "goal", "description": "Sent at the goal." }
+      },
+      "rules": [
+        { "id": "add", "when": { "on": "signal", "name": "{input}" }, "do": [ { "do": "addVar", "name": "${var}", "value": 1 } ] },
+        { "id": "goal", "when": { "on": "signal", "name": "{input}" }, "if": "${var} >= {target}", "once": true,
+          "do": [ { "do": "signal", "name": "{signal}", "to": "all" } ] }
+      ]
+    },
+    {
+      "id": "split-on-death", "name": "Split on death", "category": "Enemy",
+      "description": "Splits into {count} copies, {depth} times.",
+      "params": {
+        "count": { "type": "number", "default": 2, "min": 1, "max": 6, "description": "Copies per split." },
+        "depth": { "type": "number", "default": 3, "min": 1, "max": 6, "description": "Generations." },
+        "into": { "type": "template", "default": "=self.template", "description": "What it splits into (default: itself)." },
+        "shrink": { "type": "number", "default": 0.75, "min": 0.1, "max": 1, "description": "Size of each generation relative to the last." }
+      },
+      "vars": { "gen": 0 },
+      "rules": [ { "id": "split", "when": "death", "if": "self.$gen < {depth}", "do": [
+        { "do": "spawn", "entity": "{into}", "count": "{count}", "at": "self", "spread": 1.5, "elite": "inherit",
+          "then": [ { "do": "setVar", "target": "spawned", "name": "gen", "value": "self.$gen + 1" },
+                    { "do": "setStat", "target": "spawned", "stat": "scale", "mult": "{shrink}" } ] } ] } ]
+    },
+    {
+      "id": "spawn-on-death", "name": "Spawn on death", "category": "Enemy",
+      "description": "When it dies, {count} {unit} appear where it fell.",
+      "params": {
+        "unit": { "type": "template", "default": "vanilla:E Racer", "description": "What appears." },
+        "count": { "type": "number", "default": 1, "min": 1, "max": 20, "description": "How many." }
+      },
+      "rules": [ { "id": "spawn-on-death", "when": "death", "do": [
+        { "do": "spawn", "entity": "{unit}", "count": "{count}", "at": "self", "spread": 1, "elite": "inherit" } ] } ]
+    },
+    {
+      "id": "aura", "name": "Aura", "category": "Enemy",
+      "description": "Every second, gives {status} to {who} within {range} m.",
+      "params": {
+        "status": { "type": "status", "description": "The status (from the pack's statuses)." },
+        "who": { "type": "filter", "default": "ally and unit", "description": "Who gets it." },
+        "range": { "type": "number", "default": 6, "min": 0.5, "description": "Metres." }
+      },
+      "rules": [ { "id": "aura", "when": { "on": "every", "seconds": 1 },
+                   "do": [ { "do": "applyStatus", "status": "{status}", "for": 1.2, "target": "all('{who}', {range})" } ] } ]
+    },
+    {
+      "id": "explode-near", "name": "Explode when near", "category": "Enemy",
+      "description": "When a {filter} is within {trigger} m, it explodes for {damage} damage in {radius} m.",
+      "params": {
+        "filter": { "type": "filter", "default": "foe", "description": "What sets it off." },
+        "trigger": { "type": "number", "default": 2, "min": 0.5, "description": "Trigger range." },
+        "damage": { "type": "number", "default": 40, "min": 0, "description": "Damage." },
+        "radius": { "type": "number", "default": 3, "min": 0.5, "description": "Blast radius." }
+      },
+      "rules": [ { "id": "explode", "when": { "on": "near", "filter": "{filter}", "range": "{trigger}" }, "once": true, "do": [
+        { "do": "damage", "target": "all('foe', {radius})", "amount": "{damage}" },
+        { "do": "effect", "fx": "explosion", "at": "self" },
+        { "do": "destroy", "drops": true } ] } ]
+    },
+    {
+      "id": "multiply", "name": "Multiply", "category": "Enemy",
+      "description": "Every {seconds} s at night it makes a copy of itself, up to {max} alive.",
+      "params": {
+        "seconds": { "type": "number", "default": 8, "min": 1, "description": "Seconds between copies." },
+        "max": { "type": "number", "default": 40, "min": 1, "max": 200, "description": "Cap on live copies." }
+      },
+      "rules": [ { "id": "multiply", "when": { "on": "every", "seconds": "{seconds}", "during": "night" },
+                   "if": "count('ally and where(it.template == self.template)') < {max}",
+                   "do": [ { "do": "spawn", "entity": "=self.template", "at": "pointNear(self, 2)" } ] } ]
+    },
+    {
+      "id": "regenerate", "name": "Regenerate", "category": "Enemy",
+      "description": "Heals {amount} hp every {seconds} s.",
+      "params": {
+        "amount": { "type": "number", "default": 5, "min": 0, "description": "Hit points per tick." },
+        "seconds": { "type": "number", "default": 1, "min": 0.1, "description": "Seconds between heals." }
+      },
+      "rules": [ { "id": "regenerate", "when": { "on": "every", "seconds": "{seconds}" }, "if": "self.hpPct < 1",
+                   "do": [ { "do": "heal", "amount": "{amount}" } ] } ]
+    },
+    {
+      "id": "blink-away", "name": "Blink away", "category": "Enemy",
+      "description": "Below {pct} health, once, it teleports near {to} and heals {heal}.",
+      "params": {
+        "pct": { "type": "number", "default": 0.5, "min": 0, "max": 1, "description": "Health fraction." },
+        "to": { "type": "position", "default": "castle", "description": "Where it blinks to." },
+        "heal": { "type": "number", "default": 0.3, "min": 0, "max": 1, "description": "Fraction of max hp healed." }
+      },
+      "rules": [ { "id": "blink", "when": { "on": "hpBelow", "pct": "{pct}" }, "once": true, "do": [
+        { "do": "effect", "fx": "smoke", "at": "self" }, { "do": "teleport", "at": "pointNear({to}, 10)" },
+        { "do": "heal", "amount": "self.maxHp * {heal}" } ] } ]
+    }
+  ]
+}

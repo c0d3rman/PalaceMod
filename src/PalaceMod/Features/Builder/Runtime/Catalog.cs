@@ -288,7 +288,8 @@ namespace PalaceMod.Builder
                 ["gameVersion"] = Application.version,
                 ["generatedUtc"] = DateTime.UtcNow.ToString("o"),
                 ["tags"] = new JArray(Enum.GetNames(typeof(TagManager.ETag))),
-                ["behaviours"] = new JArray(BehaviourTypes.All),
+                // The behaviour engine's vocabulary (events, actions, functions...) and built-in presets, for agents.
+                ["logic"] = PalaceMod.Builder.Model.Logic.LogicSchema.DumpWithPresets(),
                 ["units"] = new JArray(Units.Select(u => new JObject
                 {
                     ["id"] = u.Id, ["ref"] = ContentRef.Vanilla(u.Id), ["side"] = u.Side, ["name"] = u.DisplayName, ["description"] = u.Description,

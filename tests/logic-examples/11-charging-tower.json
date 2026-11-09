@@ -1,0 +1,131 @@
+{
+ "example": 11,
+ "title": "A charging tower: every fifth hit fires a piercing bolt",
+ "doc": "Expressiveness check 11",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex11",
+  "name": "Example 11: Charging tower",
+  "entities": [
+   {
+    "id": "bolt",
+    "kind": "projectile",
+    "visual": {
+     "mesh": "mesh:Spear"
+    },
+    "lifetime": 3,
+    "projectile": {
+     "speed": 30,
+     "homing": 0,
+     "hits": "foe",
+     "range": 40
+    },
+    "rules": [
+     {
+      "when": "impact",
+      "do": [
+       {
+        "do": "damage",
+        "target": "other",
+        "amount": 20,
+        "source": "self.owner"
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "levels": [
+   {
+    "id": "ex11",
+    "name": "Example 11: Charging tower",
+    "host": "Nordfels",
+    "logic": {
+     "vars": {
+      "bolts": 0
+     },
+     "attach": {
+      "slot:Tower 3": {
+       "name": "northTower",
+       "vars": {
+        "hits": 0
+       },
+       "rules": [
+        {
+         "when": "hit",
+         "do": [
+          {
+           "do": "addVar",
+           "name": "hits",
+           "value": 1
+          },
+          {
+           "do": "if",
+           "cond": "self.$hits % 5 == 0",
+           "then": [
+            {
+             "do": "launch",
+             "entity": "bolt",
+             "toward": "other",
+             "pierce": -1
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     },
+     "rules": [
+      {
+       "note": "fixture observer",
+       "when": {
+        "on": "spawn",
+        "of": "is:bolt"
+       },
+       "do": [
+        {
+         "do": "addVar",
+         "name": "bolts",
+         "value": 1
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "play": {
+  "setup": "Build slot:Tower 3 first (`building` action), then enemies in range.",
+  "steps": [
+   {
+    "do": [
+     {
+      "do": "building",
+      "slot": "slot:Tower 3",
+      "op": "build"
+     }
+    ]
+   },
+   {
+    "cmd": "night"
+   },
+   {
+    "do": [
+     {
+      "do": "spawn",
+      "entity": "vanilla:E Ogre",
+      "count": 3,
+      "at": "pointNear(@northTower, 8)"
+     }
+    ]
+   },
+   {
+    "expect": "$bolts >= 1",
+    "within": 40
+   }
+  ]
+ }
+}
