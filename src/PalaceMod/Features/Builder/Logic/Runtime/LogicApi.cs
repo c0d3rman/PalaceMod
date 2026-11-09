@@ -119,6 +119,13 @@ namespace PalaceMod.Builder.Logic
         /// <summary>Status flags in force ("stunned", "silenced", "untargetable", ...); L2's statuses maintain it.</summary>
         public readonly HashSet<string> Flags = new(StringComparer.Ordinal);
 
+        /// <summary>The entity this one is linked to (`link` action, a template's `parts`), or null. See Runtime/Links.cs.</summary>
+        public LogicEntity Parent;
+        /// <summary>How it hangs on <see cref="Parent"/> (offset, follow, death and damage policy); null when unlinked.</summary>
+        public LinkSpec Link;
+        /// <summary>Entities linked to this one, in link order.</summary>
+        public readonly List<LogicEntity> Children = [];
+
         /// <summary>The entity's rules with their per-owner state (the world's own).</summary>
         internal List<RuleInstance> Rules = [];
         /// <summary>Seconds of game time this entity's own clock is behind the world's (its `timeScale` below 1 holds

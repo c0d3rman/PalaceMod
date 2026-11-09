@@ -259,6 +259,10 @@ namespace PalaceMod.Builder.Logic
                 case "age": return Value.Number(ctx.World.Time - e.SpawnTime);
                 case "target": return Value.Entity(LogicServices.TargetOf?.Invoke(e));
                 case "owner": return Value.Entity(e.Owner);
+                case "parent": return Value.Entity(e.Parent);
+                case "children": return Value.Set(e.Children.FindAll(c => c.Exists));
+                case "root": return Value.Entity(LogicWorld.RootOf(e));
+                case "group": return Value.Set(LogicWorld.GroupOf(e).FindAll(c => c.Exists));
                 case "id": return Value.Text(e.Id);
                 case "name": return Value.Text(e.Name ?? e.Id);
                 case "enabled": return Value.Bool(e.Enabled);
