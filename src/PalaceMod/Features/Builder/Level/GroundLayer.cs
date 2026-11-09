@@ -41,7 +41,7 @@ namespace PalaceMod.Builder.Level
             public Mesh Ground, Blocks, Water, Marks, Paint, Walls, Ice;
             public MeshFilter GroundFilter, BlocksFilter, WaterFilter;
             public MeshRenderer MarksRenderer;
-            public MeshCollider GroundCollider, BlocksCollider, WallsCollider, IceCollider;
+            public MeshCollider GroundCollider, BlocksCollider, WallsCollider;
         }
 
         private static GameObject root;
@@ -526,17 +526,15 @@ namespace PalaceMod.Builder.Level
                 wr.sharedMaterial = water;
                 wr.shadowCastingMode = ShadowCastingMode.Off;
 
-                // Frozen water (the `terrain` action's freeze): a walkable sheet at the water level, on the Ground layer
-                // so the graphs rasterize it and the king stands on it.
-                var ice = Part($"ice {x0 / ChunkCells},{z0 / ChunkCells}", GroundLayerIndex);
+                // Frozen water (the `terrain` action's freeze) is drawn as a pale sheet just over the ground, which the freeze
+                // has filled up to the water level there (TerrainVerbs.FillIce): the ground carries the king and the graphs.
+                var ice = Part($"ice {x0 / ChunkCells},{z0 / ChunkCells}", 0);
                 c.Ice = NewMesh(ice.name);
                 ice.AddComponent<MeshFilter>().sharedMesh = c.Ice;
                 var ir = ice.AddComponent<MeshRenderer>();
                 ir.sharedMaterial = IceMaterial();
                 ir.shadowCastingMode = ShadowCastingMode.Off;
                 ir.receiveShadows = true;
-                c.IceCollider = ice.AddComponent<MeshCollider>();
-                c.IceCollider.enabled = false;
             }
             // Named like the layout props' blockers, so the path check sees a spawn walled in by them.
             var b = Part("blocker", ObstacleLayerIndex);
@@ -670,9 +668,6 @@ namespace PalaceMod.Builder.Level
             c.Ice.SetTriangles(itris, 0);
             c.Ice.RecalculateNormals();
             c.Ice.RecalculateBounds();
-            c.IceCollider.sharedMesh = null;
-            if (iverts.Count > 0) c.IceCollider.sharedMesh = c.Ice;
-            c.IceCollider.enabled = iverts.Count > 0;
 
             c.Walls.Clear();
             c.Walls.SetVertices(kv);

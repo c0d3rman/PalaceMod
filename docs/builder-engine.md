@@ -282,8 +282,9 @@ ground graphs only round them (`GroundGraphs.UpdateArea`, padded 12 m for ramps 
 
 - Ops: `raise`/`lower` (`amount` m), `set` (`height`, world y), `smooth`, `paint` (`material`), `block`/`unblock`,
   `water`/`dry` (cells; new water digs its bed a metre under the water level, as the Studio's brush does),
-  `freeze`/`thaw` (water cells become a walkable ice sheet at the water level, on the Ground layer, drawn pale blue;
-  units and the king walk on it; thawed, it's water again), `waterLevel` (`level`, world y: the surface moves; cells
+  `freeze`/`thaw` (water cells become walkable ice: the freeze fills their ground, and the foot of the dug bank beside
+  them, up to the water level (`TerrainVerbs.FillIce`, beds kept in `TerrainGrid.IceBed`), so the bank is a gentle slope
+  onto the ice rather than a cliff; it's drawn as a pale sheet; thawed, the beds come back and it's water again), `waterLevel` (`level`, world y: the surface moves; cells
   whose middle is under it flood if they join existing water (`flood: "connected"`, the default), or all of them
   (`"all"`), or none; water cells whose ground is now above it dry).
 - Where: `radius` (a circle at `at`, default self), `width` x `length` turned by `angle`, or `in` (an area's own shape,

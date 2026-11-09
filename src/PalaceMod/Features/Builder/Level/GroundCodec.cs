@@ -45,6 +45,8 @@ namespace PalaceMod.Builder.Level
         /// <summary>Runtime only, on a map's own ground: cells a `terrain` action touched, drawn by the terrain even where
         /// their height still matches the host's (paint, water and blocks show there).</summary>
         public readonly bool[] Forced;     // W*H
+        /// <summary>Runtime only: corners a freeze filled up to the ice (their bed heights, given back on thaw).</summary>
+        public readonly System.Collections.Generic.Dictionary<int, float> IceBed = new();
 
         public TerrainGrid(int w, int h, float cell, float originX, float originZ, float y)
         {
@@ -219,6 +221,7 @@ namespace PalaceMod.Builder.Level
             Array.Copy(Water, g.Water, Water.Length);
             Array.Copy(Frozen, g.Frozen, Frozen.Length);
             Array.Copy(Forced, g.Forced, Forced.Length);
+            foreach (var kv in IceBed) g.IceBed[kv.Key] = kv.Value;
             return g;
         }
 

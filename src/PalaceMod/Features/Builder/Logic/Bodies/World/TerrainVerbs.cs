@@ -188,8 +188,18 @@ namespace PalaceMod.Builder.Logic.Bodies
                     break;
                 }
                 case "dry": Cells(g, shape, i => { g.Water[i] = false; g.Frozen[i] = false; }, only: i => g.Water[i]); break;
-                case "freeze": Cells(g, shape, i => g.Frozen[i] = true, only: i => g.Water[i]); break;
-                case "thaw": Cells(g, shape, i => g.Frozen[i] = false, only: i => g.Frozen[i]); break;
+                case "freeze":
+                case "thaw":
+                {
+                    bool on = op == "freeze";
+                    var d = Cells(g, shape, i => g.Frozen[i] = on, only: i => g.Water[i] && g.Frozen[i] != on, apply: false);
+                    if (d.Empty) break;
+                    FillIce(g);
+                    d.Add(Math.Max(0, d.X0 - 1), Math.Max(0, d.Z0 - 1));
+                    d.Add(Math.Min(g.W - 1, d.X1 + 1), Math.Min(g.H - 1, d.Z1 + 1));
+                    Commit(g, d);
+                    break;
+                }
                 case "waterLevel":
                 {
                     if (!p.Has("level")) throw new LogicError("terrain waterLevel: needs \"level\" (world y)");
@@ -314,6 +324,37 @@ namespace PalaceMod.Builder.Logic.Bodies
             z0 = Math.Max(0, Mathf.FloorToInt((b.min.z - g.OriginZ) / g.Cell) - 1);
             x1 = Math.Min(maxX, Mathf.CeilToInt((b.max.x - g.OriginX) / g.Cell) + 1);
             z1 = Math.Min(maxZ, Mathf.CeilToInt((b.max.z - g.OriginZ) / g.Cell) + 1);
+        }
+
+        /// <summary>
+        /// Ice is ground at the water level: every corner of a frozen cell is filled up to the ice's top (its bed height is
+        /// kept in IceBed), which also turns the dug bank beside it into a gentle slope instead of a cliff, so units and
+        /// the king walk from the bank onto the ice. Corners no frozen cell touches any more get their bed back.
+        /// </summary>
+        public static void FillIce(TerrainGrid g)
+        {
+            float top = g.ClampHeight(g.WaterLevel + 0.05f);
+            for (int cz = 0; cz <= g.H; cz++)
+                for (int cx = 0; cx <= g.W; cx++)
+                {
+                    bool touch = false;
+                    for (int k = 0; k < 4 && !touch; k++)
+                    {
+                        int x = cx - (k & 1), z = cz - (k >> 1);
+                        if (x >= 0 && z >= 0 && x < g.W && z < g.H && g.Frozen[g.CellIndex(x, z)]) touch = true;
+                    }
+                    int i = g.Corner(cx, cz);
+                    if (touch && !g.IceBed.ContainsKey(i))
+                    {
+                        g.IceBed[i] = g.Heights[i];
+                        if (g.Heights[i] < top) g.Heights[i] = top;
+                    }
+                    else if (!touch && g.IceBed.TryGetValue(i, out float bed))
+                    {
+                        g.Heights[i] = bed;
+                        g.IceBed.Remove(i);
+                    }
+                }
         }
 
         /// <summary>The water's surface moves to `to` (relative): cells under it that the flood reaches become water,
@@ -490,6 +531,7 @@ namespace PalaceMod.Builder.Logic.Bodies
                 ["terrain"] = JToken.FromObject(def),
                 ["frozen"] = Bits(g.Frozen),
                 ["forced"] = Bits(g.Forced),
+                ["iceBed"] = new JObject(g.IceBed.Select(kv => new JProperty(kv.Key.ToString(), kv.Value))),
                 ["flat"] = GroundLayer.Flat,
             };
         }
@@ -510,6 +552,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             var grid = GroundCodec.Decode(def);
             ReadBits((string)o["frozen"], grid.Frozen);
             ReadBits((string)o["forced"], grid.Forced);
+            if (o["iceBed"] is JObject bed) foreach (var p in bed.Properties()) grid.IceBed[int.Parse(p.Name)] = (float)p.Value;
             GroundLayer.Show(SceneManager.GetActiveScene(), grid, (bool?)o["flat"] ?? false);
             Changed = true;
             anims.Clear();
