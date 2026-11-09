@@ -506,6 +506,7 @@ Each action is `{"do": "<name>", ...params}`. `target` (where listed) is a selec
 - `gold` (int): addSpawn: coins each.
 - `elite` (bool): addSpawn: elite.
 - `value` (number): scaleCount/scaleHp: the factor.
+- `survivors` (enum; default "remove"; one of remove, stay): endNight: the enemies left vanish (remove) or stay on the map (stay).
 
   `{ "do": "waves", "op": "addSpawn", "unit": "brute", "count": "night - 2", "line": "North" }`
 
@@ -711,12 +712,13 @@ What each JSON block accepts (a field not listed draws an "unknown field" warnin
 - **statusVisual**: `tint`, `fx`, `glow`
 - **preset**: `id`, `name`, `description`, `category`, `kind`, `params`, `vars`, `labels`, `rules`, `visual`, `body`, `team`, `countsAsEnemy`, `lifetime`, `maxAlive`, `projectile`, `mover`, `area`, `pickup`, `interact`, `attacks`, `targeting`, `movement`, `statuses` (blocks: `params{}` → presetParam)
 - **presetParam**: `type`, `default`, `min`, `max`, `options`, `description`
-- **logic**: `seed`, `vars`, `rules`, `places`, `attach`, `hud`, `kingActions`, `caps` (blocks: `places[]` → place, `attach{}` → attach, `hud[]` → hud, `kingActions[]` → kingAction, `caps` → caps)
+- **logic**: `seed`, `vars`, `rules`, `places`, `attach`, `hud`, `kingActions`, `caps`, `game` (blocks: `places[]` → place, `attach{}` → attach, `hud[]` → hud, `kingActions[]` → kingAction, `caps` → caps, `game` → game)
 - **attach**: `name`, `labels`, `vars`, `statuses`, `targeting`, `rules`
 - **hud**: `id`, `text`, `icon`, `visible`
 - **kingAction**: `id`, `name`, `icon`, `when`, `cooldown`, `uses` (blocks: `uses` → uses)
 - **uses**: `count`, `per`
 - **caps**: `entities`, `units`, `projectiles`, `perTemplate`, `firingsPerFrame`, `actionsPerFrame`
+- **game**: `victory`, `defeat`, `castle`, `holdNight`, `endNight`, `survivors`, `combat`, `build`, `dayLength`
 
 ## Stats
 
@@ -806,6 +808,22 @@ Per level in `logic.caps`; above the default draws a "may lag" warning, above th
 | `perTemplate` | 100 | 1000 |
 | `firingsPerFrame` | 400 | 4000 |
 | `actionsPerFrame` | 4000 | 40000 |
+
+## Game rules
+
+Per level in `logic.game` (op `{"op": "logic", "game": {...}}`): the game's own rules. Each is a literal or an expression the level reads again every frame (an enum takes its word or `"=expr"`), so a rule can switch it through a variable. Leave a rule out for vanilla.
+
+| Rule | Type | Vanilla | Meaning |
+|---|---|---|---|
+| `victory` | enum (lastNight / rules) | `"lastNight"` | How the level is won. lastNight: surviving the last night (vanilla). rules: only an endLevel action wins. |
+| `defeat` | enum (castle / rules) | `"castle"` | How the level is lost. castle: the castle falls (vanilla). rules: only an endLevel action (or resigning) loses. |
+| `castle` | enum (shown / hidden) | `"shown"` | shown: the castle as usual. hidden: no castle (invisible, not solid, never targeted or hurt, and it can't lose the level). |
+| `holdNight` | bool | `false` | While true, the night doesn't end, even with no enemies left (e.g. "count('#nest') > 0"). The last night's victory waits too. |
+| `endNight` | bool | `false` | When it turns true at night, the night ends at once (spawning stops; survivors decides the enemies left). |
+| `survivors` | enum (stay / remove) | `"stay"` | Enemies left when endNight ends a night (waves endNight has its own). stay: they stay (and keep the next night open until killed). remove: they vanish. |
+| `combat` | bool | `"isNight"` | When vanilla fighting happens: units', towers' and the king's attacks, and hits on the player's side. Vanilla: "isNight". "true": by day too. |
+| `build` | bool | `"isDay"` | When the king can build and upgrade. Vanilla: "isDay". "true": at night too. |
+| `dayLength` | number | `0` | Seconds of day before night falls by itself (0: the player calls the night). |
 
 ## Built-in presets
 

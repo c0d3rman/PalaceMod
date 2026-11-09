@@ -186,6 +186,17 @@ class ValidatorMessages(unittest.TestCase):
         self.has(issues, 'levels[0].logic.attach["add:nope"]: no added slot "nope"')
         self.has(issues, 'levels[0].logic.attach["tower"]: attach keys are')
 
+    def test_checks_game_rules(self):
+        issues = validate_level(json.loads("""{ "vars": { "flipped": false }, "game": { "victory": "survive", "castle": "hidden",
+            "holdNight": "count('#camp') > 0", "endNight": "$flipd", "combat": "isNight or $flipped", "build": 3, "dayLength": -5,
+            "survivors": "=night > 2 ? 'stay' : 'remove'" } }"""))
+        self.has(issues, "levels[0].logic.game.victory: must be one of lastNight, rules")
+        self.has(issues, 'levels[0].logic.game.endNight: col 1: unknown variable "$flipd"')
+        self.has(issues, "levels[0].logic.game.build: must be true, false or a condition")
+        self.has(issues, "levels[0].logic.game.dayLength: must be 0 or more")
+        for ok in ("castle", "holdNight", "combat", "survivors"):
+            self.assertFalse(any(f"logic.game.{ok}:" in str(i) for i in issues), f"game.{ok} flagged: {issues}")
+
     def test_checks_components_and_caps(self):
         issues = validate_level(
             json.loads("""{ "caps": { "entities": 900, "units": 5000 },
