@@ -305,6 +305,17 @@ namespace PalaceMod.Tests
             Has(issues, "levels[0].logic.rules[0].do[1].targeting[0]: needs a filter");
         }
 
+        public static void PlayPackKeepsUnitsTheLogicNames()
+        {
+            var fx = JObject.Parse(File.ReadAllText(Directory.GetFiles(RepoFile("tests/logic-examples"), "09-*.json")[0]));
+            var pack = PackSerializer.FromJObject((JObject)fx["pack"], null);
+            pack.Units.Add(new UnitDef { Id = "unrelated", Base = "vanilla:E Melee" });
+            var play = PalaceMod.Builder.Studio.Play.TestPacks.Play(pack, pack.Levels[0].Id, out string err);
+            Assert.Null(err, "play pack");
+            Assert.Equal("bat", string.Join(",", play.Units.Select(u => u.Id)), "is:bat in the level script keeps the bat");
+            Assert.Equal("", Errors(Validator.Validate(play)), "the play pack validates");
+        }
+
         // ---- Validator messages ------------------------------------------------------------------------------
 
         private static List<ValidationIssue> ValidateLevel(string logicJson, string extraPack = null)

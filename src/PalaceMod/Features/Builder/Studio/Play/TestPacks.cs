@@ -11,6 +11,8 @@ namespace PalaceMod.Builder.Studio.Play
     {
         /// <summary>The pack a test play runs: the level, its wave set, the units that set uses (and the units those
         /// refer to), the pack's assets and requirements. Problems elsewhere in the pack don't block it.</summary>
+        private static readonly System.Text.RegularExpressions.Regex TemplateInText = new(@"(?:\bis:|@@)([a-z0-9._-]+)");
+
         public static DesignPack Play(DesignPack source, string levelId, out string error)
         {
             error = null;
@@ -25,6 +27,11 @@ namespace PalaceMod.Builder.Studio.Play
             var keep = new HashSet<string>(StringComparer.Ordinal);
             var queue = new Queue<JToken>();
             if (waveSet != null) queue.Enqueue(JToken.FromObject(waveSet));
+            // The behaviour engine's references too: the level's logic and every entity, status and preset (kept whole)
+            // can spawn or name units ("spawn", "is:goblin", "@@goblin").
+            if (level.Logic != null) queue.Enqueue(JToken.FromObject(level.Logic));
+            foreach (var x in (copy.Entities ?? []).Cast<object>().Concat(copy.Statuses ?? []).Concat(copy.Presets ?? []))
+                queue.Enqueue(JToken.FromObject(x));
             while (queue.Count > 0)
             {
                 var token = queue.Dequeue();
@@ -32,9 +39,14 @@ namespace PalaceMod.Builder.Studio.Play
                 foreach (var value in all.OfType<JValue>())
                 {
                     if (value.Type != JTokenType.String) continue;
-                    var r = ContentRef.Parse((string)value);
-                    if (r.Kind != RefKind.LocalUnit || copy.FindUnit(r.Id) is not { } unit || !keep.Add(r.Id)) continue;
-                    queue.Enqueue(JToken.FromObject(unit));
+                    string s = (string)value;
+                    var names = new List<string> { ContentRef.Parse(s) is { Kind: RefKind.LocalUnit } r ? r.Id : null };
+                    foreach (System.Text.RegularExpressions.Match m in TemplateInText.Matches(s)) names.Add(m.Groups[1].Value);
+                    foreach (var id in names)
+                    {
+                        if (id == null || copy.FindUnit(id) is not { } unit || !keep.Add(id)) continue;
+                        queue.Enqueue(JToken.FromObject(unit));
+                    }
                 }
             }
             copy.Units = copy.Units.Where(u => u?.Id != null && keep.Contains(u.Id)).ToList();

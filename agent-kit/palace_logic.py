@@ -2567,6 +2567,9 @@ class _Walker:
         self.check_path(path, p + ".path", scope)
         self.num(_lnum(m.get("speed")), p + ".speed", scope, 0, 100)
         self.num(_lnum(m.get("keepDistance")), p + ".keepDistance", scope, 0, 200)
+        for k, v in (_dict(m.get("surfaces")) or {}).items():
+            if not (isinstance(v, bool) or (isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0)):
+                self.error(f"{p}.surfaces.{k}", "true (may walk it), false (may not) or a path cost above 0")
         kite = _dict(m.get("kite"))
         if kite is not None:
             self.num(_lnum(kite.get("below")), p + ".kite.below", scope, 0, 200)
@@ -2687,12 +2690,22 @@ class _Walker:
             self.num(_lnum(mv.get("wait")), p + ".mover.wait", scope, 0, 600)
             if _b(body, "walkable") is True and mpath is not _MISSING:
                 self.warn(p + ".mover", "a walkable mover only snaps between poses; it can't glide along a path")
-            for key, pose in (_dict(mv.get("pose")) or {}).items():
+            self.num(_lnum(mv.get("turnSpeed")), p + ".mover.turnSpeed", scope, 0, 3600)
+            if _dict(mv.get("pose")) is not None and _dict(mv.get("poses")) is not None:
+                self.warn(p + ".mover.poses", 'give "pose" or "poses", not both ("poses" is ignored)')
+            pose_key = "pose" if _dict(mv.get("pose")) is not None else "poses"
+            for key, pose in (_dict(mv.get(pose_key)) or {}).items():
+                pp = f"{p}.mover.{pose_key}.{key}"
                 if any(key in x for x in self.schema.inputs.values()):
-                    self.error(f"{p}.mover.pose.{key}", f'"{key}" is a built-in input; name the pose something else')
+                    self.error(pp, f'"{key}" is a built-in input; name the pose something else')
                 off = _list(pose.get("offset")) if isinstance(pose, dict) else None
                 if off is not None and len(off) != 3:
-                    self.error(f"{p}.mover.pose.{key}.offset", "must be [x, y, z]")
+                    self.error(pp + ".offset", "must be [x, y, z]")
+                ppos = _list(pose.get("pos")) if isinstance(pose, dict) else None
+                if ppos is not None and len(ppos) != 3:
+                    self.error(pp + ".pos", "must be [x, y, z]")
+                if off is not None and ppos is not None:
+                    self.warn(pp, "give offset or pos, not both")
         ar = _dict(e.get("area"))
         if ar is not None:
             sh = _dict(ar.get("shape"))
@@ -2716,6 +2729,22 @@ class _Walker:
             if _s(ar, "color") is not None and not try_parse_color(_s(ar, "color")):
                 self.error(p + ".area.color", 'must be "#rrggbb"')
             self.num(_lnum(ar.get("tick")), p + ".area.tick", scope, 0.1, 600)
+            surf = ar.get("surface")
+            if isinstance(surf, str):
+                if not surf.strip():
+                    self.error(p + ".area.surface", "needs a name")
+            elif isinstance(surf, dict):
+                if not isinstance(surf.get("name"), str):
+                    self.error(p + ".area.surface.name", "needs a name")
+                if "allow" in surf:
+                    if isinstance(surf["allow"], str):
+                        self.filter_string(surf["allow"], p + ".area.surface.allow", scope)
+                    else:
+                        self.error(p + ".area.surface.allow", "must be a filter")
+                if "cost" in surf and not (isinstance(surf["cost"], (int, float)) and not isinstance(surf["cost"], bool) and surf["cost"] > 0):
+                    self.error(p + ".area.surface.cost", "must be a number above 0")
+            elif surf is not None:
+                self.error(p + ".area.surface", 'must be a name or {"name", "allow", "cost"}')
         elif kind == "area" and not place:
             self.error(p + ".area", "an area template needs an area block")
         pk = _dict(e.get("pickup"))

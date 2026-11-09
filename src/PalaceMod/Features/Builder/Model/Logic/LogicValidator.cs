@@ -396,9 +396,13 @@ namespace PalaceMod.Builder.Model.Logic
                     case "signal":
                         if (sends != null && a.GetString("name") is string sig) sends.Add(sig);
                         break;
+                    case "spawn":
                     case "launch":
                     {
                         string e = a.GetString("entity");
+                        if (e != null && !e.StartsWith("=") && pack.FindEntity(e)?.Body?.Walkable == true)
+                            Warn(p + ".entity", $"\"{e}\" has a walkable body: spawned at runtime it costs a pathfinding rescan (about 1 s); place it in logic.places instead");
+                        if (a.Do != "launch") break;
                         if (e != null && !e.StartsWith("=") && pack.FindEntity(e) is { } ent && ent.Projectile == null)
                             Warn(p + ".entity", $"\"{e}\" has no projectile block, so it flies with the defaults");
                         break;
@@ -655,6 +659,9 @@ namespace PalaceMod.Builder.Model.Logic
                 }
                 if (m.Wander != null) Num(m.Wander.Radius, p + ".wander.radius", scope, 0, 200);
                 if (m.Home is JValue hv && hv.Type == JTokenType.String && (string)hv != "spawn") Expression((string)hv, p + ".home", scope, LType.Position, "home");
+                foreach (var kv in m.Surfaces ?? [])
+                    if (!(kv.Value?.Type == JTokenType.Boolean || (kv.Value?.Type is JTokenType.Integer or JTokenType.Float && (double)kv.Value > 0)))
+                        Error($"{p}.surfaces.{kv.Key}", "true (may walk it), false (may not) or a path cost above 0");
             }
 
             private void CheckPath(JToken path, string p, CheckScope scope)
@@ -750,10 +757,16 @@ namespace PalaceMod.Builder.Model.Logic
                     Num(mv.Speed, p + ".mover.speed", scope, 0, 100);
                     Num(mv.Wait, p + ".mover.wait", scope, 0, 600);
                     if (e.Body?.Walkable == true && mv.Path != null) Warn(p + ".mover", "a walkable mover only snaps between poses; it can't glide along a path");
-                    foreach (var pose in mv.Pose ?? [])
+                    Num(mv.TurnSpeed, p + ".mover.turnSpeed", scope, 0, 3600);
+                    if (mv.Pose != null && mv.Poses != null) Warn(p + ".mover.poses", "give \"pose\" or \"poses\", not both (\"poses\" is ignored)");
+                    string poseKey = mv.Pose != null ? "pose" : "poses";
+                    foreach (var pose in mv.Pose ?? mv.Poses ?? [])
                     {
-                        if (LogicSchema.Inputs.Values.Any(x => x.Contains(pose.Key))) Error($"{p}.mover.pose.{pose.Key}", $"\"{pose.Key}\" is a built-in input; name the pose something else");
-                        if (pose.Value?.Offset != null && pose.Value.Offset.Length != 3) Error($"{p}.mover.pose.{pose.Key}.offset", "must be [x, y, z]");
+                        string pp = $"{p}.mover.{poseKey}.{pose.Key}";
+                        if (LogicSchema.Inputs.Values.Any(x => x.Contains(pose.Key))) Error(pp, $"\"{pose.Key}\" is a built-in input; name the pose something else");
+                        if (pose.Value?.Offset != null && pose.Value.Offset.Length != 3) Error(pp + ".offset", "must be [x, y, z]");
+                        if (pose.Value?.Pos != null && pose.Value.Pos.Length != 3) Error(pp + ".pos", "must be [x, y, z]");
+                        if (pose.Value?.Offset != null && pose.Value?.Pos != null) Warn(pp, "give offset or pos, not both");
                     }
                 }
                 if (e.Area is { } ar)
@@ -769,6 +782,19 @@ namespace PalaceMod.Builder.Model.Logic
                     Enum(ar.Show, p + ".area.show", "none", "outline", "fill");
                     if (ar.Color != null && !Validator.TryParseColor(ar.Color, out _)) Error(p + ".area.color", "must be \"#rrggbb\"");
                     Num(ar.Tick, p + ".area.tick", scope, 0.1, 600);
+                    switch (ar.Surface)
+                    {
+                        case null: break;
+                        case JValue sv when sv.Type == JTokenType.String:
+                            if (string.IsNullOrWhiteSpace((string)sv)) Error(p + ".area.surface", "needs a name");
+                            break;
+                        case JObject so:
+                            if (so["name"]?.Type != JTokenType.String) Error(p + ".area.surface.name", "needs a name");
+                            if (so["allow"] is JToken al) { if (al.Type == JTokenType.String) FilterString((string)al, p + ".area.surface.allow", scope); else Error(p + ".area.surface.allow", "must be a filter"); }
+                            if (so["cost"] is JToken co && !(co.Type is JTokenType.Integer or JTokenType.Float && (double)co > 0)) Error(p + ".area.surface.cost", "must be a number above 0");
+                            break;
+                        default: Error(p + ".area.surface", "must be a name or {\"name\", \"allow\", \"cost\"}"); break;
+                    }
                 }
                 else if (kind == EntityKinds.Area && !place) Error(p + ".area", "an area template needs an area block");
                 if (e.Pickup is { } pk)
@@ -785,6 +811,7 @@ namespace PalaceMod.Builder.Model.Logic
                     Num(it.Radius, p + ".interact.radius", scope, 0.5, 30);
                     if (it.Choices != null)
                     {
+                        Warn(p + ".interact.choices", "choices aren't supported by this PalaceMod yet: the king's interact uses cost and prompt only");
                         if (it.Choices.Count < 1 || it.Choices.Count > 4) Error(p + ".interact.choices", "1 to 4 choices");
                         var ids = new HashSet<string>();
                         for (int i = 0; i < it.Choices.Count; i++)
