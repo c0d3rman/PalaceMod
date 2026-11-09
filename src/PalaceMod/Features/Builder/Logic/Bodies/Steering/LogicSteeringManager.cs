@@ -140,8 +140,15 @@ namespace PalaceMod
         /// <summary>Apply a template's `targeting`, `movement` and `attacks` to a freshly spawned unit.</summary>
         internal static void OnUnitSpawned(LogicEntity e, GameObject go)
         {
-            if (e?.Def == null || go == null || !Live()) return;
-            ApplyComponents(e, go, e.Def);
+            if (e == null || go == null || !Live()) return;
+            if (e.Def != null) ApplyComponents(e, go, e.Def);
+            // a neutral unit keeps its side's brain, whose priorities would still walk it to the player: it targets
+            // nothing until its template or a rule says what
+            if (e.Team == "neutral" && go.GetComponent<PathfindMovement>() != null)
+            {
+                var st = For(e, go);
+                if (st != null) st.Targeting ??= new TargetingState { Base = [] };
+            }
         }
 
         internal static void ApplyComponents(LogicEntity e, GameObject go, JObject def)
