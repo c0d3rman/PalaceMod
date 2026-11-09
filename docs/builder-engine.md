@@ -948,11 +948,24 @@ limits), and `reference.md` gets the generated schema.
 
 **As built (L3, `Features/Builder/Studio/Logic/`).** Where it differs from the sketch below, this wins:
 
-- **Behaviour tab** (a right-panel tab, `Studio.AddPanel`): the selected thing's name (`@name`), labels, variables,
-  place fields (areas: shape, size, watches, shown; interactables: prompt, cost, usable; paths: points) and its rules
-  as one-line sentences ("When this dies → Spawn Slime × 2 at this"), plus its wires. With nothing selected it's the
-  level: variables, the level script, king actions, HUD lines and limits. The Inspector gets a one-row "Behaviour"
-  summary that jumps there.
+- **Behaviour tab** (a right-panel tab, `Studio.AddPanel`): the selected thing's name (`@name`), labels, its parts
+  (below), variables, path points, and its rules as one-line sentences ("When this dies → Spawn Slime × 2 at this"),
+  plus its wires. With nothing selected it's the level: variables, the level script, king actions, HUD lines, the
+  pack's statuses and things, and limits. A status or thing opened from there (or from a picker's "+ New status")
+  shows in the tab in place of the selection with a "← back" row (`LogicStudio.Focus`). The Inspector gets a one-row
+  "Behaviour" summary that jumps there.
+- **Parts** (`PartsPanel`): every component of a place or a thing, as typed fields: Look (a model picker over the
+  scenery library and unit models, scale, turn, raise, tint), Body (circle or box footprint, height, solid, walkable,
+  hittable with hp and game tags), Flight (`projectile`), Mover (path picker, mode, speed, spin, swing, and named
+  poses with turn and offset), Area (circle / rectangle / polygon, watches, shown, colour, inside tick, surface),
+  Pickup, Interact (prompt, cost, usable, reach, repeat, up to 4 choices) and starting statuses; "+ part" buttons add
+  the missing ones, each has Remove. A thing's own settings (name, kind, side, keeps-the-night-open, lifetime, most
+  alive) head it. A place made from a template shows the template's parts; editing one copies the whole component
+  onto the place first (the engine replaces components whole). Event pickers and the Wire tool offer component events
+  (an area's enter, a mover's arrive) by the parts a thing has, not only its kind.
+- **Statuses** (`StatusPanel`): name, duration, what applying again does (restart, stack with a cap, extend,
+  ignore), tick, stat changes (times / plus / set to, with an attacker filter for damage), flags, tint and effect,
+  and its rules (self = whoever has it).
 - **Rule editor**: a 620 px panel beside the right panel (the 340 px panel is too narrow for cards). When / If / Then
   top to bottom; an action row opens to its fields, nested lists (`then`, `else`, `onImpact`, `choose` options) indent
   under it. Options (once, cooldown, starts on, id, note) and Duplicate / Copy (JSON) / Save as preset / Delete at the
@@ -967,9 +980,17 @@ limits), and `reference.md` gets the generated schema.
 - **Placed logic** (`logic.places`) are Studio items `place:<id>` through a new shell extension point,
   `Studio.AddItemSource`: picked, selected, moved, turned, duplicated and deleted like props, drawn as a coloured
   ring, an area's outline, or a stand-in box at a solid body's size.
-- **Logic palette tab** (`Studio.AddPaletteTab`): Area, Point and Path, then every built-in preset of category
-  "Logic". They are placed unpacked (kind, components, vars and rules with the params' defaults), so their cards edit
-  like any rule; outputs are rules with an empty or signal-only Then.
+- **Logic palette tab** (`Studio.AddPaletteTab`): Circle, Rectangle and Polygon areas, Point and Path, then every
+  built-in preset of category "Logic", then "This pack's things" (placed by reference, `{"entity": id}`) with
+  "+ New thing" / "Edit…" (the Entity Studio, through `LogicStudio.OpenEntityStudio`). Presets are placed unpacked
+  (kind, components, vars and rules with the params' defaults), so their cards edit like any rule; outputs are rules
+  with an empty or signal-only Then.
+- **Shapes on the map**: areas and paths are drawn with the Place tool (`StudioPlaceable.Draw`): a circle is a drag
+  from its centre, a rectangle a drag corner to corner, a polygon clicks its corners (click the first again to close),
+  a path clicks its points (click the last again to end); Esc drops the shape in progress. A selected place shows
+  handles (`PlaceHandles`, through `Studio.AddPointerHandler`, asked by the Select tool first): drag a path point, a
+  circle's edge, a rectangle's corner or a polygon's corner (one undo step on release); Ctrl-click removes a point;
+  pressing the small ring in a side's middle inserts one there and drags it.
 - **Wire tool** (J): drag (or click, click) from one thing to another; the panel lists the source's outputs, then its
   events; then the target's built-in inputs, its own "gets signal" inputs, or a new signal (which opens the target's
   new listener). Wires draw as arcs labelled "event → input", coloured by signal; all of them while the tool is
@@ -984,7 +1005,13 @@ limits), and `reference.md` gets the generated schema.
   rule's sentence, its value and other, throttles and errors in red) and the count of spawned things; rule cards show
   "fired N×"; a pip rises over a thing when its rule fires (View ▾ Rule pips).
 - **Dev**: `builder-logic state | owner | rules | open | new | act | press <text> | set | place | wire | unwire |
-  wires | json | check | rows | tab | close` drives all of it the way the mouse does.
+  wires | json | check | rows | tab | close` drives all of it the way the mouse does. `press` clicks the row or tile
+  whose text is (else starts with, else contains) the text, rule editor first; `Label#2` is the second match; type
+  into the field it opened with `uikit type <text with _ for spaces>` then `uikit type enter`. `builder-studio dragw`
+  and `cursor`/`click` draw shapes and drag handles through the Studio's own pointer path; `builder-studio json pack`
+  prints the whole draft.
+- **Built by mouse alone** (examples 21, 6, 8, 12 and 1): each was built from an empty level with only those
+  commands (no JSON), then its pack ran headless through `palace.py logic fixture` with the example's play steps.
 
 The original sketch:
 
