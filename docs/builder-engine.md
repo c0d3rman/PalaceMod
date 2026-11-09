@@ -531,6 +531,36 @@ which accepts an entity or a position.
 The action set is closed, and each action is generic. A new action needs a mod update, so additions are judged by
 whether they unlock many behaviours rather than one.
 
+World and Show details (as built, `Logic/Bodies/World/`):
+
+- `gold` with `at`: up to 40 of the game's income coins rise there and fly to the king, each paying 1 on arrival
+  (the rest is paid at once). A negative amount is `SpendCoins` (the game's spend effect on the king).
+- `dropCoins`: the enemy drop coin, in the ring a dying enemy drops them in (max 100).
+- `building`: without `slot`, the action's `target` (default self). `slot` also takes `castle` and a slot's object
+  name. `build`/`upgrade` are free and pick `branch` (default: a random one from the logic random source); they do
+  nothing when the slot can't be upgraded (castle level, max level, locked). `demolish` undoes each applied upgrade's
+  switched objects and hp, hides the slots it had switched on, and leaves castle-upgrade perks in place. Locks and
+  `setIncome` survive savestates; `setCost` prices the next level.
+- `waves`: `night` is 1-based; the default is the night after the current or coming one's index (by day: the coming
+  night). A night that is running counts as `"current"`. `addSpawn` defaults: `count` 1, `interval` 0.5, `line` the
+  night's first line. `endNight` removes the remaining enemies without coins or death events; `skipNight` works by
+  day only and skips the coming night (not the last). Future-night edits are replayed after a savestate load.
+- `spawnGroup` spawns like the game's death spawns (Instantiate + `Spawn.AdjustEnemyParametersAfterSpawn`), `interval`
+  default 0.5, coins spread over the group; at night the night stays open until the group is done. `clearRemaining`
+  on the running night drops pending groups too.
+- `effect` ids are the game's effect prefabs (`builder dump` → `effects`) plus short aliases: `smoke`, `dust_small`,
+  `dust_large`, `explosion`, `burst`, `summon`, `spikes`, `slash`, `hit`, `fire_small`, `ward`, `coins`, `blood`,
+  `impact`, `goo`, `ally_death`. `sound` ids are the game's AudioSet clips in camelCase (`builder dump` → `sounds`).
+  Status `visual.fx` uses the same catalog, parented to the carrier.
+- `setVisual`: `tint`/`glow` paint the model (FlatKit lit and shaded colours); `glow` is a colour, `true` (gold) or
+  0..1; `scale` multiplies the original scale; `mesh` takes the `visuals.mesh` forms. With `for`, all of it reverts.
+- `hud` lines stack at the top right (under the game's night-score panel while it shows), re-evaluated every 0.25 s,
+  hidden while a menu is open. `icon` is an `asset:` sprite or a unit id (its marker icon).
+- `marker`: one per `on` entity or point; `for: 0` removes it; without `for` it lasts while `on` exists. `icon` as for
+  `hud` (default: the entity's own marker icon).
+- `shake`: the game's camera punch scaled by `strength`; off when the player disabled screen shake.
+- Dev: `logic-world status | slots | hud | fx | sounds | gallery`.
+
 ### Statuses
 
 ```jsonc

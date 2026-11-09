@@ -1483,9 +1483,28 @@ def prepare_instance(instance, base):
     write_atomic(instance.meta, json.dumps(info, indent=2) + "\n")
 
 
+def keep_crash_logs(instance):
+    """A native crash leaves mono_crash.* blobs in the game folder, and its only text (Unity's and mono's stack dumps)
+    in that session's Player.log and BepInEx log, which the next launch overwrites. Move them to <instance>/crashes/."""
+    blobs = sorted(instance.game.glob("mono_crash*"))
+    if not blobs:
+        return
+    crashed = max(b.stat().st_mtime for b in blobs)
+    dest = instance.dir / "crashes" / time.strftime("%Y%m%d-%H%M%S", time.localtime(crashed))
+    dest.mkdir(parents=True, exist_ok=True)
+    for log in [instance.home / "Library/Logs/Grizzly Games/Thronefall/Player.log", instance.game / "BepInEx/LogOutput.log"]:
+        # Only the crashed session's own logs (they stop when it dies); an older blob's logs are long gone.
+        if log.exists() and abs(log.stat().st_mtime - crashed) < 120:
+            shutil.copy2(log, dest / log.name)
+    for blob in blobs:
+        shutil.move(str(blob), dest / blob.name)
+    print(f"The last game on pool {instance} crashed; its logs are kept in {dest}", flush=True)
+
+
 def launch_instance(instance, timeout, keep_focus=True, headless=False):
     if instance.pids():
         raise RuntimeError(f"Thronefall is already running on pool {instance}; `dev.py run` restarts it.")
+    keep_crash_logs(instance)
     focus = FocusKeeper(keep_focus)
     started = time.time()
     out = ROOT / f".local/launch{'' if HOLDER == str(ROOT) else '-' + HOLDER.partition('#')[2]}.log"

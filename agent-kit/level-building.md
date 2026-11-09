@@ -338,7 +338,7 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 | `economy <pack> [level] [--compare] [--report test.json]` | gold curve of a greedy all-economy player (harbours grow and mines run dry each dawn as in the game; assumes nothing is ever knocked out); vs the base map's vanilla; `--report`: what a saved `test` run actually received per dawn and which buildings were knocked out most |
 | `waves <pack> [level] [--compare [Map]]` | per night: enemies, effective HP, gold, flyers; vs vanilla |
 | `play <pack> <level>` | load as a normal run (real gold); prints load warnings |
-| `sandbox <pack> <level> [--at X Z]` | Studio test play: unlimited gold, king at X,Z |
+| `sandbox <pack> <level> [--at X Z]` | Studio test play: unlimited gold, king at X,Z (the result has `"at": "ok"` once he stands there) |
 | `edit <pack> <level>` | open the level in the in-game Studio (the player's editor: F5 there test-plays); it edits its own copy and Ctrl+S writes pack.json, so don't `apply` while the player has unsaved Studio changes |
 | `test <pack> <level> [--nights 1-3] [--plan p.json] [--carry] [--save] [--catchup play\|free\|none] [--free] [--king castle\|<slot>\|X,Z] [--build all] [--god] [--invulnerable] [--gold N] [--speed 3] [--no-fast] [--from-night N] [--no-states] [--shots dir] [--quiet]` | load, buy per plan each day once its gold is in, play nights, report each (one progress line per night on stderr); fast simulation unless `--no-fast`; saves a resume state each dawn for `--from-night` |
 | `night [N] [--speed 3]` | start the next night (or jump to night N) and wait for its report |
