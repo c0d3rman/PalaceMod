@@ -865,7 +865,7 @@ namespace PalaceMod.Builder.Level
         }
 
         private static Material marksMaterial, iceMaterial;
-        private const float IceLift = 0.05f;
+        private const float IceLift = 0.2f;   // over the filled ground (water level + 0.05) and every paint outline on it (up to ~0.1 m)
         /// <summary>The ice's colour (pale blue-white), shaded by the level's ground material.</summary>
         public static readonly Color IceColour = new(0.80f, 0.91f, 0.97f, 1f);
 
@@ -875,8 +875,18 @@ namespace PalaceMod.Builder.Level
             var src = materials?.ElementAtOrDefault((int)GroundMaterial.Sand) ?? materials?.FirstOrDefault(m => m != null);
             iceMaterial = src != null ? new Material(src) : new Material(Shader.Find("Standard"));
             iceMaterial.name = LayoutScene.AddedPrefix + "ice";
-            if (iceMaterial.HasProperty("_BaseColor")) iceMaterial.SetColor("_BaseColor", IceColour);
-            else iceMaterial.color = IceColour;
+            // The toon shader shades with the scheme's dim colours too: tint each by the ice colour, keeping the source's
+            // ratio to its base colour (so the ice is shaded like the ground under the same light).
+            var baseC = src != null && src.HasProperty("_BaseColor") ? src.GetColor("_BaseColor") : Color.white;
+            foreach (var prop in SchemeColours)
+            {
+                if (!iceMaterial.HasProperty(prop) || prop == "_OutlineColor") continue;
+                var c = iceMaterial.GetColor(prop);
+                Color ratio = new(baseC.r > 0.01f ? c.r / baseC.r : 1f, baseC.g > 0.01f ? c.g / baseC.g : 1f, baseC.b > 0.01f ? c.b / baseC.b : 1f, 1f);
+                iceMaterial.SetColor(prop, prop == "_BaseColor" ? IceColour : new Color(IceColour.r * ratio.r, IceColour.g * ratio.g, IceColour.b * ratio.b, c.a));
+            }
+            if (!iceMaterial.HasProperty("_BaseColor")) iceMaterial.color = IceColour;
+            if (iceMaterial.HasProperty("_BaseMap")) iceMaterial.SetTexture("_BaseMap", null);
             return iceMaterial;
         }
 
