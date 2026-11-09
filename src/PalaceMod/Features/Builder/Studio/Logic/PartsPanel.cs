@@ -182,6 +182,7 @@ namespace PalaceMod.Builder.Studio.Logic
                     F("when", C("when", "Usable", "When the king can use it.", "always", "day", "night", "always")),
                     F("radius", N("radius", "Reach (m)", "How close the king must be.", "3")),
                     F("repeat", B("repeat", "Again and again", "Off: usable once.", true)),
+                    new() { Path = "pay", Custom = (page, owner, spec) => PayList(page, owner, "pay", "Also costs") },
                     new() { Path = "choices", Custom = Choices },
                 ],
             },
@@ -286,10 +287,12 @@ namespace PalaceMod.Builder.Studio.Logic
             foreach (var spec in Parts)
                 if (node[spec.Key] is JObject) PartBlock(page, owner, spec);
             Statuses(page, owner, node);
+            LinkedParts(page, owner, null);
             var missing = Parts.Where(s => node[s.Key] is not JObject).ToList();
             StudioDock.SmallHeader(page, "Add a part");
             var buttons = missing.Select(s => ($"+ {s.Label}", (Action)(() => AddPart(owner, s)), s.Desc)).ToList();
             if (node["statuses"] == null) buttons.Add(("+ Status", () => PickStatus(owner), "Starts with a status (a buff or debuff)."));
+            if (node["parts"] == null) buttons.Add(("+ Attached thing", () => AddLinkedPart(owner), "Another thing that rides on it: a weak point, a ladder, a rider. It moves and turns with it."));
             if (owner.Kind == OwnerKind.Place && node["lifetime"] == null) buttons.Add(("+ Lifetime", () => owner.Edit("Set lifetime", n => n["lifetime"] = 10), "Disappears after a while (\"runs out\")."));
             for (int i = 0; i < buttons.Count; i += 3) LogicFields.Buttons(page, buttons.Skip(i).Take(3).ToArray());
             if (owner.Kind == OwnerKind.Place && node["lifetime"] != null)
@@ -480,6 +483,7 @@ namespace PalaceMod.Builder.Studio.Logic
                     (v, l) => EditPart(owner, "interact", l, x => SetPath(x, $"choices.{idx}.id", v)), scope, "The name rules check: event.choice == 'id'.");
                 LogicFields.NumberField(page, "   Cost", N("cost", "Cost", "Gold for this choice."), () => Ch("cost"),
                     (v, l) => EditPart(owner, "interact", l, x => SetPath(x, $"choices.{idx}.cost", v)), scope, "Gold paid for this choice (replaces the cost above).");
+                PayList(page, owner, $"choices.{idx}.pay", "   Also costs");
                 LogicFields.Action(page, Dim("   Remove choice"), () => EditPart(owner, "interact", "Remove choice", x => (x["choices"] as JArray)?.RemoveAt(idx)));
             }
             if ((list?.Count ?? 0) < 4)
@@ -488,6 +492,104 @@ namespace PalaceMod.Builder.Studio.Logic
                     if (x["choices"] is not JArray arr) x["choices"] = arr = new JArray();
                     arr.Add(new JObject { ["id"] = "choice" + (arr.Count + 1), ["label"] = "Choice " + (arr.Count + 1) });
                 }), "Up to 4; the picked one's id is event.choice.");
+        }
+
+        /// <summary>`pay` items (level variables paid with the gold) at a path inside the interact block.</summary>
+        private static void PayList(ModPage page, LogicOwner owner, string path, string label)
+        {
+            var list = GetPath(Get(owner, "interact") ?? new JObject(), path) as JArray;
+            var scope = owner.Scope(null);
+            for (int i = 0; i < (list?.Count ?? 0); i++)
+            {
+                int idx = i;
+                JToken Item(string f) => (GetPath(Get(owner, "interact") ?? new JObject(), path) as JArray)?[idx]?[f];
+                LogicFields.ExprField(page, $"{label}: item", T("var", "Item", "A level variable: $bread."), () => Item("var"),
+                    (v, l) => EditPart(owner, "interact", l, x => SetPath(x, $"{path}.{idx}.var", v)), scope, "The level variable paid ($bread, $wood): an item count. Declare it in the level's variables.");
+                LogicFields.NumberField(page, "      Amount", N("amount", "Amount", "How many.", "1"), () => Item("amount"),
+                    (v, l) => EditPart(owner, "interact", l, x => SetPath(x, $"{path}.{idx}.amount", v)), scope, "How many are paid; refused when the king has fewer.");
+                LogicFields.ExprField(page, "      Word", T("label", "Word", "What the prompt calls it."), () => Item("label"),
+                    (v, l) => EditPart(owner, "interact", l, x => SetPath(x, $"{path}.{idx}.label", v)), scope, "What {cost} calls it (default: the variable's name).");
+                LogicFields.Action(page, Dim("      Remove item"), () => EditPart(owner, "interact", "Remove item cost", x => (GetPath(x, path) as JArray)?.RemoveAt(idx)), null, "×");
+            }
+            LogicFields.Action(page, (path == "pay" ? "" : "   ") + "+ item cost", () => EditPart(owner, "interact", "Add item cost", x =>
+            {
+                if (GetPath(x, path) is not JArray arr) { SetPath(x, path, new JArray()); arr = (JArray)GetPath(x, path); }
+                arr.Add(new JObject { ["var"] = "$item", ["amount"] = 1 });
+            }), "Costs a level variable too (inventory as data): paid at once with the gold, refused when short.");
+        }
+
+        // ---- Attached things (links) -------------------------------------------------------------------------------------
+
+        private static readonly string[] Follows = ["rigid", "position", "none"];
+        private static readonly string[] Deaths = ["die", "drop", "stay"];
+
+        public static void AddLinkedPart(LogicOwner owner) => owner.Edit("Attach a thing", n =>
+        {
+            if (n["parts"] is not JArray a) n["parts"] = a = (JArray)owner.Effective()?["parts"]?.DeepClone() ?? new JArray();
+            a.Add(new JObject { ["entity"] = "", ["offset"] = new JArray(0, 1, 0) });
+        });
+
+        /// <summary>A template's `parts`: things spawned and linked to it (Runtime/Links.cs). <paramref name="pickTemplate"/>
+        /// opens a template picker in the caller's dock (null: the Studio's side panel).</summary>
+        public static void LinkedParts(ModPage page, LogicOwner owner, Action<Action<JToken>> pickTemplate)
+        {
+            var list = owner.Effective()?["parts"] as JArray;
+            if (list == null) return;
+            StudioDock.SmallHeader(page, "Attached things");
+            var scope = owner.Scope(null);
+            void Set(int idx, string path, JToken v, string label) => owner.Edit(label, n =>
+            {
+                if (n["parts"] is not JArray a) n["parts"] = a = (JArray)list.DeepClone();
+                if (idx < a.Count && a[idx] is JObject o) SetPath(o, path, v);
+            }, $"parts:{idx}:{path}");
+            for (int i = 0; i < list.Count; i++)
+            {
+                int idx = i;
+                JToken At(string path) => (owner.Effective()?["parts"] as JArray)?[idx] is JObject o ? GetPath(o, path) : null;
+                string ent = (string)At("entity");
+                var tp = new ParamUi { Name = "entity", Label = "Thing", Kind = ParamKind.Template, Required = true, Desc = "What is attached: a prop, area, unit… from this pack." };
+                Action<JToken> setEnt = v => Set(idx, "entity", v, "Set attached thing");
+                LogicFields.Param(page, $"{i + 1}. Thing", tp, () => At("entity"), (v, l) => setEnt(v), scope,
+                    () => { if (pickTemplate != null) pickTemplate(setEnt); else LogicStudio.OpenSide("Attach…", p => Pickers.Template(p, v => { setEnt(v); RuleEditor.ClosePicker(); })); });
+                string[] axes = ["x (right)", "y (up)", "z (ahead)"];
+                for (int a = 0; a < 3; a++)
+                {
+                    int ax = a;
+                    LogicFields.NumberField(page, $"   Offset {axes[a]}", N("offset", "Offset", "Where it sits on its parent, m."), () => At($"offset.{ax}"),
+                        (v, l) => Set(idx, $"offset.{ax}", v ?? 0, l), scope, "Where it sits in the parent's frame, metres: x right, y up, z ahead.");
+                }
+                LogicFields.ExprField(page, "   Label", T("name", "Label", "A label it gets (#name)."), () => At("name"), (v, l) => Set(idx, "name", v, l), scope, "A label the attached thing gets, to tell them apart in filters (#left-knee).");
+                page.Choice("   Moves", ["With it, turning", "With it, own facing", "On its own"], () => Math.Max(0, Array.IndexOf(Follows, (string)At("follow") ?? "rigid")),
+                    c => Set(idx, "follow", c == 0 ? null : new JValue(Follows[c]), "Set how it moves"), tooltip: () => "Rigid parts sit on their spot every frame; \"on its own\" only links them (a chain link that walks behind).");
+                page.Choice("   When it dies", ["Dies too", "Drops off", "Stays put"], () => Math.Max(0, Array.IndexOf(Deaths, (string)At("onParentDeath") ?? "die")),
+                    c => Set(idx, "onParentDeath", c == 0 ? null : new JValue(Deaths[c]), "Set what happens on death"), tooltip: () => "What the attached thing does when its parent dies.");
+                LogicFields.NumberField(page, "   Passes on damage ×", N("damageToParent", "Passes on", "×", "0"), () => At("damageToParent"), (v, l) => Set(idx, "damageToParent", v, l), scope,
+                    "Each hit it takes also hurts its parent this many times over (2: a weak point). 0: none.");
+                LogicFields.NumberField(page, "   Shares with group", N("damageToGroup", "Shares", "0..1", "0"), () => At("damageToGroup"), (v, l) => Set(idx, "damageToGroup", v, l), scope,
+                    "This fraction of each hit is split evenly over the whole linked group (1: one shared pool).");
+                LogicFields.NumberField(page, "   Takes itself", N("damageKept", "Takes", "0..1", "1"), () => At("damageKept"), (v, l) => Set(idx, "damageKept", v, l), scope,
+                    "The share of each hit it takes itself (0 with \"passes on\" 1: a pure hitbox for its parent).");
+                LogicFields.Action(page, Dim("   Remove"), () => owner.Edit("Remove attached thing", n =>
+                {
+                    if (n["parts"] is not JArray a) n["parts"] = a = (JArray)list.DeepClone();
+                    if (idx < a.Count) a.RemoveAt(idx);
+                    if (a.Count == 0) n.Remove("parts");
+                }), null, "×");
+            }
+            LogicFields.Action(page, "+ attached thing", () => AddLinkedPart(owner), "Another thing that rides on it.");
+        }
+
+        /// <summary>The Enemy Studio: a unit's interact block and attached things (units carry both).</summary>
+        public static void UnitExtras(ModPage page, LogicOwner owner, Action<Action<JToken>> pickTemplate)
+        {
+            var node = owner.Effective() ?? new JObject();
+            var spec = Part("interact");
+            if (node["interact"] is JObject) PartBlock(page, owner, spec);
+            LinkedParts(page, owner, pickTemplate);
+            var buttons = new List<(string, Action, string)>();
+            if (node["interact"] is not JObject) buttons.Add(("+ Interact", () => AddPart(owner, spec), "The king can use it (bribe, recruit, trade) with the interact key; the prompt follows it."));
+            if (node["parts"] == null) buttons.Add(("+ Attached thing", () => AddLinkedPart(owner), "A weak point, a ladder, a rider: it moves and turns with this unit."));
+            if (buttons.Count > 0) LogicFields.Buttons(page, buttons.ToArray());
         }
 
         // ---- Statuses ---------------------------------------------------------------------------------------------------

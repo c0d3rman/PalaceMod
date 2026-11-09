@@ -30,6 +30,7 @@ namespace PalaceMod.Builder.Logic
             LogicActions.Register("enable", (ctx, p) => ctx.World.SetEnabled(p.Target, true, ctx.Self), ActionFlags.PerTarget);
             LogicActions.Register("disable", (ctx, p) => ctx.World.SetEnabled(p.Target, false, ctx.Self), ActionFlags.PerTarget);
             LogicActions.Register("toggle", (ctx, p) => ctx.World.SetEnabled(p.Target, !p.Target.Enabled, ctx.Self), ActionFlags.PerTarget);
+            LinkActions.Register();
         }
 
         private static string Literal(ActionParams p, string name)

@@ -270,6 +270,65 @@ so the same unit walks on the map or in a space. `teleport` moves units and the 
 follows the king. The fliers' graph isn't copied: fliers in a space need `movement.mode: "direct"`. The space is empty
 apart from what the level places there (props, areas, lights come from the map's own scheme).
 
+**Runtime terrain** (the `terrain` action, `Logic/Bodies/World/TerrainVerbs.cs`): the ground changes during play.
+It edits the level's terrain grid (`GroundLayer`), re-meshes only the 32x32-cell chunks it touched and rebuilds the
+ground graphs only round them (`GroundGraphs.UpdateArea`, padded 12 m for ramps and the large units' radius).
+
+```jsonc
+{ "do": "terrain", "op": "lower", "in": "@fault", "amount": 7, "softness": 0, "over": 1.5 }   // a chasm opens
+{ "do": "terrain", "op": "waterLevel", "level": "$tide", "over": 3 }                          // the tide rises
+{ "do": "terrain", "op": "freeze", "in": "@lake" }                                              // the lake ices over
+```
+
+- Ops: `raise`/`lower` (`amount` m), `set` (`height`, world y), `smooth`, `paint` (`material`), `block`/`unblock`,
+  `water`/`dry` (cells; new water digs its bed a metre under the water level, as the Studio's brush does),
+  `freeze`/`thaw` (water cells become walkable ice: the freeze fills their ground, and the foot of the dug bank beside
+  them, up to the water level (`TerrainVerbs.FillIce`, beds kept in `TerrainGrid.IceBed`), so the bank is a gentle slope
+  onto the ice rather than a cliff; it's drawn as a pale sheet; thawed, the beds come back and it's water again), `waterLevel` (`level`, world y: the surface moves; cells
+  whose middle is under it flood if they join existing water (`flood: "connected"`, the default), or all of them
+  (`"all"`), or none; water cells whose ground is now above it dry).
+- Where: `radius` (a circle at `at`, default self), `width` x `length` turned by `angle`, or `in` (an area's own shape,
+  turned and moved as it is now, or a body's footprint). `waterLevel`, `freeze`, `thaw` and `dry` with no shape act on
+  the whole field. `softness` (0..1, default 0.3 for heights) fades height changes toward the edge.
+- `over` (s) animates heights and the water level about 10 times a second; the graphs follow at the end (and, while
+  water spreads, at most once a second).
+- A level whose rules (or templates) use `terrain` gets its grid and 25.6 m graph tiles at the start
+  (`TerrainVerbs.Prepare`), so a change costs an area update, not a rescan. On a map's own ground (no Builder
+  terrain) the grid is laid over the map then (heights sampled from it, nothing drawn); the cells an action touches
+  are drawn by the terrain from then on (`TerrainGrid.Forced`), so paint, water and ice show on the host's ground too.
+- Ground that rises under the king lifts him; units a change leaves off the graphs are moved to the nearest walkable
+  point (`BodyNav.PushOut`). A unit or the king over a deep hole falls into it.
+- Savestates keep the changed grid (heights, paint, water, ice, forced cells; animations end where they were going)
+  and rescan on restore. `logic-world terrain` prints the grid's state.
+
+**World queries** (`Logic/Runtime/WorldQueries.cs`, installed by `Logic/Bodies/World/WorldQueryService.cs`): what is
+under a point, for rules.
+
+| Function | Answer |
+|---|---|
+| `groundY(p)` | the height of the top walkable ground at p: terrain, the map's ground or a walkable deck |
+| `walkable(p, who?)` | whether something can stand at p: `who` is `'small'` (ground enemies, default), `'large'`, `'air'`, `'player'`, or a unit (its own graphs and the surfaces it may walk) |
+| `ground(p)` | `'grass' 'highGrass' 'lowGrass' 'earth' 'sand' 'road' 'rock' 'water' 'ice' 'blocked' 'deck' 'none'` (a cliff too steep to walk is `'rock'`; on a map's own ground the paint comes from the hit triangle's material) |
+| `waterDepth(p)` | metres of open water over the ground (0 dry or frozen) |
+| `sight(a, b)`, `raycast(a, b)` | whether the line between two points 1.5 m over the ground is clear of ground, cliffs, walls, buildings and solid bodies; `raycast` gives where it's blocked (none if clear) |
+| `waterLevel` (global) | the terrain's water level (world y) |
+
+**Riding** (`Logic/Bodies/DeckCarrier.cs`): whatever stands on a walkable deck moves with it. After everything has
+moved for the frame (movers in `Update`, linked parts in their `LateUpdate`), each deck that moved since the last
+frame carries the king and the units standing on its top (inside its footprint, 0.3 m under to 1 m over the top) by the
+same move: translation, turn about its pivot, and height (a deck that rises lifts them). So a deck on a mover path,
+a spinning platform, a teleported raft or a walkable part linked to a walking colossus carries its riders. Walkable
+movers with `pose`s still snap (their poses are pre-scanned); path and spin movers glide. The graphs don't move with
+a gliding deck: a pathing unit on it is carried but snaps back to the ground graphs when it walks off its path, so
+riders that must stay put should `hold`. A carried unit's anchors move with it (the game's home and hold position,
+a Builder hold or wander point), so a holding unit stays on the deck instead of walking back.
+
+**Placing a deck.** A deck whose top is under the ground somewhere in its footprint (a bridge placed at the river
+bed's height, a raft whose ends lie on the banks) is raised so its top rests on the highest ground under it
+(`Walkables.LiftOutOfGround`, logged); a place over terrain water sits on the water's surface (`LogicManager.MakePlace`,
+and `palace.py`'s `place`). Before, a bridge placed with `at` over a moat sat on the moat's bed, under the banks, and
+never opened a route.
+
 **`area`**: a zone that detects what's inside it.
 
 ```jsonc
@@ -300,6 +359,13 @@ coins fill a copy of a build slot's coin display. With `choices`, the game's upg
 (each choice also takes `description` and `icon`, an `asset:` sprite); the picked choice's cost is paid at once (a
 "not enough gold" notice otherwise) and `interact` fires with `event.choice`; Esc cancels without paying.
 
+Costs beyond gold: `"pay": [{ "var": "$bread", "amount": 1, "label": "bread" }]` (on the block or on a choice) costs
+level variables as well as (or instead of) `cost`: inventory as data. Everything is paid at once on the press; if
+anything is short nothing is paid, a "Not enough: 1 bread needed" notice shows and `interactRefused` fires (`other`
+the king, `event.name` what was short). `{cost}` in the prompt reads "2 gold + 1 bread" then. `amount` may be an `=`
+expression. Units carry `interact` too (a unit template, a placed or spawned unit, wave units): the interactor is a
+child of the unit, so the prompt follows it as it walks.
+
 **Light** (`Logic/Bodies/World/LightVerbs.cs`, `LightMath.cs`). How the game looks lit: `ColorAndLightManager`
 tints one directional light, the sun, from the level's colour scheme (white by day, the scheme's night blue at
 night, through its sunset colour over 3 s each way) and re-tints the shared FlatKit materials' outlines from it. The
@@ -319,7 +385,8 @@ a level has entity lights it's raised to 8, and put back at the level's end.
 - **`light` component** (templates, places, units, attaches) and **`setLight`** (any entity: units, the king,
   vanilla buildings, props, projectiles): `{ "color": "#ffd890", "intensity": 1, "range": 10, "cone": null, "aim": 0,
   "height": 3, "flicker": 0, "on": true }`. A Unity point light (or a spot light for `cone`, degrees wide along the
-  entity's facing plus `aim`) on a child kept `height` above the entity and turned to its facing every frame, so a
+  entity's facing plus `aim`) kept `height` above the entity (not its child: game code walks some objects'
+  children, a barracks spawns its squad from them) and turned to its facing every frame, so a
   unit's torch follows its model and a beam follows `turn`. A low light makes a long beam. `setLight` takes the same
   fields plus `remove` and `for` (back to how it was); its changes are kept by savestates.
 - **How lit a point is** (`daylight`, `lightAt(p)`, `.light`, `.lit`, the `lit` filter term): daylight is the
@@ -399,6 +466,15 @@ attack, vanilla towers and troops included (`setTargeting` on `all('player and T
   "home": "spawn"                     // "spawn" | a position | "@point"
 }
 ```
+
+`"mode": "follow"` walks in formation: `"leader": "self.parent"` (an entity expression, re-read 10 times a second),
+`"spacing": 1.6` (metres behind the leader, along the line from the leader to the follower: a trail, so a chain
+snakes) or `"offset": [x, z]` (a slot in the leader's frame, x right, z ahead: beside or behind), and `"catchUp": 1.5`
+(speed multiplier while it's more than `max(spacing, 1.5)` m from its slot). It walks there with the game's A* and
+avoidance, and re-paths when the slot moves 0.4 m. A trail slot is always behind the leader (by its model's
+heading): a follower that finds itself in front walks round. Without a live leader (none, dead, unlinked) `then` applies:
+`pathfind` (on its own: it becomes a leader), `hold` or `destroy`; a new leader is picked up again as soon as the
+expression names one.
 
 It is implemented on the game's own movement components (see "Runtime"), so pathfinding, avoidance and animation keep
 working. A ranged enemy that kites and prefers towers is just `targeting` plus `movement.keepDistance` plus `kite`.
@@ -480,6 +556,36 @@ necromancer, `subject` the dead foe, and `other` its killer. `range` is optional
 Without `of`, a rule hears only its owner's events. The level script must give `of` for entity events (filters there
 treat `foe`/`ally` as relative to the player).
 
+### Links
+
+Any entity (a unit, prop, area, hittable body, logic object) can be a **part** of another: a colossus's weak points,
+ladders on its legs, a rider on a beast, a shield in front of a bearer, the links of a chain. Parts are real separate
+entities: their own hitbox and hp, rules, statuses and look; towers, units and the king fight them like anything else
+(an enemy-team hittable body is a real target for the game's AI; `countsAsEnemy` only decides whether it holds the
+night open).
+
+- **Making one.** The `link` action (`target` the part, `to` the parent), or a template's `parts`: `[{ "entity":
+  "weak-point", "offset": [1.5, 4, 0], "name": "shoulder", "damageToParent": 2 }]`, spawned and linked when the
+  template appears (placed, spawned or in a wave; `name` becomes a label, `team` defaults to the parent's). Parts may
+  have parts (4 deep). The king, the castle and buildings can't be parts.
+- **Moving.** `follow: rigid` (default) puts the part at `offset` (x right, y up, z ahead) in the parent's frame every
+  frame, after the game's movement, and turns it with the parent (`rotY` relative); `position` moves it without
+  turning it; `none` makes it a relation only (it moves on its own, e.g. `movement: {mode: follow, leader:
+  self.parent}`). A rigid unit part doesn't walk (it still attacks). A unit's heading is its model's
+  (`Heading.Yaw`), so parts turn as it turns to walk or strike.
+- **Death.** `onParentDeath`: `die` (killed with it: `death` fires, credited to nobody), `drop` (unlinked and set on
+  the ground: its own movement resumes) or `stay` (unlinked where it is). A gone parent counts as dead.
+- **Damage.** On each hit a part takes (after damage modifiers): `damageToParent` × the hit goes to the parent as
+  well (credited to the same attacker; a weak point with 2 doubles it); `damageToGroup` of the hit is split evenly
+  over its whole linked group (`.group`: the root and every part, itself included), the rest × `damageKept` it takes
+  itself. A hit on the root is shared by the largest `damageToGroup` among its parts. `damageToGroup: 1` is one shared pool; `damageKept: 0` with `damageToParent: 1` is a pure proxy hitbox.
+  Shares are dealt as they are: the receivers' own `damageTaken` doesn't apply again (a colossus immune to hits on
+  its body still bleeds through its weak points), `invulnerable` still does. A scripted `kill` isn't shared.
+- **Selectors.** `.parent`, `.children` (a set), `.root`, `.group` (a set): `self.children.len`, `count('#link and
+  where(it.root == self.root)')`, `best('foe', 20, it.parent == none ? 1 : 0)`.
+- **Events.** `linked` / `unlinked` on the part (`other` the parent).
+- **Savestates** keep links made by `link`; a template's parts are rebuilt with their parent.
+
 ### Events
 
 Every event has `self` and `subject`. The table gives `other`, `event.value` and `event.pos` where they apply. Aliases
@@ -504,6 +610,8 @@ keep rules readable.
 | `arrive` / `end` | | (movers, path followers, `moveTo`) | — / point index |
 | `bump` | | (units) a knockback (`push`, or the game's own) was stopped short by something solid: a wall, a building, a solid body, a cliff, the map's edge | the building or body it hit (none for terrain) / metres of push left; `event.pos` where it stopped |
 | `pickup` / `interact` | | (pickups, interactables) | collector / king |
+| `interactRefused` | | (interactables) the king tried to use it without enough gold or `pay` items (`event.name`: what was short) | king / the gold cost |
+| `linked` / `unlinked` | | it became a part of a parent / stopped being one (`unlink`, or its parent died with `drop`/`stay`) | the parent |
 | `signal` | `name` | it receives the signal | sender / the signal's number (`event.name` is the signal's name) |
 | `varChanged` | `name` | one of its variables changes (or a level var, on the level script) | — / new value |
 | `statusStart` / `statusEnd` / `statusTick` | `status` (when watching one from outside) | a status starts, ends, or every `tick` seconds of the status | the applier / stacks |
@@ -627,6 +735,8 @@ which accepts an entity or a position.
 | | `turn` | `facing` \| `by` \| `toward`, `speed` (deg/s): turns it (a body with its area, cut and collider; a unit's model; the king's mesh). See "Turning and reshaping" |
 | | `setShape` | `shape` (circle/rect/polygon/sector), `radius`, `angle`, `width`, `depth`, `points`, `part` (area/body/both), `for`: an area's shape or a body's footprint at runtime |
 | | `command` | `order` (`follow`/`hold`/`home`): player units, as the king's own commands |
+| **Links** | `link` | `to` (the parent), `offset` [x, y, z] in its frame, `rotY`, `follow` (`rigid`/`position`/`none`), `onParentDeath` (`die`/`drop`/`stay`), `damageToParent`, `damageToGroup`, `damageKept`: see "Links" |
+| | `unlink` | `release` (`drop`/`stay`), `children` (unlink its parts instead) |
 | **Logic** | `signal` | `name`, `to` (selector, or `"all"`), `value`, `delay` |
 | | `setVar` / `addVar` | `name` (a literal, so it's checked), `value` (on `target` for entity vars; level vars when `target` is `level` or the name has `$`) |
 | | `listAdd` / `listRemove` / `listClear` | `name`, `value` (add; or remove the first equal item), `index` (remove at): list vars of one element type (max 256 items, oldest dropped past that). Lists keep insertion order; sets from selectors are ordered by distance from the anchor, then entity id |
@@ -1536,7 +1646,8 @@ three (projectiles in flight, surfaces and spaces above), with no feature coded 
 ## Known limits
 
 - **Movement physics is limited.**
-  - Units ride a walkable mover only when it snaps between poses, not while it glides.
+  - Riders are carried by any moving deck (Riding), but the graphs don't glide with a deck: pathing units on a gliding
+    deck snap back to the ground graphs when they walk (riders should hold).
   - A walkable body made or destroyed at runtime rebuilds the ground graphs round it (30-100 ms on tiled graphs,
     about 340 ms on one-tile ones; the validator notes it). A body switched off or a pose not taken is hidden by a
     cut, not removed: a deck over walkable ground hides that ground in both states, and its ramps stay.
@@ -1546,7 +1657,9 @@ three (projectiles in flight, surfaces and spaces above), with no feature coded 
   - The king passes opened walls only on a deck that doesn't move between poses (ghost rails have no colliders).
   - Per-unit walkability is by surface (31 names per level), not per triangle; RVO avoidance can push the front row
     of a blocked crowd about 1 m into a surface it may not walk.
-  - Terrain height doesn't change at runtime; walkable props and blockers change where units can go.
+  - Runtime terrain changes cost an area update each (tens to ~200 ms on tiled graphs for a field-wide strip under
+    load; a few per night, not per tick). `over` animates the look; the graphs follow at the end. One water level per
+    field. Ice is flat at the water level.
   - Spaces have no fliers' graph; fliers there fly straight.
 - **Projectiles in flight**: the game's own are entities only while they fly, and a redirected one still deals its
   shooter's weapon damage; it can't gain Builder `impact` rules (use an area or `near` on it instead).
@@ -1560,7 +1673,11 @@ three (projectiles in flight, surfaces and spaces above), with no feature coded 
   list vars can hold: up to 256 sampled values, such as positions.
 - **King actions:** 3 keys. The day phase has no timer in Thronefall; `logic.game.dayLength` adds one.
 - **No arbitrary code**, by design. A missing verb needs a mod update; the registry's `since` makes that explicit.
-- **Savestates** don't keep pending `wait`s or Builder projectiles in flight.
+- **Savestates** don't keep pending `wait`s or Builder projectiles in flight. A template's parts come back rebuilt
+  (full hp), not as they were.
+- **Links.** A rigid part is placed, not simulated: it passes through walls with its parent, and a solid part re-cuts
+  the navmesh as it moves (keep moving parts not `solid`). Standing on a moving part is E2's riding (`Links.Moved`
+  fires after parts are placed each frame).
 
 ## Workstreams
 

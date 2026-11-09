@@ -46,6 +46,7 @@ namespace PalaceMod
                     "events" => BodyDev.Events(),
                     "vp" => BodyDev.Vanilla(args.Skip(1).ToArray()),
                     "interact" => BodyDev.Interact(args.Skip(1).ToArray()),
+                    "focus" => BodyDev.Focus(),
                     "pick" => BodyChoices.Pick(int.Parse(args.ElementAtOrDefault(1) ?? "0")),
                     _ => "logic-l2 status | nav ... | act ... | build ... | signal ...",
                 };

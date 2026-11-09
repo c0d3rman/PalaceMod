@@ -34,6 +34,8 @@ namespace PalaceMod.Builder.Logic
                 .Where(x => !x.Destroyed && x != Level && (!x.Id.StartsWith("vanilla:") || x.Vars.Count > 0 || x.Labels.Count > 0))
                 .OrderBy(x => x.Id, StringComparer.Ordinal))
             {
+                // A template's parts are rebuilt with their parent (BodyEvents → Parts), not saved.
+                if (IsTemplatePart(e)) continue;
                 var s = EntityState(e);
                 if (e.Spawned)
                 {
@@ -63,6 +65,12 @@ namespace PalaceMod.Builder.Logic
             return o;
         }
 
+        private static bool IsTemplatePart(LogicEntity e)
+        {
+            for (int i = 0; e != null && i < 64; i++, e = e.Parent) if (e.Link?.FromParts == true) return true;
+            return false;
+        }
+
         private JObject EntityState(LogicEntity e)
         {
             var s = new JObject { ["id"] = e.Id };
@@ -74,6 +82,7 @@ namespace PalaceMod.Builder.Logic
             }
             if (e.Labels.Count > 0) s["labels"] = new JArray(e.Labels.OrderBy(l => l, StringComparer.Ordinal));
             if (!e.Enabled) s["enabled"] = false;
+            if (e.Parent != null && e.Link != null) { s["parent"] = e.Parent.Id; s["link"] = e.Link.ToJson(); }
             if (e.Rules.Count > 0)
             {
                 var rules = new JArray();
@@ -151,6 +160,21 @@ namespace PalaceMod.Builder.Logic
                     matched++;
                 }
             foreach (var (e, s) in pendingStates) ApplyState(e, s);
+
+            // Links, once every entity is back (quietly: a restore is not a new link).
+            void Relink(LogicEntity e, JObject s)
+            {
+                if (e == null || s["parent"] is not JValue pv || pv.Type != JTokenType.String) return;
+                var parent = Find((string)pv);
+                if (parent == null || parent == e || e.Parent == parent) return;
+                e.Parent = parent;
+                e.Link = LinkSpec.FromJson(s["link"] as JObject);
+                parent.Children.Add(e);
+                Linked.Add(e);
+            }
+            if (o["entities"] is JObject ents2)
+                foreach (var p in ents2.Properties()) Relink(p.Name == "level" ? null : Find(p.Name), (JObject)p.Value);
+            foreach (var (e, s) in pendingStates) Relink(e, s);
 
             // The respawn queued `spawn` events; a restore is not a spawn.
             var keep = queue.Where(ev => !(ev.Name == "spawn" && pendingStates.Any(ps => ps.e == ev.Subject))).ToList();

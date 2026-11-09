@@ -15,6 +15,28 @@ namespace PalaceMod.Tests
             if (!ok) throw new Exception(what);
         }
 
+        public static void IceIsWaterThatIsntOpen()
+        {
+            var g = Field(10, 10);
+            int i = g.CellIndex(3, 3);
+            g.Water[i] = true;
+            Check(g.OpenWater(i), "water is open");
+            g.Frozen[i] = true;
+            Check(!g.OpenWater(i) && g.Water[i], "frozen water is still water, not open");
+            var c = g.Clone();
+            Check(c.Frozen[i], "clones keep the ice");
+            Check(GroundCodec.Decode(GroundCodec.Encode(g)).Frozen.All(f => !f), "ice is runtime only (not in the pack)");
+        }
+
+        public static void ForcedCellsAreTheTerrains()
+        {
+            var g = Field(4, 4);
+            g.Host = new float[g.Heights.Length];
+            Check(!g.Sculpted(1, 1), "a host cell at the host's height isn't the terrain's");
+            g.Forced[g.CellIndex(1, 1)] = true;
+            Check(g.Sculpted(1, 1), "a forced cell is drawn by the terrain");
+        }
+
         public static void FlatFieldEncodesToNothing()
         {
             var def = GroundCodec.Encode(Field());

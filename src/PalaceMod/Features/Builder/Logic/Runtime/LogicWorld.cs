@@ -338,6 +338,9 @@ namespace PalaceMod.Builder.Logic
             timers.RemoveAll(ri => ri.Owner == e);
             nears.RemoveAll(ri => ri.Owner == e);
             foreach (var n in nears) n.NearInside?.Remove(e);
+            // Links: a gone part leaves its parent quietly; a gone parent's parts follow their onParentDeath.
+            if (e.Parent != null) { e.Parent.Children.Remove(e); Linked.Remove(e); e.Parent = null; e.Link = null; }
+            if (e.Children.Count > 0) ParentDied(e);
         }
 
         /// <summary>

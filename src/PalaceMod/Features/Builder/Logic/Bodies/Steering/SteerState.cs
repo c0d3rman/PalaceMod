@@ -12,7 +12,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
     /// <summary>The `movement` block, parsed. Unset fields keep the game's behaviour.</summary>
     internal sealed class MovementDef
     {
-        public string Mode = "pathfind";      // pathfind | direct | hold | path
+        public string Mode = "pathfind";      // pathfind | direct | hold | path | follow
         public JToken Path;
         public string Then = "pathfind";      // pathfind | hold | destroy
         public float? Speed, KeepDistance;
@@ -21,8 +21,12 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
         public JToken FleeTo;
         public float WanderRadius;
         public JToken Home;
+        // follow: walk to a slot by a leader (an entity expression, re-read 10 times a second)
+        public string Leader;
+        public float Spacing = 2f, CatchUp = 1.5f;
+        public float[] Offset;                // [x, z] in the leader's frame (x right, z ahead); null = trail behind
 
-        public static readonly string[] Modes = ["pathfind", "direct", "hold", "path"];
+        public static readonly string[] Modes = ["pathfind", "direct", "hold", "path", "follow"];
         public static readonly string[] Thens = ["pathfind", "hold", "destroy"];
 
         public static MovementDef Parse(JObject o)
@@ -35,6 +39,12 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             m.Then = (string)o["then"] ?? "pathfind";
             if (Array.IndexOf(Thens, m.Then) < 0) throw new LogicError($"movement then \"{m.Then}\": expected one of {string.Join(", ", Thens)}");
             if (m.Mode == "path" && (m.Path == null || m.Path.Type == JTokenType.Null)) throw new LogicError("movement mode \"path\" needs a path");
+            m.Leader = (string)o["leader"];
+            if (m.Mode == "follow" && string.IsNullOrWhiteSpace(m.Leader)) throw new LogicError("movement mode \"follow\" needs a leader (an entity expression, e.g. \"self.parent\")");
+            if (m.Leader != null) _ = SteerExpr.Expr(m.Leader);
+            m.Spacing = (float?)o["spacing"] ?? 2f;
+            m.CatchUp = (float?)o["catchUp"] ?? 1.5f;
+            if (o["offset"] is JArray off && off.Count == 2) m.Offset = [(float)off[0], (float)off[1]];
             m.Speed = (float?)o["speed"];
             m.KeepDistance = (float?)o["keepDistance"];
             if (o["kite"] is JObject k) { m.KiteBelow = (float?)k["below"] ?? 0; m.KiteFor = (float?)k["for"] ?? 1; }
@@ -113,6 +123,9 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
         public TaggedObject DirectTarget;
         public bool DirectWalkingHome;
         public bool Overriding;               // the last destination came from steering (not the game)
+        public LogicEntity FollowLeader;       // follow: the leader now (null: none, `then` applies)
+        public double FollowEvalAt = double.NegativeInfinity;
+        public Vector3? FollowDest;            // the slot the last path went to
 
         private string pathKey;
 

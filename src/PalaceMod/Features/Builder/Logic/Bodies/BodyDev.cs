@@ -144,7 +144,19 @@ namespace PalaceMod.Builder.Logic.Bodies
             if (i == null || player == null) return "no interactable / no king";
             int frames = a.Length > 1 ? int.Parse(a[1]) : 600;
             Plugin.Instance.StartCoroutine(Hold(i, player, frames));
-            return $"{e.Id}: can interact {i.CanBeInteractedWith}, prompt \"{i.ReturnTooltip()}\"";
+            var at = i.transform.position;
+            return $"{e.Id}: can interact {i.CanBeInteractedWith}, prompt \"{i.ReturnTooltip()}\", interactor at ({at.x:0.##}, {at.z:0.##}), entity at {e.Position}";
+        }
+
+        /// <summary>focus: what the king's own interaction has focused now (the game's proximity pick).</summary>
+        public static string Focus()
+        {
+            var player = PlayerInteraction.instance;
+            if (player == null) return "no king";
+            var f = player.FocussedInteractor;
+            if (f == null) return "nothing focused";
+            var e = f is BuilderInteractor bi ? bi.Entity : LogicGame.EntityOf(f.gameObject);
+            return $"focused {f.GetType().Name} of {e?.Id ?? f.name}, prompt \"{f.ReturnTooltip()}\"";
         }
 
         private static System.Collections.IEnumerator Hold(BuilderInteractor i, PlayerInteraction player, int frames)

@@ -536,6 +536,51 @@
       "since": "1.0.0"
     },
     {
+      "name": "linked",
+      "group": "Links",
+      "description": "It was linked to a parent (`link`, a template's parts). `other` is the parent.",
+      "params": [],
+      "other": "parent",
+      "owners": [
+        "any"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "unlinked",
+      "group": "Links",
+      "description": "It was unlinked from its parent (`unlink`, or the parent died with onParentDeath drop/stay). `other` is the old parent.",
+      "params": [],
+      "other": "parent",
+      "owners": [
+        "any"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "interactRefused",
+      "group": "King",
+      "description": "(interactables) The king tried to use it but was short of gold or a `pay` item. event.name lists what was short.",
+      "params": [],
+      "other": "king",
+      "value": "number",
+      "valueMeaning": "the gold cost",
+      "fields": {
+        "name": "text"
+      },
+      "owners": [
+        "unit",
+        "building",
+        "prop",
+        "projectile",
+        "area",
+        "pickup",
+        "logic",
+        "king"
+      ],
+      "since": "1.0.0"
+    },
+    {
       "name": "targetChanged",
       "group": "Combat",
       "description": "Its attack or move target changes.",
@@ -1611,6 +1656,111 @@
       "since": "1.0.0"
     },
     {
+      "name": "link",
+      "group": "Links",
+      "description": "Links it to a parent as a part: it moves (and turns) with the parent every frame, may share its damage, and follows onParentDeath when the parent dies. Re-linking moves it to the new parent.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "to",
+          "type": "entity",
+          "required": true,
+          "description": "The parent."
+        },
+        {
+          "name": "offset",
+          "type": "position",
+          "description": "Where it sits in the parent's frame: [x, y, z], x right, y up, z ahead (default: where it is now)."
+        },
+        {
+          "name": "rotY",
+          "type": "number",
+          "description": "Its yaw relative to the parent's (default: as it is now)."
+        },
+        {
+          "name": "follow",
+          "type": "enum",
+          "default": "rigid",
+          "options": [
+            "rigid",
+            "position",
+            "none"
+          ],
+          "description": "rigid: moves and turns with the parent every frame; position: moves, keeps its own yaw; none: a relation only (it moves on its own, e.g. movement follow)."
+        },
+        {
+          "name": "onParentDeath",
+          "type": "enum",
+          "default": "die",
+          "options": [
+            "die",
+            "drop",
+            "stay"
+          ],
+          "description": "When the parent dies: die with it, drop (unlinked, set on the ground) or stay (unlinked, left where it is)."
+        },
+        {
+          "name": "damageToParent",
+          "type": "number",
+          "default": 0,
+          "min": 0.0,
+          "description": "This much of every hit it takes is dealt to the parent too (2 = double: a weak point)."
+        },
+        {
+          "name": "damageToGroup",
+          "type": "number",
+          "default": 0,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "This fraction of every hit is shared evenly by its whole linked group, itself included (1 = one shared pool)."
+        },
+        {
+          "name": "damageKept",
+          "type": "number",
+          "default": 1,
+          "min": 0.0,
+          "description": "The fraction it takes itself, before the group share (0 = a pure proxy hitbox)."
+        }
+      ],
+      "example": "{ \"do\": \"link\", \"target\": \"spawned\", \"to\": \"self\", \"offset\": [1.5, 4, 0], \"damageToParent\": 2 }",
+      "since": "1.0.0"
+    },
+    {
+      "name": "unlink",
+      "group": "Links",
+      "description": "Unlinks it from its parent (or, with children, unlinks its parts).",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "release",
+          "type": "enum",
+          "default": "drop",
+          "options": [
+            "drop",
+            "stay"
+          ],
+          "description": "drop: set it on the ground; stay: leave it where it is."
+        },
+        {
+          "name": "children",
+          "type": "bool",
+          "default": false,
+          "description": "Unlink its parts instead of itself."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
       "name": "signal",
       "group": "Logic",
       "description": "Sends a named signal (optionally with a number) to entities or everyone.",
@@ -2182,6 +2332,122 @@
         }
       ],
       "example": "{ \"do\": \"waves\", \"op\": \"addSpawn\", \"unit\": \"brute\", \"count\": \"night - 2\", \"line\": \"North\" }",
+      "since": "1.0.0"
+    },
+    {
+      "name": "terrain",
+      "group": "World",
+      "description": "Changes the ground during play: heights, paint, blocked cells, water, ice and the water level. Only the touched area is re-meshed and re-pathed.",
+      "params": [
+        {
+          "name": "op",
+          "type": "enum",
+          "required": true,
+          "options": [
+            "raise",
+            "lower",
+            "set",
+            "smooth",
+            "paint",
+            "block",
+            "unblock",
+            "water",
+            "dry",
+            "freeze",
+            "thaw",
+            "waterLevel"
+          ],
+          "description": "What to do."
+        },
+        {
+          "name": "at",
+          "type": "position",
+          "default": "self",
+          "description": "The shape's centre."
+        },
+        {
+          "name": "radius",
+          "type": "number",
+          "min": 0.1,
+          "description": "A circle this wide (m)."
+        },
+        {
+          "name": "width",
+          "type": "number",
+          "min": 0.1,
+          "description": "A rectangle: across (m)."
+        },
+        {
+          "name": "length",
+          "type": "number",
+          "min": 0.1,
+          "description": "A rectangle: along (m)."
+        },
+        {
+          "name": "angle",
+          "type": "number",
+          "description": "The rectangle's turn (degrees, 0 = length runs north)."
+        },
+        {
+          "name": "in",
+          "type": "entity",
+          "description": "Use an area's or a body's own shape instead (e.g. \"@fault\")."
+        },
+        {
+          "name": "softness",
+          "type": "number",
+          "min": 0.0,
+          "max": 1.0,
+          "description": "0..1: how far in from the edge the change fades (heights; default 0.3)."
+        },
+        {
+          "name": "amount",
+          "type": "number",
+          "default": 1,
+          "description": "raise/lower: metres."
+        },
+        {
+          "name": "height",
+          "type": "number",
+          "description": "set: the ground's new height (world y)."
+        },
+        {
+          "name": "material",
+          "type": "enum",
+          "options": [
+            "grass",
+            "highGrass",
+            "lowGrass",
+            "earth",
+            "sand",
+            "road",
+            "rock"
+          ],
+          "description": "paint: the paint."
+        },
+        {
+          "name": "level",
+          "type": "number",
+          "description": "waterLevel: the water's new surface (world y)."
+        },
+        {
+          "name": "flood",
+          "type": "enum",
+          "options": [
+            "connected",
+            "all",
+            "none"
+          ],
+          "description": "waterLevel: which low ground fills: joined to the water (default), every cell under the level, or none."
+        },
+        {
+          "name": "over",
+          "type": "number",
+          "min": 0.0,
+          "description": "Seconds to animate heights or the water level (the paths follow at the end)."
+        }
+      ],
+      "example": "{ \"do\": \"terrain\", \"op\": \"lower\", \"in\": \"@fault\", \"amount\": 6, \"softness\": 0, \"over\": 2 }",
       "since": "1.0.0"
     },
     {
@@ -2809,6 +3075,62 @@
       "description": "A random walkable point within r metres of p."
     },
     {
+      "name": "groundY",
+      "args": [
+        "position"
+      ],
+      "returns": "number",
+      "description": "Height of the walkable ground at p (terrain, the map's ground or a walkable deck).",
+      "example": "groundY(self) < -3"
+    },
+    {
+      "name": "walkable",
+      "args": [
+        "position",
+        "any?"
+      ],
+      "returns": "bool",
+      "description": "Whether something can stand at p. who: 'small' (ground enemies, default), 'large', 'air', 'player', or a unit (its own graph and surfaces).",
+      "example": "walkable(ahead(self, 2), self)"
+    },
+    {
+      "name": "ground",
+      "args": [
+        "position"
+      ],
+      "returns": "text",
+      "description": "The ground at p: 'grass', 'highGrass', 'lowGrass', 'earth', 'sand', 'road', 'rock', 'water', 'ice', 'blocked', 'deck' or 'none'.",
+      "example": "ground(it) == 'grass'"
+    },
+    {
+      "name": "waterDepth",
+      "args": [
+        "position"
+      ],
+      "returns": "number",
+      "description": "Metres of water over the ground at p (0 when dry or frozen).",
+      "example": "waterDepth(it) > 0"
+    },
+    {
+      "name": "sight",
+      "args": [
+        "position",
+        "position"
+      ],
+      "returns": "bool",
+      "description": "Whether a straight line from a to b (1.5 m up) is clear of ground, cliffs, walls, buildings and solid props.",
+      "example": "sight(self, king)"
+    },
+    {
+      "name": "raycast",
+      "args": [
+        "position",
+        "position"
+      ],
+      "returns": "position",
+      "description": "Where the line from a to b (1.5 m up) first hits ground, a cliff, wall, building or solid prop; none if clear."
+    },
+    {
       "name": "ahead",
       "args": [
         "entity",
@@ -3201,6 +3523,30 @@
     },
     {
       "on": "entity",
+      "name": "parent",
+      "returns": "entity",
+      "description": "The entity it is linked to (link, parts), or none."
+    },
+    {
+      "on": "entity",
+      "name": "children",
+      "returns": "set",
+      "description": "The entities linked to it (its parts)."
+    },
+    {
+      "on": "entity",
+      "name": "root",
+      "returns": "entity",
+      "description": "The top of its link tree (itself when unlinked)."
+    },
+    {
+      "on": "entity",
+      "name": "group",
+      "returns": "set",
+      "description": "Its whole linked group: the root and every part below it, itself included."
+    },
+    {
+      "on": "entity",
       "name": "id",
       "returns": "text",
       "description": "Its entity id."
@@ -3457,6 +3803,11 @@
     {
       "name": "daylight",
       "description": "The level's own light, 0..1: 1 by day, about 0.34 at night, lower in an eclipse (`lighting`).",
+      "type": "number"
+    },
+    {
+      "name": "waterLevel",
+      "description": "The terrain's water level (world y); 0 with no water. The `terrain` action's waterLevel op changes it.",
       "type": "number"
     },
     {
@@ -3893,6 +4244,8 @@
         "movement",
         "attacks",
         "statuses",
+        "interact",
+        "parts",
         "counterpart",
         "light",
         "rules"
@@ -3900,6 +4253,8 @@
       "children": {
         "movement": "movement",
         "attacks[]": "attack",
+        "interact": "interact",
+        "parts[]": "part",
         "light": "light"
       }
     },
@@ -3943,6 +4298,7 @@
         "pickup",
         "interact",
         "light",
+        "parts",
         "attacks",
         "targeting",
         "movement",
@@ -3959,6 +4315,7 @@
         "interact": "interact",
         "attacks[]": "attack",
         "movement": "movement",
+        "parts[]": "part",
         "light": "light"
       }
     },
@@ -3990,6 +4347,7 @@
         "pickup",
         "interact",
         "light",
+        "parts",
         "attacks",
         "targeting",
         "movement",
@@ -4007,6 +4365,7 @@
         "interact": "interact",
         "attacks[]": "attack",
         "movement": "movement",
+        "parts[]": "part",
         "light": "light"
       }
     },
@@ -4176,10 +4535,12 @@
         "when",
         "radius",
         "repeat",
+        "pay",
         "choices"
       ],
       "children": {
-        "choices[]": "choice"
+        "choices[]": "choice",
+        "pay[]": "pay"
       }
     },
     "choice": {
@@ -4188,7 +4549,33 @@
         "label",
         "description",
         "cost",
+        "pay",
         "icon"
+      ],
+      "children": {
+        "pay[]": "pay"
+      }
+    },
+    "pay": {
+      "fields": [
+        "var",
+        "amount",
+        "label"
+      ],
+      "children": {}
+    },
+    "part": {
+      "fields": [
+        "entity",
+        "offset",
+        "rotY",
+        "team",
+        "name",
+        "follow",
+        "onParentDeath",
+        "damageToParent",
+        "damageToGroup",
+        "damageKept"
       ],
       "children": {}
     },
@@ -4228,6 +4615,10 @@
         "flee",
         "wander",
         "home",
+        "leader",
+        "spacing",
+        "offset",
+        "catchUp",
         "surfaces"
       ],
       "children": {
@@ -4324,6 +4715,7 @@
         "pickup",
         "interact",
         "light",
+        "parts",
         "attacks",
         "targeting",
         "movement",
