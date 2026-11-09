@@ -111,6 +111,36 @@ namespace PalaceMod.Builder.Model.Logic
         }
     }
 
+    /// <summary>Whether a template's rules reach beyond the entity and what it fights: they change gold, waves,
+    /// buildings, level variables, the HUD or the run's end, signal everyone, or listen to events across the map
+    /// (`of` with no range). The Studio shows "this enemy affects the level" for such shared enemies.</summary>
+    public static class LevelEffects
+    {
+        private static readonly HashSet<string> LevelActions = new(StringComparer.Ordinal) { "gold", "dropCoins", "building", "waves", "endLevel", "hud", "spawnGroup" };
+
+        public static List<string> Of(IEnumerable<RuleDef> rules)
+        {
+            var found = new List<string>();
+            var json = JArray.FromObject(rules ?? [], JsonSerializer.Create(new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore }));
+            foreach (var r in json.OfType<JObject>())
+            {
+                if (r["when"] is JObject w && w["of"] != null && w["range"] == null && (string)w["on"] != "near") found.Add($"hears {(string)w["on"]} of {(string)w["of"]} anywhere");
+                foreach (var a in r.DescendantsAndSelf().OfType<JObject>().Where(o => o["do"]?.Type == JTokenType.String))
+                {
+                    string d = (string)a["do"];
+                    if (LevelActions.Contains(d)) found.Add(d);
+                    else if (d is "setVar" or "addVar" or "listAdd" or "listRemove" or "listClear" &&
+                             ((string)a["target"] == "level" || ((string)a["name"])?.StartsWith("$") == true)) found.Add("level variable " + ((string)a["name"])?.TrimStart('$'));
+                    else if (d == "signal" && (string)a["to"] == "all") found.Add("signal " + (string)a["name"] + " to all");
+                }
+            }
+            return found.Distinct().ToList();
+        }
+
+        public static List<string> Of(UnitDef u) => Of(u?.Rules);
+        public static List<string> Of(TemplateFields e) => Of(e?.Rules);
+    }
+
     /// <summary>
     /// Rules the unit factory runs on the game's own machinery instead of the logic runtime, so packs migrated from
     /// version 2 play exactly as before. Today: the first rule of a unit that is exactly

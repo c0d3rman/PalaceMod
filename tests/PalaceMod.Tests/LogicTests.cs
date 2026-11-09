@@ -216,6 +216,15 @@ namespace PalaceMod.Tests
             Assert.Equal("imp-2,ghost", string.Join(",", LogicRefs.TemplateRefs(u)), "rewritten");
         }
 
+        public static void LevelEffectsFlagSharedEnemies()
+        {
+            RuleDef R(string j) => JObject.Parse(j).ToObject<RuleDef>();
+            Assert.Equal("", string.Join(",", LevelEffects.Of([R(@"{""when"":""death"",""do"":[{""do"":""spawn"",""entity"":""x""}]}")])), "a plain ability");
+            Assert.Equal("gold,hears death of enemy anywhere,level variable souls", string.Join(",", LevelEffects.Of([
+                R(@"{""when"":""death"",""do"":[{""do"":""gold"",""amount"":5}]}"),
+                R(@"{""when"":{""on"":""death"",""of"":""enemy""},""do"":[{""do"":""if"",""cond"":""true"",""then"":[{""do"":""addVar"",""name"":""$souls""}]}]}")])), "level effects");
+        }
+
         // ---- Presets ------------------------------------------------------------------------------------------
 
         public static void PresetExpansionSubstitutesTypedValues()
