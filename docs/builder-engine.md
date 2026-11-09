@@ -286,6 +286,43 @@ attack, vanilla towers and troops included (`setTargeting` on `all('player and T
 It is implemented on the game's own movement components (see "Runtime"), so pathfinding, avoidance and animation keep
 working. A ranged enemy that kites and prefers towers is just `targeting` plus `movement.keepDistance` plus `kite`.
 
+**Steering as built** (`Logic/Bodies/Steering/`):
+
+- **Targeting.** A rule's `range` is capped by the attack's own range when it picks an attack target; with no
+  `range` a movement target can be anywhere. Prefer `weakest`/`strongest` compare current hp. A unit with no list of
+  its own (vanilla units and towers, or Builder units without `targeting`) keeps the game's priorities: a `prepend`
+  then tries its rules first and falls back to the game's choice, and `remove` has nothing to remove.
+- **`setTargeting`** takes `targeting` (a list that replaces), `prepend` (a list tried first), `remove` (filters,
+  written exactly as in the rules, whose rules are dropped), `reset: true` (back to the template's or the game's), and
+  `for` (seconds; the change reverts after).
+- **`setMovement`** merges the fields it is given (`mode`, `path`, `then`, `speed`, `keepDistance`, `kite`, `flee`,
+  `wander`, `home`, or a whole `movement` block) over the current movement. `for` reverts it; `reset: true` drops
+  earlier `setMovement`s first.
+- **Paths.** `path` is inline (`[[x, z] | [x, y, z], ...]`) or `"@name"` of a placed path whose `points` are world
+  positions. A path follower fires `arrive` at each point (`event.value` = its index), then `end`. `hold` stands
+  where the unit was when it started holding (a `teleport` moves that spot). `wander` picks a new point within
+  `radius` of home every 4-7 s, or on arrival, whenever the unit has nothing to walk to.
+- **`flee.when`** is checked 10 times a second. Without `to`, the unit runs 8 m away from the nearest `from` match
+  within 25 m. **`kite`** steps away from the nearest foe for `for` seconds.
+- **`direct`** moves in a straight line through the unit's own RVO (avoidance and walk animation stay), with no
+  navmesh. Flyers keep their height. The unit stops at `keepDistance` from a target.
+- **`attacks`.** `range` and `cooldown` default to the base unit's first attack. `launch.from` is an offset in the
+  unit's own frame (default `[0, 1, 0]`). An attack with neither `launch` nor `weapon` fires only its `attack` event
+  and `do`. `attack` carries the attack's `id` as `event.name`. The base unit's attack animation plays.
+- **`push`**: `force` is metres of travel, `up` the arc height (default 1.5 m) and `stun` seconds. It uses the game's
+  KnockbackBehavior (added when the unit has none), so it needs the game's unit movement: the king can't be pushed.
+- **`drift`**: `for` absent means until removed. `speed: 0` with no `dir` removes the drift with that `key` (default
+  key `"drift"`). With `dir` and no `speed`, `dir` is the velocity itself.
+- **`taunt`**: `for` defaults to 5 s. The taunted unit walks to the taunter and attacks it once it is in range; until
+  then its attacks pick as usual.
+- **`command`**: `hold` takes an optional `at` (default: where the unit stands).
+- **`convert`**: the counterpart, when the template names none, is the plainest catalog unit of the other side
+  with the same role: P Melee, P Archer or P Firewing for the player, E Melee, E Archer or E Flyer for the enemy.
+  `team` may be an expression (`self.team`). Going `neutral` keeps the unit's own brain, drops its team tags and
+  gives it an empty targeting list (it attacks nothing until a rule gives it targets).
+- **`replace`** keeps nothing unless `keep` says so. `hp` keeps the hp fraction, not the absolute value. `then` runs
+  with `spawned` = the new entity.
+
 ### Rules
 
 ```jsonc
