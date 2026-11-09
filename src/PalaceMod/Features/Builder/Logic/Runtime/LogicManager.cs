@@ -94,6 +94,12 @@ namespace PalaceMod.Builder.Logic
 
         public override void Update()
         {
+            if (arenaWorld)
+            {
+                // The Enemy Studio's fight: a throwaway world while it runs (LogicManager.Arena.cs).
+                if (World != null && (!Studio.Enemies.EnemyArena.Running || SceneManager.GetActiveScene() != startedScene)) EndWorld("arena fight over");
+                if (World != null) return;
+            }
             bool run = ShouldRun(out var session);
             if (World != null && (!run || SceneManager.GetActiveScene() != startedScene)) EndWorld("session or scene changed");
             if (run && World == null && !startFailed && sceneLoadedFrame >= 0 && Time.frameCount > sceneLoadedFrame + 1 && LevelReady)
@@ -208,8 +214,13 @@ namespace PalaceMod.Builder.Logic
             try { LogicWorld.RaiseEnding(w); }
             catch (Exception e) { Log.Error("A behaviour Ending handler failed", e); }
             UnhookGame();
+            if (arenaWorld)
+                Log.Info($"Behaviour: arena fight over: {w.FiringsTotal} rule firings, {w.Budget().Errors} errors" +
+                    (w.Level.Vars.Count > 0 ? "; " + string.Join(", ", w.Level.Vars.Select(kv => $"${kv.Key} = {Values.Format(kv.Value)}")) : ""));
             LogicWorld.Current = null;
             LogicServices.Spatial = null;
+            LogicServices.Game = game;
+            arenaWorld = false;
             Log.Debug($"Behaviour stopped ({why}): {w.FiringsTotal} firings, {w.ActionsTotal} action steps");
         }
 
