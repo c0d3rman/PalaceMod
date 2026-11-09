@@ -344,7 +344,7 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 | `render <pack> [level] -o f.png [--labels names\|costs\|reqs\|none] [--live]` | top-down picture; routes in one colour per line, named, lengths in the legend; offline they're an estimate, `--live` = real game render + the game's routes (level loaded). Also draws `logic.places` (templates and presets resolved): areas in their shape and `color` (dashed when `show: none`), paths with direction chevrons, bodies' footprints (a mover's path, other poses and a spin's reach dashed), points and logic objects as diamonds; labelled by `name` or `id`, "(off)" when `active: false` |
 | `economy <pack> [level] [--compare] [--report test.json]` | gold curve of a greedy all-economy player (harbours grow and mines run dry each dawn as in the game; assumes nothing is ever knocked out); vs the base map's vanilla; `--report`: what a saved `test` run actually received per dawn and which buildings were knocked out most |
 | `waves <pack> [level] [--compare [Map]]` | per night: enemies, effective HP, gold, flyers; vs vanilla |
-| `play <pack> <level>` | load as a normal run (real gold); prints load warnings |
+| `play <pack> <level> [--fast]` | load as a normal run (real gold); prints load warnings; real time unless `--fast` |
 | `sandbox <pack> <level> [--at X Z]` | Studio test play: unlimited gold, king at X,Z (the result has `"at": "ok"` once he stands there) |
 | `edit <pack> <level>` | open the level in the in-game Studio (the player's editor: F5 there test-plays); it edits its own copy and Ctrl+S writes pack.json, so don't `apply` while the player has unsaved Studio changes |
 | `test <pack> <level> [--nights 1-3] [--plan p.json] [--carry] [--save] [--catchup play\|free\|none] [--free] [--king castle\|<slot>\|X,Z] [--build all] [--god] [--invulnerable] [--gold N] [--speed 3] [--no-fast] [--from-night N] [--no-states] [--shots dir] [--quiet]` | load, buy per plan each day once its gold is in, play nights, report each (one progress line per night on stderr); fast simulation unless `--no-fast`; saves a resume state each dawn for `--from-night` |
@@ -455,6 +455,11 @@ low frame rate because it's in the background or on battery) make defences do me
 so keep `--speed` at 3 or less (5 still matched real time in our tests; 8 did not). `--no-fast` plays in real time
 at `--speed` (for watching). Screenshots in fast mode are a render of the game camera: the 3D view without the HUD.
 The game has some randomness of its own; for a close call, run the test two or three times.
+Fast mode belongs to one level load: `game cmd "agent fast on"` lasts until the next level load (play, sandbox,
+retry, savestate load), which turns it off again; `agent fast on keep` lasts across loads until `agent fast off`.
+`test` turns it on with `keep` for its own run and off at the end; `play` sets it every time (off unless `--fast`).
+So a script that loads a level and then polls in real time runs in real time unless it turns fast mode on itself,
+after the load; `agent fast` (no argument) shows `on` and `keep`.
 
 **Resuming from a later night.** Every full `test` saves a savestate at each dawn (once that morning's gold is in,
 before buying). `test ... --from-night N` loads the one before night N and plays only nights N.. with the current
@@ -813,7 +818,7 @@ One small, pure language everywhere: conditions, numbers, selectors, positions.
   tower's attack, the king's equipped weapon; `"none"` after `setWeapon none`; `.maxHp` is the live value, after the night's difficulty and elite; `@@x.hp`
   is the template's catalog value), every stat by name (`.moveSpeed`, `.damageMult`, `.income`...), methods
   `.is('filter')`, `.dist(e)`, `.inside(@area)`, `.stacks('status')`; lists and sets: `.len .first .last .at(i)
-  .has(x)`.
+  .has(x) .sample(k)` (`sample`: k distinct items at random, in random order; no k shuffles; list literals: `['a', 'b']`).
 - **Selectors**: `nearest(f, r?)`, `farthest`, `weakest`, `strongest`, `random`, `all(f, r?)` (a set, nearest first),
   `best(f, r, score)` (score is an expression over `it`), `count(f, r?)`. They anchor at `self`; call them as methods
   to anchor elsewhere: `castle.count('enemy', 10)`, `other.nearest('ally')`. No match is `none` (actions on none do
@@ -928,7 +933,7 @@ ground (the touched cells are then drawn by the terrain). Savestates keep the ch
 | `area` | zones | `shape` (`circle {radius}` / `rect {size: [w, d]}` / `polygon {points}` / `sector {radius, angle}`: a cone along its facing), `watch` (filter), `show`, `color`, `tick`, `surface` (below); events `enter exit inside empty occupied`; filters `in:@area` |
 | `light` | anything that shines | `color`, `range` (m it lights), `intensity` (1), `cone` (degrees: a beam along its facing; none = all round), `aim`, `height` (3; lower = longer beam), `flicker`, `on`; also on units (`unit` op) and attaches (12.7a) |
 | `pickup` | collectibles | `by` (filter, e.g. `king`), `radius`, `magnet`, `consume`; event `pickup` |
-| `interact` | king-usable (props, places, attached slots, and **units**: templates, placed, spawned and wave units; the prompt follows a walking unit) | `prompt` (`{cost}` shows the cost), `cost` (gold), `pay` (items: `[{"var": "$bread", "amount": 1, "label": "bread"}]`, level variables paid with the gold, all at once; refused with a notice and `interactRefused` when any is short), `when` day/night/always, `radius`, `repeat`, `choices` (up to 4 `{id, label, description, cost, pay, icon}`: the game's upgrade-choice popup; the chosen cost is paid and `event.choice` is its id); event `interact` |
+| `interact` | king-usable (props, places, attached slots, and **units**: templates, placed, spawned and wave units; the prompt follows a walking unit) | `prompt` (`{cost}` shows the cost), `cost` (gold), `pay` (items: `[{"var": "$bread", "amount": 1, "label": "bread"}]`, level variables paid with the gold, all at once; refused with a notice and `interactRefused` when any is short), `when` day/night/always, `radius`, `repeat`, `choices` (`{id, label, description, cost, pay, icon, if}`: the game's upgrade-choice popup, up to 4 at once; the chosen cost is paid and `event.choice` is its id), `offer` (an expression giving a list of choice ids: which show, in that order, worked out on every press; with `offer` or a choice's `if` (shown only while true), `choices` is a pool of up to 32, e.g. 3 random of 6 daily: `"offer": "$offers"` + a `dawn` rule `setVar $offers = "['tax','walls','haste','scouts','towers','unseen'].sample(3)"`); event `interact` |
 | `parts` | any template, units too | `[{ "entity", "offset" [x,y,z], "rotY", "name" (a label), "team", "follow", "onParentDeath", "damageToParent", "damageToGroup", "damageKept" }]`: spawned and linked when it appears (Links, below) |
 | `attacks` | turrets, units | `[{ "cooldown", "range", "targeting", "launch": {"entity", "from"} \| "weapon", "do", "replace", "when" }]`; the unit's base attacks stay unless `replace` |
 | `targeting` | attackers | ordered list of filters or `{filter, range, prefer, score}`: the first rule with a match in range wins (a list with no match leaves it idle: it never falls back to anything the list excludes); `score` (an expression over `it`) picks the highest-scoring match, e.g. `{"filter": "player and building", "score": "it.income"}`, else `prefer` nearest (default), farthest, weakest, strongest or random; works on units, vanilla towers and attached slots (`attach` `targeting`, or `setTargeting`) |
@@ -1133,7 +1138,7 @@ with `{"op": "rule", "on": "unit:<id>", ...}`.
 **Testing helpers and traps.**
 
 - Measure waits in game time, not wall time: `test` and `game cmd "agent fast on"` run the game several times faster
-  than real time, so a `sleep` overshoots. Read `logic eval time` (seconds since level start) before and after and
+  than real time, so a `sleep` overshoots (send `agent fast on` after the level has loaded: a load turns it off). Read `logic eval time` (seconds since level start) before and after and
   poll until the difference is reached; poll conditions with `logic eval` the same way.
 - `logic raise interact <place>` fires the `interact` rules without charging the `cost` (the king pays only when he
   really interacts). To test a paid interaction, check `gold` before and after a real one, or charge it with

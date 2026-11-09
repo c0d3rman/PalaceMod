@@ -428,6 +428,28 @@ namespace PalaceMod.Builder.Logic
                                 return Value.None;
                             };
                         }
+                    case "sample":
+                        {
+                            // k distinct items picked at random (the level's seeded random), in random order; k defaults
+                            // to all of them (a shuffle).
+                            var k = Arg(0);
+                            bool all = args.Length == 0;
+                            return ctx =>
+                            {
+                                var t = target(ctx);
+                                int n = t.Kind == ValueKind.List ? t.AsList.Count : t.Kind == ValueKind.Set ? t.AsSet.Count : 0;
+                                int want = all ? n : Math.Max(0, Math.Min(n, (int)Math.Floor(Num(k(ctx), "sample"))));
+                                var idx = Enumerable.Range(0, n).ToArray();
+                                for (int i = 0; i < want; i++)
+                                {
+                                    int j = ctx.World.Random.RangeInt(i, n - 1);
+                                    (idx[i], idx[j]) = (idx[j], idx[i]);
+                                }
+                                if (t.Kind == ValueKind.Set) return Value.Set(idx.Take(want).Select(i => t.AsSet[i]).ToList());
+                                if (t.Kind == ValueKind.List) return Value.List(idx.Take(want).Select(i => t.AsList[i]).ToList());
+                                return Value.List([]);
+                            };
+                        }
                     case "has":
                         {
                             var x = Arg(0);

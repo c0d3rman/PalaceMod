@@ -943,6 +943,8 @@ namespace PalaceMod.Builder.Model.Logic
                 CheckRules(owner);
             }
 
+            private const int MaxChoicePool = 32;
+
             private void CheckInteract(InteractDef it, string p, CheckScope scope)
             {
                 if (it.Prompt != null) Text(it.Prompt, p + ".prompt", scope.With(x => x.ExtraRoles = new() { ["cost"] = LType.Number }));
@@ -950,9 +952,13 @@ namespace PalaceMod.Builder.Model.Logic
                 Enum(it.When, p + ".when", "day", "night", "always");
                 Num(it.Radius, p + ".radius", scope, 0.5, 30);
                 CheckPay(it.Pay, p + ".pay", scope);
+                if (it.Offer != null && it.Choices == null) Error(p + ".offer", "offer picks from choices: add the choices");
                 if (it.Choices != null)
                 {
-                    if (it.Choices.Count < 1 || it.Choices.Count > 4) Error(p + ".choices", "1 to 4 choices");
+                    // A dynamic list (offer, or choices with if) is a pool: the popup shows up to 4 of it at a time.
+                    bool dynamic = it.Offer != null || it.Choices.Exists(c => c?.If != null);
+                    if (it.Choices.Count < 1 || it.Choices.Count > (dynamic ? MaxChoicePool : 4))
+                        Error(p + ".choices", dynamic ? $"1 to {MaxChoicePool} choices (up to 4 are shown at once)" : "1 to 4 choices (more with offer or a choice's if: up to 4 are shown at once)");
                     var ids = new HashSet<string>();
                     for (int i = 0; i < it.Choices.Count; i++)
                     {
@@ -960,7 +966,9 @@ namespace PalaceMod.Builder.Model.Logic
                         if (c?.Id == null || !ids.Add(c.Id)) Error($"{p}.choices[{i}].id", "each choice needs its own id");
                         Num(c?.Cost, $"{p}.choices[{i}].cost", scope, 0, 100000);
                         CheckPay(c?.Pay, $"{p}.choices[{i}].pay", scope);
+                        if (c?.If != null) Expression(c.If, $"{p}.choices[{i}].if", scope, LType.Bool, "a choice's if");
                     }
+                    if (it.Offer != null) Expression(it.Offer, p + ".offer", scope, LType.List, "offer");
                 }
             }
 

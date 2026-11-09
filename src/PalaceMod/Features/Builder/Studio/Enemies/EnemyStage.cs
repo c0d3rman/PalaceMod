@@ -59,7 +59,27 @@ namespace PalaceMod.Builder.Studio.Enemies
             holder.SetActive(false);
             holder.transform.SetParent(root.transform, false);
             spin = 0f;
+            HideKing();
             TakeCamera();
+        }
+
+        // The stage stands where the Level Studio's camera was, often right where the king waits: hide him (his
+        // renderers only; he stays where he is) so he doesn't stand in front of the model.
+        private static readonly List<Renderer> hiddenKing = [];
+
+        private static void HideKing()
+        {
+            ShowKing();
+            var king = TagManager.instance != null && TagManager.instance.Players.Count > 0 ? TagManager.instance.Players[0] : null;
+            if (king == null) return;
+            foreach (var r in king.GetComponentsInChildren<Renderer>())
+                if (r.enabled) { r.enabled = false; hiddenKing.Add(r); }
+        }
+
+        private static void ShowKing()
+        {
+            foreach (var r in hiddenKing) if (r != null) r.enabled = true;
+            hiddenKing.Clear();
         }
 
         /// <summary>Shows or hides the turntable and its model (hidden while the arena fights).</summary>
@@ -70,6 +90,7 @@ namespace PalaceMod.Builder.Studio.Enemies
 
         public static void Leave()
         {
+            ShowKing();
             ReleaseCamera();
             if (root != null) Object.Destroy(root);
             root = disc = holder = model = null;

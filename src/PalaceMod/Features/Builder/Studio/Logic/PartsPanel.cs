@@ -471,8 +471,12 @@ namespace PalaceMod.Builder.Studio.Logic
         {
             var list = Get(owner, "interact")?["choices"] as JArray;
             StudioDock.SmallHeader(page, "Choices");
-            if (list == null || list.Count == 0) page.Text(Dim("None: one prompt. With choices the game's choice popup opens (up to 4)."));
+            if (list == null || list.Count == 0) page.Text(Dim("None: one prompt. With choices the game's choice popup opens (up to 4 at once)."));
             var scope = owner.Scope(null);
+            if ((list?.Count ?? 0) > 0)
+                LogicFields.ExprField(page, "Offer", T("offer", "Offer", "Which choices show, in order: a list of ids.", ParamKind.Expr),
+                    () => Get(owner, "interact")?["offer"], (v, l) => EditPart(owner, "interact", l, x => SetPath(x, "offer", v)), scope,
+                    "An expression giving a list of choice ids: the popup shows those (up to 4) in that order, worked out on each press. Empty: every choice. E.g. $offers, set at dawn to ['tax', 'walls', 'haste', 'scouts'].sample(3).");
             for (int i = 0; i < (list?.Count ?? 0); i++)
             {
                 int idx = i;
@@ -484,14 +488,16 @@ namespace PalaceMod.Builder.Studio.Logic
                 LogicFields.NumberField(page, "   Cost", N("cost", "Cost", "Gold for this choice."), () => Ch("cost"),
                     (v, l) => EditPart(owner, "interact", l, x => SetPath(x, $"choices.{idx}.cost", v)), scope, "Gold paid for this choice (replaces the cost above).");
                 PayList(page, owner, $"choices.{idx}.pay", "   Also costs");
+                LogicFields.ExprField(page, "   Only if", T("if", "Only if", "Shown only while this holds.", ParamKind.Condition), () => Ch("if"),
+                    (v, l) => EditPart(owner, "interact", l, x => SetPath(x, $"choices.{idx}.if", v)), scope, "A condition: the choice is shown only while it holds (checked on each press). Empty: always.");
                 LogicFields.Action(page, Dim("   Remove choice"), () => EditPart(owner, "interact", "Remove choice", x => (x["choices"] as JArray)?.RemoveAt(idx)));
             }
-            if ((list?.Count ?? 0) < 4)
+            if ((list?.Count ?? 0) < 32)
                 LogicFields.Action(page, "+ choice", () => EditPart(owner, "interact", "Add choice", x =>
                 {
                     if (x["choices"] is not JArray arr) x["choices"] = arr = new JArray();
                     arr.Add(new JObject { ["id"] = "choice" + (arr.Count + 1), ["label"] = "Choice " + (arr.Count + 1) });
-                }), "Up to 4; the picked one's id is event.choice.");
+                }), "The picked one's id is event.choice. Up to 4 show at once; more than 4 need Offer or Only if to pick which.");
         }
 
         /// <summary>`pay` items (level variables paid with the gold) at a path inside the interact block.</summary>
