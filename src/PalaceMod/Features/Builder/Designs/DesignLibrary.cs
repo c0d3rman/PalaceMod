@@ -256,15 +256,27 @@ namespace PalaceMod.Builder
         private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<PackEntry, Dictionary<string, List<ValidationIssue>>> playIssues = new();
 
         /// <summary>What stops a design from playing: for a library level only that level, its nights and the enemies
-        /// they use (a problem in another level doesn't matter); for a pack (or no level), the pack's own issues.</summary>
+        /// they use (a problem in another level doesn't matter); for a pack (or no level), the pack's own issues.
+        /// Shared units, entities, statuses and presets are checked in the context of the level (Model/Logic/LevelScope.cs),
+        /// and each issue names its library file.</summary>
         public static IReadOnlyList<ValidationIssue> PlayIssues(PackEntry entry, string levelId)
         {
             if (entry?.Pack == null || entry.Id != PackId || levelId == null) return entry?.Issues ?? [];
             var cache = playIssues.GetOrCreateValue(entry);
             if (cache.TryGetValue(levelId, out var list)) return list;
-            var play = Studio.Play.TestPacks.Play(entry.Pack, levelId, out string error);
-            list = play == null ? [new ValidationIssue(Severity.Error, "levels", error)] : BuilderServices.Packs.Validate(play);
+            var scoped = Model.Logic.LevelScope.For(entry.Pack, levelId);
+            list = scoped == null ? [new ValidationIssue(Severity.Error, "levels", $"no level \"{levelId}\"")]
+                : BuilderServices.Packs.Validate(scoped).Select(i => Model.Logic.LevelScope.Attribute(scoped, i)).ToList();
             return cache[levelId] = list;
+        }
+
+        /// <summary>The whole library's issues, each about one level or one shared item (LevelScope.LibraryIssues).</summary>
+        public static List<ValidationIssue> LibraryIssues(PackEntry entry)
+        {
+            if (entry?.Pack == null || entry.Id != PackId) return entry?.Issues?.ToList() ?? [];
+            var list = new List<ValidationIssue>(Store?.Issues ?? []);
+            list.AddRange(Model.Logic.LevelScope.LibraryIssues(entry.Pack, BuilderServices.Packs.Validate));
+            return list;
         }
 
         public static bool CanPlay(PackEntry entry, string levelId) => !PlayIssues(entry, levelId).Any(i => i.Severity == Severity.Error);

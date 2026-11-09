@@ -551,7 +551,18 @@ namespace PalaceMod
         {
             InvulnerableKingdom = on;
             if (on) Mark("invulnerable kingdom");
-            return $"invulnerable kingdom {(on ? "on" : "off")}";
+            return on ? "invulnerable kingdom on: player units and buildings take no damage (rule damage and kill too) until off or the next level load"
+                : "invulnerable kingdom off";
+        }
+
+        /// <summary>Turns god mode and the invulnerable kingdom off (the agent bridge does this on every level load:
+        /// they're test helpers for one run). Returns what was on.</summary>
+        public static string ResetCheats()
+        {
+            var was = new List<string>();
+            if (GodMode) { GodMode = false; was.Add("god mode"); }
+            if (InvulnerableKingdom) { InvulnerableKingdom = false; was.Add("invulnerable kingdom"); }
+            return was.Count == 0 ? "none" : string.Join(", ", was) + " off";
         }
 
         internal static bool BlocksDamage(Hp hp)

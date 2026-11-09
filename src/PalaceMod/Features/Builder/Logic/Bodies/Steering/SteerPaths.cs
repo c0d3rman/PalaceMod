@@ -51,7 +51,13 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
                 string s = (string)t;
                 var e = s.StartsWith("@") ? LogicWorld.Current?.FindNamed(s.Substring(1)) : LogicWorld.Current?.Find(s);
                 pts = e?.Def?["points"] ?? e?.Def?["path"] ?? e?.Def?["shape"]?["points"];
-                if (pts == null) { SteerLog.Once("path " + s, $"path {s}: no placed path with that name (or it has no points)"); return list; }
+                if (pts == null)
+                {
+                    string note = self?.Template != null ? $" (movement of template \"{self.Template}\": a shared template that names a level's @path only works in levels that have it)" : "";
+                    SteerLog.Once("path " + s, $"path {s}: no placed path with that name on this level (or it has no points){note}");
+                    LogicWorld.Current?.ReportError(self, "movement.path", $"path {s}: no placed path with that name on this level{note}");
+                    return list;
+                }
             }
             if (pts is JArray arr)
                 foreach (var p in arr)
