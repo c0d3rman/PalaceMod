@@ -84,7 +84,7 @@ namespace PalaceMod.Builder.Logic
                         ["on"] = ri.Enabled,
                         ["done"] = ri.Done,
                         ["cd"] = ri.CooldownUntil > Time ? ri.CooldownUntil - Time : 0,
-                        ["next"] = double.IsNaN(ri.NextTime) ? null : ri.NextTime - Time,
+                        ["next"] = double.IsNaN(ri.NextTime) ? null : ri.NextTime - LocalTime(e),
                         ["ticks"] = ri.Ticks,
                         ["armed"] = ri.HpArmed,
                     });
@@ -187,7 +187,7 @@ namespace PalaceMod.Builder.Logic
                     ri.CooldownUntil = cd > 0 ? Time + cd : 0;
                     if (rs["next"] is JValue nv && nv.Type != JTokenType.Null)
                     {
-                        ri.NextTime = Time + (double)nv;
+                        ri.NextTime = LocalTime(e) + (double)nv;
                         if (!timers.Contains(ri)) timers.Add(ri);
                     }
                     else if (ri.Rule.Event == "after") { ri.NextTime = double.NaN; timers.Remove(ri); }

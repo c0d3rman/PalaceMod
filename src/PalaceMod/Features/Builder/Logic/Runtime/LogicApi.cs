@@ -121,6 +121,10 @@ namespace PalaceMod.Builder.Logic
 
         /// <summary>The entity's rules with their per-owner state (the world's own).</summary>
         internal List<RuleInstance> Rules = [];
+        /// <summary>Seconds of game time this entity's own clock is behind the world's (its `timeScale` below 1 holds
+        /// its rule timers and waits back; above 1 runs them ahead). 0 for anything never scaled.</summary>
+        internal double Lag;
+        internal int LagStep = -1;           // the world step Lag was last advanced on
 
         public bool Exists => !Destroyed && (Body == null || Body.Exists);
         public bool Alive => Exists && (Body == null || Body.Alive);
