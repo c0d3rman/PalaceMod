@@ -122,7 +122,10 @@ namespace PalaceMod.Builder.Model.Logic
                     CheckMovement(u.Movement, p + ".movement", owner);
                     CheckAttacks(u.Attacks, p + ".attacks", owner);
                     CheckStatusRefs(u.Statuses, p + ".statuses");
+                    if (u.Interact != null) CheckInteract(u.Interact, p + ".interact", Scope(owner, null));
+                    CheckParts(u.Parts, p + ".parts", Scope(owner, null));
                     if (u.Counterpart != null) CheckTemplate(u.Counterpart, p + ".counterpart", Scope(owner, null));
+                    CheckLight(u.Light, p + ".light", Scope(owner, null));
                     CheckRules(owner, LogicLowering.LoweredRuleIndex(u, LogicLowering.IsUnitIn(pack)));
                 }
                 for (int i = 0; i < (pack.Entities?.Count ?? 0); i++)
@@ -668,6 +671,20 @@ namespace PalaceMod.Builder.Model.Logic
                 }
             }
 
+            /// <summary>A `light` block (docs/builder-engine.md, "Light").</summary>
+            private void CheckLight(LightDef l, string p, CheckScope scope)
+            {
+                if (l == null) return;
+                if (l.Color != null && !Validator.TryParseColor(l.Color, out _)) Error(p + ".color", "must be \"#rrggbb\"");
+                Num(l.Intensity, p + ".intensity", scope, 0, 4);
+                Num(l.Range, p + ".range", scope, 0.5, 200);
+                Num(l.Cone, p + ".cone", scope, 1, 179);
+                Num(l.Height, p + ".height", scope, 0, 60);
+                Num(l.Flicker, p + ".flicker", scope, 0, 1);
+                Num(l.Aim, p + ".aim", scope, -360, 360);
+                if (l.Aim != null && l.Cone == null) Warn(p + ".aim", "aim only turns a cone (give cone)");
+            }
+
             private void Num(LNum n, string p, CheckScope scope, double? min, double? max)
             {
                 if (n == null) return;
@@ -739,7 +756,13 @@ namespace PalaceMod.Builder.Model.Logic
             {
                 if (m == null) return;
                 scope ??= Scope(owner, null);
-                Enum(m.Mode, p + ".mode", "pathfind", "direct", "hold", "path");
+                Enum(m.Mode, p + ".mode", "pathfind", "direct", "hold", "path", "follow");
+                if (m.Mode == "follow" && string.IsNullOrWhiteSpace(m.Leader)) Error(p + ".leader", "mode follow needs a leader (an entity expression, e.g. \"self.parent\")");
+                if (m.Leader != null) Expression(m.Leader, p + ".leader", scope, LType.Entity, "leader");
+                Num(m.Spacing, p + ".spacing", scope, 0, 100);
+                Num(m.CatchUp, p + ".catchUp", scope, 1, 5);
+                if (m.Offset != null && m.Offset.Length != 2) Error(p + ".offset", "must be [x, z] in the leader's frame (x right, z ahead)");
+                if (m.Mode != "follow" && (m.Leader != null || m.Spacing != null || m.Offset != null || m.CatchUp != null)) Warn(p + ".leader", "leader, spacing, offset and catchUp only apply to mode follow");
                 Enum(m.Then, p + ".then", "pathfind", "hold", "destroy");
                 if (m.Mode == "path" && m.Path == null) Error(p + ".path", "mode path needs a path (@name or [[x, z], ...])");
                 CheckPath(m.Path, p + ".path", scope);
@@ -858,7 +881,7 @@ namespace PalaceMod.Builder.Model.Logic
                     Enum(mv.Mode, p + ".mover.mode", "loop", "pingpong", "once");
                     Num(mv.Speed, p + ".mover.speed", scope, 0, 100);
                     Num(mv.Wait, p + ".mover.wait", scope, 0, 600);
-                    if (e.Body?.Walkable == true && mv.Path != null) Warn(p + ".mover", "a walkable mover only snaps between poses; it can't glide along a path");
+                    if (e.Body?.Walkable == true && mv.Path != null) Warn(p + ".mover", "a walkable mover gliding on a path carries the king and units standing on it, but paths are only on its deck where it started: pathing units on it snap back to the ground when they walk (riders should hold)");
                     Num(mv.TurnSpeed, p + ".mover.turnSpeed", scope, 0, 3600);
                     if (mv.Pose != null && mv.Poses != null) Warn(p + ".mover.poses", "give \"pose\" or \"poses\", not both (\"poses\" is ignored)");
                     string poseKey = mv.Pose != null ? "pose" : "poses";
@@ -874,8 +897,13 @@ namespace PalaceMod.Builder.Model.Logic
                 if (e.Area is { } ar)
                 {
                     var sh = ar.Shape;
-                    int shapes = sh == null ? 0 : new object[] { sh.Circle, sh.Rect, sh.Polygon }.Count(x => x != null);
-                    if (shapes != 1) Error(p + ".area.shape", "needs exactly one of circle {radius}, rect {size: [w, d]} or polygon {points}");
+                    int shapes = sh == null ? 0 : new object[] { sh.Circle, sh.Rect, sh.Polygon, sh.Sector }.Count(x => x != null);
+                    if (shapes != 1) Error(p + ".area.shape", "needs exactly one of circle {radius}, rect {size: [w, d]}, polygon {points} or sector {radius, angle}");
+                    if (sh?.Sector != null)
+                    {
+                        Num(sh.Sector.Radius, p + ".area.shape.sector.radius", scope, 0.1, 500);
+                        Num(sh.Sector.Angle, p + ".area.shape.sector.angle", scope, 1, 360);
+                    }
                     if (sh?.Circle != null) Num(sh.Circle.Radius, p + ".area.shape.circle.radius", scope, 0.1, 500);
                     if (sh?.Rect != null && (sh.Rect.Size == null || sh.Rect.Size.Length != 2)) Error(p + ".area.shape.rect.size", "must be [width, depth]");
                     if (sh?.Polygon != null && (sh.Polygon.Points == null || sh.Polygon.Points.Count < 3 || sh.Polygon.Points.Any(x => x == null || x.Length != 2)))
@@ -899,35 +927,76 @@ namespace PalaceMod.Builder.Model.Logic
                     }
                 }
                 else if (kind == EntityKinds.Area && !place) Error(p + ".area", "an area template needs an area block");
+                CheckLight(e.Light, p + ".light", scope);
                 if (e.Pickup is { } pk)
                 {
                     if (pk.By != null) FilterString(pk.By, p + ".pickup.by", scope);
                     Num(pk.Radius, p + ".pickup.radius", scope, 0.1, 50);
                     Num(pk.Magnet, p + ".pickup.magnet", scope, 0, 100);
                 }
-                if (e.Interact is { } it)
-                {
-                    if (it.Prompt != null) Text(it.Prompt, p + ".interact.prompt", scope.With(x => x.ExtraRoles = new() { ["cost"] = LType.Number }));
-                    Num(it.Cost, p + ".interact.cost", scope, 0, 100000);
-                    Enum(it.When, p + ".interact.when", "day", "night", "always");
-                    Num(it.Radius, p + ".interact.radius", scope, 0.5, 30);
-                    if (it.Choices != null)
-                    {
-                        if (it.Choices.Count < 1 || it.Choices.Count > 4) Error(p + ".interact.choices", "1 to 4 choices");
-                        var ids = new HashSet<string>();
-                        for (int i = 0; i < it.Choices.Count; i++)
-                        {
-                            var c = it.Choices[i];
-                            if (c?.Id == null || !ids.Add(c.Id)) Error($"{p}.interact.choices[{i}].id", "each choice needs its own id");
-                            Num(c?.Cost, $"{p}.interact.choices[{i}].cost", scope, 0, 100000);
-                        }
-                    }
-                }
+                if (e.Interact is { } it) CheckInteract(it, p + ".interact", scope);
+                CheckParts(e.Parts, p + ".parts", scope);
                 CheckAttacks(e.Attacks, p + ".attacks", owner);
                 CheckTargeting(e.Targeting, p + ".targeting", owner);
                 CheckMovement(e.Movement, p + ".movement", owner);
                 CheckStatusRefs(e.Statuses, p + ".statuses");
                 CheckRules(owner);
+            }
+
+            private void CheckInteract(InteractDef it, string p, CheckScope scope)
+            {
+                if (it.Prompt != null) Text(it.Prompt, p + ".prompt", scope.With(x => x.ExtraRoles = new() { ["cost"] = LType.Number }));
+                Num(it.Cost, p + ".cost", scope, 0, 100000);
+                Enum(it.When, p + ".when", "day", "night", "always");
+                Num(it.Radius, p + ".radius", scope, 0.5, 30);
+                CheckPay(it.Pay, p + ".pay", scope);
+                if (it.Choices != null)
+                {
+                    if (it.Choices.Count < 1 || it.Choices.Count > 4) Error(p + ".choices", "1 to 4 choices");
+                    var ids = new HashSet<string>();
+                    for (int i = 0; i < it.Choices.Count; i++)
+                    {
+                        var c = it.Choices[i];
+                        if (c?.Id == null || !ids.Add(c.Id)) Error($"{p}.choices[{i}].id", "each choice needs its own id");
+                        Num(c?.Cost, $"{p}.choices[{i}].cost", scope, 0, 100000);
+                        CheckPay(c?.Pay, $"{p}.choices[{i}].pay", scope);
+                    }
+                }
+            }
+
+            private void CheckPay(List<PayDef> pay, string p, CheckScope scope)
+            {
+                for (int i = 0; i < (pay?.Count ?? 0); i++)
+                {
+                    var x = pay[i];
+                    string pp = $"{p}[{i}]";
+                    if (x?.Var == null || !x.Var.StartsWith("$") || !VarName.IsMatch(x.Var.Substring(1))) { Error(pp + ".var", "needs a level variable: \"$name\""); continue; }
+                    string name = x.Var.Substring(1);
+                    if (scope.LevelVars != null && !scope.LevelVars.Contains(name))
+                        Error(pp + ".var", $"no level variable \"{name}\" (declare it in logic.vars)");
+                    Num(x.Amount, pp + ".amount", scope, 0, 100000);
+                }
+            }
+
+            private void CheckParts(List<PartDef> parts, string p, CheckScope scope)
+            {
+                if (parts == null) return;
+                if (parts.Count > 32) Error(p, "at most 32 parts");
+                for (int i = 0; i < parts.Count; i++)
+                {
+                    var x = parts[i];
+                    string pp = $"{p}[{i}]";
+                    if (x == null) { Error(pp, "is empty"); continue; }
+                    if (x.Entity == null) Error(pp + ".entity", "needs a template");
+                    else CheckTemplate(x.Entity, pp + ".entity", scope);
+                    if (x.Offset != null && x.Offset.Length != 3) Error(pp + ".offset", "must be [x, y, z]");
+                    Enum(x.Team, pp + ".team", Teams.All);
+                    Enum(x.Follow, pp + ".follow", "rigid", "position", "none");
+                    Enum(x.OnParentDeath, pp + ".onParentDeath", "die", "drop", "stay");
+                    if (x.DamageToParent < 0) Error(pp + ".damageToParent", "must be 0 or more");
+                    if (x.DamageToGroup is < 0 or > 1) Error(pp + ".damageToGroup", "must be 0..1");
+                    if (x.DamageKept < 0) Error(pp + ".damageKept", "must be 0 or more");
+                }
             }
 
             private void CheckStatus(StatusDef s, string p)
@@ -1069,6 +1138,7 @@ namespace PalaceMod.Builder.Model.Logic
                     CheckStatusRefs(a.Statuses, ap + ".statuses");
                     var owner = new Owner { Path = ap, Kind = kind ?? "building", Vars = VarSet(a.Vars), Level = lv, Rules = a.Rules };
                     CheckTargeting(a.Targeting, ap + ".targeting", owner);
+                    CheckLight(a.Light, ap + ".light", Scope(owner, null));
                     CheckRules(owner);
                 }
                 CheckRules(levelOwner);

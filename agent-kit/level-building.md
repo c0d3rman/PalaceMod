@@ -685,6 +685,9 @@ stat, flag, filter term and built-in preset with its parameters. `palace.py logi
   `@gate1` (a placed object by name).
 - **Statuses** are timed, stacking modifier sets with their own rules: buffs, debuffs, auras, damage over time,
   shields, stuns, invisibility.
+- **Links** make multi-part things: any entity can be a part of another (weak points on a colossus, a rider, the
+  links of a chain). Parts move and turn with their parent every frame, can pass their damage on, and die or drop off
+  with it (12.7, "Links").
 - **Signals** wire objects together: any rule can `signal` a name to an entity, a set or everyone; `signal` rules
   listen. Every entity also takes built-in inputs (`enable`, `disable`, `toggle`, `destroy`, and per component
   `open`/pose names, `start`, `stop`, `reverse`, `show`, `hide`, `lock`, `unlock`).
@@ -804,9 +807,9 @@ One small, pure language everywhere: conditions, numbers, selectors, positions.
   `event.choice` / `event.types` / `event.weapon`, `@name` (a place or attached object), `@@id` (a template), `$var` (a level variable), `x.$var` (an
   entity variable), globals (`night`, `isNight`, `isDay`, `time`, `nightTime`, `nightProgress`, `gold`, `income`
   (what the buildings paid at the last dawn, already set when `dawn` rules run), `enemiesAlive`, `difficulty`,
-  `nights`).
+  `nights`, `daylight`).
 - **Properties**: `.hp .maxHp .hpPct .alive .elite .pos .x .y .z .facing .team .kind .template .labels .level .cost
-  .buildingType .age .target .owner .id .weapon` (`.weapon` is its weapon's id, `"vanilla:<weapon>"`: a unit's or
+  .buildingType .age .target .owner .id .weapon .light .lit` (12.7a), links `.parent .children .root .group` (12.7) (`.weapon` is its weapon's id, `"vanilla:<weapon>"`: a unit's or
   tower's attack, the king's equipped weapon; `"none"` after `setWeapon none`; `.maxHp` is the live value, after the night's difficulty and elite; `@@x.hp`
   is the template's catalog value), every stat by name (`.moveSpeed`, `.damageMult`, `.income`...), methods
   `.is('filter')`, `.dist(e)`, `.inside(@area)`, `.stacks('status')`; lists and sets: `.len .first .last .at(i)
@@ -830,10 +833,19 @@ One small, pure language everywhere: conditions, numbers, selectors, positions.
 - **Positions**: an entity is its position wherever a position is wanted. `pointNear(p, r)` (a random walkable point),
   `ahead(e, d)`, `toward(a, b, d)`, `lerp(a, b, t)`, `dir(deg)` (0 = north, 90 = east), `angle(a, b)`,
   `spawnLine('Name')`; positions add, subtract and scale (`self.pos + dir(90) * 3`).
+- **The world under a point** (positions or entities): `groundY(p)` (height of the walkable ground: terrain, the map's
+  ground or a walkable deck), `walkable(p, who?)` (can something stand there: `'small'` ground enemies (default),
+  `'large'`, `'air'`, `'player'`, or a unit, which uses its own graphs and the surfaces it may walk), `ground(p)`
+  (`'grass' 'highGrass' 'lowGrass' 'earth' 'sand' 'road' 'rock' 'water' 'ice' 'blocked' 'deck' 'none'`; a cliff is
+  `'rock'`), `waterDepth(p)` (0 dry or frozen), `sight(a, b)` (a clear line 1.5 m up: no ground, cliff, wall,
+  building or solid body between), `raycast(a, b)` (where that line is blocked, or `none`), global `waterLevel`.
+  E.g. fire spreads only `where(ground(it) == 'grass')`; a pushed boulder stops where `not walkable(ahead(self, 1))`;
+  a unit drowns when `waterDepth(it) > 0.5`; a sniper fires only with `sight(self, it)`.
 - **Maths and logic**: `+ - * / %`, `== != < <= > >=`, `and or not` (also `&& || !`), `c ? a : b`, `min max abs floor
   ceil round clamp sqrt pow sin cos`, `rand()`, `rand(a, b)`, `randInt(a, b)`, `chance(p)` (seeded: the same events
   give the same results).
 - **Waves**: `waveCount(n, filter?)`, `waveUnits(n)`, `strongestUnit(n)`.
+- **Light**: `lightAt(p)` (0..1), `daylight` (the level's own light), `.light`, `.lit` (12.7a).
 - **Types are checked** before the game runs (`palace.py check`): an unknown variable, a role the event doesn't have
   (`other` in `levelStart`), a misspelled filter term or a number compared with text are errors with the column.
 
@@ -843,7 +855,7 @@ A filter is a string: `"foe and Building and not Wall"`, `"#lantern"`, `"in:@moa
 enemy neutral` (foe/ally relative to `self`); kinds `unit building prop projectile area pickup coin king castle line
 point path logic self`; `melee ranged alive dead elite`; any game tag, case-sensitive (`Tower`, `Flying`, `Wall`, `Boss`,
 `Undead`...; see `logic-reference.md`); `#label`; `is:<template>`; `in:@area` / `in:self` (inside an area); `has:<status>`;
-`type:<building kind>` (`type:Mill`); `where(<expression over it>)`; the visibility terms `disabled unbuilt` and
+`type:<building kind>` (`type:Mill`); `lit` (standing in the light, 12.7a); `where(<expression over it>)`; the visibility terms `disabled unbuilt` and
 `include:<dead|disabled|unbuilt|self>` (12.4, "What a selector sees"). Combine with `and or not ( )`.
 
 A name with spaces (or other punctuation) is quoted, with whichever quote the surrounding expression doesn't use:
@@ -860,10 +872,11 @@ runs once per member and the other params are evaluated per member with `it` bou
 | Make | `spawn` (any template; `then` runs with `spawned`), `launch` (a projectile template toward a target; `onImpact`), `spawnGroup` (a wave-style group that counts toward the night), `replace` (morph into another template) |
 | Health | `damage` (`amount`, `source` credited, `types` like `["fire"]`), `heal`, `kill`, `revive`, `setHp` |
 | Stats | `setStat` (`stat`, one of `value`/`add`/`mult`, `for` seconds or `"night"`/`"day"`), `applyStatus`, `removeStatus`, `setWeapon` (below) |
-| Team, move | `convert` (switch side), `teleport`, `push` (knockback), `drift` (continuous pull/wind), `moveTo`, `setMovement`, `setTargeting` (`prepend`, `remove`, `for`), `taunt`, `command` (player units: follow/hold/home) |
+| Team, move | `convert` (switch side), `teleport`, `push` (knockback), `drift` (continuous pull/wind), `moveTo`, `setMovement`, `setTargeting` (`prepend`, `remove`, `for`), `taunt`, `command` (player units: follow/hold/home), `turn` (`facing`/`by`/`toward`, `speed`: aim a beam, a turret, an area), `setShape` (an area's shape or size, a body's footprint, at runtime) |
+| Links | `link` (`to` a parent, `offset`, `follow`, `onParentDeath`, `damageToParent`, `damageToGroup`, `damageKept`), `unlink` (`release` drop/stay, `children`) |
 | Logic | `signal`, `setVar`, `addVar`, `listAdd`/`listRemove`/`listClear`, `addLabel`/`removeLabel`, `enableRule`/`disableRule`, `enable`/`disable`/`toggle`, `wait`, `if` (`cond`, `then`, `else`), `repeat` (`times`, `every`, `actions`), `forEach` (`in`, `actions`, `limit`), `choose` (`options: [{weight, do}]`), `stop` |
-| World | `gold` (give/take), `dropCoins`, `building` (build, upgrade, knockOut, repair, demolish, lock, unlock, setCost, setIncome a slot: `slot` is any expression giving a building or slot entity, `@name`, `it`, `$var`, `it.$slot`, `nearest('unbuilt and type:House')`, or a Studio key `"add:h1"`; without `slot` it acts on each `target`), `waves` (addSpawn, removeUnit, scaleCount, scaleHp, clearRemaining, startNight, endNight, skipNight), `endLevel` |
-| Show | `effect`, `sound`, `message`, `floatText`, `setVisual`, `hud`, `shake`, `marker` |
+| World | `terrain` (change the ground during play, below), `gold` (give/take), `dropCoins`, `building` (build, upgrade, knockOut, repair, demolish, lock, unlock, setCost, setIncome a slot: `slot` is any expression giving a building or slot entity, `@name`, `it`, `$var`, `it.$slot`, `nearest('unbuilt and type:House')`, or a Studio key `"add:h1"`; without `slot` it acts on each `target`), `waves` (addSpawn, removeUnit, scaleCount, scaleHp, clearRemaining, startNight, endNight, skipNight), `endLevel` |
+| Show | `effect`, `sound`, `message`, `floatText`, `setVisual`, `hud`, `shake`, `marker`, `lighting` (darken or tint the level: an eclipse, day made night), `setLight` (a light that follows anything: a torch on the king) |
 | End | `destroy` (`drops`, `effects`, `silent`): removes anything; a unit the logic spawned is removed outright, one of the game's own player troops is knocked out for good (no revive at dawn); buildings, the castle and the king are only knocked out |
 
 **`setWeapon`** gives units, towers and the king another weapon: `"weapon": "vanilla:<weapon>"` (or
@@ -878,6 +891,30 @@ passive half). `palace.py game cmd logic-weapons` lists every weapon id with its
 `self`'s variable unless `target` names another entity; a level variable is `"name": "$souls"` or `"target":
 "level"` (in the level script plain names are level variables).
 
+**Runtime terrain: `terrain`.** The ground itself changes during play; only the touched area is re-drawn and re-pathed
+(tens to a couple of hundred ms, so a few changes a night, not every tick).
+`{"do": "terrain", "op": ..., <where>, ...}` with `op`:
+
+- `raise` / `lower` (`amount` m), `set` (`height`, world y), `smooth`: heights, faded toward the edge by `softness`
+  (0..1, default 0.3; 0 = sheer cliffs). A deep `lower` is a real chasm (units and the king can't cross; they fall in).
+- `paint` (`material`: grass, highGrass, lowGrass, earth, sand, road, rock), `block` / `unblock`.
+- `water` / `dry`: cells become water (the bed is dug a metre under the water level) or land.
+- `freeze` / `thaw`: water becomes walkable ice at the water level (drawn pale blue; units and the king walk on it), or
+  water again. Things standing on ice that thaws are pushed ashore unless a rule kills them first.
+- `waterLevel` (`level`, world y; an expression like `"$tide"` works): the surface moves. Low ground joined to the
+  water floods (`flood: "all"` floods every cell under the level, `"none"` none) and ground it leaves dries.
+
+Where: `radius` (a circle at `at`, default self), `width` + `length` (+ `angle`), or `in: "@zone"` (an area's own
+shape, or a body's footprint). `waterLevel`, `freeze`, `thaw` and `dry` with no shape act on the whole field. `over`
+(seconds) animates heights and the water level; paths follow when it ends. Works on a flat field and on a map's own
+ground (the touched cells are then drawn by the terrain). Savestates keep the changed ground.
+
+```json
+{"do": "terrain", "op": "lower", "in": "@fault", "amount": 7, "softness": 0, "over": 1.5}
+{"do": "terrain", "op": "waterLevel", "level": "$tide", "over": 3}
+{"do": "terrain", "op": "freeze", "in": "@lake"}
+```
+
 ### 12.7 Components (what a template is)
 
 | Component | For | Key fields |
@@ -888,14 +925,38 @@ passive half). `palace.py game cmd logic-weapons` lists every weapon id with its
 | `lifetime`, `maxAlive` | any | seconds before `expire` + destroy; cap on live copies |
 | `projectile` | flying things | `speed`, `homing` 0..1, `arc`, `gravity`, `spin`, `face`, `hits` (filter), `hitRadius`, `pierce`, `onGround`, `range`; events `impact`, `expire` |
 | `mover` | moving props | `path` (`@path` or points), `mode` loop/pingpong/once, `speed`, `wait`, `spin`, `swing`, `running`, `pose` (or `poses`) {name: {`offset` [x,y,z] or world `pos`, `rotY`}}, `turnSpeed` (deg/s, 90); inputs `start stop reverse goto` and each pose's name; events `arrive`, `end`. A walkable mover snaps between poses |
-| `area` | zones | `shape` (`circle {radius}` / `rect {size: [w, d]}` / `polygon {points}`), `watch` (filter), `show`, `color`, `tick`, `surface` (below); events `enter exit inside empty occupied`; filters `in:@area` |
+| `area` | zones | `shape` (`circle {radius}` / `rect {size: [w, d]}` / `polygon {points}` / `sector {radius, angle}`: a cone along its facing), `watch` (filter), `show`, `color`, `tick`, `surface` (below); events `enter exit inside empty occupied`; filters `in:@area` |
+| `light` | anything that shines | `color`, `range` (m it lights), `intensity` (1), `cone` (degrees: a beam along its facing; none = all round), `aim`, `height` (3; lower = longer beam), `flicker`, `on`; also on units (`unit` op) and attaches (12.7a) |
 | `pickup` | collectibles | `by` (filter, e.g. `king`), `radius`, `magnet`, `consume`; event `pickup` |
-| `interact` | king-usable | `prompt` (`{cost}` shows the cost), `cost`, `when` day/night/always, `radius`, `repeat`, `choices` (up to 4 `{id, label, description, cost, icon}`: the game's upgrade-choice popup; the chosen cost is paid and `event.choice` is its id); event `interact` |
+| `interact` | king-usable (props, places, attached slots, and **units**: templates, placed, spawned and wave units; the prompt follows a walking unit) | `prompt` (`{cost}` shows the cost), `cost` (gold), `pay` (items: `[{"var": "$bread", "amount": 1, "label": "bread"}]`, level variables paid with the gold, all at once; refused with a notice and `interactRefused` when any is short), `when` day/night/always, `radius`, `repeat`, `choices` (up to 4 `{id, label, description, cost, pay, icon}`: the game's upgrade-choice popup; the chosen cost is paid and `event.choice` is its id); event `interact` |
+| `parts` | any template, units too | `[{ "entity", "offset" [x,y,z], "rotY", "name" (a label), "team", "follow", "onParentDeath", "damageToParent", "damageToGroup", "damageKept" }]`: spawned and linked when it appears (Links, below) |
 | `attacks` | turrets, units | `[{ "cooldown", "range", "targeting", "launch": {"entity", "from"} \| "weapon", "do", "replace", "when" }]`; the unit's base attacks stay unless `replace` |
 | `targeting` | attackers | ordered list of filters or `{filter, range, prefer, score}`: the first rule with a match in range wins (a list with no match leaves it idle: it never falls back to anything the list excludes); `score` (an expression over `it`) picks the highest-scoring match, e.g. `{"filter": "player and building", "score": "it.income"}`, else `prefer` nearest (default), farthest, weakest, strongest or random; works on units, vanilla towers and attached slots (`attach` `targeting`, or `setTargeting`) |
-| `movement` | units | `mode` pathfind/direct/hold/path, `path`, `then`, `speed`, `keepDistance`, `kite`, `flee`, `wander`, `home`, `surfaces` |
+| `movement` | units | `mode` pathfind/direct/hold/path/follow, `path`, `then`, `speed`, `keepDistance`, `kite`, `flee`, `wander`, `home`, `surfaces`; for `follow`: `leader` (an entity expression, e.g. `"self.parent"`), `spacing` (m behind it, a trail; default 2), `offset` [x, z] (a slot in the leader's frame: x right, z ahead), `catchUp` (speed × while behind; 1.5) |
 
 A number field may be an expression evaluated when the entity appears: `"hp": "=100 * night"`.
+
+**Links (multi-part entities).** A part is a real entity of its own (its own hitbox, hp, rules, look), hung on a
+parent. Make one with a template's `parts` (spawned and linked when the parent appears) or the `link` action (`target`
+the part, `to` the parent; `unlink` to let go):
+
+- `offset` [x, y, z] in the parent's frame (x right, y up, z ahead; default: where it is now), `rotY` relative yaw.
+- `follow`: `rigid` (default: placed at its offset and turned with the parent every frame; a unit part doesn't walk,
+  but still attacks), `position` (moves, keeps its own yaw), `none` (a relation only; it moves on its own, e.g. with
+  `movement: {"mode": "follow", "leader": "self.parent"}` to walk behind it).
+- `onParentDeath`: `die` (default), `drop` (unlinked and set on the ground; it resumes its own movement) or `stay`.
+- Damage, applied inside the game's own hit: `damageToParent` × each hit it takes is dealt to its parent too, credited
+  to the same attacker (2 = a weak point that doubles the hit); `damageToGroup` of each hit is shared evenly by its
+  whole linked group (the root and all parts, itself included; 1 = one shared pool; a hit on the root is shared by
+  the largest share among its parts); `damageKept` is the part of the
+  rest it takes itself (0 with `damageToParent: 1` = a pure proxy hitbox). The receivers' own `damageTaken` doesn't
+  apply to a share again (a body immune to direct hits still bleeds through its weak points); `kill` isn't shared.
+- Read them with `.parent`, `.children` (a set), `.root`, `.group` (a set); events `linked` / `unlinked` on the part
+  (`other` the parent). Selector example: `count('#link and where(it.root == self.root)')`.
+- An enemy-team `hittable` body is a real target for vanilla towers, troops and the king (weak points work); only
+  `countsAsEnemy: true` makes it hold the night open.
+- Keep moving parts not `solid` (a moving cut re-paths the map). The king can't be a part; standing on a moving part
+  is the riding feature's.
 
 **Surfaces (who may walk where).** An area with `"surface": "mud"` or `{"name": "ladder", "allow": "melee", "cost": 1}`
 becomes a named pathfinding surface: only units matching `allow` path through it, and `cost` multiplies its path cost
@@ -905,7 +966,45 @@ placed in `logic.places`; spawned or destroyed at runtime it rebuilds the pathfi
 and then. Its top should be within 2.5 m of the ground it meets: an edge that touches walkable ground opens (with a
 ramp when the step is over 0.45 m), and the map's invisible walls or terrain water under it give way; every other
 edge gets an invisible rail, so units can't step off into the river. Let a bridge overlap each bank by 1 m or more,
-and make it over 8 m wide for large enemies (they keep 4 m from every edge).
+and make it over 8 m wide for large enemies (they keep 4 m from every edge). A deck placed lower than the ground it
+spans (e.g. with `at` over a river, whose bed is lower) is raised to rest on the highest ground under it; a place over
+open water floats on the surface (a raft).
+
+**Riding.** Whatever stands on a walkable body's top moves with it: the king and units are carried by a deck on a
+mover path, a spinning one, a teleported raft, a lift whose path climbs (`"path": [[x, 0, z], [x, 6, z]]`) or a
+walkable part linked to a moving unit. Pathing units are carried too but snap back to the ground's paths when they walk,
+so give riders `command hold` (troops) or `setMovement hold`: their hold point moves with the deck. Movers with `pose`s snap between poses (their poses are
+pre-scanned for paths) and carry riders at the snap.
+
+**Surfaces follow their area**: one placed `"active": false` and enabled later starts stopping units then, disabled it
+stops, and a moved or turned area re-tags where it is (`paths` and `paths --between` don't model surfaces; test them
+with a walking unit).
+
+### 12.7a Light, darkness, facing and shape at runtime
+
+- **Darkness.** `{"do": "lighting", "brightness": 0.15, "fade": 3, "for": 25}` darkens the whole level (an eclipse by
+  day); `"color": "#ff9060"` tints it; `"phase": "night"` makes day look like the game's night (`"day"` the reverse:
+  a flipped cycle); `"reset": true` brings the game's light back. It fades back after `for` (seconds, or `"night"` /
+  `"day"`) and at the level's end. Units and the king stay readable in the dark. There is no fog.
+- **Lights on things.** A `light` component (`{"range": 8, "color": "#ffc070"}`) on a template, place, unit or
+  attach, or `setLight` on anything at runtime (`{"do": "setLight", "target": "king", "range": 8}`; `remove`, `on`,
+  `for`). It follows its owner; with `cone` it's a beam along the owner's facing (`turn` aims it).
+- **Is it lit?** `daylight` is the level's own light (1 by day, about 0.34 at night, 0.15 in the eclipse above);
+  `lightAt(p)` adds every light reaching `p` (its intensity out to 80% of its range, fading to 0 at the range, so at night a light of intensity 1 lights its
+  whole range; a cone
+  only inside its width), capped at 1. `.lit` / the `lit` filter term mean 0.5 or more: by day everything, at night
+  only what's near a light (the castle's own night fire lights about 15 m round it). `targeting: ["enemy and lit"]`, `all('foe and not
+  lit')`, `"if": "not self.lit"`.
+- **Facing.** `.facing` (0 = north, 90 = east) is where it looks; a walking unit's follows its model. `turn` sets it:
+  `{"do": "turn", "target": "@beam", "toward": "king", "speed": 90}` (or `facing`, `by`). A turned body takes its
+  area, drawn outline, surface and solid footprint with it; a unit turns its model (and turns back when it walks).
+- **Shape.** `setShape` changes an area at runtime (`"angle": 120` widens a sector, `"radius": 12`, `"shape":
+  "rect", "width": 6, "depth": 3`, `points`), redrawing it and moving its membership and surface; `"part": "body"`
+  resizes a body's solid footprint. `for` puts the old shape back.
+- **Recipe: a lighthouse.** One entity: `{"kind": "area", "area": {"shape": {"sector": {"radius": 40, "angle":
+  60}}, "show": "fill", "color": "#fff3a0"}, "light": {"cone": 60, "range": 40}, "mover": {"spin": 45}}`. Widen it
+  with `setShape` `angle` + `setLight` `cone`; aim it with `signal stop` (the mover) + `turn toward`; who's in it is
+  `in:@beam` or, at night, `lit`.
 
 ### 12.8 Statuses
 
@@ -972,7 +1071,9 @@ Recipes: a custom win (hold a hill, escort a wagon): `victory: rules` + a rule t
 does `endLevel lose` on `waveCleared` of the last night if the goal wasn't met. A different vital object: `defeat:
 rules` (or `castle: hidden`) + `{"when": {"on": "death", "of": "#wagon"}, "do": [{"do": "endLevel", "result":
 "lose"}]}`. A spawner that would breed forever: `endNight` when the wave is dead, `survivors: stay`. Day/night swap:
-`combat: "isNight or $flipped"`, `build: "isDay or $flipped"`, raiders spawned by day with `spawn`/`spawnGroup`.
+`combat: "isNight or $flipped"`, `build: "isDay or $flipped"`, raiders spawned by day with `spawn`/`spawnGroup`, and
+the light flipped too: `{"do": "lighting", "phase": "night", "fade": 3}` in the flipped `day` rule, `"phase": "day"` in
+its `dusk`/`nightStart` rule, and `{"do": "lighting", "reset": true}` when the cycle flips back (12.7a).
 `palace.py game cmd logic-game` prints the rules as the level sees them now.
 
 ### 12.10 Presets
@@ -1003,7 +1104,7 @@ number). Errors in a preset's rules are reported at the place that uses it.
 | `remove_rule` | `on`, `id` |
 | `wire` | `from` (an `on` value), `event` (default `interact`), `to` (a place id/name or attach name), `input` (signal), `value`, `delay`, `do` (the target's listener, for an input that isn't built in) |
 | `var` | `name`, `value` (a level variable), or `on` + `name` + `value` (an entity default) |
-| `attach` | `key`, `name`, `labels`, `vars`, `statuses`, `targeting` |
+| `attach` | `key`, `name`, `labels`, `vars`, `statuses`, `targeting`, `light` |
 | `king_action` | `id`, `name`, `when`, `cooldown`, `uses` |
 | `hud` | `id`, `text`, `icon`, `visible` |
 | `logic` | `seed`, `caps`, `game` (merged rule by rule; `null` puts one back to vanilla) |
@@ -1024,6 +1125,9 @@ with `{"op": "rule", "on": "unit:<id>", ...}`.
      `logic do '{"do":"spawn","entity":"necromancer","at":"vec(-4,-14)"}'`.
    - `logic fire <signal> [to]`, `logic raise <event> <on> [other] [name] [value]` (selector arguments without spaces),
      `logic set <var> <expr>`, `logic king <1-3>`.
+   - `game cmd "logic-l2 interact <@name|id> [frames]"` makes the king use an interactable for real (focus, press,
+     hold: costs and `pay` are paid or refused); `logic raise interact ...` only fires the event. `game cmd
+     "logic-links"` lists linked parts (parent, offset, how far from their slot).
 3. Test a mechanic deliberately: spawn what it needs with `logic do`, wait, assert with `logic eval`.
 
 **Testing helpers and traps.**
@@ -1071,14 +1175,15 @@ Write one per mechanic you want to keep working, next to your ops, and re-run it
 
 - Vanilla arrows in flight aren't affected by `drift` or `timeScale` (Builder projectiles are).
 - Per-unit walkability is by surfaces (above), not by terrain: a "ladder" is an area surface only some units may
-  path through. Walkable movers snap between poses; they don't carry units while gliding. Terrain height doesn't
-  change at runtime.
+  path through (or `terrain block`). Gliding walkable movers carry riders, but the paths don't glide with them.
 - Three teams; vanilla units never attack `neutral` things (Builder targeting can). A weapon hurts its wielder's
   foes whatever side it was made for: a `neutral` unit's vanilla swing hurts whatever its targeting picks, and a
   copied or stolen weapon hurts the new owner's foes.
+- A rigid part is placed every frame, not simulated: it goes wherever its parent goes. A template's parts come back
+  from a savestate rebuilt (full hp); links made by `link` are kept.
 - Game tags are a fixed set; your own labels work through Builder targeting and filters.
 - The castle can be hidden (`logic.game.castle`) but not moved at runtime; place it where the level needs it.
-- No new scenes, lighting or arbitrary code. Pending `wait`s and Builder projectiles in flight aren't kept by
+- No new scenes, fog or arbitrary code (light: 12.7a). Pending `wait`s and Builder projectiles in flight aren't kept by
   savestates; keep state that matters in variables.
 - No world queries beyond entities: expressions can't ask for the ground height at a point (`vec(x, z).y` is 0, not
   the ground), whether a point is walkable, the terrain material under it, or how lit it is. Track such state yourself
@@ -1126,7 +1231,26 @@ is:spore') < 40", "do": [{"do": "spawn", "entity": "=self.template", "at": "poin
 
 **Drawbridge on a lever**: a prop template with `"mover": {"pose": {"up": {"offset": [0, 4, 0]}, "down": {}}}` placed as
 `bridge`; a lever: `{"op": "place", "id": "lever", "preset": "lever", "with": {"signal": "up", "to": "@bridge"}, "at":
-[14, -6]}`; and on the bridge `{"when": "dusk", "do": [{"do": "signal", "name": "down", "to": "self"}]}`.
+[14, -6]}`; and on the bridge `{"when": "dusk", "do": [{"do": "signal", "name": "down", "to": "self"}]}`. For a
+crossing over water, give the bridge `"body": {"box": [12, 14], "height": 0.4, "walkable": true}` (long enough to
+overlap each bank by a metre or more) and switch it with `enable`/`disable`: on, it opens the route over the moat; off,
+the route goes round (and a rule can `kill` `all('enemy and unit and in:@deck')` first).
+
+**What changes where units can go at runtime**: `terrain` (heights, block, water, ice, water level), solid bodies
+(`enable`/`disable`, `teleport`, movers), walkable bodies (`enable`/`disable`, spawned or destroyed) and area surfaces
+(`enable`/`disable`, moved). All of them update the paths live.
+
+**Rising tide**: `{"when": "dawn", "do": [{"do": "addVar", "name": "$tide", "value": 1}, {"do": "terrain", "op":
+"waterLevel", "level": "$tide", "over": 3}]}` (low ground joined to the sea floods; enemies path round it). A slot
+under the new level: `"if": "@h1.y < $tide"` or `waterDepth(@h1) > 0` (once the water has spread).
+
+**Earthquake**: an area place `fault` along the crack; `{"do": "terrain", "op": "lower", "in": "@fault", "amount": 7,
+"softness": 0, "over": 1.5}` opens a real chasm, and a walkable bridge spawned over it (`"at": "vec(x, z)"`, the deck
+rests on the banks) reconnects the lane.
+
+**Frozen lake**: terrain water placed with the `water` op; on the lake's area `{"when": "dusk", "do": [{"do":
+"terrain", "op": "freeze", "in": "self"}]}`, `{"when": "dawn", "do": [{"do": "terrain", "op": "thaw", "in": "self"}]}`,
+and to break it `{"do": "kill", "target": "all('unit and in:self')"}` then `thaw`.
 
 **Aura**: a status `{"id": "warded", "duration": 1.2, "mods": {"damageTaken": {"mult": 0.7}}}` and on the bearer
 `{"when": {"on": "every", "seconds": 1}, "do": [{"do": "applyStatus", "status": "warded", "target": "all('ally and unit', 6)"}]}`.
@@ -1174,6 +1298,29 @@ jumping back).
 
 **Day/night shapeshifter**: `{"when": "dusk", "do": [{"do": "replace", "with": "werewolf", "keep": ["hp", "vars"]}]}`, and
 the mirror rule at `dawn` on the werewolf.
+
+**Colossus with weak points** (parts on a walking unit; the body itself shrugs off hits):
+
+```jsonc
+{"op": "entity", "id": "weak-point", "kind": "prop", "team": "enemy", "visual": {"mesh": "mesh:Rock A", "meshScale": 0.4, "tint": "#ff5030"},
+ "body": {"radius": 0.8, "height": 1.2, "hittable": true, "hp": 60}}
+{"op": "unit", "id": "colossus", "base": "vanilla:E Ogre", "visuals": {"scale": 2.2}, "stats": {"maxHp": 600}, "statuses": ["towering"],
+ "parts": [{"entity": "weak-point", "name": "left", "offset": [-1.6, 0.5, 0], "damageToParent": 3},
+           {"entity": "weak-point", "name": "right", "offset": [1.6, 0.5, 0], "damageToParent": 3}]}
+```
+
+`towering` is a status with `damageTaken` × 0: only hits on the weak points (×3, credited to the real attacker)
+hurt it; when it dies, the weak points die with it.
+
+**Shieldbearer chain** (links that walk in file and share one pool): on the link template, `"movement": {"mode":
+"follow", "leader": "self.parent", "spacing": 1.6}` and a `spawn` rule on the head that spawns the next link with
+`then: [{"do": "link", "target": "spawned", "to": "self", "follow": "none", "onParentDeath": "drop",
+"damageToGroup": 1}]`. Every hit is split over the live chain; killing a middle link drops the links behind it, whose
+first one, without a leader, walks on as a new head.
+
+**Bribe a unit with an item**: on a unit template, `"interact": {"prompt": "Give {cost}", "pay": [{"var": "$bread",
+"amount": 1, "label": "bread"}], "when": "day"}` and a rule `interact → convert team player`. Without bread the king
+gets "Not enough: 1 bread needed" and nothing happens.
 
 **Toll gate**: a door place with `"interact": {"prompt": "Pay {cost} to open", "cost": 5, "when": "day"}` and rules
 `interact → signal open to self`, `dusk → signal closed to self`.

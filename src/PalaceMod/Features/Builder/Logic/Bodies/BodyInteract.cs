@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
@@ -8,6 +9,9 @@ using UnityEngine;
     paid coin by coin while the key is held, on a copy of the game's coin-slot display (CostDisplay), and `interact`
     (other = the king) fires once it's full. `when`: day | night | always. `repeat: false` makes it single-use.
     `cost` and `prompt` are re-evaluated whenever the king focuses it ("=expr"; {expr} in the prompt).
+    `pay` (on the block or a choice): [{ "var": "$bread", "amount": 1, "label": "bread" }]: level variables paid as well
+    as (or instead of) gold, all at once on the press; refused with a notice (and `interactRefused`) when any is
+    short. {cost} in the prompt then reads "2 gold + 1 bread". Units carry the block too (LogicLinksManager).
     Inputs: lock, unlock.
 */
 namespace PalaceMod.Builder.Logic.Bodies
@@ -48,6 +52,7 @@ namespace PalaceMod.Builder.Logic.Bodies
         public bool Used { get => used; set => used = value; }
         private bool used, focused, holding, paid;
         private int cost;
+        private List<PayItem> pays = [];
         private string prompt;
         private CostDisplay display;
 
@@ -64,6 +69,65 @@ namespace PalaceMod.Builder.Logic.Bodies
         }
 
         private string When => (string)Def["when"] ?? "always";
+
+        /// <summary>One `pay` item, evaluated: a level variable and how much of it.</summary>
+        public readonly struct PayItem
+        {
+            public readonly string Var, Label;
+            public readonly double Amount;
+            public PayItem(string v, double a, string l) { Var = v; Amount = a; Label = l; }
+        }
+
+        public List<PayItem> Pays(JToken pay)
+        {
+            var list = new List<PayItem>();
+            if (pay is not JArray a) return list;
+            foreach (var t in a)
+            {
+                if (t is not JObject o || (string)o["var"] is not { Length: > 1 } name || !name.StartsWith("$")) continue;
+                var amt = o["amount"];
+                double n = amt == null ? 1 : amt.Type is JTokenType.Integer or JTokenType.Float ? (double)amt : amt.Type == JTokenType.String ? EvalNumber((string)amt, Entity) ?? 0 : 0;
+                if (n <= 0) continue;
+                list.Add(new PayItem(name, n, (string)o["label"] ?? name.Substring(1)));
+            }
+            return list;
+        }
+
+        private static double Have(string var)
+        {
+            var w = LogicWorld.Current;
+            if (w == null) return 0;
+            var v = w.GetVar(w.Level, var);
+            return v.Kind is ValueKind.Number or ValueKind.Bool ? v.Num : 0;
+        }
+
+        /// <summary>"2 gold + 1 bread"; with gold only, the number alone (as {cost} always read).</summary>
+        public static string CostText(int gold, List<PayItem> pays, bool goldWord = false)
+        {
+            if (pays == null || pays.Count == 0) return goldWord ? $"{gold} gold" : gold.ToString();
+            var parts = new List<string>();
+            if (gold > 0) parts.Add($"{gold} gold");
+            foreach (var p in pays) parts.Add($"{p.Amount:0.##} {p.Label}");
+            return string.Join(" + ", parts);
+        }
+
+        /// <summary>Pay gold and items at once; false (with a notice) if anything is short.</summary>
+        private bool PayAll(PlayerInteraction player, int gold, List<PayItem> pays)
+        {
+            var shortOf = new List<string>();
+            if (gold > 0 && player.Balance < gold) shortOf.Add($"{gold} gold");
+            foreach (var p in pays) if (Have(p.Var) < p.Amount - 1e-9) shortOf.Add($"{p.Amount:0.##} {p.Label}");
+            if (shortOf.Count > 0)
+            {
+                Notify.Show($"Not enough: {string.Join(", ", shortOf)} needed", NotifyKind.Warning, 3f, "builder-interact");
+                BodyDev.Raise("interactRefused", Entity, LogicGame.EntityOf(player.gameObject), gold, transform.position.ToVec(), string.Join(", ", shortOf));
+                return false;
+            }
+            if (gold > 0) player.SpendCoins(gold);
+            var w = LogicWorld.Current;
+            foreach (var p in pays) w?.SetVar(w.Level, p.Var, Value.Number(Have(p.Var) - p.Amount));
+            return true;
+        }
 
         public int Price(JToken c)
         {
@@ -91,15 +155,16 @@ namespace PalaceMod.Builder.Logic.Bodies
             cost = 0;
             if (c != null && c.Type is JTokenType.Integer or JTokenType.Float) cost = Mathf.Max(0, (int)c);
             else if (c?.Type == JTokenType.String) cost = Mathf.Max(0, (int)(EvalNumber((string)c, Entity) ?? 0));
-            string p = (string)Def["prompt"] ?? (cost > 0 ? "Pay {cost}" : "Interact");
-            prompt = EvalText(p.Replace("{cost}", cost.ToString()), Entity);
+            pays = Pays(Def["pay"]);
+            string p = (string)Def["prompt"] ?? (cost > 0 || pays.Count > 0 ? "Pay {cost}" : "Interact");
+            prompt = EvalText(p.Replace("{cost}", CostText(cost, pays)), Entity);
         }
 
         public override void Focus(PlayerInteraction player)
         {
             focused = true;
             Refresh();
-            if (cost > 0 && CanBeInteractedWith)
+            if (cost > 0 && pays.Count == 0 && CanBeInteractedWith)
             {
                 display ??= MakeDisplay();
                 if (display != null) { display.gameObject.SetActive(true); display.UpdateDisplay(cost); }
@@ -124,22 +189,15 @@ namespace PalaceMod.Builder.Logic.Bodies
             Refresh();
             paid = false;
             if (Def["choices"] is JArray choices && choices.Count > 0) { BodyChoices.Present(this, choices, player); return; }
+            if (pays.Count > 0) { if (PayAll(player, cost, pays)) Fire(player); return; }
             if (cost <= 0) { Fire(player); return; }
             holding = true;
         }
 
         /// <summary>A choice was picked in the game's choice popup: pay its cost (all at once), then fire.</summary>
-        public void Chosen(PlayerInteraction player, string id, int price)
+        public void Chosen(PlayerInteraction player, string id, int price, List<PayItem> choicePays = null)
         {
-            if (price > 0)
-            {
-                if (player.Balance < price)
-                {
-                    Notify.Show($"Not enough gold ({price} needed)", NotifyKind.Warning, 3f, "builder-interact");
-                    return;
-                }
-                player.SpendCoins(price);
-            }
+            if (!PayAll(player, price, choicePays ?? [])) return;
             used = true;
             BodyDev.Raise("interact", Entity, LogicGame.EntityOf(player.gameObject), price, transform.position.ToVec(), id);
             if (focused) Refresh();

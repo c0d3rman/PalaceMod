@@ -1013,6 +1013,17 @@ class Ops:
             return None
         return self.fallback_y(level, x, z)
 
+    def water_y(self, level, x, z):
+        """The terrain's water surface over a water cell at a point, else None."""
+        t = level.get("terrain")
+        if not t or not t.get("water"):
+            return None
+        T = self.terrain_ro(level)
+        i, j = int((x - T.ox) // T.cell), int((z - T.oz) // T.cell)
+        if not (0 <= i < T.w and 0 <= j < T.h) or not T.water[j * T.w + i]:
+            return None
+        return T.y + T.water_level
+
     def fallback_y(self, level, x, z):
         """A height where the level may have no ground (props, flyer-only lines): the host's sampled ground, else the
         castle's height."""
@@ -1953,6 +1964,9 @@ class Ops:
                 d["pos"] = self.pos(lv, op, strict=False)
         else:
             d["pos"] = self.pos(lv, op, strict=False)
+            wy = self.water_y(lv, d["pos"][0], d["pos"][2]) if op.get("pos") is None else None
+            if wy is not None and wy > d["pos"][1]:
+                d["pos"][1] = round(wy, 2)   # over water a place floats on the surface (a raft, a bridge's deck)
         return f"place {d['id']} " + self._upsert(ensure(self.logic(op), "places", []), d)
 
     def op_remove_place(self, op):
@@ -2071,12 +2085,13 @@ class Ops:
 
     def op_attach(self, op):
         """{"op":"attach","key":"slot:Tower 3"|"add:<id>"|"prop:<id>"|"line:<name>"|"castle","name":"northTower",
-        "labels":["lit"],"vars":{},"statuses":[]}: names, labels and vars on an object the level already has."""
+        "labels":["lit"],"vars":{},"statuses":[],"light":{"range":8}}: names, labels, vars and a light on an object the level
+        already has."""
         key = op["key"]
         if not (key == "castle" or key.startswith(self.ATTACH_PREFIXES)):
             raise Fail("key is slot:<host slot name> | add:<added slot id> | prop:<prop id> | line:<spawn line> | castle")
         a = ensure(ensure(self.logic(op), "attach", {}), key, {})
-        for f in ("name", "labels", "vars", "statuses", "targeting"):
+        for f in ("name", "labels", "vars", "statuses", "targeting", "light"):
             if op.get(f) is not None:
                 a[f] = op[f]
         return f"attach {key}" + (f" as @{a['name']}" if a.get("name") else "")

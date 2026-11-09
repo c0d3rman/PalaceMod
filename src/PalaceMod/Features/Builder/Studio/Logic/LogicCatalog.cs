@@ -90,7 +90,7 @@ namespace PalaceMod.Builder.Studio.Logic
     internal static class LogicCatalog
     {
         public static readonly string[] EventCategories = ["This", "Combat", "Time", "Night", "Nearby", "Areas", "Movement", "Buildings", "Gold", "King", "Signals", "Variables", "Level"];
-        public static readonly string[] ActionCategories = ["Make", "Health", "Stats", "Move", "Logic", "World", "Show", "End"];
+        public static readonly string[] ActionCategories = ["Make", "Health", "Stats", "Move", "Links", "Logic", "World", "Show", "End"];
 
         public static readonly List<EventUi> Events = [];
         public static readonly List<ActionUi> Actions = [];
@@ -154,6 +154,9 @@ namespace PalaceMod.Builder.Studio.Logic
             Ev("statusStart", "gains a status", "This", "A status starts on it.", other: "applier", value: "stacks", ps: ["status:status"]);
             Ev("statusEnd", "loses a status", "This", "A status ends (runs out or is removed).", other: "applier", value: "stacks", ps: ["status:status"]);
             Ev("statusTick", "status ticks", "This", "Every tick of a status it has.", other: "applier", value: "stacks", ps: ["status:status"]);
+            Ev("linked", "is linked to a parent", "This", "It becomes a part of another entity (link, a template's parts).", other: "parent");
+            Ev("unlinked", "is unlinked", "This", "It stops being a part (unlink, or its parent died and it dropped off).", other: "old parent");
+            Ev("interactRefused", "is refused (short of payment)", "King", "The king tried to use it without enough gold or items.", other: "king", value: "gold cost");
             Ev("targetChanged", "changes target", "Combat", "Its attack or move target changes.", other: "new target");
             Ev("built", "is built", "Buildings", "The player builds it (build slots).", value: "level", ps: ["level:number"]);
             Ev("upgraded", "is upgraded", "Buildings", "The player upgrades it.", value: "level", ps: ["level:number"]);
@@ -198,7 +201,14 @@ namespace PalaceMod.Builder.Studio.Logic
             Act("setMovement", "Change movement", "Move", "Change how {target} moves", "Replaces its movement block (for a while).", ["movement:json!*", "for:number"], targeted: true);
             Act("setTargeting", "Change targeting", "Move", "Change who {target} goes for", "Replaces or extends its target priorities.", ["targeting:json", "prepend:json", "remove:json", "for:number"], targeted: true);
             Act("taunt", "Taunt", "Move", "Make {target} attack {toward}", "Forces their aggro onto something.", ["toward:entity!*", "for:number=5*"], targeted: true);
+            Act("turn", "Turn", "Move", "Turn {target} toward {toward}{facing}{by}", "Faces a direction: aim a beam, a turret, an area (its shape turns too).",
+                ["toward:position*", "facing:number*", "by:number*", "speed:number"], targeted: true);
+            Act("setShape", "Reshape", "Move", "Reshape {target}: {shape} {radius}{angle}", "Changes an area's shape or size (outline, fill, surface follow) or a body's footprint.",
+                ["shape:choice(circle|rect|polygon|sector)*", "radius:number*", "angle:number*", "width:number", "depth:number", "points:json", "part:choice(area|body|both)", "for:expr"], targeted: true);
             Act("command", "Order troops", "Move", "Order {target} to {order}", "Player units, as the king's own commands.", ["order:choice(follow|hold|home)!*"], targeted: true);
+            Act("link", "Attach as a part", "Links", "Attach {target} to {to}", "Makes it a part of another entity: it moves with it, may pass on its damage, and follows it in death.",
+                ["to:entity!*", "offset:position", "rotY:number", "follow:choice(rigid|position|none)=rigid*", "onParentDeath:choice(die|drop|stay)=die", "damageToParent:number", "damageToGroup:number", "damageKept:number"], targeted: true);
+            Act("unlink", "Detach", "Links", "Detach {target}", "It stops being a part (with children: its parts drop off).", ["release:choice(drop|stay)=drop*", "children:bool"], targeted: true);
             Act("signal", "Send a signal", "Logic", "Send {name} to {to}", "Sends a named signal (with an optional number).", ["name:signal!*", "to:target=self*", "value:expr", "delay:number"], common: true);
             Act("setVar", "Set a variable", "Logic", "Set {name} to {value}", "Sets a level or entity variable.", ["name:var!*", "value:expr!*"], targeted: true, common: true);
             Act("addVar", "Add to a variable", "Logic", "Add {value} to {name}", "Adds to a number variable.", ["name:var!*", "value:expr=1!*"], targeted: true, common: true);
@@ -224,6 +234,10 @@ namespace PalaceMod.Builder.Studio.Logic
                 ["slot:entity!*", "op:choice(build|upgrade|knockOut|repair|demolish|lock|unlock|setCost|setIncome)=build!*", "value:number", "branch:number"], levelWide: true);
             Act("waves", "Change the nights", "World", "Nights: {op}", "Adds, removes or scales enemies of a night, or starts/ends one.",
                 ["op:choice(addSpawn|removeUnit|scaleCount|scaleHp|clearRemaining|startNight|endNight|skipNight)=addSpawn!*", "night:expr", "unit:template", "count:number", "interval:number", "delay:number", "line:text", "gold:number", "elite:bool", "value:number", "survivors:choice(remove|stay)"], levelWide: true);
+            Act("terrain", "Change the ground", "World", "Ground: {op}", "Raises, lowers, paints, blocks, floods, freezes or thaws the ground, or moves the water level, during play.",
+                ["op:choice(raise|lower|set|smooth|paint|block|unblock|water|dry|freeze|thaw|waterLevel)=lower!*", "at:position=self", "radius:number", "width:number", "length:number", "angle:number",
+                 "in:entity", "softness:number", "amount:number", "height:number", "material:choice(grass|highGrass|lowGrass|earth|sand|road|rock)", "level:expr",
+                 "flood:choice(connected|all|none)", "over:number"], levelWide: true);
             Act("endLevel", "End the level", "World", "End the level: {result}", "Wins or loses the run.", ["result:choice(win|lose)=win!*", "message:text"], levelWide: true);
             Act("effect", "Effect", "Show", "Effect {fx} at {at}", "Plays a game effect.", ["fx:fx!*", "at:position=self*", "scale:number"], common: true);
             Act("sound", "Sound", "Show", "Sound {sound}", "Plays a sound.", ["sound:sound!*", "at:position"]);
@@ -231,6 +245,10 @@ namespace PalaceMod.Builder.Studio.Logic
             Act("floatText", "Floating text", "Show", "Float \"{text}\" at {at}", "Text that rises from a spot.", ["text:text!*", "at:position=self*", "color:text"]);
             Act("setVisual", "Change look", "Show", "Change how {target} looks", "Tint, size, mesh, visibility, glow.", ["tint:text", "scale:number", "mesh:text", "visible:bool", "glow:bool", "for:number"], targeted: true);
             Act("hud", "HUD line", "Show", "HUD {id}: \"{text}\"", "Changes a line of the level's HUD.", ["id:text!*", "text:text*", "icon:text", "visible:condition"], levelWide: true);
+            Act("lighting", "Light the level", "Show", "Light: brightness {brightness} {phase} for {for}", "Darkens (an eclipse), tints, or turns day into night; reverts at the end or after for.",
+                ["brightness:number=0.2*", "color:text", "phase:choice(auto|day|sunset|night)*", "fade:number", "for:expr*", "reset:bool"], levelWide: true);
+            Act("setLight", "Light on it", "Show", "Light {target}: {range} m {color}", "Gives it a light that follows it (a torch, a beam with cone), or changes or removes it.",
+                ["color:text=#ffd890*", "range:number=8*", "intensity:number", "cone:number", "aim:number", "height:number", "flicker:number", "on:bool", "remove:bool", "for:expr"], targeted: true);
             Act("shake", "Shake", "Show", "Shake the camera", "Shakes the camera.", ["strength:number=1", "seconds:number=0.5"]);
             Act("marker", "Marker", "Show", "Mark {on}", "A screen-edge marker like the wave markers.", ["on:entity!*", "icon:text", "for:number"]);
             Act("destroy", "Destroy", "End", "Destroy {target}", "Removes it (death effects, optional coins).", ["effects:bool", "drops:bool", "silent:bool"], targeted: true, common: true);

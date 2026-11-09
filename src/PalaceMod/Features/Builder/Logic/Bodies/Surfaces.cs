@@ -31,11 +31,13 @@ namespace PalaceMod.Builder.Logic.Bodies
             public BuilderArea Area;      // the outline (an area component on the same entity)
             public NavmeshCut Cut;
             public bool Applied;
+            public Vector3[] LastOutline;  // where it was last tagged (world)
         }
 
         private static readonly Dictionary<string, uint> tags = [];
         private static readonly List<Surface> surfaces = [];
         private static bool dirty;
+        private static float nextMoveCheck;
 
         public static bool Any => surfaces.Count > 0;
 
@@ -75,7 +77,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             {
                 if (s.Cut != null) Object.Destroy(s.Cut);
                 surfaces.Remove(s);
-                Untag(s);
+                if (s.Applied && AstarPath.active != null) Untag(s);
             }
             dirty = true;
         }
@@ -108,28 +110,82 @@ namespace PalaceMod.Builder.Logic.Bodies
         /// <summary>Re-tag after cuts have been applied (call once a frame; cheap when nothing changed).</summary>
         public static void Tick()
         {
-            if (!dirty || AstarPath.active == null) return;
+            if (AstarPath.active == null) return;
+            // Moved, turned or rescaled since it was tagged (teleport, a mover, a spin, a shape change): re-tag, at most
+            // 4 times a second per surface (the graphs' cut rate).
+            if (Time.time >= nextMoveCheck)
+            {
+                nextMoveCheck = Time.time + 0.25f;
+                foreach (var s in surfaces)
+                {
+                    if (!s.Applied || s.Area == null || s.LastOutline == null) continue;
+                    var t = s.Area.transform;
+                    var o = s.Area.Shape.Outline();
+                    if (o.Length != s.LastOutline.Length) { Moved(s.Area); continue; }
+                    for (int i = 0; i < o.Length; i++)
+                        if ((t.TransformPoint(new Vector3(o[i].x, 0f, o[i].y)) - s.LastOutline[i]).sqrMagnitude > 0.25f) { Moved(s.Area); break; }
+                }
+            }
+            if (!dirty) return;
             dirty = false;
             var astar = AstarPath.active;
-            foreach (var s in surfaces) if (s.Cut != null) s.Cut.ForceUpdate();
+            // A switched-off area (placed `active: false`, or disabled by a rule) is no surface: its cut is off with its
+            // object, and its triangles go back to plain ground before the live surfaces are tagged again.
+            foreach (var s in surfaces) if (s.Cut != null && Live(s)) s.Cut.ForceUpdate();
             astar.navmeshUpdates.ForceUpdate();
             astar.FlushWorkItems();
-            foreach (var s in surfaces) Tag(s);
+            foreach (var s in surfaces) if (!Live(s) && s.Applied) { Untag(s); s.Applied = false; }
+            astar.FlushGraphUpdates();
+            foreach (var s in surfaces) if (Live(s)) { Tag(s); s.Applied = true; }
             astar.FlushGraphUpdates();
             ApplyToAll();
         }
 
+        private static bool Live(Surface s) => s.Area != null && s.Area.isActiveAndEnabled && (s.Area.Entity == null || s.Area.Entity.Enabled);
+
+        /// <summary>An area was switched on or off: re-tag (its surface comes or goes with it).</summary>
+        public static void Toggled(BuilderArea area)
+        {
+            if (surfaces.Any(s => s.Area == area)) dirty = true;
+        }
+
+        /// <summary>An area moved, turned or changed shape: re-tag where it was and where it is.</summary>
+        public static void Moved(BuilderArea area)
+        {
+            foreach (var s in surfaces.Where(s => s.Area == area))
+            {
+                if (s.Applied && s.LastOutline != null) UpdateAt(s.LastOutline, s.Area.Shape.Points == null, 0);
+                s.Applied = false;
+                dirty = true;
+            }
+        }
+
         /// <summary>After a rescan the graphs are new: tag again.</summary>
-        public static void Rescanned() { if (Any) dirty = true; }
+        public static void Rescanned()
+        {
+            if (!Any) return;
+            foreach (var s in surfaces) s.Applied = false;
+            dirty = true;
+        }
 
         private static void Tag(Surface s) => Update(s, s.Tag);
-        private static void Untag(Surface s) => Update(s, 0);
+        private static void Untag(Surface s)
+        {
+            if (s.LastOutline != null) UpdateAt(s.LastOutline, s.Area == null || s.Area.Shape?.Points == null, 0);
+            else Update(s, 0);
+        }
 
         private static void Update(Surface s, uint tag)
         {
             if (s.Area == null || AstarPath.active == null) return;   // the level is unloading: no graphs left to untag
             var t = s.Area.transform;
             var pts = s.Area.Shape.Outline().Select(p => t.TransformPoint(new Vector3(p.x, 0f, p.y))).ToArray();
+            if (tag != 0) s.LastOutline = pts;
+            UpdateAt(pts, s.Area.Shape.Points == null, tag);
+        }
+
+        private static void UpdateAt(Vector3[] pts, bool convex, uint tag)
+        {
             var b = new Bounds(pts[0], Vector3.zero);
             foreach (var p in pts) b.Encapsulate(p);
             b.size = new Vector3(b.size.x, 400f, b.size.z);
@@ -139,7 +195,7 @@ namespace PalaceMod.Builder.Logic.Bodies
                 modifyTag = true,
                 setTag = tag,
                 graphMask = BodyNav.GroundMask(),
-                shape = new GraphUpdateShape(pts, convex: s.Area.Shape.Points == null, Matrix4x4.identity, 0f),
+                shape = new GraphUpdateShape(pts, convex: convex, Matrix4x4.identity, 0f),
             };
             AstarPath.active.UpdateGraphs(guo);
         }
@@ -195,7 +251,7 @@ namespace PalaceMod.Builder.Logic.Bodies
         /// <summary>A walkable mover reached a pose (its surface moved with it).</summary>
         public static void PoseReached(BuilderMover m)
         {
-            if (surfaces.Any(s => s.Area != null && s.Area.gameObject == m.gameObject)) dirty = true;
+            foreach (var s in surfaces.Where(s => s.Area != null && s.Area.gameObject == m.gameObject).ToList()) Moved(s.Area);
             Walkables.PoseReached(m);
         }
 

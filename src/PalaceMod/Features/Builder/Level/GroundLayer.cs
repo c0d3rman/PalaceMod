@@ -38,7 +38,7 @@ namespace PalaceMod.Builder.Level
         private sealed class Chunk
         {
             public int X0, Z0, X1, Z1;   // cells, exclusive end
-            public Mesh Ground, Blocks, Water, Marks, Paint, Walls;
+            public Mesh Ground, Blocks, Water, Marks, Paint, Walls, Ice;
             public MeshFilter GroundFilter, BlocksFilter, WaterFilter;
             public MeshRenderer MarksRenderer;
             public MeshCollider GroundCollider, BlocksCollider, WallsCollider;
@@ -265,6 +265,17 @@ namespace PalaceMod.Builder.Level
             return true;
         }
 
+        /// <summary>The water surface's height at a point over the terrain's open (unfrozen) water, when it is.</summary>
+        public static bool TryWater(Vector3 p, out float y)
+        {
+            y = 0f;
+            if (!Active || !Grid.CellAt(p.x, p.z, out int cx, out int cz)) return false;
+            int i = Grid.CellIndex(cx, cz);
+            if (!Grid.Water[i]) return false;
+            y = Grid.Y + Grid.WaterLevel + (Grid.Frozen[i] ? IceLift : 0f);
+            return true;
+        }
+
         /// <summary>Where a ray from the camera meets the terrain's own ground (exact over cliffs, unlike a ground-plane
         /// guess), when it does.</summary>
         public static bool TryRaycast(Ray ray, out Vector3 point)
@@ -468,6 +479,8 @@ namespace PalaceMod.Builder.Level
                     if (m != null) UnityEngine.Object.Destroy(m);
             materials = null;
             sources = null;
+            if (iceMaterial != null) UnityEngine.Object.Destroy(iceMaterial);
+            iceMaterial = null;
         }
 
         private static Chunk MakeChunk(int x0, int z0, int x1, int z1)
@@ -512,6 +525,16 @@ namespace PalaceMod.Builder.Level
                 var wr = w.AddComponent<MeshRenderer>();
                 wr.sharedMaterial = water;
                 wr.shadowCastingMode = ShadowCastingMode.Off;
+
+                // Frozen water (the `terrain` action's freeze) is drawn as a pale sheet just over the ground, which the freeze
+                // has filled up to the water level there (TerrainVerbs.FillIce): the ground carries the king and the graphs.
+                var ice = Part($"ice {x0 / ChunkCells},{z0 / ChunkCells}", 0);
+                c.Ice = NewMesh(ice.name);
+                ice.AddComponent<MeshFilter>().sharedMesh = c.Ice;
+                var ir = ice.AddComponent<MeshRenderer>();
+                ir.sharedMaterial = IceMaterial();
+                ir.shadowCastingMode = ShadowCastingMode.Off;
+                ir.receiveShadows = true;
             }
             // Named like the layout props' blockers, so the path check sees a spawn walled in by them.
             var b = Part("blocker", ObstacleLayerIndex);
@@ -562,6 +585,8 @@ namespace PalaceMod.Builder.Level
             var wuvs = new List<Vector2>();
             var kv = new List<Vector3>();
             var kt = new List<int>();
+            var iverts = new List<Vector3>();
+            var itris = new List<int>();
             float wy = g.Y + g.WaterLevel;
             bool anyWater = g.AnyWater;
             var steepCells = new bool[n];
@@ -605,7 +630,13 @@ namespace PalaceMod.Builder.Level
                     // Water: its cells, and the cells round them that rise out of it (the bank hides the plane's edge,
                     // so the shore is where the slope meets the water, not a cell edge).
                     int ci = g.CellIndex(x, z);
-                    if (anyWater && (g.Water[ci] || (Mathf.Max(h00, h10, h01, h11) > g.WaterLevel && Mathf.Min(h00, h10, h01, h11) < g.WaterLevel && NextToWater(g, x, z))))
+                    if (g.Water[ci] && g.Frozen[ci])
+                    {
+                        int ib = iverts.Count;
+                        iverts.AddRange([new Vector3(x0, wy + IceLift, z0), new Vector3(x1, wy + IceLift, z0), new Vector3(x0, wy + IceLift, z1), new Vector3(x1, wy + IceLift, z1)]);
+                        itris.AddRange([ib, ib + 2, ib + 3, ib, ib + 3, ib + 1]);
+                    }
+                    else if (anyWater && (g.Water[ci] || (Mathf.Max(h00, h10, h01, h11) > g.WaterLevel && Mathf.Min(h00, h10, h01, h11) < g.WaterLevel && NextToWater(g, x, z))))
                     {
                         int wb = wverts.Count;
                         wverts.AddRange([new Vector3(x0, wy, z0), new Vector3(x1, wy, z0), new Vector3(x0, wy, z1), new Vector3(x1, wy, z1)]);
@@ -631,6 +662,12 @@ namespace PalaceMod.Builder.Level
             c.Water.SetTriangles(wtris, 0);
             c.Water.RecalculateNormals();
             c.Water.RecalculateBounds();
+
+            c.Ice.Clear();
+            c.Ice.SetVertices(iverts);
+            c.Ice.SetTriangles(itris, 0);
+            c.Ice.RecalculateNormals();
+            c.Ice.RecalculateBounds();
 
             c.Walls.Clear();
             c.Walls.SetVertices(kv);
@@ -764,7 +801,7 @@ namespace PalaceMod.Builder.Level
                 for (int dx = -1; dx <= 1; dx++)
                 {
                     int nx = x + dx, nz = z + dz;
-                    if (nx >= 0 && nz >= 0 && nx < g.W && nz < g.H && g.Water[g.CellIndex(nx, nz)]) return true;
+                    if (nx >= 0 && nz >= 0 && nx < g.W && nz < g.H && g.OpenWater(g.CellIndex(nx, nz))) return true;
                 }
             return false;
         }
@@ -827,7 +864,31 @@ namespace PalaceMod.Builder.Level
             }
         }
 
-        private static Material marksMaterial;
+        private static Material marksMaterial, iceMaterial;
+        private const float IceLift = 0.2f;   // over the filled ground (water level + 0.05) and every paint outline on it (up to ~0.1 m)
+        /// <summary>The ice's colour (pale blue-white), shaded by the level's ground material.</summary>
+        public static readonly Color IceColour = new(0.80f, 0.91f, 0.97f, 1f);
+
+        private static Material IceMaterial()
+        {
+            if (iceMaterial != null) return iceMaterial;
+            var src = materials?.ElementAtOrDefault((int)GroundMaterial.Sand) ?? materials?.FirstOrDefault(m => m != null);
+            iceMaterial = src != null ? new Material(src) : new Material(Shader.Find("Standard"));
+            iceMaterial.name = LayoutScene.AddedPrefix + "ice";
+            // The toon shader shades with the scheme's dim colours too: tint each by the ice colour, keeping the source's
+            // ratio to its base colour (so the ice is shaded like the ground under the same light).
+            var baseC = src != null && src.HasProperty("_BaseColor") ? src.GetColor("_BaseColor") : Color.white;
+            foreach (var prop in SchemeColours)
+            {
+                if (!iceMaterial.HasProperty(prop) || prop == "_OutlineColor") continue;
+                var c = iceMaterial.GetColor(prop);
+                Color ratio = new(baseC.r > 0.01f ? c.r / baseC.r : 1f, baseC.g > 0.01f ? c.g / baseC.g : 1f, baseC.b > 0.01f ? c.b / baseC.b : 1f, 1f);
+                iceMaterial.SetColor(prop, prop == "_BaseColor" ? IceColour : new Color(IceColour.r * ratio.r, IceColour.g * ratio.g, IceColour.b * ratio.b, c.a));
+            }
+            if (!iceMaterial.HasProperty("_BaseColor")) iceMaterial.color = IceColour;
+            if (iceMaterial.HasProperty("_BaseMap")) iceMaterial.SetTexture("_BaseMap", null);
+            return iceMaterial;
+        }
 
         private static Material MarksMaterial()
         {
@@ -871,7 +932,7 @@ namespace PalaceMod.Builder.Level
         private static bool IsBlocked(TerrainGrid g, int x, int z)
         {
             int i = g.CellIndex(x, z);
-            return g.Blocked[i] || g.Water[i];
+            return g.Blocked[i] || g.OpenWater(i);
         }
 
         private static void AddBox(List<Vector3> v, List<int> t, Vector3 min, Vector3 max)

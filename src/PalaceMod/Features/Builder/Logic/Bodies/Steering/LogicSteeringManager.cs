@@ -484,6 +484,13 @@ namespace PalaceMod
                 float baseSpeed = en != null ? en.movementSpeed : pu.movementSpeed;
                 // a moveTo speed still feels slows and haste (the stat factor), like the game's own speed field
                 float? orderSpeed = st.MoveTo?.Speed * (float)StatsService.Instance.Factor(st.Entity, "moveSpeed");
+                // follow: keep the path on the leader's moving slot, and hurry when left behind
+                if (orderSpeed == null && st.FollowDest is Vector3 fd && st.FollowLeader is { } leader && leader.Alive)
+                {
+                    var slot = SteerMovement.FollowSlot(st, leader, pos);
+                    if (SteerMovement.Flat(slot, fd) > 0.4f) SteerMovement.Repath(st);
+                    if (SteerMovement.Flat(pos, slot) > Mathf.Max(1.5f, st.Move.Spacing)) orderSpeed = baseSpeed * Mathf.Max(1f, st.Move.CatchUp);
+                }
                 float speed = orderSpeed ?? baseSpeed;
                 if (st.Move.Mode == "direct")
                 {

@@ -39,10 +39,11 @@ namespace PalaceMod.Builder.Logic.Bodies
 
         private void OnDestroy() => Surfaces.Remove(this);
 
-        private void OnEnable() { All.Add(this); Redraw(); }
+        private void OnEnable() { All.Add(this); Redraw(); Surfaces.Toggled(this); }
         private void OnDisable()
         {
             All.Remove(this);
+            Surfaces.Toggled(this);
             // Switched off: everything inside leaves.
             if (Entity != null && LogicWorld.Current != null)
             {
@@ -110,10 +111,19 @@ namespace PalaceMod.Builder.Logic.Bodies
         public float Radius = -1f;
         public Vector2 Size;
         public Vector2[] Points;
+        /// <summary>A sector (cone) along +Z: its radius and width in degrees (Points then hold its outline).</summary>
+        public float SectorRadius = -1f, SectorAngle = -1f;
+
+        public static AreaShape Sector(float radius, float angle) => new()
+        {
+            SectorRadius = radius, SectorAngle = angle,
+            Points = LightMath.SectorOutline(radius, angle).Select(q => new Vector2((float)q.x, (float)q.z)).ToArray(),
+        };
 
         public static AreaShape Parse(JObject s)
         {
             if (s == null) return null;
+            if (s["sector"] is JObject sec) return Sector(Mathf.Max(0.1f, sec.Value<float?>("radius") ?? 6f), Mathf.Clamp(sec.Value<float?>("angle") ?? 60f, 1f, 360f));
             if (s["circle"] is JObject c) return new AreaShape { Radius = c.Value<float?>("radius") ?? 3f };
             if (s["rect"] is JObject r && r["size"] is JArray size && size.Count == 2) return new AreaShape { Size = new Vector2((float)size[0], (float)size[1]) };
             if (s["polygon"] is JObject p && p["points"] is JArray pts && pts.Count >= 3)
@@ -128,6 +138,7 @@ namespace PalaceMod.Builder.Logic.Bodies
         public bool Contains(Vector3 local, float scale)
         {
             var p = new Vector2(local.x, local.z) * scale;
+            if (SectorAngle > 0) return LightMath.SectorContains(p.x, p.y, SectorRadius, SectorAngle);
             if (Radius > 0) return p.sqrMagnitude <= Radius * Radius;
             if (Points != null) return InPolygon(p, Points);
             return Mathf.Abs(p.x) <= Size.x / 2f && Mathf.Abs(p.y) <= Size.y / 2f;

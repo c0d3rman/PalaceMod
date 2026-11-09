@@ -143,6 +143,8 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("statuses")] public List<string> Statuses { get; set; }
         [JsonProperty("targeting")] public List<TargetingDef> Targeting { get; set; }
         [JsonProperty("rules")] public List<RuleDef> Rules { get; set; }
+        /// <summary>A light on the object (a lantern on a tower, a fire on the castle).</summary>
+        [JsonProperty("light")] public LightDef Light { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
@@ -304,6 +306,10 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("area")] public AreaDef Area { get; set; }
         [JsonProperty("pickup")] public PickupDef Pickup { get; set; }
         [JsonProperty("interact")] public InteractDef Interact { get; set; }
+        /// <summary>A light that follows it (docs/builder-engine.md, "Light").</summary>
+        [JsonProperty("light")] public LightDef Light { get; set; }
+        /// <summary>Entities spawned and linked to it when it appears (Runtime/Links.cs).</summary>
+        [JsonProperty("parts")] public List<PartDef> Parts { get; set; }
         [JsonProperty("attacks")] public List<AttackDef> Attacks { get; set; }
         [JsonProperty("targeting")] public List<TargetingDef> Targeting { get; set; }
         [JsonProperty("movement")] public MovementDef Movement { get; set; }
@@ -447,6 +453,39 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("circle")] public CircleDef Circle { get; set; }
         [JsonProperty("rect")] public RectDef Rect { get; set; }
         [JsonProperty("polygon")] public PolygonDef Polygon { get; set; }
+        /// <summary>A cone on the ground along the entity's facing (a beam, a breath, a field of view).</summary>
+        [JsonProperty("sector")] public SectorDef Sector { get; set; }
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>A sector: `radius` metres long, `angle` degrees wide, centred on the entity's facing.</summary>
+    public sealed class SectorDef
+    {
+        [JsonProperty("radius")] public LNum Radius { get; set; }
+        [JsonProperty("angle")] public LNum Angle { get; set; }
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>A light that follows its entity (a unit, the king, a prop, a projectile, an attached building): it lights
+    /// the ground round it (or a cone along its facing) and counts for `lightAt`, `.lit` and the `lit` filter term.</summary>
+    public sealed class LightDef
+    {
+        /// <summary>#rrggbb (default a warm #ffd890).</summary>
+        [JsonProperty("color")] public string Color { get; set; }
+        /// <summary>1 lights its range fully (default 1).</summary>
+        [JsonProperty("intensity")] public LNum Intensity { get; set; }
+        /// <summary>Radius it lights on the ground, or a cone's length (m, default 10).</summary>
+        [JsonProperty("range")] public LNum Range { get; set; }
+        /// <summary>A beam this many degrees wide along the entity's facing (null: all round).</summary>
+        [JsonProperty("cone")] public LNum Cone { get; set; }
+        /// <summary>A cone's yaw relative to the facing (degrees).</summary>
+        [JsonProperty("aim")] public LNum Aim { get; set; }
+        /// <summary>Metres above the entity (default 3).</summary>
+        [JsonProperty("height")] public LNum Height { get; set; }
+        /// <summary>0..1: a fire's flicker (looks only).</summary>
+        [JsonProperty("flicker")] public LNum Flicker { get; set; }
+        /// <summary>false: placed switched off until `setLight` with on: true.</summary>
+        [JsonProperty("on")] public bool? On { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
@@ -475,6 +514,8 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("when")] public string When { get; set; }
         [JsonProperty("radius")] public LNum Radius { get; set; }
         [JsonProperty("repeat")] public bool? Repeat { get; set; }
+        /// <summary>Level variables paid too (items): [{ "var": "$bread", "amount": 1 }].</summary>
+        [JsonProperty("pay")] public List<PayDef> Pay { get; set; }
         /// <summary>Up to 4 choices shown in the game's upgrade-choice popup.</summary>
         [JsonProperty("choices")] public List<ChoiceDef> Choices { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
@@ -486,7 +527,41 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("label")] public string Label { get; set; }
         [JsonProperty("description")] public string Description { get; set; }
         [JsonProperty("cost")] public LNum Cost { get; set; }
+        [JsonProperty("pay")] public List<PayDef> Pay { get; set; }
         [JsonProperty("icon")] public string Icon { get; set; }
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>A cost in a level variable (an item count): paid with the gold, refused when short.</summary>
+    public sealed class PayDef
+    {
+        /// <summary>A level variable, "$name".</summary>
+        [JsonProperty("var")] public string Var { get; set; }
+        [JsonProperty("amount")] public LNum Amount { get; set; }
+        /// <summary>The word the prompt uses (default: the variable's name).</summary>
+        [JsonProperty("label")] public string Label { get; set; }
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>A part: an entity spawned and linked to its parent when the parent appears (Runtime/Links.cs).</summary>
+    public sealed class PartDef
+    {
+        /// <summary>The template.</summary>
+        [JsonProperty("entity")] public string Entity { get; set; }
+        /// <summary>[x, y, z] in the parent's frame: x right, y up, z ahead.</summary>
+        [JsonProperty("offset")] public float[] Offset { get; set; }
+        [JsonProperty("rotY")] public float? RotY { get; set; }
+        /// <summary>Default: the parent's team ("owner").</summary>
+        [JsonProperty("team")] public string Team { get; set; }
+        /// <summary>A label the part gets (#name), to tell parts apart.</summary>
+        [JsonProperty("name")] public string Name { get; set; }
+        /// <summary>"rigid" | "position" | "none".</summary>
+        [JsonProperty("follow")] public string Follow { get; set; }
+        /// <summary>"die" | "drop" | "stay".</summary>
+        [JsonProperty("onParentDeath")] public string OnParentDeath { get; set; }
+        [JsonProperty("damageToParent")] public float? DamageToParent { get; set; }
+        [JsonProperty("damageToGroup")] public float? DamageToGroup { get; set; }
+        [JsonProperty("damageKept")] public float? DamageKept { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
@@ -563,7 +638,7 @@ namespace PalaceMod.Builder.Model.Logic
 
     public sealed class MovementDef
     {
-        /// <summary>"pathfind" (default) | "direct" | "hold" | "path".</summary>
+        /// <summary>"pathfind" (default) | "direct" | "hold" | "path" | "follow".</summary>
         [JsonProperty("mode")] public string Mode { get; set; }
         /// <summary>For "path": "@pathName" or inline points.</summary>
         [JsonProperty("path")] public JToken Path { get; set; }
@@ -576,6 +651,14 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("wander")] public WanderDef Wander { get; set; }
         /// <summary>"spawn" | [x, y, z] | "@point".</summary>
         [JsonProperty("home")] public JToken Home { get; set; }
+        /// <summary>For "follow": the leader, an entity expression re-read 10 times a second ("self.parent").</summary>
+        [JsonProperty("leader")] public string Leader { get; set; }
+        /// <summary>For "follow": metres behind the leader (a trail), default 2.</summary>
+        [JsonProperty("spacing")] public LNum Spacing { get; set; }
+        /// <summary>For "follow": a slot [x, z] in the leader's frame (x right, z ahead) instead of the trail.</summary>
+        [JsonProperty("offset")] public float[] Offset { get; set; }
+        /// <summary>For "follow": speed multiplier while left behind (default 1.5).</summary>
+        [JsonProperty("catchUp")] public LNum CatchUp { get; set; }
         /// <summary>Per surface name: true (may walk it), false (may not), or a path cost multiplier.</summary>
         [JsonProperty("surfaces")] public Dictionary<string, JToken> Surfaces { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }

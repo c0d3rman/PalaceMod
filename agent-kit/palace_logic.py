@@ -2137,8 +2137,12 @@ class _Walker:
             self.check_movement(_dict(u.get("movement")), p + ".movement", owner)
             self.check_attacks(_list(u.get("attacks")), p + ".attacks", owner)
             self.check_status_refs(u.get("statuses"), p + ".statuses")
+            if _dict(u.get("interact")) is not None:
+                self.check_interact(_dict(u.get("interact")), p + ".interact", self.scope(owner, None))
+            self.check_parts(_list(u.get("parts")), p + ".parts", self.scope(owner, None))
             if _s(u, "counterpart") is not None:
                 self.check_template(_s(u, "counterpart"), p + ".counterpart", self.scope(owner, None))
+            self.check_light(_dict(u.get("light")), p + ".light", self.scope(owner, None))
             self.check_rules(owner, lowered_rule_index(_list(u.get("rules")), _s(u, "id"), is_unit))
         for i, e in enumerate(self.lst("entities")):
             if not isinstance(e, dict):
@@ -2712,6 +2716,21 @@ class _Walker:
         else:
             self.error(p, f'"{s}" isn\'t a template (a unit or entity id, "vanilla:<id>", or "=expression")')
 
+    def check_light(self, l, p, scope):
+        """A `light` block (level-building.md 12.7a)."""
+        if l is None:
+            return
+        if _s(l, "color") is not None and not try_parse_color(_s(l, "color")):
+            self.error(p + ".color", 'must be "#rrggbb"')
+        self.num(_lnum(l.get("intensity")), p + ".intensity", scope, 0, 4)
+        self.num(_lnum(l.get("range")), p + ".range", scope, 0.5, 200)
+        self.num(_lnum(l.get("cone")), p + ".cone", scope, 1, 179)
+        self.num(_lnum(l.get("height")), p + ".height", scope, 0, 60)
+        self.num(_lnum(l.get("flicker")), p + ".flicker", scope, 0, 1)
+        self.num(_lnum(l.get("aim")), p + ".aim", scope, -360, 360)
+        if l.get("aim") is not None and l.get("cone") is None:
+            self.warn(p + ".aim", "aim only turns a cone (give cone)")
+
     def num(self, n, p, scope, mn, mx):
         if n is None:
             return
@@ -2783,7 +2802,19 @@ class _Walker:
             return
         scope = scope if scope is not None else self.scope(owner, None)
         mode = _s(m, "mode")
-        self.enum(mode, p + ".mode", ["pathfind", "direct", "hold", "path"])
+        self.enum(mode, p + ".mode", ["pathfind", "direct", "hold", "path", "follow"])
+        leader = _s(m, "leader")
+        if mode == "follow" and (leader is None or not leader.strip()):
+            self.error(p + ".leader", 'mode follow needs a leader (an entity expression, e.g. "self.parent")')
+        if leader is not None:
+            self.expression(leader, p + ".leader", scope, ENTITY, "leader")
+        self.num(_lnum(m.get("spacing")), p + ".spacing", scope, 0, 100)
+        self.num(_lnum(m.get("catchUp")), p + ".catchUp", scope, 1, 5)
+        off = m.get("offset")
+        if off is not None and not (isinstance(off, list) and len(off) == 2):
+            self.error(p + ".offset", "must be [x, z] in the leader's frame (x right, z ahead)")
+        if mode != "follow" and any(m.get(k) is not None for k in ("leader", "spacing", "offset", "catchUp")):
+            self.warn(p + ".leader", "leader, spacing, offset and catchUp only apply to mode follow")
         self.enum(_s(m, "then"), p + ".then", ["pathfind", "hold", "destroy"])
         path = _jt(m, "path")
         if mode == "path" and path is _MISSING:
@@ -2812,6 +2843,65 @@ class _Walker:
         home = m.get("home")
         if isinstance(home, str) and home != "spawn":
             self.expression(home, p + ".home", scope, POSITION, "home")
+
+    def check_interact(self, it, p, scope):
+        if _s(it, "prompt") is not None:
+            self.text(_s(it, "prompt"), p + ".prompt", scope.with_(extra_roles={"cost": NUMBER}))
+        self.num(_lnum(it.get("cost")), p + ".cost", scope, 0, 100000)
+        self.enum(_s(it, "when"), p + ".when", ["day", "night", "always"])
+        self.num(_lnum(it.get("radius")), p + ".radius", scope, 0.5, 30)
+        self.check_pay(_list(it.get("pay")), p + ".pay", scope)
+        choices = _list(it.get("choices"))
+        if choices is not None:
+            if len(choices) < 1 or len(choices) > 4:
+                self.error(p + ".choices", "1 to 4 choices")
+            ids = set()
+            for i, c in enumerate(choices):
+                cid = _s(c, "id")
+                if cid is None or cid in ids:
+                    self.error(f"{p}.choices[{i}].id", "each choice needs its own id")
+                else:
+                    ids.add(cid)
+                self.num(_lnum(c.get("cost")) if isinstance(c, dict) else None, f"{p}.choices[{i}].cost", scope, 0, 100000)
+                if isinstance(c, dict):
+                    self.check_pay(_list(c.get("pay")), f"{p}.choices[{i}].pay", scope)
+
+    def check_pay(self, pay, p, scope):
+        for i, x in enumerate(pay or []):
+            pp = f"{p}[{i}]"
+            v = _s(x, "var") if isinstance(x, dict) else None
+            if v is None or not v.startswith("$") or not _var_name_ok(v[1:]):
+                self.error(pp + ".var", 'needs a level variable: "$name"')
+                continue
+            if scope.level_vars is not None and v[1:] not in scope.level_vars:
+                self.error(pp + ".var", f'no level variable "{v[1:]}" (declare it in logic.vars)')
+            self.num(_lnum(x.get("amount")), pp + ".amount", scope, 0, 100000)
+
+    def check_parts(self, parts, p, scope):
+        if parts is None:
+            return
+        if len(parts) > 32:
+            self.error(p, "at most 32 parts")
+        for i, x in enumerate(parts):
+            pp = f"{p}[{i}]"
+            if not isinstance(x, dict):
+                self.error(pp, "is empty")
+                continue
+            ent = _s(x, "entity")
+            if ent is None:
+                self.error(pp + ".entity", "needs a template")
+            else:
+                self.check_template(ent, pp + ".entity", scope)
+            off = x.get("offset")
+            if off is not None and not (isinstance(off, list) and len(off) == 3):
+                self.error(pp + ".offset", "must be [x, y, z]")
+            self.enum(_s(x, "team"), pp + ".team", TEAMS)
+            self.enum(_s(x, "follow"), pp + ".follow", ["rigid", "position", "none"])
+            self.enum(_s(x, "onParentDeath"), pp + ".onParentDeath", ["die", "drop", "stay"])
+            for k, lo, hi in (("damageToParent", 0, None), ("damageToGroup", 0, 1), ("damageKept", 0, None)):
+                v = x.get(k)
+                if isinstance(v, (int, float)) and not isinstance(v, bool) and (v < lo or (hi is not None and v > hi)):
+                    self.error(f"{pp}.{k}", "must be 0..1" if hi is not None else "must be 0 or more")
 
     def check_path(self, path, p, scope):
         if path is _MISSING:
@@ -2930,7 +3020,7 @@ class _Walker:
             self.num(_lnum(mv.get("speed")), p + ".mover.speed", scope, 0, 100)
             self.num(_lnum(mv.get("wait")), p + ".mover.wait", scope, 0, 600)
             if _b(body, "walkable") is True and mpath is not _MISSING:
-                self.warn(p + ".mover", "a walkable mover only snaps between poses; it can't glide along a path")
+                self.warn(p + ".mover", "a walkable mover gliding on a path carries the king and units standing on it, but paths are only on its deck where it started: pathing units on it snap back to the ground when they walk (riders should hold)")
             self.num(_lnum(mv.get("turnSpeed")), p + ".mover.turnSpeed", scope, 0, 3600)
             if _dict(mv.get("pose")) is not None and _dict(mv.get("poses")) is not None:
                 self.warn(p + ".mover.poses", 'give "pose" or "poses", not both ("poses" is ignored)')
@@ -2953,9 +3043,13 @@ class _Walker:
             circle = _dict(sh.get("circle")) if sh else None
             rect = _dict(sh.get("rect")) if sh else None
             poly = _dict(sh.get("polygon")) if sh else None
-            shapes = 0 if sh is None else sum(1 for x in (circle, rect, poly) if x is not None)
+            sector = _dict(sh.get("sector")) if sh else None
+            shapes = 0 if sh is None else sum(1 for x in (circle, rect, poly, sector) if x is not None)
             if shapes != 1:
-                self.error(p + ".area.shape", "needs exactly one of circle {radius}, rect {size: [w, d]} or polygon {points}")
+                self.error(p + ".area.shape", "needs exactly one of circle {radius}, rect {size: [w, d]}, polygon {points} or sector {radius, angle}")
+            if sector is not None:
+                self.num(_lnum(sector.get("radius")), p + ".area.shape.sector.radius", scope, 0.1, 500)
+                self.num(_lnum(sector.get("angle")), p + ".area.shape.sector.angle", scope, 1, 360)
             if circle is not None:
                 self.num(_lnum(circle.get("radius")), p + ".area.shape.circle.radius", scope, 0.1, 500)
             if rect is not None and (_list(rect.get("size")) is None or len(rect["size"]) != 2):
@@ -2988,6 +3082,7 @@ class _Walker:
                 self.error(p + ".area.surface", 'must be a name or {"name", "allow", "cost"}')
         elif kind == "area" and not place:
             self.error(p + ".area", "an area template needs an area block")
+        self.check_light(_dict(e.get("light")), p + ".light", scope)
         pk = _dict(e.get("pickup"))
         if pk is not None:
             if _s(pk, "by") is not None:
@@ -2996,23 +3091,8 @@ class _Walker:
             self.num(_lnum(pk.get("magnet")), p + ".pickup.magnet", scope, 0, 100)
         it = _dict(e.get("interact"))
         if it is not None:
-            if _s(it, "prompt") is not None:
-                self.text(_s(it, "prompt"), p + ".interact.prompt", scope.with_(extra_roles={"cost": NUMBER}))
-            self.num(_lnum(it.get("cost")), p + ".interact.cost", scope, 0, 100000)
-            self.enum(_s(it, "when"), p + ".interact.when", ["day", "night", "always"])
-            self.num(_lnum(it.get("radius")), p + ".interact.radius", scope, 0.5, 30)
-            choices = _list(it.get("choices"))
-            if choices is not None:
-                if len(choices) < 1 or len(choices) > 4:
-                    self.error(p + ".interact.choices", "1 to 4 choices")
-                ids = set()
-                for i, c in enumerate(choices):
-                    cid = _s(c, "id")
-                    if cid is None or cid in ids:
-                        self.error(f"{p}.interact.choices[{i}].id", "each choice needs its own id")
-                    else:
-                        ids.add(cid)
-                    self.num(_lnum(c.get("cost")) if isinstance(c, dict) else None, f"{p}.interact.choices[{i}].cost", scope, 0, 100000)
+            self.check_interact(it, p + ".interact", scope)
+        self.check_parts(_list(e.get("parts")), p + ".parts", scope)
         self.check_attacks(_list(e.get("attacks")), p + ".attacks", owner)
         self.check_targeting(_list(e.get("targeting")), p + ".targeting", owner)
         self.check_movement(_dict(e.get("movement")), p + ".movement", owner)
@@ -3201,6 +3281,7 @@ class _Walker:
             self.check_status_refs(a.get("statuses"), ap + ".statuses")
             owner = _Owner(ap, kind if kind is not None else "building", _var_set(a.get("vars")), level=lv, rules=_list(a.get("rules")))
             self.check_targeting(_list(a.get("targeting")), ap + ".targeting", owner)
+            self.check_light(_dict(a.get("light")), ap + ".light", self.scope(owner, None))
             self.check_rules(owner)
         self.check_rules(level_owner)
 

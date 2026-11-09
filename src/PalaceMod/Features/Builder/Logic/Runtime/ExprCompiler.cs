@@ -180,6 +180,8 @@ namespace PalaceMod.Builder.Logic
                 "income" => _ => Value.Number(G().Income),
                 "enemiesAlive" => _ => Value.Number(G().EnemiesAlive),
                 "difficulty" => _ => Value.Number(G().Difficulty),
+                "daylight" => _ => Value.Number(LogicLighting.Daylight),
+                "waterLevel" => _ => Value.Number(WorldQueries.Service is { } wq && !double.IsNaN(wq.WaterLevel) ? wq.WaterLevel : 0),
                 "none" or "null" => _ => Value.None,
                 _ => ctx => ctx.Locals != null && ctx.Locals.TryGetValue(name, out var v) ? v : throw new LogicError($"unknown name \"{name}\""),
             };
@@ -281,10 +283,16 @@ namespace PalaceMod.Builder.Logic
                 case "age": return Value.Number(ctx.World.Time - e.SpawnTime);
                 case "target": return Value.Entity(LogicServices.TargetOf?.Invoke(e));
                 case "owner": return Value.Entity(e.Owner);
+                case "parent": return Value.Entity(e.Parent);
+                case "children": return Value.Set(e.Children.FindAll(c => c.Exists));
+                case "root": return Value.Entity(LogicWorld.RootOf(e));
+                case "group": return Value.Set(LogicWorld.GroupOf(e).FindAll(c => c.Exists));
                 case "id": return Value.Text(e.Id);
                 case "name": return Value.Text(e.Name ?? e.Id);
                 case "enabled": return Value.Bool(e.Enabled);
                 case "elite": return Value.Bool(LogicServices.IsElite?.Invoke(e) ?? false);
+                case "light": return Value.Number(LogicLighting.LightAt(e.Position));
+                case "lit": return Value.Bool(LogicLighting.Lit(e.Position));
                 case "weapon": return LogicServices.WeaponOf?.Invoke(e) is string w ? Value.Text(w) : Value.None;
             }
             if (LogicServices.GameProperty?.Invoke(e, name) is Value game) return game;
@@ -451,6 +459,25 @@ namespace PalaceMod.Builder.Logic
                         double ang = ctx.World.Random.NextDouble() * Math.PI * 2, d = r * Math.Sqrt(ctx.World.Random.NextDouble());
                         return Value.Position(new Vec(p.X + (float)(Math.Sin(ang) * d), p.Y, p.Z + (float)(Math.Cos(ang) * d)));
                     };
+                case "groundY":
+                    return ctx => Value.Number(WorldQueries.Service?.GroundY(Pos(A0(ctx))) ?? 0);
+                case "walkable":
+                    return ctx =>
+                    {
+                        var p = Pos(A0(ctx));
+                        var who = args.Length > 1 ? A1(ctx) : Value.None;
+                        var unit = Values.ToEntity(who);
+                        string kind = unit == null && who.Kind != ValueKind.None ? Values.Format(who) : null;
+                        return Value.Bool(WorldQueries.Service?.Walkable(p, kind, unit) ?? true);
+                    };
+                case "ground":
+                    return ctx => Value.Text(WorldQueries.Service?.Ground(Pos(A0(ctx))) ?? "grass");
+                case "waterDepth":
+                    return ctx => Value.Number(WorldQueries.Service?.WaterDepth(Pos(A0(ctx))) ?? 0);
+                case "sight":
+                    return ctx => Value.Bool(WorldQueries.Service?.Raycast(Pos(A0(ctx)), Pos(A1(ctx))) == null);
+                case "raycast":
+                    return ctx => WorldQueries.Service?.Raycast(Pos(A0(ctx)), Pos(A1(ctx))) is Vec hit ? Value.Position(hit) : Value.None;
                 case "ahead":
                     return ctx =>
                     {
@@ -524,6 +551,7 @@ namespace PalaceMod.Builder.Logic
                     }
                 case "waveUnits":
                     return ctx => Value.List((LogicServices.Game ?? throw new LogicError("game state isn't available")).WaveUnits((int)Num(A0(ctx), name)).Select(Value.Template).ToList());
+                case "lightAt": return ctx => Value.Number(LogicLighting.LightAt(Pos(A0(ctx))));
                 case "strongestUnit":
                     return ctx => (LogicServices.Game ?? throw new LogicError("game state isn't available")).StrongestUnit((int)Num(A0(ctx), name)) is { } t ? Value.Template(t) : Value.None;
             }
@@ -688,6 +716,7 @@ namespace PalaceMod.Builder.Logic
                 case "ranged": return (_, c) => c.Body?.HasTag("RangedFighter") ?? false;
                 case "alive": return (_, c) => c.Alive && !IsDisabled(c) && !IsUnbuilt(c);
                 case "elite": return (_, c) => LogicServices.IsElite?.Invoke(c) ?? false;
+                case "lit": return (_, c) => LogicLighting.Lit(c.Position);
                 case "dead": return (_, c) => IsDead(c);
                 case "disabled": return (_, c) => IsDisabled(c);
                 case "unbuilt": return (_, c) => IsUnbuilt(c);
@@ -755,6 +784,13 @@ namespace PalaceMod.Builder.Logic
                 double yaw = -(area.Body?.Facing ?? (float?)area.Def?["rotY"] ?? 0) * Math.PI / 180;
                 double lx = p.X * Math.Cos(yaw) - p.Z * Math.Sin(yaw), lz = p.X * Math.Sin(yaw) + p.Z * Math.Cos(yaw);
                 return Math.Abs(lx) <= (float)size[0] / 2 && Math.Abs(lz) <= (float)size[1] / 2;
+            }
+            if (shape["sector"] is Newtonsoft.Json.Linq.JObject sector)
+            {
+                // Into the area's frame (yaw clockwise from north): local z runs along its facing.
+                double yaw = (area.Body?.Facing ?? (float?)area.Def?["rotY"] ?? 0) * Math.PI / 180;
+                double lx = p.X * Math.Cos(yaw) - p.Z * Math.Sin(yaw), lz = p.X * Math.Sin(yaw) + p.Z * Math.Cos(yaw);
+                return PalaceMod.Builder.Logic.Bodies.LightMath.SectorContains(lx, lz, (float?)sector["radius"] ?? 6, (float?)sector["angle"] ?? 60);
             }
             if (shape["polygon"] is Newtonsoft.Json.Linq.JObject poly && poly["points"] is Newtonsoft.Json.Linq.JArray pts && pts.Count >= 3)
             {
