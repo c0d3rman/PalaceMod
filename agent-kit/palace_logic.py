@@ -278,6 +278,7 @@ class EventSpec:
         self.aliases = dict(d.get("aliases") or {})
         self.owners = list(d.get("owners") or ["any"])
         self.global_ = bool(d.get("global", False))
+        self.own_only = bool(d.get("ownOnly", False))
 
 
 class ActionSpec:
@@ -2206,6 +2207,8 @@ class _Walker:
         scope = self.scope(owner, ev)
         if w["of"] is not None:
             self.filter_string(w["of"], p + ".when.of", scope)
+            if ev.own_only:
+                self.error(p + ".when.of", f'"{ev.name}" only hears its owner\'s own; put the rule on the entity itself')
         own_range = any(x.name == "range" for x in ev.params)
         if w["range"] is not None:
             self.num(w["range"], p + ".when.range", scope, 0, None)

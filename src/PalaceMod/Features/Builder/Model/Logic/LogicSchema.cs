@@ -77,6 +77,8 @@ namespace PalaceMod.Builder.Model.Logic
         public string[] Owners = ["any"];
         /// <summary>Fired by the level/world, not an entity (the level script hears it without `of`).</summary>
         public bool Global;
+        /// <summary>Only the owner's own (no `of` listeners).</summary>
+        public bool OwnOnly;
         public string Since = LogicSchema.V1;
     }
 
@@ -215,6 +217,8 @@ namespace PalaceMod.Builder.Model.Logic
             Ev("healed", "Combat", "It is healed.", other: "healer", value: LType.Number, valueMeaning: "the amount healed", aliases: A("healer", "other"));
             Ev("hpBelow", "Combat", "Its hp crosses below a fraction (edge-triggered; re-arms when healed above).", value: LType.Number, valueMeaning: "hpPct",
                 ps: [P("pct", "number", "Fraction of max hp, 0..1.", req: true, min: 0, max: 1)]);
+            Events["hpBelow"].OwnOnly = true;
+            Events["hpBelow"].Description += " Only its own hp: no `of`.";
             Ev("attack", "Combat", "It attacks (any attack, vanilla ones included).", other: "target", ps: [P("attack", "text", "Only this attack id.")], aliases: A("target", "other"));
             Ev("hit", "Combat", "Its attack, projectile or damage action damaged something.", other: "victim", value: LType.Number, valueMeaning: "the damage dealt", aliases: A("victim", "other"));
             Ev("kill", "Combat", "Something it damaged died from that damage.", other: "victim", aliases: A("victim", "other"));
@@ -625,6 +629,7 @@ namespace PalaceMod.Builder.Model.Logic
                 if (e.Aliases.Count > 0) j["aliases"] = JObject.FromObject(e.Aliases);
                 j["owners"] = new JArray(e.Owners);
                 if (e.Global) j["global"] = true;
+                if (e.OwnOnly) j["ownOnly"] = true;
                 if (e.Example != null) j["example"] = e.Example;
                 j["since"] = e.Since;
                 return j;

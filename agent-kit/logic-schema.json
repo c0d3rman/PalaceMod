@@ -72,7 +72,7 @@
     {
       "name": "hpBelow",
       "group": "Combat",
-      "description": "Its hp crosses below a fraction (edge-triggered; re-arms when healed above).",
+      "description": "Its hp crosses below a fraction (edge-triggered; re-arms when healed above). Only its own hp: no `of`.",
       "params": [
         {
           "name": "pct",
@@ -88,6 +88,7 @@
       "owners": [
         "any"
       ],
+      "ownOnly": true,
       "since": "1.0.0"
     },
     {
