@@ -191,9 +191,27 @@ namespace PalaceMod
 
         // ------------------------------------------------------------------ per frame
 
+        private static readonly List<(Hp hp, float frac, int frame)> pendingHp = [];
+
+        /// <summary>Set a unit's hp fraction now and again after its Start (a new unit's Hp.Start revives it to full).</summary>
+        internal static void SetHpFraction(Hp hp, float frac)
+        {
+            frac = Mathf.Clamp(frac, 0.01f, 1f);
+            hp.HpPercentage = frac;
+            pendingHp.Add((hp, frac, Time.frameCount + 2));
+        }
+
         public override void Update()
         {
             if (!Live()) return;
+            for (int i = pendingHp.Count - 1; i >= 0; i--)
+            {
+                var (hp, frac, frame) = pendingHp[i];
+                if (hp == null) { pendingHp.RemoveAt(i); continue; }
+                if (Time.frameCount < frame) continue;
+                if (!hp.KnockedOut) hp.HpPercentage = frac;
+                pendingHp.RemoveAt(i);
+            }
             float dt = Time.deltaTime;
             if (dt <= 0) return;
             if (Drifts.Any) ApplyDrifts(dt);

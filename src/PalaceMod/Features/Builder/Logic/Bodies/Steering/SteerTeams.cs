@@ -185,7 +185,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             }
             e.Team = team;
             var hp = made.GetComponent<Hp>();
-            if (hp != null) { hp.HpPercentage = Mathf.Clamp(frac, 0.01f, 1f); }
+            if (hp != null) LogicSteeringManager.SetHpFraction(hp, frac);
             LogicSteeringManager.Deaths.Remove(e);
 
             // steering follows the entity: the template's components, then any runtime override it had
@@ -214,7 +214,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             float rotY = go.transform.eulerAngles.y;
             var made = SteerSpawn.Spawn(ctx, with, pos, rotY, e.Team, e.Owner);
             if (made == null) return null;
-            if (keep.Contains("hp") && e.Body != null && e.Body.MaxHp > 0 && made.Hp() is { } nh) nh.HpPercentage = Mathf.Clamp(e.Body.Hp / e.Body.MaxHp, 0.01f, 1f);
+            if (keep.Contains("hp") && e.Body != null && e.Body.MaxHp > 0 && made.Hp() is { } nh) LogicSteeringManager.SetHpFraction(nh, e.Body.Hp / e.Body.MaxHp);
             if (keep.Contains("vars")) foreach (var kv in e.Vars) made.Vars[kv.Key] = kv.Value;
             if (keep.Contains("labels")) foreach (var l in e.Labels) made.Labels.Add(l);
             if (keep.Contains("statuses") && LogicServices.Stats != null)
