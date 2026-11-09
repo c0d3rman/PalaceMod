@@ -125,6 +125,7 @@ namespace PalaceMod.Builder.Model.Logic
                     if (u.Interact != null) CheckInteract(u.Interact, p + ".interact", Scope(owner, null));
                     CheckParts(u.Parts, p + ".parts", Scope(owner, null));
                     if (u.Counterpart != null) CheckTemplate(u.Counterpart, p + ".counterpart", Scope(owner, null));
+                    CheckLight(u.Light, p + ".light", Scope(owner, null));
                     CheckRules(owner, LogicLowering.LoweredRuleIndex(u, LogicLowering.IsUnitIn(pack)));
                 }
                 for (int i = 0; i < (pack.Entities?.Count ?? 0); i++)
@@ -670,6 +671,20 @@ namespace PalaceMod.Builder.Model.Logic
                 }
             }
 
+            /// <summary>A `light` block (docs/builder-engine.md, "Light").</summary>
+            private void CheckLight(LightDef l, string p, CheckScope scope)
+            {
+                if (l == null) return;
+                if (l.Color != null && !Validator.TryParseColor(l.Color, out _)) Error(p + ".color", "must be \"#rrggbb\"");
+                Num(l.Intensity, p + ".intensity", scope, 0, 4);
+                Num(l.Range, p + ".range", scope, 0.5, 200);
+                Num(l.Cone, p + ".cone", scope, 1, 179);
+                Num(l.Height, p + ".height", scope, 0, 60);
+                Num(l.Flicker, p + ".flicker", scope, 0, 1);
+                Num(l.Aim, p + ".aim", scope, -360, 360);
+                if (l.Aim != null && l.Cone == null) Warn(p + ".aim", "aim only turns a cone (give cone)");
+            }
+
             private void Num(LNum n, string p, CheckScope scope, double? min, double? max)
             {
                 if (n == null) return;
@@ -882,8 +897,13 @@ namespace PalaceMod.Builder.Model.Logic
                 if (e.Area is { } ar)
                 {
                     var sh = ar.Shape;
-                    int shapes = sh == null ? 0 : new object[] { sh.Circle, sh.Rect, sh.Polygon }.Count(x => x != null);
-                    if (shapes != 1) Error(p + ".area.shape", "needs exactly one of circle {radius}, rect {size: [w, d]} or polygon {points}");
+                    int shapes = sh == null ? 0 : new object[] { sh.Circle, sh.Rect, sh.Polygon, sh.Sector }.Count(x => x != null);
+                    if (shapes != 1) Error(p + ".area.shape", "needs exactly one of circle {radius}, rect {size: [w, d]}, polygon {points} or sector {radius, angle}");
+                    if (sh?.Sector != null)
+                    {
+                        Num(sh.Sector.Radius, p + ".area.shape.sector.radius", scope, 0.1, 500);
+                        Num(sh.Sector.Angle, p + ".area.shape.sector.angle", scope, 1, 360);
+                    }
                     if (sh?.Circle != null) Num(sh.Circle.Radius, p + ".area.shape.circle.radius", scope, 0.1, 500);
                     if (sh?.Rect != null && (sh.Rect.Size == null || sh.Rect.Size.Length != 2)) Error(p + ".area.shape.rect.size", "must be [width, depth]");
                     if (sh?.Polygon != null && (sh.Polygon.Points == null || sh.Polygon.Points.Count < 3 || sh.Polygon.Points.Any(x => x == null || x.Length != 2)))
@@ -907,6 +927,7 @@ namespace PalaceMod.Builder.Model.Logic
                     }
                 }
                 else if (kind == EntityKinds.Area && !place) Error(p + ".area", "an area template needs an area block");
+                CheckLight(e.Light, p + ".light", scope);
                 if (e.Pickup is { } pk)
                 {
                     if (pk.By != null) FilterString(pk.By, p + ".pickup.by", scope);
@@ -1117,6 +1138,7 @@ namespace PalaceMod.Builder.Model.Logic
                     CheckStatusRefs(a.Statuses, ap + ".statuses");
                     var owner = new Owner { Path = ap, Kind = kind ?? "building", Vars = VarSet(a.Vars), Level = lv, Rules = a.Rules };
                     CheckTargeting(a.Targeting, ap + ".targeting", owner);
+                    CheckLight(a.Light, ap + ".light", Scope(owner, null));
                     CheckRules(owner);
                 }
                 CheckRules(levelOwner);

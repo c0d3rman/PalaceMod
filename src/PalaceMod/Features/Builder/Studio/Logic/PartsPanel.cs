@@ -132,6 +132,8 @@ namespace PalaceMod.Builder.Studio.Logic
                     F("shape.circle.radius", N("radius", "Radius (m)", "The circle's radius.", "4"), a => a["shape"]?["circle"] != null),
                     F("shape.rect.size.0", N("w", "Width (m)", "The rectangle's width.", "4"), a => a["shape"]?["rect"] != null),
                     F("shape.rect.size.1", N("d", "Depth (m)", "The rectangle's depth.", "4"), a => a["shape"]?["rect"] != null),
+                    F("shape.sector.radius", N("radius", "Length (m)", "How far the cone reaches.", "8"), a => a["shape"]?["sector"] != null),
+                    F("shape.sector.angle", N("angle", "Width (°)", "How wide the cone is, centred on its facing (turn it to aim).", "60"), a => a["shape"]?["sector"] != null),
                     F("watch", T("watch", "Watches", "What it notices (a filter).", ParamKind.Filter, "unit")),
                     F("show", C("show", "Shown", "How players see it in the level.", "outline", "outline", "fill", "none")),
                     F("color", T("color", "Colour", "#rrggbb.")),
@@ -139,6 +141,22 @@ namespace PalaceMod.Builder.Studio.Logic
                     F("surface.name", T("name", "Surface", "Makes its ground a named surface (mud, road, ladder): who may walk it, at what cost.")),
                     F("surface.allow", T("allow", "   Who may walk it", "A filter (empty: everyone).", ParamKind.Filter), a => a["surface"] != null),
                     F("surface.cost", N("cost", "   Path cost", "Above 1: avoided; below 1: preferred.", "1"), a => a["surface"] != null),
+                ],
+            },
+            new()
+            {
+                Key = "light", Label = "Light", Desc = "A light that follows it and lights the ground round it, or a beam along its facing: things in it are lit (.lit, the lit filter).",
+                Fresh = () => new JObject { ["color"] = "#ffd890", ["range"] = 8 },
+                Fields =
+                [
+                    F("color", T("color", "Colour", "#rrggbb.", def: "#ffd890")),
+                    F("range", N("range", "Reach (m)", "How far it lights the ground (a beam's length).", "10")),
+                    F("intensity", N("intensity", "Brightness", "1 lights its reach fully; less is dimmer.", "1")),
+                    F("cone", N("cone", "Beam (°)", "A beam this many degrees wide along its facing (empty: all round).", null)),
+                    F("aim", N("aim", "Beam turn (°)", "Turns the beam from its facing.", "0"), l => l["cone"] != null),
+                    F("height", N("height", "Height (m)", "How high it hangs (lower makes a longer beam).", "3")),
+                    F("flicker", N("flicker", "Flicker", "0..1: flickers like a fire (looks only).", "0")),
+                    F("on", B("on", "Starts on", "Off: dark until a rule switches it on (setLight).", true)),
                 ],
             },
             new()
@@ -378,11 +396,12 @@ namespace PalaceMod.Builder.Studio.Logic
         private static void AreaShape(ModPage page, LogicOwner owner, PartSpec spec)
         {
             var shape = Get(owner, "area")?["shape"] as JObject;
-            int cur = shape?["rect"] != null ? 1 : shape?["polygon"] != null ? 2 : 0;
-            page.Choice("Shape", ["Circle", "Rectangle", "Polygon"], () => cur, i => EditPart(owner, "area", "Set shape", a => a["shape"] = i switch
+            int cur = shape?["rect"] != null ? 1 : shape?["polygon"] != null ? 2 : shape?["sector"] != null ? 3 : 0;
+            page.Choice("Shape", ["Circle", "Rectangle", "Polygon", "Cone"], () => cur, i => EditPart(owner, "area", "Set shape", a => a["shape"] = i switch
             {
                 1 => new JObject { ["rect"] = new JObject { ["size"] = new JArray(6, 4) } },
                 2 => new JObject { ["polygon"] = new JObject { ["points"] = new JArray(new JArray(-3, -3), new JArray(3, -3), new JArray(3, 3), new JArray(-3, 3)) } },
+                3 => new JObject { ["sector"] = new JObject { ["radius"] = 8, ["angle"] = 60 } },
                 _ => new JObject { ["circle"] = new JObject { ["radius"] = 4 } },
             }), tooltip: () => "Drag its handles on the map to resize it.");
             if (cur == 2 && shape?["polygon"]?["points"] is JArray pts)

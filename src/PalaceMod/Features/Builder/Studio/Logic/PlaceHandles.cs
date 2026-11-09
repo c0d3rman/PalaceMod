@@ -81,6 +81,12 @@ namespace PalaceMod.Builder.Studio.Logic
                 int i = 0;
                 foreach (var (x, z) in new[] { (-w, -d), (w, -d), (w, d), (-w, d) }) list.Add(new Handle { Kind = HKind.Corner, Index = i++, World = W(x, z) });
             }
+            else if (shape["sector"] is JObject sec)
+            {
+                // One handle on the cone's right edge: drag it out for length, round for width.
+                float sr = (float?)sec["radius"] ?? 6f, half = ((float?)sec["angle"] ?? 60f) * Mathf.Deg2Rad / 2f;
+                list.Add(new Handle { Kind = HKind.Corner, Index = 0, World = W(Mathf.Sin(half) * sr, Mathf.Cos(half) * sr) });
+            }
             else if (shape["polygon"]?["points"] is JArray poly && poly.Count >= 3)
             {
                 var ls = poly.OfType<JArray>().Select(p => new Vector2((float)p[0], (float)p[p.Count - 1])).ToList();
@@ -164,6 +170,10 @@ namespace PalaceMod.Builder.Studio.Logic
                     break;
                 case HKind.Radius when (area?["shape"]?["circle"] is JObject c):
                     c["radius"] = R(Mathf.Max(0.5f, new Vector2(local.x, local.z).magnitude));
+                    break;
+                case HKind.Corner when (area?["shape"]?["sector"] is JObject sec):
+                    sec["radius"] = R(Mathf.Max(0.5f, new Vector2(local.x, local.z).magnitude));
+                    sec["angle"] = R(Mathf.Clamp(2f * Mathf.Abs(Mathf.Atan2(local.x, local.z) * Mathf.Rad2Deg), 1f, 360f));
                     break;
                 case HKind.Corner when (area?["shape"]?["rect"] is JObject rect):
                     rect["size"] = new JArray(R(Mathf.Max(0.5f, 2f * Mathf.Abs(local.x))), R(Mathf.Max(0.5f, 2f * Mathf.Abs(local.z))));

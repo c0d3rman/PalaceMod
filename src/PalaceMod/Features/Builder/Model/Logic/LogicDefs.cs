@@ -143,6 +143,8 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("statuses")] public List<string> Statuses { get; set; }
         [JsonProperty("targeting")] public List<TargetingDef> Targeting { get; set; }
         [JsonProperty("rules")] public List<RuleDef> Rules { get; set; }
+        /// <summary>A light on the object (a lantern on a tower, a fire on the castle).</summary>
+        [JsonProperty("light")] public LightDef Light { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
@@ -304,6 +306,8 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("area")] public AreaDef Area { get; set; }
         [JsonProperty("pickup")] public PickupDef Pickup { get; set; }
         [JsonProperty("interact")] public InteractDef Interact { get; set; }
+        /// <summary>A light that follows it (docs/builder-engine.md, "Light").</summary>
+        [JsonProperty("light")] public LightDef Light { get; set; }
         /// <summary>Entities spawned and linked to it when it appears (Runtime/Links.cs).</summary>
         [JsonProperty("parts")] public List<PartDef> Parts { get; set; }
         [JsonProperty("attacks")] public List<AttackDef> Attacks { get; set; }
@@ -449,6 +453,39 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("circle")] public CircleDef Circle { get; set; }
         [JsonProperty("rect")] public RectDef Rect { get; set; }
         [JsonProperty("polygon")] public PolygonDef Polygon { get; set; }
+        /// <summary>A cone on the ground along the entity's facing (a beam, a breath, a field of view).</summary>
+        [JsonProperty("sector")] public SectorDef Sector { get; set; }
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>A sector: `radius` metres long, `angle` degrees wide, centred on the entity's facing.</summary>
+    public sealed class SectorDef
+    {
+        [JsonProperty("radius")] public LNum Radius { get; set; }
+        [JsonProperty("angle")] public LNum Angle { get; set; }
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>A light that follows its entity (a unit, the king, a prop, a projectile, an attached building): it lights
+    /// the ground round it (or a cone along its facing) and counts for `lightAt`, `.lit` and the `lit` filter term.</summary>
+    public sealed class LightDef
+    {
+        /// <summary>#rrggbb (default a warm #ffd890).</summary>
+        [JsonProperty("color")] public string Color { get; set; }
+        /// <summary>1 lights its range fully (default 1).</summary>
+        [JsonProperty("intensity")] public LNum Intensity { get; set; }
+        /// <summary>Radius it lights on the ground, or a cone's length (m, default 10).</summary>
+        [JsonProperty("range")] public LNum Range { get; set; }
+        /// <summary>A beam this many degrees wide along the entity's facing (null: all round).</summary>
+        [JsonProperty("cone")] public LNum Cone { get; set; }
+        /// <summary>A cone's yaw relative to the facing (degrees).</summary>
+        [JsonProperty("aim")] public LNum Aim { get; set; }
+        /// <summary>Metres above the entity (default 3).</summary>
+        [JsonProperty("height")] public LNum Height { get; set; }
+        /// <summary>0..1: a fire's flicker (looks only).</summary>
+        [JsonProperty("flicker")] public LNum Flicker { get; set; }
+        /// <summary>false: placed switched off until `setLight` with on: true.</summary>
+        [JsonProperty("on")] public bool? On { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 

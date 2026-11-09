@@ -51,6 +51,8 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("parts")] public List<PartDef> Parts { get; set; }
         /// <summary>The template `convert` turns it into (default: the other side's unit with the same role).</summary>
         [JsonProperty("counterpart")] public string Counterpart { get; set; }
+        /// <summary>A light that follows the unit (docs/builder-engine.md, "Light").</summary>
+        [JsonProperty("light")] public LightDef Light { get; set; }
         /// <summary>When / If / Then rules (and preset uses). Replaces version 2's "behaviours".</summary>
         [JsonProperty("rules")] public List<RuleDef> Rules { get; set; }
 

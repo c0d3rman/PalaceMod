@@ -159,6 +159,13 @@ namespace PalaceMod.Builder.Studio.Logic
                 float w = (float)size[0] / 2f, d = (float)size[1] / 2f;
                 return [new(-w, 0, -d), new(w, 0, -d), new(w, 0, d), new(-w, 0, d), new(-w, 0, -d)];
             }
+            if (shape["sector"] is JObject sec)
+            {
+                var cone = PalaceMod.Builder.Logic.Bodies.LightMath.SectorOutline((float?)sec["radius"] ?? 6f, (float?)sec["angle"] ?? 60f);
+                var list = cone.Select(q => new Vector3((float)q.x, 0f, (float)q.z)).ToList();
+                list.Add(list[0]);
+                return list;
+            }
             if (shape["polygon"]?["points"] is JArray poly && poly.Count >= 3)
             {
                 var list = poly.OfType<JArray>().Select(p => new Vector3((float)p[0], 0f, (float)p[p.Count - 1])).ToList();

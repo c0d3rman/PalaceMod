@@ -201,6 +201,10 @@ namespace PalaceMod.Builder.Studio.Logic
             Act("setMovement", "Change movement", "Move", "Change how {target} moves", "Replaces its movement block (for a while).", ["movement:json!*", "for:number"], targeted: true);
             Act("setTargeting", "Change targeting", "Move", "Change who {target} goes for", "Replaces or extends its target priorities.", ["targeting:json", "prepend:json", "remove:json", "for:number"], targeted: true);
             Act("taunt", "Taunt", "Move", "Make {target} attack {toward}", "Forces their aggro onto something.", ["toward:entity!*", "for:number=5*"], targeted: true);
+            Act("turn", "Turn", "Move", "Turn {target} toward {toward}{facing}{by}", "Faces a direction: aim a beam, a turret, an area (its shape turns too).",
+                ["toward:position*", "facing:number*", "by:number*", "speed:number"], targeted: true);
+            Act("setShape", "Reshape", "Move", "Reshape {target}: {shape} {radius}{angle}", "Changes an area's shape or size (outline, fill, surface follow) or a body's footprint.",
+                ["shape:choice(circle|rect|polygon|sector)*", "radius:number*", "angle:number*", "width:number", "depth:number", "points:json", "part:choice(area|body|both)", "for:expr"], targeted: true);
             Act("command", "Order troops", "Move", "Order {target} to {order}", "Player units, as the king's own commands.", ["order:choice(follow|hold|home)!*"], targeted: true);
             Act("link", "Attach as a part", "Links", "Attach {target} to {to}", "Makes it a part of another entity: it moves with it, may pass on its damage, and follows it in death.",
                 ["to:entity!*", "offset:position", "rotY:number", "follow:choice(rigid|position|none)=rigid*", "onParentDeath:choice(die|drop|stay)=die", "damageToParent:number", "damageToGroup:number", "damageKept:number"], targeted: true);
@@ -241,6 +245,10 @@ namespace PalaceMod.Builder.Studio.Logic
             Act("floatText", "Floating text", "Show", "Float \"{text}\" at {at}", "Text that rises from a spot.", ["text:text!*", "at:position=self*", "color:text"]);
             Act("setVisual", "Change look", "Show", "Change how {target} looks", "Tint, size, mesh, visibility, glow.", ["tint:text", "scale:number", "mesh:text", "visible:bool", "glow:bool", "for:number"], targeted: true);
             Act("hud", "HUD line", "Show", "HUD {id}: \"{text}\"", "Changes a line of the level's HUD.", ["id:text!*", "text:text*", "icon:text", "visible:condition"], levelWide: true);
+            Act("lighting", "Light the level", "Show", "Light: brightness {brightness} {phase} for {for}", "Darkens (an eclipse), tints, or turns day into night; reverts at the end or after for.",
+                ["brightness:number=0.2*", "color:text", "phase:choice(auto|day|sunset|night)*", "fade:number", "for:expr*", "reset:bool"], levelWide: true);
+            Act("setLight", "Light on it", "Show", "Light {target}: {range} m {color}", "Gives it a light that follows it (a torch, a beam with cone), or changes or removes it.",
+                ["color:text=#ffd890*", "range:number=8*", "intensity:number", "cone:number", "aim:number", "height:number", "flicker:number", "on:bool", "remove:bool", "for:expr"], targeted: true);
             Act("shake", "Shake", "Show", "Shake the camera", "Shakes the camera.", ["strength:number=1", "seconds:number=0.5"]);
             Act("marker", "Marker", "Show", "Mark {on}", "A screen-edge marker like the wave markers.", ["on:entity!*", "icon:text", "for:number"]);
             Act("destroy", "Destroy", "End", "Destroy {target}", "Removes it (death effects, optional coins).", ["effects:bool", "drops:bool", "silent:bool"], targeted: true, common: true);

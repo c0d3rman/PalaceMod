@@ -2142,6 +2142,7 @@ class _Walker:
             self.check_parts(_list(u.get("parts")), p + ".parts", self.scope(owner, None))
             if _s(u, "counterpart") is not None:
                 self.check_template(_s(u, "counterpart"), p + ".counterpart", self.scope(owner, None))
+            self.check_light(_dict(u.get("light")), p + ".light", self.scope(owner, None))
             self.check_rules(owner, lowered_rule_index(_list(u.get("rules")), _s(u, "id"), is_unit))
         for i, e in enumerate(self.lst("entities")):
             if not isinstance(e, dict):
@@ -2715,6 +2716,21 @@ class _Walker:
         else:
             self.error(p, f'"{s}" isn\'t a template (a unit or entity id, "vanilla:<id>", or "=expression")')
 
+    def check_light(self, l, p, scope):
+        """A `light` block (level-building.md 12.7a)."""
+        if l is None:
+            return
+        if _s(l, "color") is not None and not try_parse_color(_s(l, "color")):
+            self.error(p + ".color", 'must be "#rrggbb"')
+        self.num(_lnum(l.get("intensity")), p + ".intensity", scope, 0, 4)
+        self.num(_lnum(l.get("range")), p + ".range", scope, 0.5, 200)
+        self.num(_lnum(l.get("cone")), p + ".cone", scope, 1, 179)
+        self.num(_lnum(l.get("height")), p + ".height", scope, 0, 60)
+        self.num(_lnum(l.get("flicker")), p + ".flicker", scope, 0, 1)
+        self.num(_lnum(l.get("aim")), p + ".aim", scope, -360, 360)
+        if l.get("aim") is not None and l.get("cone") is None:
+            self.warn(p + ".aim", "aim only turns a cone (give cone)")
+
     def num(self, n, p, scope, mn, mx):
         if n is None:
             return
@@ -3027,9 +3043,13 @@ class _Walker:
             circle = _dict(sh.get("circle")) if sh else None
             rect = _dict(sh.get("rect")) if sh else None
             poly = _dict(sh.get("polygon")) if sh else None
-            shapes = 0 if sh is None else sum(1 for x in (circle, rect, poly) if x is not None)
+            sector = _dict(sh.get("sector")) if sh else None
+            shapes = 0 if sh is None else sum(1 for x in (circle, rect, poly, sector) if x is not None)
             if shapes != 1:
-                self.error(p + ".area.shape", "needs exactly one of circle {radius}, rect {size: [w, d]} or polygon {points}")
+                self.error(p + ".area.shape", "needs exactly one of circle {radius}, rect {size: [w, d]}, polygon {points} or sector {radius, angle}")
+            if sector is not None:
+                self.num(_lnum(sector.get("radius")), p + ".area.shape.sector.radius", scope, 0.1, 500)
+                self.num(_lnum(sector.get("angle")), p + ".area.shape.sector.angle", scope, 1, 360)
             if circle is not None:
                 self.num(_lnum(circle.get("radius")), p + ".area.shape.circle.radius", scope, 0.1, 500)
             if rect is not None and (_list(rect.get("size")) is None or len(rect["size"]) != 2):
@@ -3062,6 +3082,7 @@ class _Walker:
                 self.error(p + ".area.surface", 'must be a name or {"name", "allow", "cost"}')
         elif kind == "area" and not place:
             self.error(p + ".area", "an area template needs an area block")
+        self.check_light(_dict(e.get("light")), p + ".light", scope)
         pk = _dict(e.get("pickup"))
         if pk is not None:
             if _s(pk, "by") is not None:
@@ -3260,6 +3281,7 @@ class _Walker:
             self.check_status_refs(a.get("statuses"), ap + ".statuses")
             owner = _Owner(ap, kind if kind is not None else "building", _var_set(a.get("vars")), level=lv, rules=_list(a.get("rules")))
             self.check_targeting(_list(a.get("targeting")), ap + ".targeting", owner)
+            self.check_light(_dict(a.get("light")), ap + ".light", self.scope(owner, None))
             self.check_rules(owner)
         self.check_rules(level_owner)
 

@@ -509,6 +509,46 @@ namespace PalaceMod.Builder.Model.Logic
             Act("marker", "Show", "A screen-edge marker like the game's wave markers.",
                 [P("on", "entity", "What it points at.", req: true), P("icon", "text", "Icon."), P("for", "number", "Seconds (omit: until it's gone).")]);
 
+            // ---- Light and shape (docs/builder-engine.md, "Light") -----------------------------------------------
+            Act("lighting", "Show", "Changes the level's light: darken it (an eclipse by day, a pitch-black night), tint it, or make day look like night. Reverts at the level's end, after `for`, or with `reset`.",
+            [
+                P("brightness", "number", "Multiplies the sun's light: 1 = as the game has it, 0.2 = an eclipse, 0 = black. Units stay readable.", min: 0, max: 2),
+                P("color", "color", "Tints the sunlight, #rrggbb (#ff9060 = a red dusk)."),
+                P("phase", "enum", "The base light from the level's colours: day, sunset or night whatever the time; auto follows the game's day and night.", opts: ["auto", "day", "sunset", "night"]),
+                P("fade", "number", "Seconds to blend into the new light.", def: 1, min: 0, max: 60),
+                P("for", "for", "Seconds (or \"night\"/\"day\": until the next dawn/dusk); then it fades back."),
+                P("reset", "bool", "Back to the game's own light (the other params are ignored).", def: false),
+            ], example: "{ \"do\": \"lighting\", \"brightness\": 0.15, \"color\": \"#8090ff\", \"fade\": 3, \"for\": 25 }");
+            Act("setLight", "Show", "Gives it a light that follows it (or changes or removes its `light`): a torch on the king, a lantern on a unit, a lighthouse beam. Works on anything: units, the king, buildings, props, projectiles.",
+            [
+                P("color", "color", "#rrggbb.", def: "#ffd890"), P("intensity", "number", "How bright: 1 lights its range fully.", def: 1, min: 0, max: 4),
+                P("range", "number", "Radius it lights on the ground (m); a cone's length.", def: 10, min: 0.5, max: 200),
+                P("cone", "number", "A beam this many degrees wide along its facing (empty: all round).", min: 1, max: 179),
+                P("aim", "number", "A cone's yaw relative to its facing (degrees).", def: 0),
+                P("height", "number", "Metres above it.", def: 3, min: 0, max: 60),
+                P("flicker", "number", "0..1: a fire's flicker (looks only).", def: 0, min: 0, max: 1),
+                P("on", "bool", "Switches it on or off (keeps its settings)."),
+                P("remove", "bool", "Removes the light.", def: false),
+                P("for", "for", "Seconds (or \"night\"/\"day\"); then it goes back to how it was."),
+            ], targeted: true, example: "{ \"do\": \"setLight\", \"target\": \"king\", \"color\": \"#ffc070\", \"range\": 8 }");
+            Act("turn", "Move", "Turns it to face a direction: aim a beam, a turret, a blade wall, a placed area (its shape, outline, surface and solid footprint turn with it). Units turn their model (they turn back when they walk).",
+            [
+                P("facing", "number", "Yaw in degrees to face (0 = north, 90 = east)."),
+                P("by", "number", "Degrees to turn by (clockwise; negative = anticlockwise)."),
+                P("toward", "position", "Face this entity or position."),
+                P("speed", "number", "Degrees per second (empty: at once).", min: 0),
+            ], targeted: true, example: "{ \"do\": \"turn\", \"target\": \"@beam\", \"toward\": \"king\", \"speed\": 90 }");
+            Act("setShape", "Move", "Changes an area's shape or size (its outline, fill, membership and surface follow), or a body's footprint (its solid cut and collider follow).",
+            [
+                P("shape", "enum", "The new kind (default: keep the kind it has).", opts: ["circle", "rect", "polygon", "sector"]),
+                P("radius", "number", "circle, sector: the radius (m).", min: 0.1),
+                P("angle", "number", "sector: how wide (degrees), centred on its facing.", min: 1, max: 360),
+                P("width", "number", "rect: width (m).", min: 0.1), P("depth", "number", "rect: depth (m).", min: 0.1),
+                P("points", "json", "polygon: [[x, z], ...] relative to it."),
+                P("part", "enum", "What to reshape (default: its area, else its body).", opts: ["area", "body", "both"]),
+                P("for", "for", "Seconds (or \"night\"/\"day\"); then the old shape comes back."),
+            ], targeted: true, example: "{ \"do\": \"setShape\", \"target\": \"@beam\", \"angle\": \"$beamWidth\" }");
+
             // ---- End ------------------------------------------------------------------------------------------
             Act("destroy", "End", "Removes it.",
                 [P("effects", "bool", "Play death effects.", def: true), P("drops", "bool", "Drop its coins.", def: false), P("silent", "bool", "No death event.", def: false)], targeted: true);
@@ -542,6 +582,7 @@ namespace PalaceMod.Builder.Model.Logic
             Named(Globals, "income", "The gold the buildings paid at the last dawn (`income` stats applied), already counted when `dawn` rules run; the coins themselves land over the next seconds.", LType.Number);
             Named(Globals, "enemiesAlive", "Enemies on the map.", LType.Number);
             Named(Globals, "difficulty", "The run's difficulty multiplier.", LType.Number);
+            Named(Globals, "daylight", "The level's own light, 0..1: 1 by day, about 0.34 at night, lower in an eclipse (`lighting`).", LType.Number);
             Named(Globals, "waterLevel", "The terrain's water level (world y); 0 with no water. The `terrain` action's waterLevel op changes it.", LType.Number);
             Named(Globals, "none", "No entity (what a selector gives when nothing matches, or a role the event doesn't have): `other != none`.", LType.Any);
 
@@ -583,6 +624,8 @@ namespace PalaceMod.Builder.Model.Logic
             Prop(LType.Entity, "root", LType.Entity, "The top of its link tree (itself when unlinked).");
             Prop(LType.Entity, "group", LType.Set, "Its whole linked group: the root and every part below it, itself included.");
             Prop(LType.Entity, "id", LType.Text, "Its entity id.");
+            Prop(LType.Entity, "light", LType.Number, "How lit it is, 0..1: daylight plus the lights that reach it (lightAt(its position)).");
+            Prop(LType.Entity, "lit", LType.Bool, "Whether it stands in the light (light >= 0.5): day, or near a light at night or in an eclipse.");
             Prop(LType.Entity, "weapon", LType.Text, "Its current weapon's id (\"vanilla:<weapon>\"; the king's is his equipped weapon's auto attack), \"none\" when disarmed by setWeapon, or none.");
             foreach (var s in Stats.Values)
                 if (Property(LType.Entity, s.Name) == null) Prop(LType.Entity, s.Name, LType.Number, s.Description + " (with modifiers)");
@@ -631,6 +674,7 @@ namespace PalaceMod.Builder.Model.Logic
             Fn("chance", LType.Bool, "True with probability p.", ["number"]);
             Fn("waveCount", LType.Number, "Enemies night n will spawn, optionally only templates matching a filter.", ["number", "filter?"]);
             Fn("waveUnits", LType.List, "The templates night n spawns.", ["number"]);
+            Fn("lightAt", LType.Number, "How lit a point is, 0..1: daylight plus every light that reaches it (entity lights and the game's own, such as the castle's night fire). 0.5 and up counts as lit.", ["position"], example: "lightAt(self) < 0.5");
             Fn("strongestUnit", LType.Template, "Night n's strongest template (hp x damage).", ["number"]);
             Fn("stacks", LType.Number, "Stacks of a status on it.", ["status"], method: true, onlyOn: LType.Entity);
             Fn("is", LType.Bool, "Whether it matches a filter.", ["filter"], method: true, onlyOn: LType.Entity);
@@ -646,7 +690,7 @@ namespace PalaceMod.Builder.Model.Logic
                 ("unit", "Units (not buildings)."), ("building", "Buildings."), ("prop", "Props."), ("projectile", "Projectiles."), ("area", "Areas."),
                 ("pickup", "Pickups."), ("coin", "The game's coins."), ("king", "The king."), ("castle", "The castle."), ("self", "The rule's owner."),
                 ("melee", "Melee fighters."), ("ranged", "Ranged fighters."), ("alive", "Alive (not dead, switched off or an unbuilt slot)."),
-                ("dead", "Dead or knocked out. Naming it lets a selector see the dead."), ("elite", "Elite enemies."),
+                ("dead", "Dead or knocked out. Naming it lets a selector see the dead."), ("elite", "Elite enemies."), ("lit", "Standing in the light (.light >= 0.5)."),
                 ("disabled", "Switched off (`disable`, or placed with active: false). Naming it lets a selector see switched-off things."),
                 ("unbuilt", "An empty build slot (level 0). Naming it lets a selector see empty slots, which it otherwise skips."),
                 ("logic", "Logic objects."), ("line", "Spawn lines."), ("point", "Points."), ("path", "Paths."),
@@ -791,9 +835,9 @@ namespace PalaceMod.Builder.Model.Logic
                 d[name] = c;
             }
             var template = new[] { ("visual", "visual"), ("body", "body"), ("projectile", "projectile"), ("mover", "mover"), ("area", "area"),
-                ("pickup", "pickup"), ("interact", "interact"), ("attacks[]", "attack"), ("movement", "movement"), ("parts[]", "part") };
+                ("pickup", "pickup"), ("interact", "interact"), ("attacks[]", "attack"), ("movement", "movement"), ("parts[]", "part"), ("light", "light") };
             C("pack", typeof(DesignPack), ("units[]", "unit"), ("entities[]", "entity"), ("statuses[]", "status"), ("presets[]", "preset"), ("levels[]", "level"));
-            C("unit", typeof(UnitDef), ("movement", "movement"), ("attacks[]", "attack"), ("interact", "interact"), ("parts[]", "part"));
+            C("unit", typeof(UnitDef), ("movement", "movement"), ("attacks[]", "attack"), ("interact", "interact"), ("parts[]", "part"), ("light", "light"));
             C("level", typeof(LevelDef), ("logic", "logic"));
             C("entity", typeof(EntityDef), template);
             C("place", typeof(PlaceDef), template);
@@ -804,7 +848,9 @@ namespace PalaceMod.Builder.Model.Logic
             C("swing", typeof(SwingDef));
             C("pose", typeof(PoseDef));
             C("area", typeof(AreaDef), ("shape", "shape"));
-            C("shape", typeof(ShapeDef), ("circle", "circle"), ("rect", "rect"), ("polygon", "polygon"));
+            C("shape", typeof(ShapeDef), ("circle", "circle"), ("rect", "rect"), ("polygon", "polygon"), ("sector", "sector"));
+            C("sector", typeof(SectorDef));
+            C("light", typeof(LightDef));
             C("circle", typeof(CircleDef));
             C("rect", typeof(RectDef));
             C("polygon", typeof(PolygonDef));
@@ -825,7 +871,7 @@ namespace PalaceMod.Builder.Model.Logic
             C("preset", typeof(PresetDef), ("params{}", "presetParam"));
             C("presetParam", typeof(PresetParamDef));
             C("logic", typeof(LogicDef), ("places[]", "place"), ("attach{}", "attach"), ("hud[]", "hud"), ("kingActions[]", "kingAction"), ("caps", "caps"), ("game", "game"));
-            C("attach", typeof(AttachDef));
+            C("attach", typeof(AttachDef), ("light", "light"));
             C("hud", typeof(HudDef));
             C("kingAction", typeof(KingActionDef), ("uses", "uses"));
             C("uses", typeof(UsesDef));

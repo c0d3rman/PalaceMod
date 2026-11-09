@@ -2693,6 +2693,246 @@
       "since": "1.0.0"
     },
     {
+      "name": "lighting",
+      "group": "Show",
+      "description": "Changes the level's light: darken it (an eclipse by day, a pitch-black night), tint it, or make day look like night. Reverts at the level's end, after `for`, or with `reset`.",
+      "params": [
+        {
+          "name": "brightness",
+          "type": "number",
+          "min": 0.0,
+          "max": 2.0,
+          "description": "Multiplies the sun's light: 1 = as the game has it, 0.2 = an eclipse, 0 = black. Units stay readable."
+        },
+        {
+          "name": "color",
+          "type": "color",
+          "description": "Tints the sunlight, #rrggbb (#ff9060 = a red dusk)."
+        },
+        {
+          "name": "phase",
+          "type": "enum",
+          "options": [
+            "auto",
+            "day",
+            "sunset",
+            "night"
+          ],
+          "description": "The base light from the level's colours: day, sunset or night whatever the time; auto follows the game's day and night."
+        },
+        {
+          "name": "fade",
+          "type": "number",
+          "default": 1,
+          "min": 0.0,
+          "max": 60.0,
+          "description": "Seconds to blend into the new light."
+        },
+        {
+          "name": "for",
+          "type": "for",
+          "description": "Seconds (or \"night\"/\"day\": until the next dawn/dusk); then it fades back."
+        },
+        {
+          "name": "reset",
+          "type": "bool",
+          "default": false,
+          "description": "Back to the game's own light (the other params are ignored)."
+        }
+      ],
+      "example": "{ \"do\": \"lighting\", \"brightness\": 0.15, \"color\": \"#8090ff\", \"fade\": 3, \"for\": 25 }",
+      "since": "1.0.0"
+    },
+    {
+      "name": "setLight",
+      "group": "Show",
+      "description": "Gives it a light that follows it (or changes or removes its `light`): a torch on the king, a lantern on a unit, a lighthouse beam. Works on anything: units, the king, buildings, props, projectiles.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "color",
+          "type": "color",
+          "default": "#ffd890",
+          "description": "#rrggbb."
+        },
+        {
+          "name": "intensity",
+          "type": "number",
+          "default": 1,
+          "min": 0.0,
+          "max": 4.0,
+          "description": "How bright: 1 lights its range fully."
+        },
+        {
+          "name": "range",
+          "type": "number",
+          "default": 10,
+          "min": 0.5,
+          "max": 200.0,
+          "description": "Radius it lights on the ground (m); a cone's length."
+        },
+        {
+          "name": "cone",
+          "type": "number",
+          "min": 1.0,
+          "max": 179.0,
+          "description": "A beam this many degrees wide along its facing (empty: all round)."
+        },
+        {
+          "name": "aim",
+          "type": "number",
+          "default": 0,
+          "description": "A cone's yaw relative to its facing (degrees)."
+        },
+        {
+          "name": "height",
+          "type": "number",
+          "default": 3,
+          "min": 0.0,
+          "max": 60.0,
+          "description": "Metres above it."
+        },
+        {
+          "name": "flicker",
+          "type": "number",
+          "default": 0,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "0..1: a fire's flicker (looks only)."
+        },
+        {
+          "name": "on",
+          "type": "bool",
+          "description": "Switches it on or off (keeps its settings)."
+        },
+        {
+          "name": "remove",
+          "type": "bool",
+          "default": false,
+          "description": "Removes the light."
+        },
+        {
+          "name": "for",
+          "type": "for",
+          "description": "Seconds (or \"night\"/\"day\"); then it goes back to how it was."
+        }
+      ],
+      "example": "{ \"do\": \"setLight\", \"target\": \"king\", \"color\": \"#ffc070\", \"range\": 8 }",
+      "since": "1.0.0"
+    },
+    {
+      "name": "turn",
+      "group": "Move",
+      "description": "Turns it to face a direction: aim a beam, a turret, a blade wall, a placed area (its shape, outline, surface and solid footprint turn with it). Units turn their model (they turn back when they walk).",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "facing",
+          "type": "number",
+          "description": "Yaw in degrees to face (0 = north, 90 = east)."
+        },
+        {
+          "name": "by",
+          "type": "number",
+          "description": "Degrees to turn by (clockwise; negative = anticlockwise)."
+        },
+        {
+          "name": "toward",
+          "type": "position",
+          "description": "Face this entity or position."
+        },
+        {
+          "name": "speed",
+          "type": "number",
+          "min": 0.0,
+          "description": "Degrees per second (empty: at once)."
+        }
+      ],
+      "example": "{ \"do\": \"turn\", \"target\": \"@beam\", \"toward\": \"king\", \"speed\": 90 }",
+      "since": "1.0.0"
+    },
+    {
+      "name": "setShape",
+      "group": "Move",
+      "description": "Changes an area's shape or size (its outline, fill, membership and surface follow), or a body's footprint (its solid cut and collider follow).",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "shape",
+          "type": "enum",
+          "options": [
+            "circle",
+            "rect",
+            "polygon",
+            "sector"
+          ],
+          "description": "The new kind (default: keep the kind it has)."
+        },
+        {
+          "name": "radius",
+          "type": "number",
+          "min": 0.1,
+          "description": "circle, sector: the radius (m)."
+        },
+        {
+          "name": "angle",
+          "type": "number",
+          "min": 1.0,
+          "max": 360.0,
+          "description": "sector: how wide (degrees), centred on its facing."
+        },
+        {
+          "name": "width",
+          "type": "number",
+          "min": 0.1,
+          "description": "rect: width (m)."
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "min": 0.1,
+          "description": "rect: depth (m)."
+        },
+        {
+          "name": "points",
+          "type": "json",
+          "description": "polygon: [[x, z], ...] relative to it."
+        },
+        {
+          "name": "part",
+          "type": "enum",
+          "options": [
+            "area",
+            "body",
+            "both"
+          ],
+          "description": "What to reshape (default: its area, else its body)."
+        },
+        {
+          "name": "for",
+          "type": "for",
+          "description": "Seconds (or \"night\"/\"day\"); then the old shape comes back."
+        }
+      ],
+      "example": "{ \"do\": \"setShape\", \"target\": \"@beam\", \"angle\": \"$beamWidth\" }",
+      "since": "1.0.0"
+    },
+    {
       "name": "destroy",
       "group": "End",
       "description": "Removes it.",
@@ -3093,6 +3333,15 @@
       "description": "The templates night n spawns."
     },
     {
+      "name": "lightAt",
+      "args": [
+        "position"
+      ],
+      "returns": "number",
+      "description": "How lit a point is, 0..1: daylight plus every light that reaches it (entity lights and the game's own, such as the castle's night fire). 0.5 and up counts as lit.",
+      "example": "lightAt(self) < 0.5"
+    },
+    {
       "name": "strongestUnit",
       "args": [
         "number"
@@ -3301,6 +3550,18 @@
       "name": "id",
       "returns": "text",
       "description": "Its entity id."
+    },
+    {
+      "on": "entity",
+      "name": "light",
+      "returns": "number",
+      "description": "How lit it is, 0..1: daylight plus the lights that reach it (lightAt(its position))."
+    },
+    {
+      "on": "entity",
+      "name": "lit",
+      "returns": "bool",
+      "description": "Whether it stands in the light (light >= 0.5): day, or near a light at night or in an eclipse."
     },
     {
       "on": "entity",
@@ -3540,6 +3801,11 @@
       "type": "number"
     },
     {
+      "name": "daylight",
+      "description": "The level's own light, 0..1: 1 by day, about 0.34 at night, lower in an eclipse (`lighting`).",
+      "type": "number"
+    },
+    {
       "name": "waterLevel",
       "description": "The terrain's water level (world y); 0 with no water. The `terrain` action's waterLevel op changes it.",
       "type": "number"
@@ -3768,6 +4034,10 @@
       "description": "Elite enemies."
     },
     {
+      "name": "lit",
+      "description": "Standing in the light (.light >= 0.5)."
+    },
+    {
       "name": "disabled",
       "description": "Switched off (`disable`, or placed with active: false). Naming it lets a selector see switched-off things."
     },
@@ -3977,13 +4247,15 @@
         "interact",
         "parts",
         "counterpart",
+        "light",
         "rules"
       ],
       "children": {
         "movement": "movement",
         "attacks[]": "attack",
         "interact": "interact",
-        "parts[]": "part"
+        "parts[]": "part",
+        "light": "light"
       }
     },
     "level": {
@@ -4025,6 +4297,7 @@
         "area",
         "pickup",
         "interact",
+        "light",
         "parts",
         "attacks",
         "targeting",
@@ -4042,7 +4315,8 @@
         "interact": "interact",
         "attacks[]": "attack",
         "movement": "movement",
-        "parts[]": "part"
+        "parts[]": "part",
+        "light": "light"
       }
     },
     "place": {
@@ -4072,6 +4346,7 @@
         "area",
         "pickup",
         "interact",
+        "light",
         "parts",
         "attacks",
         "targeting",
@@ -4090,7 +4365,8 @@
         "interact": "interact",
         "attacks[]": "attack",
         "movement": "movement",
-        "parts[]": "part"
+        "parts[]": "part",
+        "light": "light"
       }
     },
     "visual": {
@@ -4195,13 +4471,35 @@
       "fields": [
         "circle",
         "rect",
-        "polygon"
+        "polygon",
+        "sector"
       ],
       "children": {
         "circle": "circle",
         "rect": "rect",
-        "polygon": "polygon"
+        "polygon": "polygon",
+        "sector": "sector"
       }
+    },
+    "sector": {
+      "fields": [
+        "radius",
+        "angle"
+      ],
+      "children": {}
+    },
+    "light": {
+      "fields": [
+        "color",
+        "intensity",
+        "range",
+        "cone",
+        "aim",
+        "height",
+        "flicker",
+        "on"
+      ],
+      "children": {}
     },
     "circle": {
       "fields": [
@@ -4416,6 +4714,7 @@
         "area",
         "pickup",
         "interact",
+        "light",
         "parts",
         "attacks",
         "targeting",
@@ -4465,9 +4764,12 @@
         "vars",
         "statuses",
         "targeting",
-        "rules"
+        "rules",
+        "light"
       ],
-      "children": {}
+      "children": {
+        "light": "light"
+      }
     },
     "hud": {
       "fields": [
