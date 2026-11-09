@@ -17,7 +17,7 @@ using Newtonsoft.Json.Linq;
       onParentDeath        die (killed with it) | drop (unlinked, set down on the ground) | stay (unlinked, left where it is)
       damageToParent       this much of every hit it takes is dealt to its parent too (2 = double; a weak point)
       damageToGroup        this fraction of every hit is shared evenly by its whole linked group, itself included
-                           (1 = one shared pool)
+                           (1 = one shared pool); a hit on the root is shared by the largest of its parts' shares
       damageKept           the fraction it takes itself, before the group share (default 1)
 */
 namespace PalaceMod.Builder.Logic
@@ -154,8 +154,16 @@ namespace PalaceMod.Builder.Logic
         /// </summary>
         public static (double kept, double toParent, double perOther, List<LogicEntity> others) ShareDamage(LogicEntity victim, double amount)
         {
-            var s = victim?.Link;
-            if (s == null || amount <= 0) return (amount, 0, 0, null);
+            if (victim == null || amount <= 0) return (amount, 0, 0, null);
+            var s = victim.Link;
+            if (s == null)
+            {
+                // A root (the head of a chain, a colossus): a hit on it is shared like its parts share theirs.
+                double rootShare = 0;
+                foreach (var c in victim.Children) rootShare = Math.Max(rootShare, c.Link?.ToGroup ?? 0);
+                if (rootShare <= 0) return (amount, 0, 0, null);
+                s = new LinkSpec { ToGroup = rootShare };
+            }
             double toParent = victim.Parent != null && victim.Parent.Alive ? amount * Math.Max(0, s.ToParent) : 0;
             double g = Math.Max(0, Math.Min(1, s.ToGroup));
             double kept = amount * Math.Max(0, s.Kept);

@@ -364,7 +364,8 @@ attack, vanilla towers and troops included (`setTargeting` on `all('player and T
 `"spacing": 1.6` (metres behind the leader, along the line from the leader to the follower: a trail, so a chain
 snakes) or `"offset": [x, z]` (a slot in the leader's frame, x right, z ahead: beside or behind), and `"catchUp": 1.5`
 (speed multiplier while it's more than `max(spacing, 1.5)` m from its slot). It walks there with the game's A* and
-avoidance, and re-paths when the slot moves 0.75 m. Without a live leader (none, dead, unlinked) `then` applies:
+avoidance, and re-paths when the slot moves 0.4 m. A trail slot is always behind the leader (by its model's
+heading): a follower that finds itself in front walks round. Without a live leader (none, dead, unlinked) `then` applies:
 `pathfind` (on its own: it becomes a leader), `hold` or `destroy`; a new leader is picked up again as soon as the
 expression names one.
 
@@ -470,7 +471,7 @@ night open).
 - **Damage.** On each hit a part takes (after damage modifiers): `damageToParent` × the hit goes to the parent as
   well (credited to the same attacker; a weak point with 2 doubles it); `damageToGroup` of the hit is split evenly
   over its whole linked group (`.group`: the root and every part, itself included), the rest × `damageKept` it takes
-  itself. `damageToGroup: 1` is one shared pool; `damageKept: 0` with `damageToParent: 1` is a pure proxy hitbox.
+  itself. A hit on the root is shared by the largest `damageToGroup` among its parts. `damageToGroup: 1` is one shared pool; `damageKept: 0` with `damageToParent: 1` is a pure proxy hitbox.
   Shares are dealt as they are: the receivers' own `damageTaken` doesn't apply again (a colossus immune to hits on
   its body still bleeds through its weak points), `invulnerable` still does. A scripted `kill` isn't shared.
 - **Selectors.** `.parent`, `.children` (a set), `.root`, `.group` (a set): `self.children.len`, `count('#link and

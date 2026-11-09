@@ -181,6 +181,10 @@ namespace PalaceMod.Tests
             Assert.Equal(5.0, each, "every other link a quarter");
             Assert.Equal("head,a,c", string.Join(",", others.Select(o => o.Id)), "the rest of the group, root first");
             Assert.Equal(0.0, toParent, "no parent share");
+            // A hit on the root (the head) is shared like its parts': a quarter each.
+            (kept, _, each, others) = LogicWorld.ShareDamage(head, 20);
+            Assert.Equal(5.0, kept, "the root keeps its quarter");
+            Assert.Equal(3, others.Count, "and shares with its 3 parts");
             // Half shared: the struck one keeps half plus its share.
             b.Link.ToGroup = 0.5;
             (kept, _, each, _) = LogicWorld.ShareDamage(b, 20);

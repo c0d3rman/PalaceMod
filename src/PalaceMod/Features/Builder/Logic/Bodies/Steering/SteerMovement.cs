@@ -253,8 +253,11 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             if (m.Offset != null) slot = lp + Quaternion.Euler(0f, Heading.Yaw(leader), 0f) * new Vector3(m.Offset[0], 0f, m.Offset[1]);
             else
             {
+                // A trail: along the line from the leader to the follower (so a chain snakes round corners), but
+                // always behind the leader: a follower ahead of it (it turned, or it was spawned in front) walks round.
+                var back = -(Quaternion.Euler(0f, Heading.Yaw(leader), 0f) * Vector3.forward);
                 var d = pos - lp; d.y = 0;
-                if (d.sqrMagnitude < 0.01f) d = -(Quaternion.Euler(0f, Heading.Yaw(leader), 0f) * Vector3.forward);
+                if (d.sqrMagnitude < 0.01f || Vector3.Dot(d.normalized, back) < 0f) d = back;
                 slot = lp + d.normalized * m.Spacing;
             }
             return Ground(st, slot);

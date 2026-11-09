@@ -844,7 +844,8 @@ the part, `to` the parent; `unlink` to let go):
 - `onParentDeath`: `die` (default), `drop` (unlinked and set on the ground; it resumes its own movement) or `stay`.
 - Damage, applied inside the game's own hit: `damageToParent` × each hit it takes is dealt to its parent too, credited
   to the same attacker (2 = a weak point that doubles the hit); `damageToGroup` of each hit is shared evenly by its
-  whole linked group (the root and all parts, itself included; 1 = one shared pool); `damageKept` is the part of the
+  whole linked group (the root and all parts, itself included; 1 = one shared pool; a hit on the root is shared by
+  the largest share among its parts); `damageKept` is the part of the
   rest it takes itself (0 with `damageToParent: 1` = a pure proxy hitbox). The receivers' own `damageTaken` doesn't
   apply to a share again (a body immune to direct hits still bleeds through its weak points); `kill` isn't shared.
 - Read them with `.parent`, `.children` (a set), `.root`, `.group` (a set); events `linked` / `unlinked` on the part

@@ -475,7 +475,7 @@ namespace PalaceMod
                 if (orderSpeed == null && st.FollowDest is Vector3 fd && st.FollowLeader is { } leader && leader.Alive)
                 {
                     var slot = SteerMovement.FollowSlot(st, leader, pos);
-                    if (SteerMovement.Flat(slot, fd) > 0.75f) SteerMovement.Repath(st);
+                    if (SteerMovement.Flat(slot, fd) > 0.4f) SteerMovement.Repath(st);
                     if (SteerMovement.Flat(pos, slot) > Mathf.Max(1.5f, st.Move.Spacing)) orderSpeed = baseSpeed * Mathf.Max(1f, st.Move.CatchUp);
                 }
                 float speed = orderSpeed ?? baseSpeed;

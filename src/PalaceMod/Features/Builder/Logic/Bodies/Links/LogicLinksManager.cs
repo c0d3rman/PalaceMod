@@ -119,12 +119,21 @@ namespace PalaceMod
         {
             Links.Carried.Remove(e);
             var go = e?.Go();
-            if (go == null || how != LinkSpec.Drop) return;
+            // A part dropped while its level unloads (the parent's object went first) has nowhere to land.
+            if (go == null || how != LinkSpec.Drop || !go.activeInHierarchy || AstarPath.active == null) return;
             var p = go.transform.position;
             var pm = go.GetComponent<PathfindMovement>();
-            go.transform.position = pm is PathfindMovementEnemy en ? en.GetNearestGroundPosition(p)
-                : pm is PathfindMovementPlayerunit pu ? pu.GetNearestGroundPosition(p)
-                : BodyNav.UnitGround(p);
+            try
+            {
+                go.transform.position = pm is PathfindMovementEnemy en ? en.GetNearestGroundPosition(p)
+                    : pm is PathfindMovementPlayerunit pu ? pu.GetNearestGroundPosition(p)
+                    : BodyNav.UnitGround(p);
+            }
+            catch (NullReferenceException)
+            {
+                // A unit whose movement hasn't started has no nearest-node constraint yet: the plain graph query.
+                go.transform.position = BodyNav.UnitGround(p);
+            }
             if (go.GetComponent<BuilderBody>() != null) go.transform.rotation = Quaternion.Euler(0f, go.transform.eulerAngles.y, 0f);
         }
 
@@ -174,8 +183,9 @@ namespace PalaceMod
                 var w = LogicWorld.Current;
                 if (w == null || w.Linked.Count == 0 || sharing > 0 || partKilling || LogicStatsManager.killing || _amount <= 0 || __instance.HpValue <= 0 || __instance.invulnerable) return true;
                 var e = LogicGame.EntityOf(__instance.gameObject);
-                if (e?.Link == null || !e.Link.SharesDamage) return true;
+                if (e == null || (e.Link == null ? e.Children.Count == 0 : !e.Link.SharesDamage)) return true;
                 var (kept, toParent, each, others) = LogicWorld.ShareDamage(e, _amount);
+                if (toParent <= 0 && others == null && Math.Abs(kept - _amount) < 1e-6) return true;
                 __state = new ShareState { Parent = e.Parent, ToParent = toParent, Each = each, Others = others, From = _damageComingFrom, ByPlayer = causedByPlayer };
                 if (kept <= 0) { __result = false; return false; }
                 _amount = (float)kept;
@@ -305,7 +315,8 @@ namespace PalaceMod.Builder.Logic.Bodies
             {
                 string slot = "";
                 if (e.Link?.Moves == true && e.Parent != null) slot = $" off-slot {Vector3.Distance(Slot(e, out _), e.Position.ToVector3()):0.##} m";
-                return $"{e.Id} -> {e.Parent?.Id} offset {e.Link?.Offset} follow {e.Link?.Follow} death {e.Link?.OnParentDeath} dmg parent {e.Link?.ToParent} group {e.Link?.ToGroup} kept {e.Link?.Kept} at {e.Position}{slot}";
+                string gap = e.Parent != null ? $" {Vec.FlatDistance(e.Position, e.Parent.Position):0.##} m from parent at {e.Parent.Position}" : "";
+                return $"{e.Id} -> {e.Parent?.Id} offset {e.Link?.Offset} follow {e.Link?.Follow} death {e.Link?.OnParentDeath} dmg parent {e.Link?.ToParent} group {e.Link?.ToGroup} kept {e.Link?.Kept} at {e.Position}{gap}{slot}";
             });
             return $"{parts.Count} linked parts\n" + string.Join("\n", lines);
         }
