@@ -101,12 +101,14 @@ namespace PalaceMod
                 foreach (var element in map.AllMaps)
                 {
                     if (!claimingActions.Contains(element.actionId)) continue;
+                    bool sparesGame = Keybinds.SparesGame(byAction[element.actionId].Context);
                     foreach (var otherMap in maps)
                     {
                         if (otherMap.controllerType != map.controllerType || otherMap.controllerId != map.controllerId) continue;
                         foreach (var other in otherMap.AllMaps)
                         {
                             if (!other.enabled || claimingActions.Contains(other.actionId)) continue;
+                            if (sparesGame && !byAction.ContainsKey(other.actionId)) continue;
                             if (other.elementType != element.elementType || other.elementIdentifierId != element.elementIdentifierId) continue;
                             if (map.controllerType == ControllerType.Keyboard && other.modifierKeyFlags != element.modifierKeyFlags) continue;
                             if (element.axisRange != AxisRange.Full && other.axisRange != AxisRange.Full && element.axisRange != other.axisRange) continue;

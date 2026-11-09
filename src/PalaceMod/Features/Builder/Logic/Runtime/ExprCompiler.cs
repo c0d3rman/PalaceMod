@@ -73,8 +73,21 @@ namespace PalaceMod.Builder.Logic
                 case ExprKind.Bool: { var v = Value.Bool((bool)n.Literal); return _ => v; }
                 case ExprKind.Text: { var v = Value.Text((string)n.Literal); return _ => v; }
                 case ExprKind.Template: { var v = Value.Template(n.Name); return _ => v; }
-                case ExprKind.LevelVar: { string name = n.Name; return ctx => ctx.World.Level.Vars.TryGetValue(name, out var v) ? v : Value.None; }
-                case ExprKind.Named: { string name = n.Name; return ctx => Value.Entity(ctx.World.FindNamed(name)); }
+                // Level-bound references resolve against the level the rule runs in. A shared template may be used by a
+                // level that lacks the name: that's a clear error naming the template, not a silent none.
+                case ExprKind.LevelVar:
+                {
+                    string name = n.Name;
+                    return ctx => ctx.World.Level.Vars.TryGetValue(name, out var v) ? v
+                        : throw new LogicError($"this level has no variable \"${name}\" (declare it in logic.vars){TemplateNote(ctx)}");
+                }
+                case ExprKind.Named:
+                {
+                    string name = n.Name;
+                    return ctx => ctx.World.FindNamed(name) is { } e ? Value.Entity(e)
+                        : ctx.World.IsKnownName(name) ? Value.None
+                        : throw new LogicError($"nothing on this level is named \"@{name}\"{TemplateNote(ctx)}");
+                }
                 case ExprKind.Role: return Role(n.Name);
                 case ExprKind.Global: return Global(n.Name);
                 case ExprKind.Member: return Member(n);
@@ -103,6 +116,12 @@ namespace PalaceMod.Builder.Logic
             }
             throw new LogicError($"col {n.Col + 1}: unsupported expression");
         }
+
+        /// <summary>" (in template X: ...)" when the rule belongs to a template rather than the level's own logic.</summary>
+        internal static string TemplateNote(LogicContext ctx) =>
+            ctx?.Self is { } self && self != ctx.World?.Level && self.Template != null && !self.Template.StartsWith("vanilla:")
+                ? $" (in template \"{self.Template}\": a shared template that names a level's $variables or @names only works in levels that have them)"
+                : "";
 
         private static string ResolveAlias(string name) => LogicSchema.RoleAliases.TryGetValue(name, out var to) ? to : name;
 
@@ -136,6 +155,7 @@ namespace PalaceMod.Builder.Logic
                 "other" => Local(ctx => Value.Entity(ctx.Other)),
                 "spawned" => ctx => Value.Entity(ctx.Spawned),
                 "it" => ctx => Value.Entity(ctx.It),
+                "outer" => ctx => Value.Entity(ctx.Outer),
                 "king" => ctx => Value.Entity(LogicServices.Game?.King),
                 "castle" => ctx => Value.Entity(LogicServices.Game?.Castle),
                 "level" => ctx => Value.Entity(ctx.World.Level),
@@ -177,6 +197,8 @@ namespace PalaceMod.Builder.Logic
                     "value" => ctx => ctx.Event == null ? Value.None : !ctx.Event.Payload.IsNone ? ctx.Event.Payload : Value.Number(ctx.Event.Value),
                     "pos" => ctx => ctx.Event?.Pos is Vec p ? Value.Position(p) : ctx.Event?.Subject != null ? Value.Position(ctx.Event.Subject.Position) : Value.None,
                     "name" or "choice" or "result" => ctx => ctx.Event?.Text != null ? Value.Text(ctx.Event.Text) : Value.None,
+                    "types" => ctx => Value.List(ctx.Event?.Types?.Select(Value.Text).ToList() ?? []),
+                    "weapon" => ctx => ctx.Event?.Weapon != null ? Value.Text(ctx.Event.Weapon) : Value.None,
                     _ => throw new LogicError($"col {n.Col + 1}: event has no \"{name}\""),
                 };
             }
@@ -267,7 +289,9 @@ namespace PalaceMod.Builder.Logic
                 case "name": return Value.Text(e.Name ?? e.Id);
                 case "enabled": return Value.Bool(e.Enabled);
                 case "elite": return Value.Bool(LogicServices.IsElite?.Invoke(e) ?? false);
+                case "weapon": return LogicServices.WeaponOf?.Invoke(e) is string w ? Value.Text(w) : Value.None;
             }
+            if (LogicServices.GameProperty?.Invoke(e, name) is Value game) return game;
             var stats = LogicServices.Stats;
             if (stats != null)
             {
@@ -375,7 +399,8 @@ namespace PalaceMod.Builder.Logic
                     case "dist":
                         {
                             var o = Arg(0);
-                            return ctx => Value.Number(Vec.FlatDistance(Pos(target(ctx)), Pos(o(ctx))));
+                            // A distance to or from nothing is none (a missing target must not read as "0 m away").
+                            return ctx => Values.ToPosition(target(ctx)) is Vec a && Values.ToPosition(o(ctx)) is Vec b ? Value.Number(Vec.FlatDistance(a, b)) : Value.None;
                         }
                     case "inside":
                         {
@@ -461,7 +486,9 @@ namespace PalaceMod.Builder.Logic
                         double deg = Math.Atan2(d.X, d.Z) * 180 / Math.PI;
                         return Value.Number(deg < 0 ? deg + 360 : deg);
                     };
-                case "dist": return ctx => Value.Number(Vec.FlatDistance(Pos(A0(ctx)), args.Length > 1 ? Pos(A1(ctx)) : (ctx.Self?.Position ?? Vec.Zero)));
+                case "dist":
+                    return ctx => Values.ToPosition(A0(ctx)) is Vec a && (args.Length > 1 ? Values.ToPosition(A1(ctx)) : ctx.Self?.Position) is Vec b
+                        ? Value.Number(Vec.FlatDistance(a, b)) : Value.None;
                 case "min":
                 case "max":
                     {
@@ -533,8 +560,11 @@ namespace PalaceMod.Builder.Logic
             string name = n.Name;
             var args = n.Args;
             var filter = FilterArg(args, 0);
-            bool wantsSelf = args.Length > 0 && args[0].Kind == ExprKind.Text && FilterMentions((string)args[0].Literal, "self");
-            bool wantsDead = args.Length > 0 && args[0].Kind == ExprKind.Text && FilterMentions((string)args[0].Literal, "dead");
+            // What the selector may see beyond the living, switched-on, built things: what its filter names.
+            Func<LogicContext, Seen> seen;
+            if (args.Length == 0) seen = _ => Seen.Default;
+            else if (args[0].Kind == ExprKind.Text) { var s = SeenBy((string)args[0].Literal); seen = _ => s; }
+            else { var fe = Node(args[0]); seen = ctx => SeenBy(Values.Format(fe(ctx))); }
             Eval radius = args.Length > 1 ? Node(args[1]) : (_ => Value.Number(0));
             Eval score = name == "best" && args.Length > 2 ? Node(args[2]) : null;
             Eval anchor = n.Target != null ? Node(n.Target) : (ctx => Value.Entity(ctx.Self));
@@ -549,15 +579,20 @@ namespace PalaceMod.Builder.Logic
                 bool anchorIsLevel = anchorEntity?.Kind == "level";
                 if (anchorIsLevel) r = 0;
                 var f = filter(ctx);
+                var vis = seen(ctx);
                 var cands = new List<LogicEntity>();
                 ctx.World.Query(center, r, cands);
+                if (vis.Unbuilt) LogicServices.UnbuiltSlots?.Invoke(center, r, cands);
                 var fctx = ctx.With();
+                fctx.Outer = ctx.It;   // in where(): `it` is the candidate, `outer` the it around the selector
                 var hits = new List<(LogicEntity e, float d)>();
+                var dedupe = vis.Unbuilt ? new HashSet<LogicEntity>() : null;
                 foreach (var c in cands)
                 {
                     if (c == null || !c.Exists) continue;
-                    if (!wantsSelf && (c == ctx.Self || c == anchorEntity)) continue;
-                    if (!wantsDead && !c.Alive) continue;
+                    if (dedupe != null && !dedupe.Add(c)) continue;
+                    if (!vis.Self && (c == ctx.Self || c == anchorEntity)) continue;
+                    if (!vis.Sees(c)) continue;
                     float d = anchorIsLevel && n.Target == null ? 0 : Vec.FlatDistance(center, c.Position);
                     if (r > 0 && d > r) continue;
                     fctx.It = c;
@@ -596,11 +631,41 @@ namespace PalaceMod.Builder.Logic
             };
         }
 
-        private static bool FilterMentions(string src, string term)
+        /// <summary>What a selector looks at. By default it skips self (and its anchor), the dead, switched-off
+        /// entities and empty build slots; its filter opts in to each by naming it (`self`, `dead`, `disabled`,
+        /// `unbuilt`) or with `include:&lt;that&gt;` (which matches everything, so it only widens the search).</summary>
+        internal readonly struct Seen
         {
-            var node = Filter.Parse(src, out _, out _);
-            return node != null && Filter.Terms(node).Any(t => t.Term == term);
+            public readonly bool Self, Dead, Disabled, Unbuilt;
+            public Seen(bool self, bool dead, bool disabled, bool unbuilt) { Self = self; Dead = dead; Disabled = disabled; Unbuilt = unbuilt; }
+            public static readonly Seen Default = new(false, false, false, false);
+
+            public bool Sees(LogicEntity c) =>
+                (Disabled || !IsDisabled(c)) && (Unbuilt || !IsUnbuilt(c)) && (Dead || !IsDead(c));
         }
+
+        private static readonly Dictionary<string, Seen> seenCache = new(StringComparer.Ordinal);
+
+        internal static Seen SeenBy(string src)
+        {
+            if (src == null) return Seen.Default;
+            if (seenCache.TryGetValue(src, out var s)) return s;
+            var node = Filter.Parse(src, out _, out _);
+            bool Names(string what) => node != null && Filter.Terms(node).Any(t => t.Term == what || t.Term == "include" && t.Arg == what);
+            s = new Seen(Names("self"), Names("dead"), Names("disabled"), Names("unbuilt"));
+            if (seenCache.Count > 4096) seenCache.Clear();
+            seenCache[src] = s;
+            return s;
+        }
+
+        /// <summary>Switched off: `disable`, or placed with `active: false`.</summary>
+        internal static bool IsDisabled(LogicEntity c) => !c.Enabled;
+
+        /// <summary>An empty build slot (or its building object while the slot is empty).</summary>
+        internal static bool IsUnbuilt(LogicEntity c) => c.Kind == "building" && c.Body is { } b && b.BuildingType != null && b.Level == 0;
+
+        /// <summary>Dead or knocked out (not merely switched off or an empty slot).</summary>
+        internal static bool IsDead(LogicEntity c) => !c.Alive && !IsDisabled(c) && !IsUnbuilt(c);
 
         // ------------------------------------------------------------------ filters
 
@@ -625,9 +690,12 @@ namespace PalaceMod.Builder.Logic
                 case "self": return (ctx, c) => c == ctx.Self;
                 case "melee": return (_, c) => c.Body?.HasTag("MeeleFighter") ?? false;
                 case "ranged": return (_, c) => c.Body?.HasTag("RangedFighter") ?? false;
-                case "alive": return (_, c) => c.Alive;
+                case "alive": return (_, c) => c.Alive && !IsDisabled(c) && !IsUnbuilt(c);
                 case "elite": return (_, c) => LogicServices.IsElite?.Invoke(c) ?? false;
-                case "dead": return (_, c) => !c.Alive;
+                case "dead": return (_, c) => IsDead(c);
+                case "disabled": return (_, c) => IsDisabled(c);
+                case "unbuilt": return (_, c) => IsUnbuilt(c);
+                case "include": return (_, _) => true;
                 case "label": return (_, c) => c.Labels.Contains(arg);
                 case "is": return (_, c) => c.Template == arg || c.Template == "vanilla:" + arg;
                 case "has": return (_, c) => LogicServices.Stats != null && LogicServices.Stats.Stacks(c, arg) > 0;

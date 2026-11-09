@@ -210,8 +210,24 @@ namespace PalaceMod.Builder.Logic.Bodies
                     Object.Instantiate(hp.fxToSpawnOnDeath, go.transform.position + hp.deathFxSpawnOffset, hp.fxToSpawnOnDeath.transform.rotation);
             }
             if (go.GetComponent<BuilderBody>() is { } b) b.Despawning = true;
-            // A knocked-out building or the castle isn't removed: destroy on those knocks it out instead.
-            if (hp != null && hp.getsKnockedOutInsteadOfDying) { if (hp.HpValue > 0f) hp.TakeDamage(hp.HpValue + 1f); return; }
+            // The player's units are knocked out instead of dying (and revive at dawn). A unit the logic spawned is
+            // removed outright; one the game made (a barracks troop) is knocked out for good: no revive at dawn.
+            // Buildings, the castle and the king are only knocked out.
+            if (hp != null && hp.getsKnockedOutInsteadOfDying)
+            {
+                bool unit = e.Kind == "unit";
+                if (unit && e.Spawned) { Object.Destroy(go); LogicWorld.Current?.Forget(e); return; }
+                if (hp.HpValue > 0f || !hp.KnockedOut)
+                {
+                    bool inv = hp.invulnerable;
+                    hp.invulnerable = false;
+                    hp.TakeDamage(hp.HpValue + 1f);
+                    if (hp != null) hp.invulnerable = inv;
+                }
+                if (unit && hp.TaggedObj != null && !hp.TaggedObj.Tags.Contains(TagManager.ETag.AUTO_NoReviveNextMorning))
+                    hp.TaggedObj.AddTag(TagManager.ETag.AUTO_NoReviveNextMorning);
+                return;
+            }
             Object.Destroy(go);
             LogicWorld.Current?.Forget(e);
         }

@@ -21,6 +21,7 @@ import decimal
 import json
 import math
 import re
+import sys
 import unicodedata
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
@@ -30,15 +31,19 @@ __all__ = [
     "parse_expr", "node_str", "parse_filter", "filter_str", "parse_interp", "walk", "filter_terms",
     "check_expr", "check_expr_node", "check_filter", "accepts", "suggest", "distance",
     "expand_presets", "validate_logic", "has_logic",
-    "try_parse_color", "ids_is_valid", "content_ref", "spawn_on_death_unit", "lowered_rule_index", "cs_double",
+    "try_parse_color", "parse_color", "classify_param", "is_identifier", "ids_is_valid", "content_ref", "spawn_on_death_unit", "lowered_rule_index", "cs_double",
 ]
 
 ANY, NUMBER, BOOL, TEXT, POSITION, ENTITY, SET, LIST, TEMPLATE, LEVEL, EVENT, VOID = (
     "any", "number", "bool", "text", "position", "entity", "set", "list", "template", "level", "event", "none")
 _TYPES = {ANY, NUMBER, BOOL, TEXT, POSITION, ENTITY, SET, LIST, TEMPLATE, LEVEL, EVENT, VOID}
 
-MAX_LENGTH = 512
-ROLES = ["self", "subject", "other", "spawned", "it", "king", "castle", "level", "event"]
+MAX_LENGTH = 8192
+MAX_DEPTH = 100
+ROLES = ["self", "subject", "other", "spawned", "it", "outer", "king", "castle", "level", "event"]
+# Filter.Prefixes / Filter.Includes
+FILTER_PREFIXES = ("is", "in", "has", "type", "include")
+FILTER_INCLUDES = ["dead", "disabled", "unbuilt", "self"]
 
 # Model/Logic/LogicDefs.cs (EntityKinds, Teams): not part of LogicSchema, so not in logic-schema.json.
 ENTITY_KIND_TEMPLATES = ["prop", "projectile", "area", "pickup", "logic"]
@@ -46,6 +51,10 @@ ENTITY_KIND_PLACES = ["prop", "projectile", "area", "pickup", "logic", "path", "
 TEAMS = ["player", "enemy", "neutral", "owner"]
 
 _MISSING = object()
+
+# The parser and checker recurse about a dozen frames per nesting level (MAX_DEPTH levels at most).
+if sys.getrecursionlimit() < 20 * MAX_DEPTH + 1000:
+    sys.setrecursionlimit(20 * MAX_DEPTH + 1000)
 
 
 # ---- C# compatibility helpers ---------------------------------------------------------------------------------
@@ -202,6 +211,84 @@ def try_parse_color(hex_: Optional[str]) -> bool:
     return len(t) > 0 and all(_is_hex(c) for c in t)
 
 
+# ParamForms.ColorNames / ColorHelp
+COLOR_NAMES = {
+    "red": "#ff0000", "cyan": "#00ffff", "blue": "#0000ff", "darkblue": "#0000a0", "lightblue": "#add8e6",
+    "purple": "#800080", "yellow": "#ffff00", "lime": "#00ff00", "fuchsia": "#ff00ff", "white": "#ffffff",
+    "silver": "#c0c0c0", "grey": "#808080", "gray": "#808080", "black": "#000000", "orange": "#ffa500",
+    "brown": "#a52a2a", "maroon": "#800000", "green": "#008000", "olive": "#808000", "navy": "#000080",
+    "teal": "#008080", "aqua": "#00ffff", "magenta": "#ff00ff",
+}
+COLOR_HELP = '"#rrggbb" (or "#rgb", "#rrggbbaa", or a colour name like "red")'
+
+
+def parse_color(text: Optional[str]) -> bool:
+    """ParamForms.TryParseColor: "#rgb", "#rrggbb", "#rrggbbaa" (the "#" optional) or a colour name."""
+    if not isinstance(text, str) or not text.strip() or all(_is_ws(c) for c in text):
+        return False
+    t = text.strip()
+    t = COLOR_NAMES.get(t.lower(), t)
+    if t.startswith("#"):
+        t = t[1:]
+    if len(t) == 3:
+        t = t[0] * 2 + t[1] * 2 + t[2] * 2
+    return len(t) in (6, 8) and all(_is_hex(c) for c in t)
+
+
+# ParamForms.Classify: how a param of a schema type reads its JSON value (the runtime's own rule).
+_LITERAL_TYPES = {"color", "fx", "sound", "enum", "status", "template"}
+_NAME_TYPES = {"var", "rule", "local"}
+_TEXT_TYPES = {"text", "signal", "label"}
+_STRUCTURED_TYPES = {"actions", "options", "targeting", "movement", "types", "keep", "json"}
+
+
+def is_slot_key(s: str) -> bool:
+    """ParamForms.IsSlotKey."""
+    return s == "castle" or s.startswith("slot:") or s.startswith("add:")
+
+
+def classify_param(type_: Optional[str], name: Optional[str], v) -> Tuple[str, Optional[str]]:
+    """ParamForms.Classify: (form, source); form is None Expression Text Literal Filter Json Structured."""
+    if v is None:
+        return "None", None
+    if not isinstance(v, str):
+        return ("Structured" if type_ in _STRUCTURED_TYPES else "Json"), None
+    s = v
+    eq = s.startswith("=")
+    if type_ in (None, "number", "int", "bool", "position", "entity", "any"):
+        pass
+    elif type_ == "entities":
+        if name == "to" and s == "all":
+            return "Literal", s
+    elif type_ == "for":
+        if s in ("night", "day"):
+            return "Literal", s
+    elif type_ == "night":
+        if s == "current":
+            return "Literal", s
+    elif type_ == "slot":
+        if is_slot_key(s):
+            return "Literal", s
+    elif type_ == "filter":
+        return "Filter", s
+    elif type_ in _NAME_TYPES:
+        return "Literal", s
+    elif type_ in _TEXT_TYPES:
+        if not eq:
+            return "Text", s
+    elif type_ in _LITERAL_TYPES:
+        if not eq:
+            return "Literal", s
+    elif type_ in _STRUCTURED_TYPES:
+        return "Structured", s
+    return "Expression", (s[1:] if eq else s)
+
+
+def is_identifier(s) -> bool:
+    """Expr.IsIdentifier."""
+    return isinstance(s, str) and len(s) > 0 and (_is_letter(s[0]) or s[0] == "_") and all(_is_letter_or_digit(c) or c == "_" for c in s)
+
+
 def ids_is_valid(id_: Optional[str]) -> bool:
     """Ids.IsValid: 1-64 chars of a-z, 0-9, '_', '-', '.', starting with a letter or digit."""
     if not isinstance(id_, str) or not id_ or len(id_) > 64:
@@ -337,6 +424,7 @@ class Schema:
         self.param_types: List[str] = list(data.get("paramTypes", []))
         self.caps: Dict[str, Tuple[int, int]] = {k: (v["default"], v["max"]) for k, v in data.get("caps", {}).items()}
         self.presets: List[dict] = list(data.get("presets", []))
+        self.game_rules: List[dict] = list(data.get("gameRules", []))
         self.role_aliases: Dict[str, str] = {}
         for e in self.events.values():
             self.role_aliases.update(e.aliases)
@@ -554,7 +642,17 @@ class _Parser:
             raise ExprError(f"unexpected {self.peek}", self.peek.col)
 
     def parse_expr(self):
-        return self.parse_cond()
+        return self._deeper(self.parse_cond)
+
+    def _deeper(self, parse):
+        """Parser.Deeper: brackets, calls, ?: and prefix operators recurse; cap it."""
+        self.nesting = getattr(self, "nesting", 0) + 1
+        if self.nesting > MAX_DEPTH:
+            raise ExprError(f"nested more than {MAX_DEPTH} deep (split it up with a variable)", self.peek.col)
+        try:
+            return parse()
+        finally:
+            self.nesting -= 1
 
     def parse_cond(self):
         c = self.parse_or()
@@ -583,7 +681,7 @@ class _Parser:
     def parse_not(self):
         if self.is_op("not"):
             col = self.next().col
-            return ExprNode("Unary", op="not", args=[self.parse_not()], col=col)
+            return ExprNode("Unary", op="not", args=[self._deeper(self.parse_not)], col=col)
         return self.parse_cmp()
 
     def parse_cmp(self):
@@ -610,7 +708,7 @@ class _Parser:
     def parse_unary(self):
         if self.peek.kind == "Op" and self.peek.text == "-":
             col = self.next().col
-            inner = self.parse_unary()
+            inner = self._deeper(self.parse_unary)
             if inner.kind == "Number":
                 inner.literal = -inner.literal
                 inner.col = col
@@ -618,7 +716,7 @@ class _Parser:
             return ExprNode("Unary", op="-", args=[inner], col=col)
         if self.peek.kind == "Op" and self.peek.text == "+":
             self.next()
-            return self.parse_unary()
+            return self._deeper(self.parse_unary)
         return self.parse_postfix(self.parse_primary())
 
     def parse_postfix(self, n):
@@ -702,9 +800,27 @@ def _parse(src: Optional[str], schema: Optional[Schema] = None) -> Tuple[Optiona
         p = _Parser(src, _schema(schema))
         node = p.parse_expr()
         p.expect_end()
+        if expr_depth(node) > MAX_DEPTH:
+            raise ExprError(f"nested more than {MAX_DEPTH} deep (split it up with a variable)", 0)
         return node, None, 0
     except ExprError as e:
         return None, e.message, e.col
+
+
+def expr_depth(root) -> int:
+    """Expr.Depth: the tree's depth, without recursion."""
+    best, stack = 0, ([(root, 1)] if root is not None else [])
+    while stack:
+        n, d = stack.pop()
+        best = max(best, d)
+        if d > MAX_DEPTH:
+            break
+        if n.target is not None:
+            stack.append((n.target, d + 1))
+        for a in n.args:
+            if a is not None:
+                stack.append((a, d + 1))
+    return best
 
 
 def parse_expr(src: str, schema: Optional[Schema] = None) -> ExprNode:
@@ -815,12 +931,21 @@ def filter_str(f: FilterNode) -> str:
     if f.kind == "Not":
         return "(not " + filter_str(f.args[0]) + ")"
     if f.term == "label":
-        return "#" + f.arg
+        return "#" + quote_arg(f.arg)
     if f.term == "where":
         return "where(" + node_str(f.where) + ")"
-    if f.term in ("is", "in", "has", "type"):
-        return f.term + ":" + f.arg
+    if f.term in FILTER_PREFIXES:
+        return f.term + ":" + quote_arg(f.arg)
     return f.term
+
+
+def quote_arg(arg):
+    """Filter.QuoteArg: quoted when it isn't a plain name."""
+    if not arg:
+        return arg
+    if all(_is_letter_or_digit(c) or c in "_-.:@" for c in arg):
+        return arg
+    return '"' + arg + '"' if '"' not in arg else "'" + arg + "'"
 
 
 def filter_terms(n: Optional[FilterNode]):
@@ -874,9 +999,15 @@ class _FilterParser:
     def not_(self):
         self.skip_ws()
         col = self.i
-        if self.word("not"):
-            return FilterNode("Not", args=[self.not_()], col=col)
-        return self.atom()
+        self.nesting = getattr(self, "nesting", 0) + 1
+        if self.nesting > MAX_DEPTH:
+            raise ExprError(f"nested more than {MAX_DEPTH} deep", col)
+        try:
+            if self.word("not"):
+                return FilterNode("Not", args=[self.not_()], col=col)
+            return self.atom()
+        finally:
+            self.nesting -= 1
 
     def atom(self):
         s = self.s
@@ -894,7 +1025,7 @@ class _FilterParser:
             return n
         if s[self.i] == "#":
             self.i += 1
-            label = self.name()
+            label = self.arg()
             if not label:
                 raise ExprError("'#' needs a label", col)
             return FilterNode("Term", term="label", arg=label, col=col)
@@ -930,13 +1061,13 @@ class _FilterParser:
             if e is None:
                 raise ExprError("in where(...): " + err, start + ecol)
             return FilterNode("Term", term="where", where=e, col=col)
-        if self.i < len(s) and s[self.i] == ":" and word in ("is", "in", "has", "type"):
+        if self.i < len(s) and s[self.i] == ":" and word in FILTER_PREFIXES:
             self.i += 1
             if word == "in" and self.i < len(s) and s[self.i] == "@":
                 self.i += 1
-                arg = "@" + self.name()
+                arg = "@" + self.arg()
             else:
-                arg = self.name()
+                arg = self.arg()
             if not arg or arg == "@":
                 raise ExprError(f'"{word}:" needs a name', col)
             return FilterNode("Term", term=word, arg=arg, col=col)
@@ -946,6 +1077,25 @@ class _FilterParser:
         s = self.s
         start = self.i
         while self.i < len(s) and (_is_letter_or_digit(s[self.i]) or s[self.i] in "_-."):
+            self.i += 1
+        return s[start:self.i]
+
+    def arg(self):
+        """P.Arg: a name (also with ':'), or a quoted one for names with spaces."""
+        s = self.s
+        if self.i < len(s) and s[self.i] in "\"'":
+            q = s[self.i]
+            self.i += 1
+            start = self.i
+            while self.i < len(s) and s[self.i] != q:
+                self.i += 1
+            if self.i >= len(s):
+                raise ExprError(f"unclosed {q}", start - 1)
+            out = s[start:self.i]
+            self.i += 1
+            return out
+        start = self.i
+        while self.i < len(s) and (_is_letter_or_digit(s[self.i]) or s[self.i] in "_-.:"):
             self.i += 1
         return s[start:self.i]
 
@@ -1164,6 +1314,10 @@ class _Checker:
             if not s.has_it:
                 self.err(n, '"it" is only defined inside where(), best(), forEach, targeting, or an action applied to a set')
             return ENTITY
+        if name == "outer":
+            if not s.has_it:
+                self.err(n, '"outer" (the `it` one scope out) is only defined where `it` is: inside where(), best(), forEach, targeting, or an action applied to a set')
+            return ENTITY
         return ENTITY
 
     def member(self, n):
@@ -1203,11 +1357,13 @@ class _Checker:
                 return ev.value if ev is not None else ANY
             if n.name == "pos":
                 return POSITION
-            if n.name in ("name", "choice", "result"):
+            if n.name in ("name", "choice", "result", "types", "weapon"):
                 if ev is not None and n.name not in ev.fields:
                     self.err(n, f'the event "{ev.name}" has no {n.name}')
-                return TEXT
-            self.err(n, f'events have value, pos, name, choice and result, not "{n.name}"')
+                if ev is not None and n.name in ev.fields:
+                    return ev.fields[n.name]
+                return LIST if n.name == "types" else TEXT
+            self.err(n, f'events have value, pos, name, choice, result, types and weapon, not "{n.name}"')
             return ANY
         on = tt
         p = sc.property(on, n.name)
@@ -1366,6 +1522,10 @@ class _Checker:
                 self.issues.append((col, f'nothing is named "{f.arg}"' + suggest(f.arg[1:], s.names, "@")))
             return
         if term == "type":
+            return
+        if term == "include":
+            if f.arg not in FILTER_INCLUDES:
+                self.issues.append((col, f'include: takes {", ".join(FILTER_INCLUDES)}, not "{f.arg}"' + suggest(f.arg, FILTER_INCLUDES)))
             return
         if term in sc.plain_term_set or term in sc.tag_set:
             return
@@ -1938,8 +2098,11 @@ _ID_MSG = "must be 1-64 characters of a-z, 0-9, '.', '_' or '-'"
 
 
 class _Walker:
-    def __init__(self, original: dict, pack: dict, issues: list, schema: Schema):
+    def __init__(self, original: dict, pack: dict, issues: list, schema: Schema, names: Optional[dict] = None):
         self.original, self.pack, self.issues, self.schema = original, pack, issues, schema
+        # ILogicNamesContext: the game's effect and sound names (from the ref cache), or None (unknown: not checked).
+        self.effects = (names or {}).get("effects")
+        self.sounds = (names or {}).get("sounds")
         self.units = _OSet()
         self.entities = _OSet()
         self.statuses = _OSet()
@@ -2335,6 +2498,11 @@ class _Walker:
         is_string = isinstance(v, str)
         s = v if is_string else None
         t = ps.type
+        # How the game reads it (ParamForms.Classify); src is the expression without its "=".
+        form, src = classify_param(t, ps.name, v)
+        if is_string and form == "Expression" and t in ("color", "fx", "sound", "enum"):
+            self.expression(src, p, scope, TEXT, ps.name)
+            return
 
         def act_str(k):
             if action is None:
@@ -2343,7 +2511,7 @@ class _Walker:
             return x if isinstance(x, str) else None
         if t in ("number", "int"):
             if is_string:
-                self.expression(s[1:] if s.startswith("=") else s, p, scope, NUMBER, ps.name)
+                self.expression(src, p, scope, NUMBER, ps.name)
             elif _is_num(v):
                 d = float(v)
                 if _is_num(ps.min) and d < ps.min:
@@ -2362,7 +2530,7 @@ class _Walker:
                 self.error(p, "must be a number or an expression")
         elif t == "bool":
             if is_string:
-                self.expression(s, p, scope, BOOL, ps.name)
+                self.expression(src, p, scope, BOOL, ps.name)
             elif not isinstance(v, bool):
                 self.error(p, "must be true, false or an expression")
         elif t == "text":
@@ -2374,7 +2542,7 @@ class _Walker:
                 self.error(p, "must be text")
         elif t == "position":
             if is_string:
-                self.expression(s, p, scope, POSITION, ps.name)
+                self.expression(src, p, scope, POSITION, ps.name)
             elif isinstance(v, list):
                 if len(v) < 2 or len(v) > 3 or any(not _is_num(x) for x in v):
                     self.error(p, "must be [x, z] or [x, y, z]")
@@ -2382,14 +2550,14 @@ class _Walker:
                 self.error(p, "must be an expression (an entity or vec(...)) or [x, y, z]")
         elif t == "entity":
             if is_string:
-                self.expression(s, p, scope, ENTITY, ps.name)
+                self.expression(src, p, scope, ENTITY, ps.name)
             else:
                 self.error(p, "must be a selector expression (self, other, @name, nearest('foe', 10)...)")
         elif t == "entities":
             if not is_string:
                 self.error(p, "must be a selector expression")
-            elif not (action is not None and action.get("do") == "signal" and s == "all"):
-                self.expression(s, p, scope, SET, ps.name)
+            elif form != "Literal":  # signal's to: "all"
+                self.expression(src, p, scope, SET, ps.name)
         elif t == "template":
             if not is_string:
                 self.error(p, 'must be a template id or "=expression"')
@@ -2433,6 +2601,8 @@ class _Walker:
         elif t in ("signal", "label"):
             if not is_string or not s.strip() or all(_is_ws(c) for c in s):
                 self.error(p, f"must be a {t} name")
+            else:
+                self.text(s, p, scope)
         elif t == "enum":
             opts = self.schema.stats if (action is not None and action.get("do") == "setStat" and ps.name == "stat") else ps.options
             val = s if is_string else (("true" if v else "false") if isinstance(v, bool) else None)
@@ -2458,7 +2628,13 @@ class _Walker:
                     changes["extra_roles"] = {"other": ENTITY}
                 inner = scope.with_(**changes)
             if action is not None and action.get("do") == "forEach":
-                inner = scope.with_(has_it=True)
+                loop_var = act_str("as")
+                if loop_var is not None and is_identifier(loop_var):
+                    extra = dict(scope.extra_roles or {})
+                    extra[loop_var] = ENTITY
+                    inner = scope.with_(has_it=True, extra_roles=extra)
+                else:
+                    inner = scope.with_(has_it=True)
             self.actions(v, p, inner, owner, sends)
         elif t == "options":
             if not isinstance(v, list):
@@ -2486,7 +2662,7 @@ class _Walker:
                 self.check_movement(v, p, owner, scope)
         elif t == "any":
             if is_string:
-                self.expression(s[1:] if s.startswith("=") else s, p, scope, ANY)
+                self.expression(src, p, scope, ANY)
         elif t == "for":
             if not (is_string and s in ("night", "day")):
                 self.param(ParamSpec.make(ps.name, "number", 0), v, p, scope, owner, action)
@@ -2495,9 +2671,9 @@ class _Walker:
                 self.param(ParamSpec.make(ps.name, "int", 1), v, p, scope, owner, action)
         elif t == "slot":
             if not is_string:
-                self.error(p, 'must be @name, a selector or a Studio key ("slot:Tower 3")')
-            elif not (s.startswith("slot:") or s.startswith("add:") or s == "castle"):
-                self.expression(s, p, scope, ENTITY, "slot")
+                self.error(p, 'must be an expression giving a slot (@name, it, nearest(...)) or a Studio key ("slot:Tower 3")')
+            elif form != "Literal":  # a Studio key
+                self.expression(src, p, scope, ENTITY, "slot")
         elif t == "types":
             if not isinstance(v, list) or any(not isinstance(x, str) for x in v):
                 self.error(p, 'must be a list of labels, e.g. ["fire"]')
@@ -2505,11 +2681,24 @@ class _Walker:
             if not isinstance(v, list) or any(not isinstance(x, str) or (ps.options is not None and x not in ps.options) for x in v):
                 self.error(p, f"must be a list of {', '.join(ps.options or [])}")
         elif t == "color":
-            if not is_string or (not s.startswith("=") and not try_parse_color(s)):
-                self.error(p, 'must be "#rrggbb"')
+            if ps.name == "glow" and (isinstance(v, bool) or _is_num(v)):
+                return  # on/off or a strength
+            if not is_string or not parse_color(s):
+                self.error(p, "must be a colour: " + COLOR_HELP + ', or "=expression"')
         elif t in ("fx", "sound"):
+            what = "effect" if t == "fx" else "sound"
             if not is_string or not s.strip() or all(_is_ws(c) for c in s):
-                self.error(p, f"must be a {'effect' if t == 'fx' else 'sound'} name")
+                self.error(p, f"must be a {what} name")
+                return
+            # Game names: palace.py passes its ref cache's lists (the game passes its own).
+            known = self.effects if t == "fx" else self.sounds
+            if known is not None and not (t == "sound" and s.startswith("asset:")) and not any(k.lower() == s.lower() for k in known):
+                self.error(p, f'no game {what} "{s}"' + suggest(s, known) + f" (`palace.py ref {what}s` lists them)")
+        elif t == "local":
+            if not is_string or not is_identifier(s):
+                self.error(p, "must be a plain name (letters, digits and '_')")
+            elif s in ROLES or s in self.schema.role_aliases or s in self.schema.globals or s in self.schema.functions or s in ("true", "false", "and", "or", "not"):
+                self.error(p, f'"{s}" is already a name in expressions; pick another')
 
     def check_template(self, s: str, p: str, scope: Scope):
         if s.startswith("="):
@@ -2537,6 +2726,38 @@ class _Walker:
             self.error(p, f"{cs_double(d)} is below {cs_double(mn)}")
         if mx is not None and d > mx:
             self.error(p, f"{cs_double(d)} is outside {cs_double(mn if mn is not None else 0)}..{cs_double(mx)}")
+
+    def check_game_rules(self, g, p, scope):
+        """logic.game: each rule a literal of its type or an expression (LogicSchema.GameRules)."""
+        if g is None:
+            return
+        for spec in self.schema.game_rules:
+            name = spec["name"]
+            v = g.get(name)
+            if v is None:
+                continue
+            path = f"{p}.{name}"
+            t = spec["type"]
+            if t == "enum":
+                if not isinstance(v, str):
+                    self.error(path, f"must be one of {', '.join(spec.get('options') or [])}")
+                elif v.startswith("="):
+                    self.expression(v[1:], path, scope, TEXT, name)
+                else:
+                    self.enum(v, path, spec.get("options") or [])
+            elif t == "bool":
+                if isinstance(v, str):
+                    self.expression(v, path, scope, BOOL, name)
+                elif not isinstance(v, bool):
+                    self.error(path, "must be true, false or a condition")
+            elif t == "number":
+                if isinstance(v, str):
+                    self.expression(v, path, scope, NUMBER, name)
+                elif isinstance(v, bool) or not isinstance(v, (int, float)):
+                    self.error(path, "must be a number or a formula")
+                elif spec.get("min") is not None and v < spec["min"]:
+                    mn = spec["min"]
+                    self.error(path, f"must be {int(mn) if float(mn).is_integer() else mn} or more")
 
     def enum(self, v, p, options):
         if v is not None and v not in options:
@@ -2735,8 +2956,8 @@ class _Walker:
             self.error(p + ".maxAlive", f"must be 1..{per_template_max}")
         vis = _dict(e.get("visual"))
         if vis is not None:
-            if _s(vis, "tint") is not None and not try_parse_color(_s(vis, "tint")):
-                self.error(p + ".visual.tint", 'must be "#rrggbb"')
+            if _s(vis, "tint") is not None and not parse_color(_s(vis, "tint")):
+                self.error(p + ".visual.tint", "must be a colour: " + COLOR_HELP)
             if _s(vis, "mesh") is not None and _model_ref_kind(_s(vis, "mesh")) == "invalid":
                 self.error(p + ".visual.mesh", 'must be "asset:<key>", "mesh:<scenery mesh>" or "vanilla:<unit id>"')
         body = _dict(e.get("body"))
@@ -2820,8 +3041,8 @@ class _Walker:
             if _s(ar, "watch") is not None:
                 self.filter_string(_s(ar, "watch"), p + ".area.watch", scope)
             self.enum(_s(ar, "show"), p + ".area.show", ["none", "outline", "fill"])
-            if _s(ar, "color") is not None and not try_parse_color(_s(ar, "color")):
-                self.error(p + ".area.color", 'must be "#rrggbb"')
+            if _s(ar, "color") is not None and not parse_color(_s(ar, "color")):
+                self.error(p + ".area.color", "must be a colour: " + COLOR_HELP)
             self.num(_lnum(ar.get("tick")), p + ".area.tick", scope, 0.1, 600)
             surf = ar.get("surface")
             if isinstance(surf, str):
@@ -2903,8 +3124,8 @@ class _Walker:
             if f not in self.schema.flags:
                 self.error(f"{p}.flags[{i}]", f'unknown flag "{f}"' + suggest(f if isinstance(f, str) else None, self.schema.flags))
         vis = _dict(s.get("visual"))
-        if vis is not None and _s(vis, "tint") is not None and not try_parse_color(_s(vis, "tint")):
-            self.error(p + ".visual.tint", 'must be "#rrggbb"')
+        if vis is not None and _s(vis, "tint") is not None and not parse_color(_s(vis, "tint")):
+            self.error(p + ".visual.tint", "must be a colour: " + COLOR_HELP)
         self.check_rules(owner)
 
     def check_preset_def(self, pr: Optional[dict], p: str):
@@ -2939,6 +3160,7 @@ class _Walker:
                     self.warn(f"{p}.caps.{name}", f"{v} is above the default {dflt}: may lag")
         level_owner = _Owner(p, "level", level_script=True, level=lv, rules=_list(logic.get("rules")))
         level_scope = self.scope(level_owner, None)
+        self.check_game_rules(_dict(logic.get("game")), p + ".game", level_scope)
         hud_ids = set()
         for i, h in enumerate(_list(logic.get("hud")) or []):
             hp = f"{p}.hud[{i}]"
@@ -3087,17 +3309,19 @@ class _Walker:
                 stack.extend(graph.get(s, ()))
 
 
-def validate_logic(pack_json: dict, issues: list, library_presets=None, schema: Optional[Schema] = None) -> list:
+def validate_logic(pack_json: dict, issues: list, library_presets=None, schema: Optional[Schema] = None,
+                   names: Optional[dict] = None) -> list:
     """LogicValidator.Validate with no game context: expands presets, then checks every rule, action, component,
     status, preset and expression, appending (severity, path, message) tuples ("error" / "warning") to issues.
-    Checks that need the game (vanilla units and weapons, other installed packs, host slot names) are skipped."""
+    Checks that need the game (vanilla units and weapons, other installed packs, host slot names) are skipped;
+    names {"effects": [...], "sounds": [...]} (the ref cache's lists) turns on the effect and sound name checks."""
     sc = _schema(schema)
     if not isinstance(pack_json, dict) or not has_logic(pack_json):
         return issues
     expanded = expand_presets(pack_json, issues, library_presets, sc)
     if expanded is None:
         return issues
-    _Walker(pack_json, expanded, issues, sc).run()
+    _Walker(pack_json, expanded, issues, sc, names).run()
     unknown_fields(pack_json, "pack", "", issues, sc)
     return issues
 

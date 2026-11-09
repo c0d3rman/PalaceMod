@@ -69,6 +69,11 @@ namespace PalaceMod.Builder.Logic
         public LogicEntity Find(string id) => id != null && byId.TryGetValue(id, out var e) ? e : null;
         /// <summary>`@name`: a place or attach name, or else an entity id.</summary>
         public LogicEntity FindNamed(string name) => name != null && byName.TryGetValue(name, out var e) && !e.Destroyed ? e : Find(name);
+
+        // Every `@name` this level declares (places, attaches) or an entity has had: a known name that finds nothing is
+        // an entity that's gone (none); an unknown one is an error (ExprCompiler).
+        private readonly HashSet<string> knownNames = new(StringComparer.Ordinal);
+        public bool IsKnownName(string name) => name != null && (knownNames.Contains(name) || byId.ContainsKey(name));
         public bool HasListeners(string ev) => byEvent.TryGetValue(ev, out var l) && l.Count > 0;
         public bool HasOfListeners(string ev) => ofByEvent.TryGetValue(ev, out var l) && l.Count > 0;
 
@@ -86,6 +91,11 @@ namespace PalaceMod.Builder.Logic
             foreach (var p in presets ?? []) if ((string)p["id"] is { } pid) Presets[pid] = p;
             logic ??= new JObject();
             LevelLogic = logic;
+            foreach (var place in (logic["places"] as JArray ?? []).OfType<JObject>())
+                foreach (var key in new[] { "id", "name" })
+                    if (place[key]?.Type == JTokenType.String) knownNames.Add((string)place[key]);
+            foreach (var a in (logic["attach"] as JObject ?? new JObject()).Properties())
+                if (a.Value is JObject ao && ao["name"]?.Type == JTokenType.String) knownNames.Add((string)ao["name"]);
 
             ulong seed = logic["seed"]?.Type is JTokenType.Integer ? (ulong)(long)logic["seed"] : StableHash(levelPath ?? "level");
             Random.Seed(seed);
@@ -212,7 +222,7 @@ namespace PalaceMod.Builder.Logic
             if (byId.TryGetValue(e.Id, out var prev) && prev != e && !prev.Destroyed) Forget(prev);
             e.SpawnTime = Time;
             byId[e.Id] = e;
-            if (!string.IsNullOrEmpty(e.Name)) byName[e.Name] = e;
+            if (!string.IsNullOrEmpty(e.Name)) { byName[e.Name] = e; knownNames.Add(e.Name); }
             if (vanilla) return;
 
             pendingPlace.TryGetValue(e, out var place);
@@ -362,7 +372,7 @@ namespace PalaceMod.Builder.Logic
         {
             if (e.Name != null && byName.TryGetValue(e.Name, out var cur) && cur == e) byName.Remove(e.Name);
             e.Name = name;
-            if (!string.IsNullOrEmpty(name)) byName[name] = e;
+            if (!string.IsNullOrEmpty(name)) { byName[name] = e; knownNames.Add(name); }
         }
 
         /// <summary>After places and attaches exist: raise `levelStart`.</summary>
@@ -436,11 +446,12 @@ namespace PalaceMod.Builder.Logic
 
         private int droppedThisFrame;
 
-        public void Raise(string name, LogicEntity subject, LogicEntity other, double value, Vec? pos, string text, int depth = 0)
+        public void Raise(string name, LogicEntity subject, LogicEntity other, double value, Vec? pos, string text, int depth = 0,
+            IReadOnlyList<string> types = null, string weapon = null)
         {
             if (depth > Caps.ChainDepth) { Drop(name, subject); return; }
             if (queue.Count >= Caps.Queue) { Drop(name, subject, full: true); return; }
-            queue.Enqueue(new LogicEvent { Name = name, Subject = subject, Other = other, Value = value, Pos = pos, Text = text, Depth = depth, Seq = ++seq });
+            queue.Enqueue(new LogicEvent { Name = name, Subject = subject, Other = other, Value = value, Pos = pos, Text = text, Depth = depth, Seq = ++seq, Types = types, Weapon = weapon });
         }
 
         public void Signal(string name, IReadOnlyList<LogicEntity> to, double value, LogicEntity sender, int depth = 0)
@@ -559,7 +570,7 @@ namespace PalaceMod.Builder.Logic
             if (firingsThisFrame >= Caps.FiringsPerFrame)
             {
                 if (!throttledThisFrame) { throttledThisFrame = true; throttled++; TraceAdd(owner.Id, r.Label, r.Path, e.Name, TraceOutcome.Throttled, $"over {Caps.FiringsPerFrame} rule firings this frame; the rest run next frame", e.Value, e.Other?.Id); }
-                deferred.Enqueue(new LogicEvent { Name = e.Name, Subject = e.Subject, Other = e.Other, Value = e.Value, Pos = e.Pos, Text = e.Text, Payload = e.Payload, Seq = e.Seq, Depth = e.Depth, Target = ri });
+                deferred.Enqueue(new LogicEvent { Name = e.Name, Subject = e.Subject, Other = e.Other, Value = e.Value, Pos = e.Pos, Text = e.Text, Payload = e.Payload, Types = e.Types, Weapon = e.Weapon, Seq = e.Seq, Depth = e.Depth, Target = ri });
                 return;
             }
             if (Time - ri.WindowStart >= 1) { ri.WindowStart = Time; ri.WindowCount = 0; }
@@ -698,7 +709,7 @@ namespace PalaceMod.Builder.Logic
                 else
                 {
                     double next = r.Seconds;
-                    if (r.Jitter > 0) next += Random.Range(-r.Jitter, r.Jitter);
+                    if (r.Jitter > 0) next *= 1 + Random.Range(-r.Jitter, r.Jitter);   // a share of the interval, like attacks' jitter
                     ri.NextTime += Math.Max(0.1, next);
                     if (ri.NextTime <= now) ri.NextTime = now + Math.Max(0.1, r.Seconds);
                 }
@@ -819,6 +830,17 @@ namespace PalaceMod.Builder.Logic
 
         /// <summary>The last <see cref="TraceSize"/> rule firings, throttles and errors, oldest first.</summary>
         public IReadOnlyList<TraceEntry> Trace => trace.ToList();
+
+        /// <summary>A rule-author error found outside a rule (a component reading a name the level lacks): one trace
+        /// entry per owner and message, counted with the rule errors.</summary>
+        public void ReportError(LogicEntity owner, string where, string msg)
+        {
+            if (!reported.Add((owner?.Id ?? "level") + "|" + msg)) return;
+            errors++;
+            TraceAdd(owner?.Id ?? "level", null, where, "component", TraceOutcome.Error, msg, 0, null);
+        }
+
+        private readonly HashSet<string> reported = new(StringComparer.Ordinal);
 
         internal void TraceAdd(string owner, string rule, string path, string ev, TraceOutcome outcome, string msg, double value, string other)
         {

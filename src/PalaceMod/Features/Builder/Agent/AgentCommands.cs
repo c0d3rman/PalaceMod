@@ -22,6 +22,20 @@ namespace PalaceMod.Builder.Agent
 {
     internal static class AgentCommands
     {
+        /// <summary>What the slot pays at dawn: through its interactor, so logic `income` modifiers (setStat, statuses,
+        /// noIncome) count, as they do in the payout.</summary>
+        private static int Income(BuildSlot s) => s.Interactor != null ? s.Interactor.GoldIncome : s.GoldIncome;
+
+        /// <summary>Loads <paramref name="scene"/> once the scene transition under way has finished.</summary>
+        private static System.Collections.IEnumerator LoadWhenFree(SceneTransitionManager transitions, string scene)
+        {
+            float until = Time.realtimeSinceStartup + 60f;
+            while (transitions != null && transitions.SceneTransitionIsRunning && Time.realtimeSinceStartup < until) yield return null;
+            if (transitions == null) yield break;
+            if (transitions.SceneTransitionIsRunning) { Log.For<BuilderManager>().Warn($"agent vanilla {scene}: the previous scene change never finished"); yield break; }
+            transitions.TransitionFromNullToLevel(scene);
+        }
+
         private static readonly Log log = Log.For<AgentBridgeManager>();
 
         private const string Usage =
@@ -30,7 +44,15 @@ namespace PalaceMod.Builder.Agent
             "gold <n> | god on|off | invulnerable on|off | speed <x> | fast on|off [fps] | kill | heal | teleport <x> <z> | paths [rescan] | reach <x1> <z1> <x2> <z2> | " +
             "share code <pack> [clipboard] | share export <pack> [path] | capture <file> [pixels] | screenshot <file>   agent bridge: JSON state, level tests, map dumps (see agent-kit/)";
 
-        internal static void Register() => DevCommands.Register("agent", Usage, Run);
+        internal static void Register()
+        {
+            DevCommands.Register("agent", Usage, Run);
+            // Counts level loads, so a client can wait for the load it asked for, not the level still showing from
+            // before (replaying the same level looks loaded until the transition starts).
+            SceneManager.sceneLoaded += (_, _) => levelLoads++;
+        }
+
+        private static int levelLoads;
 
         /// <summary>Per frame while the bridge (or a dev launch) is running: records nights.</summary>
         internal static void Tick() => NightRecorder.Tick();
@@ -77,14 +99,20 @@ namespace PalaceMod.Builder.Agent
                 case "validate":
                 {
                     var entry = FindPack(Arg(args, 1));
-                    var issues = PlayIssues(entry, args.Length > 2 ? args[2] : null);
+                    string level = args.Length > 2 ? args[2] : null;
+                    var issues = level == null && entry.Id == DesignLibrary.PackId ? DesignLibrary.LibraryIssues(entry) : PlayIssues(entry, level);
                     return Json(new JObject
                     {
                         ["pack"] = entry.Id,
                         ["ok"] = !issues.Any(i => i.Severity == Severity.Error),
-                        ["issues"] = new JArray(issues.Select(i => new JObject
+                        ["issues"] = new JArray(issues.Select(i =>
                         {
-                            ["severity"] = i.Severity == Severity.Error ? "error" : "warning", ["path"] = i.Path, ["message"] = i.Message,
+                            var o = new JObject { ["severity"] = i.Severity == Severity.Error ? "error" : "warning" };
+                            if (i.File != null) o["file"] = i.File;
+                            if (i.Level != null) o["level"] = i.Level;
+                            o["path"] = i.Path;
+                            o["message"] = i.Message;
+                            return o;
                         })),
                     });
                 }
@@ -92,8 +120,10 @@ namespace PalaceMod.Builder.Agent
                 {
                     var entry = FindPack(Arg(args, 1));
                     string level = Arg(args, 2);
-                    if (PlayIssues(entry, level).Any(i => i.Severity == Severity.Error))
-                        throw new InvalidOperationException($"{entry.Id} has errors; run `agent validate {entry.Id} {level}`");
+                    if (PlayIssues(entry, level).FirstOrDefault(i => i.Severity == Severity.Error) is { } first)
+                        throw new InvalidOperationException($"{entry.Id}/{level} has errors ({first}); run `agent validate {entry.Id} {level}`");
+                    // Cheats are test helpers for one run: a new level starts without them.
+                    DebugActions.ResetCheats();
                     if (entry.Pack.FindLevel(level) == null) throw new ArgumentException($"{entry.Id} has no level \"{level}\"");
                     if (!BuilderServices.Sessions.Launch(new SessionRequest { Pack = entry.Pack, LevelId = level }, out string error))
                         throw new InvalidOperationException(error);
@@ -109,7 +139,7 @@ namespace PalaceMod.Builder.Agent
                     Vector3? at = args.Length >= 5 ? new Vector3(F(args[3]), 0f, F(args[4])) : null;
                     if (!Studio.Play.StudioPlay.Instance.PlayLevel(Draft(entry, level), level, at))
                         throw new InvalidOperationException("test play didn't start (see `agent status` and the log)");
-                    NightRecorder.Reset();
+                    NightRecorder.Reset(); DebugActions.ResetCheats();
                     return Json(new JObject { ["loading"] = $"{entry.Id}/{level}", ["sandbox"] = true });
                 }
                 case "edit":
@@ -126,7 +156,7 @@ namespace PalaceMod.Builder.Agent
                         draft = Editor.BuilderEditor.Draft ?? throw new InvalidOperationException("the Builder couldn't open the pack");
                     }
                     if (!Studio.Studio.Open(draft, level, out string error)) throw new InvalidOperationException(error);
-                    NightRecorder.Reset();
+                    NightRecorder.Reset(); DebugActions.ResetCheats();
                     return Json(new JObject { ["loading"] = $"{entry.Id}/{level}", ["studio"] = true });
                 }
                 case "library":
@@ -156,12 +186,15 @@ namespace PalaceMod.Builder.Agent
                 {
                     string scene = string.Join(" ", args.Skip(1));
                     if (scene.Length == 0) throw new ArgumentException("usage: agent vanilla <scene>");
-                    if (BuilderServices.InSession) BuilderServices.Sessions.End();
                     var transitions = SceneTransitionManager.instance ?? throw new InvalidOperationException("the game isn't ready");
-                    if (transitions.SceneTransitionIsRunning) throw new InvalidOperationException("a scene is loading; try again");
-                    transitions.TransitionFromNullToLevel(scene);
-                    NightRecorder.Reset();
-                    return Json(new JObject { ["loading"] = scene });
+                    // Ending a session whose map is loaded starts a transition to level select, and so may a load
+                    // already under way: the map then loads as soon as that one is done.
+                    if (BuilderServices.InSession) BuilderServices.Sessions.End();
+                    bool queued = transitions.SceneTransitionIsRunning;
+                    if (queued) Plugin.Instance.StartCoroutine(LoadWhenFree(transitions, scene));
+                    else transitions.TransitionFromNullToLevel(scene);
+                    NightRecorder.Reset(); DebugActions.ResetCheats();
+                    return Json(new JObject { ["loading"] = scene, ["queued"] = queued });
                 }
                 case "menu":
                 {
@@ -255,6 +288,7 @@ namespace PalaceMod.Builder.Agent
                 ["scene"] = SceneManager.GetActiveScene().name,
                 ["loading"] = SceneTransitionManager.instance != null && SceneTransitionManager.instance.SceneTransitionIsRunning,
                 ["inLevel"] = DebugActions.InLevel,
+                ["loads"] = levelLoads,
             };
             var session = BuilderServices.Sessions?.Current;
             o["session"] = session == null ? null : new JObject
@@ -284,12 +318,12 @@ namespace PalaceMod.Builder.Agent
             if (king != null) o["king"] = new JObject { ["hp"] = R(king.HpValue), ["maxHp"] = R(king.maxHp), ["knockedOut"] = king.KnockedOut, ["pos"] = V(king.transform.position) };
             var buildings = BuiltSlots().ToList();
             // Knocked out during the last night: no harvest the next dawn (the flag clears at dusk).
-            int blocked = buildings.Where(KnockedOutTonight).Sum(s => s.GoldIncome);
+            int blocked = buildings.Where(KnockedOutTonight).Sum(Income);
             o["buildings"] = new JObject
             {
                 ["built"] = buildings.Count,
                 ["knockedOut"] = buildings.Count(s => BuildingHp(s)?.KnockedOut == true),
-                ["income"] = buildings.Sum(s => s.GoldIncome),
+                ["income"] = buildings.Sum(Income),
                 ["incomeBlocked"] = blocked,
             };
             // Gold still on its way to the treasury: dawn income being spawned, coins flying or lying on the ground.
@@ -336,7 +370,7 @@ namespace PalaceMod.Builder.Agent
                 {
                     ["name"] = s.name, ["kind"] = s.buildingName, ["pos"] = V(s.transform.position),
                     ["available"] = s.gameObject.activeInHierarchy, ["level"] = s.Level, ["maxLevel"] = s.Upgrades.Count,
-                    ["state"] = s.State.ToString(), ["income"] = s.GoldIncome,
+                    ["state"] = s.State.ToString(), ["income"] = Income(s),
                 };
                 if (s.ActivatorUpgradesThis) o["followsActivator"] = s.ActivatorBuilding != null ? s.ActivatorBuilding.name : null;
                 if (s.gameObject.activeInHierarchy && s.Level < s.Upgrades.Count) o["nextCost"] = s.Upgrades[s.Level].cost;

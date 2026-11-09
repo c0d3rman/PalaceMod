@@ -259,7 +259,8 @@ namespace PalaceMod.Builder
         private string Fingerprint()
         {
             var parts = new List<string>();
-            foreach (var dir in new[] { Library.LevelsDir, Library.EnemiesDir })
+            foreach (var dir in new[] { Library.LevelsDir, Library.EnemiesDir, Library.LogicDir(LibraryStore.LogicKind.Entity),
+                                        Library.LogicDir(LibraryStore.LogicKind.Status), Library.LogicDir(LibraryStore.LogicKind.Preset) })
                 if (Directory.Exists(dir))
                     foreach (var file in Directory.GetFiles(dir, "*.json")) parts.Add(file + "|" + File.GetLastWriteTimeUtc(file).Ticks);
             string assetsFile = Path.Combine(LibraryDir, "assets.json");

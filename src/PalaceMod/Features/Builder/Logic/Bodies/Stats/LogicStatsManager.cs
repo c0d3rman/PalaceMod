@@ -34,6 +34,15 @@ namespace PalaceMod
         internal static int rawHits;
         private static int weaponDepth;
         private static readonly bool[] weaponSplash = new bool[8], weaponMagic = new bool[8];
+        private static readonly Weapon[] weaponOf = new Weapon[8];
+
+        /// <summary>The game weapon whose DealDamage is in progress (innermost), or null.</summary>
+        internal static Weapon CurrentWeapon => weaponDepth > 0 && weaponDepth <= weaponOf.Length ? weaponOf[weaponDepth - 1] : null;
+
+        /// <summary>A game damage call that doesn't go through a weapon (burning ground, hot oil): its types and the
+        /// entity it's credited to, for status modifiers and the damage events. Pair with <see cref="PopDamage"/>.</summary>
+        internal static void PushDamage(DamageInfo info) => scope.Add(info);
+        internal static void PopDamage() { if (scope.Count > 0) scope.RemoveAt(scope.Count - 1); }
 
         public override void Awake(Plugin plugin)
         {
@@ -41,6 +50,12 @@ namespace PalaceMod
             LogicServices.Stats = Stats;
             StatusFlags.Has = (go, flag) => LogicWorld.Current != null && Stats.HasFlag(go, flag);
             LogicServices.CurrentDamageSource = () => CurrentDamage?.Source;
+            LogicServices.CurrentHit = attacker =>
+            {
+                var t = HitTypes(attacker as TaggedObject);
+                string weapon = CurrentWeapon is { } w ? LogicWeapons.IdOf(w) : CurrentDamage?.Weapon;
+                return (t.Count == 0 ? Array.Empty<string>() : t.OrderBy(x => x, StringComparer.Ordinal).ToArray(), weapon);
+            };
 
             LogicActions.Register("damage", DamageAction, ActionFlags.PerTarget);
             LogicActions.Register("heal", (ctx, p) => { if (HpOf(p.Target) is { } hp) hp.Heal((float)Math.Max(0, p.Number("amount"))); }, ActionFlags.PerTarget);
@@ -51,8 +66,15 @@ namespace PalaceMod
             LogicActions.Register("applyStatus", ApplyStatus, ActionFlags.PerTarget);
             LogicActions.Register("removeStatus", (ctx, p) => Stats.Remove(ctx, p.Target, Required(p, "status"), (int)p.Number("stacks", 0)), ActionFlags.PerTarget);
 
-            LogicWorld.Started += _ => { Stats.Reset(); StatusVisuals.Clear(); started.Clear(); };
-            LogicWorld.Ending += _ => { Stats.Reset(); StatusVisuals.Clear(); started.Clear(); };
+            // Places and attaches are built before Started (whose reset would wipe what they started with), so their
+            // template statuses are applied here; later entities get theirs as they spawn.
+            LogicWorld.Started += w =>
+            {
+                Stats.Reset(); StatusVisuals.Clear(); started.Clear();
+                worldReady = true;
+                foreach (var e in w.Entities.ToList()) if (!e.Destroyed) StartingStatuses(e);
+            };
+            LogicWorld.Ending += _ => { Stats.Reset(); StatusVisuals.Clear(); started.Clear(); worldReady = false; };
             LogicWorld.Polled += (w, t) => Stats.Poll(w, t);
             BodyEvents.UnitSpawned += (e, _) => StartingStatuses(e);
             BodyEvents.EntityBuilt += (e, _) => StartingStatuses(e);
@@ -89,9 +111,13 @@ namespace PalaceMod
             var source = p.Has("source") ? p.Entity("source") : ctx.Self;
             var types = Types(p);
             bool splash = p.Bool("splash");
+            string weaponId = null;
             if (p.Text("weapon") is { Length: > 0 } wname && HpOf(victim)?.TaggedObj is { } vt)
+            {
                 amount *= WeaponFactor(wname, vt, splash);
-            Deal(victim, amount, source, types, splash);
+                weaponId = wname.StartsWith("vanilla:") ? wname : "vanilla:" + wname;
+            }
+            Deal(victim, amount, source, types, splash, weaponId);
         }
 
         /// <summary>
@@ -103,13 +129,14 @@ namespace PalaceMod
         private static bool ByPlayer(LogicEntity source, LogicEntity victim) =>
             source?.Team == "player" && source.Kind != "level" && victim?.Team == "enemy";
 
-        internal static bool Deal(LogicEntity victim, double amount, LogicEntity source, HashSet<string> types, bool splash)
+        internal static bool Deal(LogicEntity victim, double amount, LogicEntity source, HashSet<string> types, bool splash, string weapon = null)
         {
             var hp = HpOf(victim);
             if (hp == null || amount <= 0 || hp.HpValue <= 0) return false;
             if (splash) (types ??= new HashSet<string>(StringComparer.Ordinal)).Add("splash");
             var from = source?.Go() != null ? source.Tagged() ?? source.Go().GetComponentInChildren<TaggedObject>() : null;
-            scope.Add(new DamageInfo { Types = types, Splash = splash, Source = source });
+            if (weapon != null) (types ??= new HashSet<string>(StringComparer.Ordinal)).Add(weapon);
+            scope.Add(new DamageInfo { Types = types, Splash = splash, Source = source, Weapon = weapon });
             try { return hp.TakeDamage((float)amount, from, ByPlayer(source, victim), true); }
             finally { scope.RemoveAt(scope.Count - 1); }
         }
@@ -204,11 +231,12 @@ namespace PalaceMod
         }
 
         private static readonly HashSet<LogicEntity> started = [];
+        private static bool worldReady;
 
         /// <summary>A template's `statuses`: statuses it starts with.</summary>
         private static void StartingStatuses(LogicEntity e)
         {
-            if (e?.Def?["statuses"] is not JArray list || list.Count == 0 || !started.Add(e)) return;
+            if (!worldReady || e?.Def?["statuses"] is not JArray list || list.Count == 0 || !started.Add(e)) return;
             foreach (var id in list.Where(t => t.Type == JTokenType.String).Select(t => (string)t))
             {
                 try { Stats.Apply(null, e, id, null, null, 1, null); }
@@ -228,6 +256,8 @@ namespace PalaceMod
             {
                 if (weaponSplash[weaponDepth - 1]) t.Add("splash");
                 if (weaponMagic[weaponDepth - 1]) t.Add("magic");
+                // the weapon's own types (fire...) and its id, so any weapon can be told apart
+                if (weaponOf[weaponDepth - 1] is { } w) LogicWeapons.AddTypes(w, t);
             }
             if (attacker != null)
             {
@@ -286,7 +316,7 @@ namespace PalaceMod
             private static void Prefix(Weapon __instance, bool splashDamage)
             {
                 if (LogicWorld.Current == null) return;
-                if (weaponDepth < weaponSplash.Length) { weaponSplash[weaponDepth] = splashDamage; weaponMagic[weaponDepth] = IsMagic(__instance); }
+                if (weaponDepth < weaponSplash.Length) { weaponSplash[weaponDepth] = splashDamage; weaponMagic[weaponDepth] = IsMagic(__instance); weaponOf[weaponDepth] = __instance; }
                 weaponDepth++;
             }
 

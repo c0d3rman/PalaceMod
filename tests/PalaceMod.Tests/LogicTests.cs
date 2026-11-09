@@ -305,6 +305,15 @@ namespace PalaceMod.Tests
             Has(issues, "levels[0].logic.rules[0].do[1].targeting[0]: needs a filter");
         }
 
+        public static void TargetingScoreNeedsPreferBest()
+        {
+            var issues = ValidateLevel(@"{ ""rules"": [{ ""when"": ""dusk"", ""do"": [
+                { ""do"": ""setTargeting"", ""target"": ""all('enemy')"", ""targeting"": [{ ""filter"": ""player"", ""score"": ""it.hp"" }] },
+                { ""do"": ""setTargeting"", ""target"": ""all('enemy')"", ""targeting"": [{ ""filter"": ""player"", ""prefer"": ""weakest"", ""score"": ""it.hp"" }] }] }] }");
+            Assert.True(!issues.Any(i => i.Path.StartsWith("levels[0].logic.rules[0].do[0]")), "a score alone implies prefer best: " + Errors(issues));
+            Assert.True(issues.Any(i => i.Path == "levels[0].logic.rules[0].do[1].targeting[0].score"), "a score with another prefer is an error: " + Errors(issues));
+        }
+
         public static void PlayPackKeepsUnitsTheLogicNames()
         {
             var fx = JObject.Parse(File.ReadAllText(Directory.GetFiles(RepoFile("tests/logic-examples"), "09-*.json")[0]));
@@ -353,6 +362,31 @@ namespace PalaceMod.Tests
             Has(issues, "levels[0].logic.rules[2].do[2].name: unknown variable \"$sols\" (did you mean \"souls\"?)");
             Has(issues, "levels[0].logic.attach[\"add:nope\"]: no added slot \"nope\"");
             Has(issues, "levels[0].logic.attach[\"tower\"]: attach keys are");
+        }
+
+        public static void CombatFieldsAndActionsValidate()
+        {
+            var issues = ValidateLevel(@"{ ""vars"": { ""w"": ""''"" }, ""rules"": [
+                { ""when"": { ""on"": ""damaged"", ""of"": ""enemy"" }, ""if"": ""event.types.has('fire') and event.weapon != none"", ""do"": [
+                    { ""do"": ""setWeapon"", ""target"": ""subject"", ""weapon"": ""=other"", ""for"": 5 },
+                    { ""do"": ""setWeapon"", ""target"": ""king"", ""weapon"": ""none"", ""for"": ""night"" },
+                    { ""do"": ""setVar"", ""name"": ""w"", ""value"": ""king.weapon"" } ] },
+                { ""when"": { ""on"": ""bump"", ""of"": ""enemy"" }, ""if"": ""event.value > 1 and other != none"", ""do"": [] },
+                { ""when"": ""levelStart"", ""if"": ""event.types.len > 0"", ""do"": [] }] }");
+            Assert.Equal(1, issues.Count(i => i.Severity == Severity.Error), "one error: " + string.Join("; ", issues));
+            Has(issues, "levels[0].logic.rules[2].if: col 7: the event \"levelStart\" has no types");
+        }
+
+        public static void ValidatorChecksGameRules()
+        {
+            var issues = ValidateLevel(@"{ ""vars"": { ""flipped"": false }, ""game"": { ""victory"": ""survive"", ""castle"": ""hidden"", ""holdNight"": ""count('#camp') > 0"",
+                ""endNight"": ""$flipd"", ""combat"": ""isNight or $flipped"", ""build"": 3, ""dayLength"": -5, ""survivors"": ""=night > 2 ? 'stay' : 'remove'"", ""speed"": 2 } }");
+            Has(issues, "levels[0].logic.game.victory: must be one of lastNight, rules");
+            Has(issues, "levels[0].logic.game.endNight: col 1: unknown variable \"$flipd\"");
+            Has(issues, "levels[0].logic.game.build: must be true, false or a condition");
+            Has(issues, "levels[0].logic.game.dayLength: must be 0 or more");
+            foreach (var ok in new[] { "castle", "holdNight", "combat", "survivors" })
+                Assert.True(!issues.Any(i => i.ToString().Contains("logic.game." + ok + ":")), $"game.{ok} flagged: {string.Join("; ", issues)}");
         }
 
         public static void ValidatorChecksComponentsAndCaps()

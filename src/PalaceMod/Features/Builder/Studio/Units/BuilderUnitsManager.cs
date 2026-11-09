@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.Linq;
+using HarmonyLib;
 using PalaceMod.Builder;
 using PalaceMod.Builder.Level;
 using PalaceMod.Builder.Studio;
@@ -54,7 +55,7 @@ namespace PalaceMod
         private static void RegisterDevCommand()
         {
             DevCommands.Register("builder-units",
-                "builder-units [live] | settle | studio [key] | ground [key] | set <key> <index> <x> <z> | reset [key]   training slots' unit positions (live level or Studio)", args =>
+                "builder-units [live] | select | settle | studio [key] | ground [key] | set <key> <index> <x> <z> | reset [key]   training slots' unit positions (live level or Studio)", args =>
             {
                 string sub = args.FirstOrDefault()?.ToLowerInvariant() ?? "live";
                 StudioItem One(int at)
@@ -78,6 +79,21 @@ namespace PalaceMod
                             })));
                         return UnitHomes.LastSettle + "\n" + string.Join("\n", lines);
                     }
+                    case "select":
+                    {
+                        // Every "command these units" ring (SelectUnitUI) in the level and whether its selector drives it.
+                        var driven = new System.Collections.Generic.HashSet<SelectUnitUI>(
+                            UnityEngine.Object.FindObjectsOfType<UnitProductionSelector>(true)
+                                .Select(s => Traverse.Create(s).Field("mySelectUnitUI").GetValue<SelectUnitUI>()).Where(u => u != null));
+                        return string.Join("\n", UnityEngine.Object.FindObjectsOfType<SelectUnitUI>(true).Select(ui =>
+                        {
+                            var canvas = Traverse.Create(ui).Field("canvas").GetValue<GameObject>();
+                            var fill = Traverse.Create(ui).Field("mpImage").GetValue<UnityEngine.UI.Image>();
+                            var slot = ui.GetComponentInParent<BuildSlot>(true);
+                            return $"{slot?.name ?? ui.transform.root.name}: {(driven.Contains(ui) ? "driven" : "ORPHAN")} " +
+                                $"shown={canvas != null && canvas.activeInHierarchy} fill={(fill != null ? fill.fillAmount.ToString("0.00", CultureInfo.InvariantCulture) : "-")} @ {F(ui.transform.position)}";
+                        }));
+                    }
                     case "settle":
                         UnitHomes.Settle(SceneManager.GetActiveScene());
                         return UnitHomes.LastSettle;
@@ -98,7 +114,7 @@ namespace PalaceMod
                         StudioUnits.Reset(Many(1));
                         return "reset";
                     default:
-                        throw new ArgumentException("builder-units [live] | settle | studio [key] | ground [key] | set <key> <index> <x> <z> | reset [key]");
+                        throw new ArgumentException("builder-units [live] | select | settle | studio [key] | ground [key] | set <key> <index> <x> <z> | reset [key]");
                 }
             });
         }

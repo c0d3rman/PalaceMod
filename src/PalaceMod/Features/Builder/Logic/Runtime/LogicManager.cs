@@ -34,7 +34,6 @@ namespace PalaceMod.Builder.Logic
         private readonly Dictionary<int, string> dawnSnapshots = [];
         private readonly HashSet<string> loggedTrace = [];
         private DaytimeHook daytime;
-        private readonly List<(BuildSlot slot, UnityEngine.Events.UnityAction action)> slotHooks = [];
         private PlayerInteraction goldHooked;
         private bool waveClearedRaised;
         private float purgeAt;
@@ -167,6 +166,7 @@ namespace PalaceMod.Builder.Logic
             game.NightStartedAt = game.IsNight ? Time.time : -1;
             LogicServices.Game = game;
             LogicServices.Spatial = spatial;
+            GameSlots.Install();
             world.TraceListener = OnTrace;
             LogicWorld.Current = world;
             startedScene = SceneManager.GetActiveScene();
@@ -459,16 +459,11 @@ namespace PalaceMod.Builder.Logic
                 w.Raise("dusk", w.Level, null, instance.game.Night, null, null);
             }
 
-            public void OnDawn_BeforeSunrise()
-            {
-                instance.incomeCounting = true;
-                instance.game.IncomeAtDawn = 0;
-            }
+            public void OnDawn_BeforeSunrise() { }
 
             public void OnDawn_AfterSunrise()
             {
                 var w = World;
-                instance.incomeCounting = false;
                 int ended = instance.game.Night;
                 instance.game.NightRunning = false;
                 if (w == null) return;
@@ -478,7 +473,5 @@ namespace PalaceMod.Builder.Logic
                 instance.snapshotAfterTick = true;   // after the `dawn` rules have run
             }
         }
-
-        private bool incomeCounting;
     }
 }

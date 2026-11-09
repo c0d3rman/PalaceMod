@@ -145,6 +145,7 @@ namespace PalaceMod.Builder.Studio.Logic
             Ev("impact", "hits (as a shot)", "Combat", "A projectile strikes something or the ground.", other: "thing it hit", pos: true);
             Ev("expire", "runs out", "This", "Its lifetime or range runs out.");
             Ev("arrive", "reaches a point", "Movement", "A mover or path follower reaches a point.", value: "point index");
+            Ev("bump", "is stopped by a wall", "Movement", "A push or knockback is stopped short by a wall, building, solid body or cliff.", other: "what it hit", value: "push left (m)");
             Ev("end", "reaches the end", "Movement", "A mover or path follower reaches its end.", value: "point index");
             Ev("pickup", "is picked up", "King", "A pickup is collected.", other: "collector");
             Ev("interact", "is used by the king", "King", "The king uses it (after paying its cost).", other: "king", common: true);
@@ -190,6 +191,8 @@ namespace PalaceMod.Builder.Studio.Logic
                 ["stat:stat!*", "mult:number*", "add:number*", "value:number*", "for:expr*", "key:text"], targeted: true, common: true);
             Act("applyStatus", "Give a status", "Stats", "Give {target} {status} for {for}", "Applies a status (a buff or debuff).", ["status:status!*", "for:number*", "stacks:number", "source:entity"], targeted: true, common: true);
             Act("removeStatus", "Remove a status", "Stats", "Remove {status} from {target}", "Ends a status.", ["status:status!*"], targeted: true);
+            Act("setWeapon", "Change weapon", "Stats", "Give {target} weapon {weapon} for {for}", "Swaps its weapon: vanilla:<weapon>, a copy of another's (=other), none, or base (its own back). Range follows the weapon.",
+                ["weapon:text=none!*", "range:number", "for:expr*"], targeted: true);
             Act("convert", "Switch sides", "Stats", "Make {target} join {team}", "Changes its team (a dead target rises on the new side).", ["team:choice(player|enemy|neutral)!*", "keepLook:bool", "hpPct:number"], targeted: true, levelWide: true);
             Act("teleport", "Teleport", "Move", "Teleport {target} to {at}", "Moves it instantly.", ["at:position!*"], targeted: true);
             Act("push", "Push", "Move", "Push {target} {force} m", "A one-off shove (or a pull with toward).", ["force:number=4!*", "from:position", "toward:position", "up:number", "stun:number"], targeted: true);
@@ -226,7 +229,7 @@ namespace PalaceMod.Builder.Studio.Logic
             Act("building", "Change a building", "World", "{op} {slot}", "Builds, upgrades, knocks out, locks or reprices a slot.",
                 ["slot:entity!*", "op:choice(build|upgrade|knockOut|repair|demolish|lock|unlock|setCost|setIncome)=build!*", "value:number", "branch:number"], levelWide: true);
             Act("waves", "Change the nights", "World", "Nights: {op}", "Adds, removes or scales enemies of a night, or starts/ends one.",
-                ["op:choice(addSpawn|removeUnit|scaleCount|scaleHp|clearRemaining|startNight|endNight|skipNight)=addSpawn!*", "night:expr", "unit:template", "count:number", "interval:number", "delay:number", "line:text", "gold:number", "elite:bool", "value:number"], levelWide: true);
+                ["op:choice(addSpawn|removeUnit|scaleCount|scaleHp|clearRemaining|startNight|endNight|skipNight)=addSpawn!*", "night:expr", "unit:template", "count:number", "interval:number", "delay:number", "line:text", "gold:number", "elite:bool", "value:number", "survivors:choice(remove|stay)"], levelWide: true);
             Act("endLevel", "End the level", "World", "End the level: {result}", "Wins or loses the run.", ["result:choice(win|lose)=win!*", "message:text"], levelWide: true);
             Act("effect", "Effect", "Show", "Effect {fx} at {at}", "Plays a game effect.", ["fx:fx!*", "at:position=self*", "scale:number"], common: true);
             Act("sound", "Sound", "Show", "Sound {sound}", "Plays a sound.", ["sound:sound!*", "at:position"]);
