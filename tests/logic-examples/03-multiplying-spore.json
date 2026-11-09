@@ -1,0 +1,66 @@
+{
+ "example": 3,
+ "title": "A unit that multiplies every 8 s (capped)",
+ "doc": "Expressiveness check 3",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex03",
+  "name": "Example 3: Multiplying spore",
+  "units": [
+   {
+    "id": "spore",
+    "base": "vanilla:E Slime",
+    "name": "Spore",
+    "rules": [
+     {
+      "when": {
+       "on": "every",
+       "seconds": 8,
+       "during": "night"
+      },
+      "if": "count('ally and is:spore') < 40",
+      "do": [
+       {
+        "do": "spawn",
+        "entity": "=self.template",
+        "at": "pointNear(self, 2)"
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "levels": [
+   {
+    "id": "ex03",
+    "name": "Example 3: Multiplying spore",
+    "host": "Nordfels",
+    "logic": {}
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "cmd": "agent build castle"
+   },
+   {
+    "cmd": "night"
+   },
+   {
+    "do": [
+     {
+      "do": "spawn",
+      "entity": "spore",
+      "at": "vec(-4, -60)"
+     }
+    ]
+   },
+   {
+    "expect": "count('is:spore') >= 2",
+    "within": 20
+   }
+  ]
+ }
+}

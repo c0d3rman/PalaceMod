@@ -28,7 +28,12 @@ namespace PalaceMod
         internal SaveStateData Data { get; private set; }
 
         public string Id { get; }
+        /// <summary>What the state is filed under: the scene name, or for a Builder level "Builder/&lt;pack&gt;/&lt;level&gt;".</summary>
         public string Level => Data.level;
+        /// <summary>The scene the state was captured in (the host map for a Builder level).</summary>
+        public string Scene => string.IsNullOrEmpty(Data.scene) ? Data.level : Data.scene;
+        /// <summary>The Builder level (and its version) the state was captured in; null for vanilla levels.</summary>
+        public Builder.Model.LevelPin Builder => Data.builder;
         public string Name => Data.name;
         public SaveStateKind Kind { get; }
         /// <summary>EnemySpawner.Wavenumber when captured: -1 on the first day; n during night n+1 and the day after it.</summary>
@@ -66,8 +71,9 @@ namespace PalaceMod
         /// <summary>Folder holding all savestates (one subfolder per level).</summary>
         public static string Root => Path.Combine(Paths.BepInExRootPath, "PalaceMod", "SaveStates");
 
-        /// <summary>The active level's scene name, or null outside a level.</summary>
-        public static string CurrentLevel => DayNightCycle.Instance != null && EnemySpawner.instance != null ? SceneManager.GetActiveScene().name : null;
+        /// <summary>What the active level's states are filed under, or null outside a level: its scene name, or in a
+        /// Builder session "Builder/&lt;pack&gt;/&lt;level&gt;" (so a custom level's states never mix with its host map's).</summary>
+        public static string CurrentLevel => DayNightCycle.Instance != null && EnemySpawner.instance != null ? StateUtil.LevelKey(SceneManager.GetActiveScene().name) : null;
 
         /// <summary>Raised after any state is captured and written (all kinds).</summary>
         public static event Action<SaveStateInfo> Captured;
@@ -294,10 +300,12 @@ namespace PalaceMod
 
         // ---- Disk ---------------------------------------------------------------------------------------------------
 
+        // A Builder key ("Builder/<pack>/<level>") is a folder per part.
         internal static string LevelFolder(string level)
         {
-            string safe = new(level.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c).ToArray());
-            return Path.Combine(Root, safe);
+            static string Safe(string part) => new(part.Select(c => Path.GetInvalidFileNameChars().Contains(c) || c == '\\' ? '_' : c).ToArray());
+            var parts = Builder.Model.LevelPin.IsKey(level) ? level.Split(['/'], 3) : [level];
+            return Path.Combine([Root, .. parts.Select(p => p is "" or "." or ".." ? "_" + p : Safe(p))]);
         }
 
         private static SaveStateInfo Read(string file)

@@ -1,0 +1,170 @@
+{
+ "example": 5,
+ "title": "A splitting slime, three generations deep",
+ "doc": "Presets; Expressiveness check 5",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex05",
+  "name": "Example 5: Splitting slime",
+  "units": [
+   {
+    "id": "big-slime",
+    "base": "vanilla:E StrongSlime",
+    "name": "Big slime",
+    "rules": [
+     {
+      "preset": "split-on-death"
+     }
+    ]
+   }
+  ],
+  "presets": [
+   {
+    "id": "split-on-death",
+    "name": "Split on death",
+    "description": "Splits into {count} copies, {depth} times.",
+    "params": {
+     "count": {
+      "type": "number",
+      "default": 2,
+      "min": 1,
+      "max": 6
+     },
+     "depth": {
+      "type": "number",
+      "default": 3
+     },
+     "into": {
+      "type": "template",
+      "default": "=self.template"
+     }
+    },
+    "vars": {
+     "gen": 0
+    },
+    "rules": [
+     {
+      "when": "death",
+      "if": "self.$gen < {depth}",
+      "do": [
+       {
+        "do": "spawn",
+        "entity": "{into}",
+        "count": "{count}",
+        "at": "self",
+        "spread": 1.5,
+        "then": [
+         {
+          "do": "setVar",
+          "target": "spawned",
+          "name": "gen",
+          "value": "self.$gen + 1"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "levels": [
+   {
+    "id": "ex05",
+    "name": "Example 5: Splitting slime",
+    "host": "Nordfels",
+    "logic": {
+     "vars": {
+      "slimes": 0
+     },
+     "rules": [
+      {
+       "note": "fixture observer",
+       "when": {
+        "on": "spawn",
+        "of": "is:big-slime"
+       },
+       "do": [
+        {
+         "do": "addVar",
+         "name": "slimes",
+         "value": 1
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "cmd": "agent build castle"
+   },
+   {
+    "cmd": "night"
+   },
+   {
+    "do": [
+     {
+      "do": "spawn",
+      "entity": "big-slime",
+      "at": "vec(-4, -60)"
+     }
+    ]
+   },
+   {
+    "wait": 1
+   },
+   {
+    "do": [
+     {
+      "do": "kill",
+      "target": "all('is:big-slime')"
+     }
+    ]
+   },
+   {
+    "wait": 1
+   },
+   {
+    "do": [
+     {
+      "do": "kill",
+      "target": "all('is:big-slime')"
+     }
+    ]
+   },
+   {
+    "wait": 1
+   },
+   {
+    "do": [
+     {
+      "do": "kill",
+      "target": "all('is:big-slime')"
+     }
+    ]
+   },
+   {
+    "wait": 1
+   },
+   {
+    "do": [
+     {
+      "do": "kill",
+      "target": "all('is:big-slime')"
+     }
+    ]
+   },
+   {
+    "wait": 1
+   },
+   {
+    "expect": "$slimes == 15 and count('is:big-slime') == 0",
+    "within": 5
+   }
+  ]
+ }
+}

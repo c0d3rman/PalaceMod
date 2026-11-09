@@ -1,0 +1,147 @@
+{
+ "example": 1,
+ "title": "An enemy that hurls homing trees",
+ "doc": "Expressiveness check 1",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex01",
+  "name": "Example 1: Homing trees",
+  "units": [
+   {
+    "id": "treant",
+    "base": "vanilla:E Ogre",
+    "name": "Treant",
+    "attacks": [
+     {
+      "replace": true,
+      "cooldown": 3,
+      "range": 18,
+      "targeting": [
+       "foe and Building",
+       "foe"
+      ],
+      "launch": {
+       "entity": "tree-missile",
+       "from": [
+        0,
+        3,
+        0
+       ]
+      }
+     }
+    ]
+   }
+  ],
+  "entities": [
+   {
+    "id": "tree-missile",
+    "kind": "projectile",
+    "visual": {
+     "mesh": "mesh:Cone Tree",
+     "meshScale": 0.4
+    },
+    "lifetime": 6,
+    "projectile": {
+     "speed": 9,
+     "homing": 0.6,
+     "arc": 0.2,
+     "spin": [
+      0,
+      0,
+      360
+     ],
+     "hits": "foe"
+    },
+    "rules": [
+     {
+      "when": "impact",
+      "do": [
+       {
+        "do": "damage",
+        "target": "all('foe', 2)",
+        "amount": 25,
+        "source": "self.owner"
+       },
+       {
+        "do": "effect",
+        "fx": "dust_large",
+        "at": "self"
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "levels": [
+   {
+    "id": "ex01",
+    "name": "Example 1: Homing trees",
+    "host": "Nordfels",
+    "logic": {
+     "vars": {
+      "launched": 0,
+      "impacts": 0
+     },
+     "rules": [
+      {
+       "note": "fixture observer",
+       "when": {
+        "on": "spawn",
+        "of": "is:tree-missile"
+       },
+       "do": [
+        {
+         "do": "addVar",
+         "name": "launched",
+         "value": 1
+        }
+       ]
+      },
+      {
+       "note": "fixture observer",
+       "when": {
+        "on": "impact",
+        "of": "is:tree-missile"
+       },
+       "do": [
+        {
+         "do": "addVar",
+         "name": "impacts",
+         "value": 1
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "cmd": "agent build castle"
+   },
+   {
+    "cmd": "night"
+   },
+   {
+    "do": [
+     {
+      "do": "spawn",
+      "entity": "treant",
+      "at": "vec(-4, -20)"
+     }
+    ]
+   },
+   {
+    "expect": "$launched >= 1",
+    "within": 20
+   },
+   {
+    "expect": "$impacts >= 1",
+    "within": 20
+   }
+  ]
+ }
+}

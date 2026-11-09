@@ -6,7 +6,8 @@ features. A homing tree, a necromancer, a drawbridge, a toll gate and a splittin
 primitives arranged differently, stored as data in the level or enemy JSON. They are authored in the Studios and by
 agents through `palace.py`.
 
-This is a design. Nothing here is built yet. It was worked out from the code on `main` at 3bef6cc and from the
+This is the design; the "as built" sections (L1 runtime core, L4 data model) record what the code does where it
+refines it. It was worked out from the code on `main` at 3bef6cc and from the
 decompiled game; no game was run. `docs/builder-design.md` (data model, runtime, sessions) and `docs/builder-ux.md`
 (the Studios) still apply.
 
@@ -183,16 +184,32 @@ Events: `impact` (`other` is what it hit, or none for ground; `event.pos`), `exp
 ```
 
 Events: `arrive` (at each point; `event.value` is the index), `end` (once/pingpong end, and the end of a
-`movement.path`; it fires before `then: "destroy"` acts). A solid mover drags its
-NavmeshCut; the graph updates at most 4 times a second per mover. Units it would trap are pushed to the nearest
-walkable point, the same fix as the terrain stuck bug.
+`movement.path`; it fires before `then: "destroy"` acts). A solid mover drags a NavmeshCut on the ground graphs
+(the fliers' graph excluded); the navmesh follows it at most 4 times a second. Units it would trap are pushed to the
+nearest walkable point, the same fix as the terrain stuck bug.
 
 **Walkable surfaces** (`body.walkable`): a prop whose top ground units walk on, such as a bridge, a raft or a frozen
-lake's ice. Ground graphs can't gain triangles locally, so a walkable surface appearing, disappearing or reaching a
-pose re-runs `GroundGraphs.Scan()`. A static one is scanned once at level start. A mover with `walkable` only snaps
-between poses (no gliding), and carries nothing while moving: units on it are moved with it at the snap.
-**L2 measures the rescan first.** If a scan of an edited map takes over about 150 ms, runtime walkable changes are
-limited to one per 5 s, with a validator warning.
+lake's ice. Ground graphs can't gain triangles locally, so the level-start scan rasterizes every walkable surface in
+every pose it can take, and a non-dual NavmeshCut, limited to the surface's height band, hides each one that is
+switched off or not in its current pose. Appearing, disappearing and reaching a pose are then cut updates (about
+10 ms), not rescans. A mover with `walkable` only snaps between poses (no gliding), and carries nothing while moving:
+units on it are moved with it at the snap. A surface over walkable ground hides that ground while it is present in
+the scan; switched off, its footprint is a hole unless its deck is higher than a unit is tall.
+
+**L2 spike results** (`logic-l2 nav`, headless pool instance, 6 instances running; A* Pathfinding Project 5.4.4):
+
+- The four baked graphs are one tile each and already have `enableNavmeshCutting` on. A box NavmeshCut added or
+  moved costs 4-35 ms for the first update and about 3 ms per graph per later update (Nordfels: 580 triangles on
+  the small graphs). Gliding a cut through 30 enemies at 4 m/s with `navmeshUpdates.updateInterval = 0.25` cost
+  5 ms per graph update and left no unit off the navmesh: the game's movement snaps a unit to the nearest node every
+  frame when it is within 2 m, so only a cut wider than about 4 m can trap one, and the push-out covers that case.
+- `GroundGraphs.Scan()` takes 630-680 ms on vanilla Nordfels and 0.9-1.8 s on edited maps (Caldera, Kingsclimb),
+  far over the 150 ms budget. Runtime rescans are therefore never used for logic: walkable surfaces use the
+  pre-scanned cuts above, and anything that would need a rescan is a validator error, not a rate-limited call.
+- Node tags work as per-unit walkability: a dual NavmeshCut splits the navmesh along an area's outline, a
+  `GraphUpdateObject` (no physics) tags the triangles inside (under 35 ms), and a unit whose `Seeker.traversableTags`
+  and snap constraint exclude that tag stops at the edge (within about 1 m: RVO avoidance pushes the front row in),
+  while units without the limit walk through. See `body.walkTag` and `movement.walk`.
 
 **`area`**: a zone that detects what's inside it.
 
@@ -268,6 +285,43 @@ attack, vanilla towers and troops included (`setTargeting` on `all('player and T
 
 It is implemented on the game's own movement components (see "Runtime"), so pathfinding, avoidance and animation keep
 working. A ranged enemy that kites and prefers towers is just `targeting` plus `movement.keepDistance` plus `kite`.
+
+**Steering as built** (`Logic/Bodies/Steering/`):
+
+- **Targeting.** A rule's `range` is capped by the attack's own range when it picks an attack target; with no
+  `range` a movement target can be anywhere. Prefer `weakest`/`strongest` compare current hp. A unit with no list of
+  its own (vanilla units and towers, or Builder units without `targeting`) keeps the game's priorities: a `prepend`
+  then tries its rules first and falls back to the game's choice, and `remove` has nothing to remove.
+- **`setTargeting`** takes `targeting` (a list that replaces), `prepend` (a list tried first), `remove` (filters,
+  written exactly as in the rules, whose rules are dropped), `reset: true` (back to the template's or the game's), and
+  `for` (seconds; the change reverts after).
+- **`setMovement`** merges the fields it is given (`mode`, `path`, `then`, `speed`, `keepDistance`, `kite`, `flee`,
+  `wander`, `home`, or a whole `movement` block) over the current movement. `for` reverts it; `reset: true` drops
+  earlier `setMovement`s first.
+- **Paths.** `path` is inline (`[[x, z] | [x, y, z], ...]`) or `"@name"` of a placed path whose `points` are world
+  positions. A path follower fires `arrive` at each point (`event.value` = its index), then `end`. `hold` stands
+  where the unit was when it started holding (a `teleport` moves that spot). `wander` picks a new point within
+  `radius` of home every 4-7 s, or on arrival, whenever the unit has nothing to walk to.
+- **`flee.when`** is checked 10 times a second. Without `to`, the unit runs 8 m away from the nearest `from` match
+  within 25 m. **`kite`** steps away from the nearest foe for `for` seconds.
+- **`direct`** moves in a straight line through the unit's own RVO (avoidance and walk animation stay), with no
+  navmesh. Flyers keep their height. The unit stops at `keepDistance` from a target.
+- **`attacks`.** `range` and `cooldown` default to the base unit's first attack. `launch.from` is an offset in the
+  unit's own frame (default `[0, 1, 0]`). An attack with neither `launch` nor `weapon` fires only its `attack` event
+  and `do`. `attack` carries the attack's `id` as `event.name`. The base unit's attack animation plays.
+- **`push`**: `force` is metres of travel, `up` the arc height (default 1.5 m) and `stun` seconds. It uses the game's
+  KnockbackBehavior (added when the unit has none), so it needs the game's unit movement: the king can't be pushed.
+- **`drift`**: `for` absent means until removed. `speed: 0` with no `dir` removes the drift with that `key` (default
+  key `"drift"`). With `dir` and no `speed`, `dir` is the velocity itself.
+- **`taunt`**: `for` defaults to 5 s. The taunted unit walks to the taunter and attacks it once it is in range; until
+  then its attacks pick as usual.
+- **`command`**: `hold` takes an optional `at` (default: where the unit stands).
+- **`convert`**: the counterpart, when the template names none, is the plainest catalog unit of the other side
+  with the same role: P Melee, P Archer or P Firewing for the player, E Melee, E Archer or E Flyer for the enemy.
+  `team` may be an expression (`self.team`). Going `neutral` keeps the unit's own brain, drops its team tags and
+  gives it an empty targeting list (it attacks nothing until a rule gives it targets).
+- **`replace`** keeps nothing unless `keep` says so. `hp` keeps the hp fraction, not the absolute value. `then` runs
+  with `spawned` = the new entity.
 
 ### Rules
 
@@ -420,8 +474,8 @@ which accepts an entity or a position.
 | | `enable` / `disable` / `toggle` | the entity's rules, components (its solid cut and hittability too) and visibility; on a spawn line, pauses or resumes its spawning (the night's schedule waits for it) |
 | | `wait` | `seconds`: the rest of the list resumes later (min 0.05 s) |
 | | `if` | `cond`, `then`, `else` |
-| | `repeat` | `times` (≤ 100), `every` (seconds, 0 = now), `do` (with `event.value` = the iteration) |
-| | `forEach` | `in` (a set), `do` (with `it`), `limit` |
+| | `repeat` | `times` (≤ 100), `every` (seconds, 0 = now), `actions` (with `event.value` = the iteration; not `do`, which names the action) |
+| | `forEach` | `in` (a set), `actions` (with `it`), `limit` |
 | | `choose` | `options: [{ "weight": 2, "do": [...] }, ...]` |
 | | `stop` | ends this action list |
 | **World** | `gold` | `amount` (negative takes, floored at 0), `at` (shows the coin effect there) |
@@ -441,6 +495,36 @@ which accepts an entity or a position.
 
 The action set is closed, and each action is generic. A new action needs a mod update, so additions are judged by
 whether they unlock many behaviours rather than one.
+
+World and Show details (as built, `Logic/Bodies/World/`):
+
+- `gold` with `at`: up to 40 of the game's income coins rise there and fly to the king, each paying 1 on arrival
+  (the rest is paid at once). A negative amount is `SpendCoins` (the game's spend effect on the king).
+- `dropCoins`: the enemy drop coin, in the ring a dying enemy drops them in (max 100).
+- `building`: without `slot`, the action's `target` (default self). `slot` also takes `castle` and a slot's object
+  name. `build`/`upgrade` are free and pick `branch` (default: a random one from the logic random source); they do
+  nothing when the slot can't be upgraded (castle level, max level, locked). `demolish` undoes each applied upgrade's
+  switched objects and hp, hides the slots it had switched on, and leaves castle-upgrade perks in place. Locks and
+  `setIncome` survive savestates; `setCost` prices the next level.
+- `waves`: `night` is 1-based; the default is the night after the current or coming one's index (by day: the coming
+  night). A night that is running counts as `"current"`. `addSpawn` defaults: `count` 1, `interval` 0.5, `line` the
+  night's first line. `endNight` removes the remaining enemies without coins or death events; `skipNight` works by
+  day only and skips the coming night (not the last). Future-night edits are replayed after a savestate load.
+- `spawnGroup` spawns like the game's death spawns (Instantiate + `Spawn.AdjustEnemyParametersAfterSpawn`), `interval`
+  default 0.5, coins spread over the group; at night the night stays open until the group is done. `clearRemaining`
+  on the running night drops pending groups too.
+- `effect` ids are the game's effect prefabs (`builder dump` → `effects`) plus short aliases: `smoke`, `dust_small`,
+  `dust_large`, `explosion`, `burst`, `summon`, `spikes`, `slash`, `hit`, `fire_small`, `ward`, `coins`, `blood`,
+  `impact`, `goo`, `ally_death`. `sound` ids are the game's AudioSet clips in camelCase (`builder dump` → `sounds`).
+  Status `visual.fx` uses the same catalog, parented to the carrier.
+- `setVisual`: `tint`/`glow` paint the model (FlatKit lit and shaded colours); `glow` is a colour, `true` (gold) or
+  0..1; `scale` multiplies the original scale; `mesh` takes the `visuals.mesh` forms. With `for`, all of it reverts.
+- `hud` lines stack at the top right (under the game's night-score panel while it shows), re-evaluated every 0.25 s,
+  hidden while a menu is open. `icon` is an `asset:` sprite or a unit id (its marker icon).
+- `marker`: one per `on` entity or point; `for: 0` removes it; without `for` it lasts while `on` exists. `icon` as for
+  `hud` (default: the entity's own marker icon).
+- `shake`: the game's camera punch scaled by `strength`; off when the player disabled screen shake.
+- Dev: `logic-world status | slots | hud | fx | sounds | gallery`.
 
 ### Statuses
 
@@ -476,6 +560,31 @@ That covers armour, dodges, "immune to arrows", "misses at long range" and "vuln
 - **Timed `setStat`s** stack independently; give `key` to make a new one replace an earlier one with the same key.
 - `damaged` doesn't fire when modifiers reduce the damage to 0, so an invulnerable door doesn't spam rules.
 - `drift` is a status mod as well (`"drift": { "toward": "@well", "speed": 3 }`).
+- **As built** (`Logic/Bodies/Stats/`):
+  - A stat's value is `(set ?? base) + Σ add, × Π mult`; the latest `set` wins; per stack, `add` sums and `mult`
+    compounds. A status mod takes `value` (= `set`), `add` or `mult`.
+  - `damageMult`, `damageTaken`, `projectileSpeed`, `scale` and `timeScale` are multipliers (base 1, on anything
+    with a body). `scale` multiplies the spawn scale. The other stats exist only where the object has the game field
+    (`.moveSpeed` on a tower is none).
+  - `hp` isn't a modifier: `setStat hp` changes hit points now, like `setHp`. A `maxHp` change keeps the hp fraction.
+  - `damageTaken` (victim) and `damageMult` (attacker) both apply inside the game's own damage call, so they cover
+    vanilla and Builder damage alike. On `damageMult`, test the victim with `when` (`victim.is('Building')`).
+    Conditional modifiers (`from`/`types`/`chance`/`when`) apply only to hits; `.damageTaken` reads the
+    unconditional value.
+  - `stunned` stops attacks and movement, `rooted` movement (speed 0), `disarmed` attacks. `untargetable` drops the
+    object from every game target search. `invulnerable` refuses all damage except `kill`.
+  - `maxStacks` defaults to 1. `refresh`: stacks add up to the cap and the timer restarts. `extend`: stacks add
+    up and the duration is added to the time left. `add`: each stack has its own timer, and past the cap the
+    soonest-ending stack is dropped. `ignore`: re-applying does nothing while it lasts. `removeStatus` takes `stacks`
+    (default: all). `applyStatus`'s `for` overrides `duration`, and takes `"night"`/`"day"` too. `source` defaults to
+    `self`.
+  - A status's own rules hear only its own `statusStart`/`statusTick`/`statusEnd`. Every status event has
+    `event.name` set to the status id. On `statusEnd`, `value` is the stack count it had.
+  - `damage.weapon` (`"vanilla:<weapon>"`) multiplies the amount by that weapon's damage multipliers for the
+    victim's tags (its `damageAdded` is ignored). The damage hooks can read the action's `source` and `types` from
+    `LogicStatsManager.CurrentDamage` (for a source without a body, such as a logic object).
+  - `visual.tint` swaps the carrier's materials for tinted copies while the status lasts. `visual.fx` needs the
+    effects catalog (`StatusVisuals.SpawnFx`).
 
 ### Signals, wires and built-in inputs
 
@@ -528,6 +637,36 @@ into the preset. Presets can also carry components (`"movement"`, `"area"`, ...)
 - **Library presets** live in `PalaceBuilder/library/presets/<id>.json`, next to levels and enemies (R2-C1's store).
   "Save as preset" on any card or selection writes one, and an export copies every preset that's used into the pack.
 
+### Data model as built (L4)
+
+- **Code.** `Model/Logic/` (pure C#, unit-tested): `LogicDefs.cs` (the defs; number fields that may be `"=expr"` are
+  `LNum`; `when` and targeting entries accept their string shorthands), `Expr.cs` (lexer, parser, AST, filters,
+  `{expr}` text), `ExprChecker.cs` (types, roles per event, variables, names, columns, "did you mean"), `LogicSchema.cs`
+  (the registry), `Presets.cs`, `LogicRefs.cs` (template references, `LogicLowering`), `LogicValidator.cs`. Every def
+  keeps unknown fields, so the Studio and newer packs round-trip.
+- **Param conventions.** A JSON string in a param whose type isn't text is an expression; text params are literal
+  with `{expr}` parts unless they start with `=`; template params are ids unless they start with `=`. `repeat` and
+  `forEach` take their body as `actions` (`do` names the action). `near`'s range is `when.range` (the same key as an
+  `of` listener's radius; only `near` declares a `range` param). In `interact.prompt`, `cost` is a role.
+- **Preset expansion.** `Presets.Expand(pack)` / `ExpandJson` replace every rules-list `{preset, with}` and every
+  place `preset` with plain rules and components before validation and compilation. A whole-string `"{p}"` becomes
+  the typed value; inside a longer string the value is inserted as text (an `=expr` value as `(expr)`). Preset vars,
+  labels and components merge under the owner's own. Every produced rule carries `_src` (the JSON path of its use,
+  e.g. `units[1].rules[0] (preset split-on-death).rules[0]`), which errors and the trace show. Lookup: the pack's
+  presets, then the library's (`Presets.Library`), then the built-ins (`Assets/builder-presets.json`, 21 presets).
+- **Library.** Entities, statuses and presets are library items like enemies (`library/entities|statuses|presets/<id>.json`,
+  `Model/LibraryStore.Logic.cs`): workspaces and the composed pack hold all of them, `SaveWorkspace` writes changed
+  ones, `Export` copies those the exported levels and enemies use (following template, status and preset references
+  transitively, units included), and `Import` reuses identical ones, replaces ones from the same origin and renames
+  clashes, rewriting references. `SavePreset` is "Save as preset".
+- **Agents.** `catalog.json` carries the registry and built-in presets as `logic`; `agent-kit/logic-schema.json` is
+  the same, generated by a test, and `agent-kit/logic-reference.md` is generated from it (`palace.py logic doc`).
+  `palace.py` validates offline with `palace_logic.py`, a port kept in step by `tests/logic-expr-cases.json` and the
+  example fixtures.
+- **Fixtures.** `tests/logic-examples/NN-*.json` holds every example in "Expressiveness check" as a pack plus a `play`
+  script; CI validates them (C# and Python), and `palace.py logic fixture <file>` runs one in a pool instance through
+  L1's `logic do / raise / eval`.
+
 ## Runtime
 
 ### Shape
@@ -564,7 +703,9 @@ for agents), `reference.md` and a test that every entry has a runtime handler al
 | `healed` | `Hp.Heal` postfix |
 | `attack` | `AutoAttack.OnAttack` postfix and the overrides (`AutoAttackTower`, `...WithKnockback`, `...WithWarning`), `ManualAttack` (the king), and `BuilderAttack` |
 | `dusk`/`dawn`/`day` | one `DayNightCycle.IDaytimeSensitive` registered by the world |
-| `nightStart`, `waveCleared` | `EnemySpawner` wave number change; `SpawningInProgress` false and `NumberOfEnemiesOnTheMap == 0` |
+| `nightStart`, `waveCleared` | `EnemySpawner.StartSpawning` postfix; polled: `SpawningInProgress` false and no `EnemyOwned` object left, once per night |
+| `lineSpawn` | `Spawn.Update` (the spawning group) around `TagManager.AddTaggedObject` |
+| `coinDrop` / `coinPickup` | `Coin.Start` postfix / `PlayerInteraction.AddCoin` inside `Coin.Update` |
 | `built`/`upgraded` | `BuildSlot.OnUpgrade` subscriptions at level start (and on added slots) |
 | `death`/`repaired` (buildings) | a building's `Hp` knock-out (it has `getsKnockedOutInsteadOfDying`) / `Hp.Revive` postfix |
 | `goldChanged` | `PlayerInteraction.onBalanceGain` / `onBalanceSpend` |
@@ -650,6 +791,48 @@ throttles per second.
   rules use `once`/vars, not waits, for state that matters.
 - **Retry day.** The world keeps an in-memory copy of the same state at each dawn. The game's "Retry Day" restores the
   copy for that dawn, so logic state matches the rewound match.
+
+### Runtime core as built (L1)
+
+Where the build settles what the text above leaves open:
+
+- **Files.** `Logic/Runtime/`: pure C# (`LogicApi`, `LogicWorld`, `Rules`, `Actions` (compiler and interpreter),
+  `CoreActions`, `ExprCompiler`, `Values`, `LogicSnapshot`), run by `tests/PalaceMod.Tests/LogicCoreTests.cs` with a
+  fake world; Unity side (`LogicManager` + `.Hooks` + `.Dev`, `GameState`, `LogicGame`, `LogicGameWorld`,
+  `BuilderEntity`).
+- **Steps.** Timers and `wait`s run on 0.05 s steps of game time, `near` polling and `LogicWorld.Polled` (L2's areas)
+  on every other step (10 Hz). Waits resume in due-time, then creation order.
+- **Bodies of `repeat`/`forEach`** are `"actions"`: `"do"` is already the action's type.
+- **`when` params.** `name`, `attack`, `status`, `action`, `line` and `result` compare `event.name`; `night` and
+  `level` compare `event.value`; `min` is `event.value >= min`. `hpBelow` hears only its owner (no `of`).
+- **Global events** (`levelStart`, `levelEnd`, `dusk`, `nightStart`, `dawn`, `day`, `waveCleared`, `goldChanged`,
+  `kingAction`) reach every rule with that `when`, wherever it lives (a merc's `dawn` rule, a bridge's `dusk` rule).
+- **Selectors** skip dead entities unless the filter says `dead`, and skip self and the anchor unless it says `self`.
+  `foe`/`ally` are relative to self's team; a neutral self treats both sides as foes; nobody's foe is neutral.
+- **Division by zero** is 0, `pow` overflow 0: an expression never yields NaN or infinity.
+- **Attribution.** A tower's `AutoAttack` has no `TaggedObject`, so the game passes a null attacker to its arrows.
+  The hooks remember the attacking component (during `OnAttack`, and per `AimbotProjectile` from `Fire` to its hit)
+  and credit `hit`/`kill` to it, without changing what the game passes (that would change aggro).
+- **Wave clones of Builder units** carry `BuilderEntity.TemplateId` (set on the template by `UnitFactory`), so they
+  register in `Start` with the template's rules. They aren't "spawned" for the caps or savestates (the game restores
+  them as its own enemies).
+- **Night numbers.** `night` is the running night from the first spawn to dawn, else the coming one; `dusk` carries
+  the coming night, `dawn` the night that ended.
+- **Caps** come from `logic.caps` (`entities`, `units`, `projectiles`, `perTemplate`, `firingsPerFrame`,
+  `actionsPerFrame`), clamped to `LogicCaps.Max`; a projectile counts only against `projectiles`. A fixed bound of
+  10000 waiting events catches fan-out loops (each firing raising many events) that chain depth alone doesn't bound.
+- **Spawn lines.** An attached `line:` entity switched off (`disable`, or the `disable` signal) pauses its spawn groups
+  (`Spawn.Update` is skipped for them), so the night's schedule and `nightProgress` wait for it.
+- **Savestates and retry day.** The world starts only once a restore is over; a restore's state is applied to the
+  freshly set-up level instead of `levelStart` (and the places' `spawn` events are dropped). A snapshot is kept at
+  each dawn by wave number; a reload that starts mid-run (retry day) applies the snapshot for its wave.
+- **Dev command** `logic status | vars [sel] | trace [n] | budget | entities [filter] | fire <signal> [to] [value] |
+  set <var|sel.var> <expr> | eval <expr> | do <actions json> | raise <event> <on> [other] [name] [value] |
+  king <1-3> | snapshot`. `eval` and `do` run as the level script.
+- **API for game code.** `LogicExpr.Compile/Filter/Text/Matches`, `world.Evaluate/Interpolate`, `world.Defer(list,
+  ctx)` / `Defer(Action)` for callbacks outside the drain, `world.Spawn` (caps, then `IEntityFactory.Build`),
+  `world.AttachRules/DetachRules` (status rules), `LogicActions.RegisterInput` (built-in inputs; `enable`/`disable`
+  handlers also hear `world.SetEnabled`), `LogicWorld.Started/Ending/Polled`.
 
 ### Sessions, the Studio and the arena
 
@@ -764,8 +947,13 @@ limits), and `reference.md` gets the generated schema.
     `rules: [{ "when": "death", "do": [{ "do": "spawn", "entity": U, "at": "self", "elite": "inherit" }] }]`;
   - drops `behaviours`.
 
-  The runtime's `spawn` of an enemy on `death` uses the same `Spawn.AdjustEnemyParametersAfterSpawn` path as the
-  game's `enemyToSpawnOnDeath`, so play doesn't change. `UnitFactory.ApplyBehaviour` and `BehaviourTypes` go away.
+  To keep migrated packs playing exactly as before, the unit factory still runs that exact rule shape on the game's
+  own `Hp.enemyToSpawnOnDeath` (`LogicLowering`: a unit's first rule that is exactly `death → spawn U at self,
+  elite inherit`, where U is a unit and not the unit itself), and the logic compiler skips it. Any other spawn-on-death
+  rule runs in the engine. `BehaviourTypes` and `ApplyBehaviour` are gone; UnitPage's "Spawns on death" edits the
+  lowered rule. A corpus check (`PALACE_MIGRATION_CORPUS=<dirs> dotnet run -- MigrationCorpus`) migrated the
+  showcase levels and the player's library and packs: 34 packs, 12 SpawnOnDeath behaviours, each lowering to the same
+  unit, no logic errors.
 - **Readers.** `LibraryStore` (enemies that reference other enemies), `UnitPage`/`EnemyDock` ("spawns on death") and
   the agent kit's `waves` read references from rules: any template param.
 - `Catalog` keeps listing vanilla `enemyToSpawnOnDeath`, for the Enemy Studio's "what the base already does".
@@ -790,7 +978,7 @@ Each behaviour below is pure data in the format above. Unit bases and meshes are
 **2. Kills convert the victim** (the user's example)
 
 ```jsonc
-{ "when": "kill", "if": "other.is('unit and not king')", "do": [{ "do": "convert", "target": "other", "team": "self.team", "hpPct": 0.5 }] }
+{ "when": "kill", "if": "other.is('unit and not king')", "do": [{ "do": "convert", "target": "other", "team": "=self.team", "hpPct": 0.5 }] }
 ```
 
 **3. A unit that multiplies every 8 s** (the user's example, capped)
@@ -1053,18 +1241,31 @@ only additively and noted in the PR.
     the component defs, `StatusDef`, `PresetDef`, `KingActionDef`, `HudDef`;
   - `Expr.cs`: the AST, parser and type checker;
   - `LogicSchema.cs`: the registry API, `LogicSchema.Events/Actions/Stats/Functions/Filters`, each with `ParamSpec`.
-- **L1 commit 1, `Logic/Runtime/LogicApi.cs`:**
+- **L1 commit 1, `Logic/Runtime/LogicApi.cs`** (as built; the file's comments are the reference). The core is pure
+  C# with no UnityEngine types, so `tests/` can drive it with a fake world: positions are `Vec`, and an entity is a
+  `LogicEntity` class (one per object per session; `null` = none) instead of a struct with Unity fields.
 
 ```csharp
-internal static class LogicActions { public static void Register(string name, ActionHandler h); }
-internal delegate void ActionHandler(LogicContext ctx, CompiledParams p);     // p.Entity("target"), p.Number("amount")...
-internal sealed class LogicContext { public EntityHandle Self, Subject, Other, Spawned; public LogicEvent Event; public int Depth; ... }
-internal readonly struct EntityHandle { public string Id; public GameObject Go; public BuilderEntity Builder; public TaggedObject Tagged; public Hp Hp; ... }
-internal static class LogicEvents { public static void Raise(string name, EntityHandle subject, EntityHandle other = default, float value = 0, Vector3? pos = null); }
-internal interface IEntityFactory { EntityHandle Spawn(string template, Vector3 pos, Quaternion rot, string team, EntityHandle owner, out string error); }
-internal interface IStatModifiers { void Add(EntityHandle e, string stat, Modifier m, float seconds); float Get(EntityHandle e, string stat); }
-internal interface ITargeting { void Set(EntityHandle e, TargetingDef t, float seconds); }
-internal static class LogicServices { public static IEntityFactory Factory; public static IStatModifiers Stats; public static ITargeting Targeting; }
+public sealed class LogicEntity { string Id, Name, Template, Kind, Team; HashSet<string> Labels; Dictionary<string, Value> Vars;
+                                  bool Enabled, Spawned, Destroyed; LogicEntity Owner; IEntityBody Body; object Game; JObject Def; object Ext; ... }
+public interface IEntityBody { bool Exists, Alive; Vec Position; float Facing, Hp, MaxHp; bool HasTag(string etag); ... }
+public static class LogicActions { public static void Register(string name, ActionHandler h, ActionFlags flags = None); }  // PerTarget: core fans out `target`
+public delegate void ActionHandler(LogicContext ctx, ActionParams p);   // p.Number("amount"), p.Entities("target"), p.Actions("then"), p.Target
+public sealed class LogicContext { LogicWorld World; LogicEntity Self, Subject, Other, Spawned, It; LogicEvent Event; int Depth;
+                                   LogicContext With(spawned, it, other); void Run(ActionList); void Raise(...); }
+public static class LogicEvents { static void Raise(string name, LogicEntity subject, LogicEntity other = null, double value = 0, Vec? pos = null, string text = null);
+                                  static void Signal(string name, IReadOnlyList<LogicEntity> to, double value = 0, LogicEntity sender = null);
+                                  static event Action<TraceEntry> Traced; }
+public interface IEntityFactory { LogicEntity Spawn(string template, Vec pos, float rotY, string team, LogicEntity owner, out string error); void Despawn(...); ... }
+public interface IStatModifiers { void Add(LogicEntity e, StatModifier m); double Get(LogicEntity e, string stat); int Stacks(...); ApplyStatus/RemoveStatus; Capture/Restore }
+public interface ITargeting { void Set(LogicEntity e, JToken targeting, double seconds); }
+public interface IAreas { bool? Contains(LogicEntity area, LogicEntity e); }     // null: use the area's `shape`
+public interface ISpatial { void Query(Vec center, float radius, List<LogicEntity> into); }
+public interface IGameState { int Night; bool IsNight; double NightProgress; int Gold; LogicEntity King, Castle; ... }
+public static class LogicServices { IEntityFactory Factory; IStatModifiers Stats; ITargeting Targeting; IAreas Areas; ISpatial Spatial; IGameState Game; }
+public static class LogicSaveState { static void Register(string id, Func<LogicWorld, JToken> capture, Action<LogicWorld, JToken> restore); }
+// Unity side (LogicGame.cs): e.Go(), e.Hp(), e.Tagged(), LogicGame.EntityOf(GameObject), LogicGame.Register(entity, go), Vec <-> Vector3
+// Studio (L3): LogicWorld.Current, TraceEntry / LogicEvents.Traced, BudgetSnapshot, LogicCaps (+ level override `logic.caps`)
 ```
 
 ### L1: Runtime core and events
@@ -1151,10 +1352,10 @@ then.
 
 ## Open questions (the user's)
 
-None block the design. Each has a default and can be changed later:
+Both were decided by the lead:
 
-1. **Caps.** 300 spawned entities, 400 projectiles and 400 rule firings per frame. Should creators be able to raise
-   them per level, behind a "may lag" warning? The default is no, for v1.
-2. **Shared enemies with level-wide effects.** An enemy from someone else's library can carry rules that give gold or
-   end the level. The default is to allow it and show a badge in the Studio ("this enemy affects the level"), rather
-   than restricting what enemy rules may do.
+1. **Caps.** Decided: creators can raise them per level (`logic.caps`: entities, units, projectiles, perTemplate,
+   firingsPerFrame, actionsPerFrame), with a "may lag" validation warning above the default and an error above the
+   hard maximum (2000 / 1000 / 2000 / 1000 / 4000 / 40000). Defaults are unchanged.
+2. **Shared enemies with level-wide effects.** Decided: allowed, with a "this enemy affects the level" badge in the
+   Studio.

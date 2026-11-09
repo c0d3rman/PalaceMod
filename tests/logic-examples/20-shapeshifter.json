@@ -1,0 +1,91 @@
+{
+ "example": 20,
+ "title": "A day-night shapeshifter",
+ "doc": "Expressiveness check 20",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex20",
+  "name": "Example 20: Shapeshifter",
+  "units": [
+   {
+    "id": "villager",
+    "base": "vanilla:E Weakling",
+    "name": "Villager",
+    "vars": {
+     "moons": 0
+    },
+    "rules": [
+     {
+      "when": "dusk",
+      "do": [
+       {
+        "do": "replace",
+        "with": "werewolf",
+        "keep": [
+         "hp",
+         "vars"
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "werewolf",
+    "base": "vanilla:E Monster Rider",
+    "name": "Werewolf",
+    "vars": {
+     "moons": 0
+    },
+    "rules": [
+     {
+      "when": "dawn",
+      "do": [
+       {
+        "do": "replace",
+        "with": "villager",
+        "keep": [
+         "hp",
+         "vars"
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "levels": [
+   {
+    "id": "ex20",
+    "name": "Example 20: Shapeshifter",
+    "host": "Nordfels",
+    "logic": {}
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "cmd": "agent build castle"
+   },
+   {
+    "do": [
+     {
+      "do": "spawn",
+      "entity": "villager",
+      "at": "vec(-4, -70)",
+      "team": "neutral"
+     }
+    ]
+   },
+   {
+    "cmd": "night"
+   },
+   {
+    "expect": "count('is:werewolf') == 1 and count('is:villager') == 0",
+    "within": 10
+   }
+  ]
+ }
+}

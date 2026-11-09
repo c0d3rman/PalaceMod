@@ -1,0 +1,79 @@
+{
+ "example": 14,
+ "title": "Revenge: when the castle is hit, towers fire twice as fast for 5 s",
+ "doc": "Expressiveness check 14",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex14",
+  "name": "Example 14: Revenge",
+  "levels": [
+   {
+    "id": "ex14",
+    "name": "Example 14: Revenge",
+    "host": "Nordfels",
+    "logic": {
+     "vars": {
+      "revenge": 0
+     },
+     "rules": [
+      {
+       "when": {
+        "on": "damaged",
+        "of": "castle"
+       },
+       "cooldown": 5,
+       "do": [
+        {
+         "do": "setStat",
+         "target": "all('player and Tower')",
+         "stat": "attackCooldown",
+         "mult": 0.5,
+         "for": 5
+        }
+       ]
+      },
+      {
+       "note": "fixture observer",
+       "when": {
+        "on": "damaged",
+        "of": "castle"
+       },
+       "cooldown": 5,
+       "do": [
+        {
+         "do": "addVar",
+         "name": "revenge",
+         "value": 1
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "cmd": "agent build castle"
+   },
+   {
+    "cmd": "night"
+   },
+   {
+    "do": [
+     {
+      "do": "damage",
+      "target": "castle",
+      "amount": 1
+     }
+    ]
+   },
+   {
+    "expect": "$revenge >= 1",
+    "within": 3
+   }
+  ]
+ }
+}

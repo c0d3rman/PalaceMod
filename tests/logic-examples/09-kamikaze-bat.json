@@ -1,0 +1,102 @@
+{
+ "example": 9,
+ "title": "A kamikaze bat that goes for the king",
+ "doc": "Expressiveness check 9",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex09",
+  "name": "Example 9: Kamikaze bat",
+  "units": [
+   {
+    "id": "bat",
+    "base": "vanilla:E Flyer",
+    "name": "Kamikaze bat",
+    "targeting": [
+     {
+      "filter": "king"
+     }
+    ],
+    "movement": {
+     "mode": "direct"
+    },
+    "rules": [
+     {
+      "when": {
+       "on": "near",
+       "filter": "king",
+       "range": 2
+      },
+      "do": [
+       {
+        "do": "damage",
+        "target": "all('foe', 3)",
+        "amount": 40
+       },
+       {
+        "do": "effect",
+        "fx": "explosion",
+        "at": "self"
+       },
+       {
+        "do": "destroy",
+        "drops": true
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "levels": [
+   {
+    "id": "ex09",
+    "name": "Example 9: Kamikaze bat",
+    "host": "Nordfels",
+    "logic": {
+     "vars": {
+      "booms": 0
+     },
+     "rules": [
+      {
+       "note": "fixture observer",
+       "when": {
+        "on": "death",
+        "of": "is:bat"
+       },
+       "do": [
+        {
+         "do": "addVar",
+         "name": "booms",
+         "value": 1
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "cmd": "agent build castle"
+   },
+   {
+    "cmd": "night"
+   },
+   {
+    "do": [
+     {
+      "do": "spawn",
+      "entity": "bat",
+      "at": "pointNear(king, 25)"
+     }
+    ]
+   },
+   {
+    "expect": "$booms >= 1",
+    "within": 30
+   }
+  ]
+ }
+}

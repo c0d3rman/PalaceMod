@@ -12,7 +12,8 @@ Install: copy this folder (the one the mod writes to `<Thronefall>/BepInEx/Palac
 - `reference.md`: generated tables (maps, buildings, enemies, vanilla nights and economy curves, scenery).
 - `palace.py`: the CLI (Python 3.8+, stdlib only). Run it from the game's copy so it finds the game, or pass
   `--game "<Thronefall folder>"` / set `PALACE_GAME`.
-- `examples/`: a complete worked level (ops, plan, commands).
+- `logic-reference.md`: the behaviour engine's whole vocabulary (events, actions, functions, presets), generated.
+- `examples/`: a complete worked level (ops, plan, commands), and `behaviour.ops.json` (programmed mechanics).
 
 ## Workflow
 
@@ -29,6 +30,9 @@ Install: copy this folder (the one the mod writes to `<Thronefall>/BepInEx/Palac
    last full run's dawn state. `render --live` for the real map with game routes.
 7. Iterate until early nights are survivable with half the gold, late nights are close, and every lane reaches the
    castle.
+8. Mechanics beyond slots and waves (traps, levers, bosses with abilities, objectives, auras, projectiles...): read
+   guide section 12, build them with the `entity`/`status`/`place`/`rule`/`wire` ops, `check` (it type-checks every
+   rule), then prove each in the game: `logic do` to set up, `logic eval` to assert, `logic trace` to see what fired.
 
 ## Rules that bite
 

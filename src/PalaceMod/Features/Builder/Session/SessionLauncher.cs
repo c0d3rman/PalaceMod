@@ -330,7 +330,7 @@ namespace PalaceMod.Builder
                 LoopTraceManager.Note("overlay end");
                 foreach (var i in issues) Log.For<BuilderManager>().Warn($"{Current.Pack.Id}/{Current.Level.Id}: {i}");
             }
-            if (StudioKind == StudioSessionKind.None)
+            if (StudioKind == StudioSessionKind.None && !SaveStates.IsRestoring)
                 Notify.Show($"Custom run: {SessionName(Current)}. Kept apart from your saves and scores.", NotifyKind.Info, 5f, "builder-session");
         }
 

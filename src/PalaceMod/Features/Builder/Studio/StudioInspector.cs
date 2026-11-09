@@ -99,6 +99,15 @@ namespace PalaceMod.Builder.Studio
                     v => StudioEdits.SetProps(props, "Set size", d => d.Scale = v, "size:" + string.Join(",", props.Select(p => p.Key))), 0.1f, 10f, 0.1f,
                     v => StudioMath.Common(props.Select(p => StudioEdits.PropDef(p)?.Scale ?? 1f), out bool m) is var _ && m ? Dim(Mixed) : $"{v:0.##}×",
                     () => "Size against the map's own.");
+                string tiltKeys = string.Join(",", props.Select(p => p.Key));
+                page.Number("Tilt", () => StudioMath.Common(props.Select(p => p.TiltX), out _),
+                    v => StudioEdits.SetTilts(props.Select(p => (p, v, p.TiltZ)).ToList(), "Tilt", "tiltx:" + tiltKeys), -180f, 180f, StudioShell.TurnStep,
+                    v => StudioMath.Common(props.Select(p => p.TiltX), out bool m) is var _ && m ? Dim(Mixed) : $"{v:0}°",
+                    () => "Tips it about its own sideways axis: + leans its front down; 90° lays an upright piece on its back. Rotate tool: X.");
+                page.Number("Roll", () => StudioMath.Common(props.Select(p => p.TiltZ), out _),
+                    v => StudioEdits.SetTilts(props.Select(p => (p, p.TiltX, v)).ToList(), "Roll", "tiltz:" + tiltKeys), -180f, 180f, StudioShell.TurnStep,
+                    v => StudioMath.Common(props.Select(p => p.TiltZ), out bool m) is var _ && m ? Dim(Mixed) : $"{v:0}°",
+                    () => "Tips it about its own forward axis, onto its side. Rotate tool: Z.");
                 bool solid = StudioMath.Common(props.Select(p => StudioEdits.PropDef(p)?.Solid ?? true), out bool solidMixed);
                 page.Row("Solid", solidMixed ? Dim(Mixed) : solid ? "Yes" : "No", Descriptions.For(DescKind.Flag, "Solid") ?? "Solid scenery blocks units; walk-through is decoration.",
                     () => StudioEdits.SetProps(props, solidMixed || !solid ? "Make solid" : "Make walk-through", d => d.Solid = solidMixed || !solid));

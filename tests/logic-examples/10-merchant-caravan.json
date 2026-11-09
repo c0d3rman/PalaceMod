@@ -1,0 +1,125 @@
+{
+ "example": 10,
+ "title": "A merchant caravan",
+ "doc": "Expressiveness check 10",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex10",
+  "name": "Example 10: Merchant caravan",
+  "units": [
+   {
+    "id": "caravan",
+    "base": "vanilla:P Knight",
+    "side": "player",
+    "name": "Caravan",
+    "movement": {
+     "mode": "path",
+     "path": "@tradeRoute",
+     "then": "destroy"
+    },
+    "rules": [
+     {
+      "when": "end",
+      "do": [
+       {
+        "do": "gold",
+        "amount": 15,
+        "at": "self"
+       },
+       {
+        "do": "message",
+        "text": "The caravan arrived: +15 gold"
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "levels": [
+   {
+    "id": "ex10",
+    "name": "Example 10: Merchant caravan",
+    "host": "Nordfels",
+    "logic": {
+     "vars": {
+      "arrived": false
+     },
+     "places": [
+      {
+       "id": "trade-route",
+       "name": "tradeRoute",
+       "kind": "path",
+       "points": [
+        [
+         30,
+         -10
+        ],
+        [
+         10,
+         -10
+        ],
+        [
+         -4,
+         -8
+        ]
+       ]
+      }
+     ],
+     "rules": [
+      {
+       "when": {
+        "on": "spawn",
+        "of": "enemy"
+       },
+       "do": [
+        {
+         "do": "setTargeting",
+         "target": "subject",
+         "prepend": [
+          "is:caravan"
+         ]
+        }
+       ]
+      },
+      {
+       "note": "fixture observer",
+       "when": {
+        "on": "end",
+        "of": "is:caravan"
+       },
+       "do": [
+        {
+         "do": "setVar",
+         "name": "$arrived",
+         "value": "true"
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "cmd": "agent build castle"
+   },
+   {
+    "do": [
+     {
+      "do": "spawn",
+      "entity": "caravan",
+      "team": "neutral",
+      "at": "vec(30, -10)"
+     }
+    ]
+   },
+   {
+    "expect": "$arrived and gold >= 15",
+    "within": 40
+   }
+  ]
+ }
+}

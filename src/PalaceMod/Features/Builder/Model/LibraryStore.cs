@@ -73,7 +73,7 @@ namespace PalaceMod.Builder.Model
         }
     }
 
-    public sealed class LibraryStore
+    public sealed partial class LibraryStore
     {
         public const string PackId = "library";
         public const string MetaField = "library";
@@ -113,6 +113,7 @@ namespace PalaceMod.Builder.Model
             Issues.Clear();
             LoadDir(LevelsDir, DesignKind.Level, levels);
             LoadDir(EnemiesDir, DesignKind.Enemy, units);
+            LoadLogic();
             assets = [];
             assetsJson = "{}";
             string file = Path.Combine(Root, AssetsFile);
@@ -226,6 +227,7 @@ namespace PalaceMod.Builder.Model
             }
             foreach (var e in units.Values.OrderBy(e => e.Id, StringComparer.Ordinal)) pack.Units.Add(PackSerializer.Clone(e.Pack).Units[0]);
             foreach (var kv in assets) pack.Assets[kv.Key] = Clone(kv.Value);
+            AddLogicTo(pack);
             return pack;
         }
 
@@ -243,6 +245,7 @@ namespace PalaceMod.Builder.Model
             }
             foreach (var u in units.Values.OrderBy(e => e.Id, StringComparer.Ordinal)) pack.Units.Add(PackSerializer.Clone(u.Pack).Units[0]);
             foreach (var kv in assets) pack.Assets[kv.Key] = Clone(kv.Value);
+            AddLogicTo(pack);
             return pack;
         }
 
@@ -296,6 +299,8 @@ namespace PalaceMod.Builder.Model
             }
             foreach (var id in baseLevels.Where(id => now.FindLevel(id) == null))
                 if (Trash(DesignKind.Level, id)) written++;
+
+            written += SaveLogic(now, baseline);
 
             // Assets: keys added or changed in the workspace are merged; keys the workspace dropped since its baseline go.
             var merged = new Dictionary<string, AssetDef>(assets);
@@ -513,6 +518,9 @@ namespace PalaceMod.Builder.Model
             }
             if (result.AssetKeys.Count > 0) RewriteStrings(pack, s => s.StartsWith("asset:", StringComparison.Ordinal) && result.AssetKeys.TryGetValue(s.Substring(6), out var k) ? "asset:" + k : null);
 
+            // Entities, statuses and presets (LibraryStore.Logic.cs) before the units and levels that use them.
+            ImportLogic(pack, origin, result);
+
             // Units: identical -> reuse; same origin and id -> replace; else a free id.
             var unitMap = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var u in pack.Units ?? [])
@@ -670,10 +678,16 @@ namespace PalaceMod.Builder.Model
                     foreach (var s in n?.Spawns ?? []) if (s != null) s.Unit = Map(s.Unit);
                 foreach (var t in ws?.Troops ?? []) if (t != null) t.Unit = Map(t.Unit);
             }
-            foreach (var u in pack.Units ?? [])
-                foreach (var b in u?.Behaviours ?? [])
-                    foreach (var key in (b?.Params?.Keys ?? []).ToList())
-                        if (b.Params[key]?.Type == JTokenType.String) b.Params[key] = Map((string)b.Params[key]);
+            foreach (var u in pack.Units ?? []) Logic.LogicRefs.Rewrite(u, r => Map(r));
+            foreach (var e in pack.Entities ?? []) Logic.LogicRefs.Rewrite(e, r => Map(r));
+            foreach (var lv in pack.Levels ?? [])
+                if (lv?.Logic != null)
+                {
+                    var logic = JObject.FromObject(lv.Logic, Newtonsoft.Json.JsonSerializer.Create(new Newtonsoft.Json.JsonSerializerSettings { NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore }));
+                    var values = Logic.LogicRefs.TemplateValues(logic).ToList();
+                    foreach (var v in values) v.Value = Map((string)v);
+                    if (values.Count > 0) lv.Logic = logic.ToObject<Logic.LogicDef>();
+                }
         }
 
         private static void RewriteStrings(DesignPack pack, Func<string, string> map)
@@ -685,6 +699,9 @@ namespace PalaceMod.Builder.Model
             pack.Units = back.Units;
             pack.WaveSets = back.WaveSets;
             pack.Levels = back.Levels;
+            pack.Entities = back.Entities;
+            pack.Statuses = back.Statuses;
+            pack.Presets = back.Presets;
         }
 
         // ---------------------------------------------------------------- export
@@ -711,6 +728,7 @@ namespace PalaceMod.Builder.Model
             }
             foreach (var id in UnitClosure(roots, Unit).OrderBy(x => x, StringComparer.Ordinal))
                 pack.Units.Add(PackSerializer.Clone(units[id].Pack).Units[0]);
+            ExportLogic(pack);
             var json = JObject.FromObject(pack);
             var keys = new HashSet<string>(json.Descendants().OfType<JValue>().Where(v => v.Type == JTokenType.String)
                 .Select(v => (string)v).Where(s => s.StartsWith("asset:", StringComparison.Ordinal)).Select(s => s.Substring(6)), StringComparer.Ordinal);
@@ -733,6 +751,10 @@ namespace PalaceMod.Builder.Model
                     foreach (var s in n?.Spawns ?? []) if (s?.Unit != null) yield return s.Unit;
                 foreach (var t in ws?.Troops ?? []) if (t?.Unit != null) yield return t.Unit;
             }
+            // Units the level's behaviour spawns (spawn, spawnGroup, waves addSpawn, ...).
+            foreach (var lv in item.Levels ?? [])
+                if (lv?.Logic != null)
+                    foreach (var v in Logic.LogicRefs.TemplateValues(JObject.FromObject(lv.Logic))) yield return (string)v;
         }
 
         /// <summary>Library unit ids reachable from the refs (behaviour parameters included).</summary>
@@ -744,9 +766,7 @@ namespace PalaceMod.Builder.Model
             {
                 var r = ContentRef.Parse(queue.Dequeue());
                 if (r.Kind != RefKind.LocalUnit || find(r.Id) is not { } unit || !keep.Add(r.Id)) continue;
-                foreach (var b in unit.Behaviours ?? [])
-                    foreach (var v in b?.Params?.Values ?? [])
-                        if (v?.Type == JTokenType.String) queue.Enqueue((string)v);
+                foreach (var r2 in Logic.LogicRefs.TemplateRefs(unit)) queue.Enqueue(r2);
             }
             return keep;
         }

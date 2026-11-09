@@ -1,0 +1,141 @@
+{
+ "example": 21,
+ "title": "A toll gate",
+ "doc": "Expressiveness check 21",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex21",
+  "name": "Example 21: Toll gate",
+  "entities": [
+   {
+    "id": "door",
+    "kind": "prop",
+    "visual": {
+     "mesh": "mesh:Totend Gate Segment"
+    },
+    "body": {
+     "box": [
+      4,
+      0.6
+     ],
+     "height": 3,
+     "solid": true
+    },
+    "vars": {
+     "open": false
+    },
+    "mover": {
+     "pose": {
+      "open": {
+       "rotY": 90
+      },
+      "closed": {
+       "rotY": 0
+      }
+     }
+    },
+    "rules": [
+     {
+      "note": "fixture observer",
+      "when": {
+       "on": "signal",
+       "name": "open"
+      },
+      "do": [
+       {
+        "do": "setVar",
+        "name": "open",
+        "value": "true"
+       }
+      ]
+     },
+     {
+      "note": "fixture observer",
+      "when": {
+       "on": "signal",
+       "name": "closed"
+      },
+      "do": [
+       {
+        "do": "setVar",
+        "name": "open",
+        "value": "false"
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "levels": [
+   {
+    "id": "ex21",
+    "name": "Example 21: Toll gate",
+    "host": "Nordfels",
+    "logic": {
+     "places": [
+      {
+       "id": "toll",
+       "entity": "door",
+       "pos": [
+        20,
+        0,
+        -10
+       ],
+       "interact": {
+        "prompt": "Pay {cost} to open",
+        "cost": 5,
+        "when": "day"
+       },
+       "rules": [
+        {
+         "when": "interact",
+         "do": [
+          {
+           "do": "signal",
+           "name": "open",
+           "to": "self"
+          }
+         ]
+        },
+        {
+         "when": "dusk",
+         "do": [
+          {
+           "do": "signal",
+           "name": "closed",
+           "to": "self"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "cmd": "agent build castle"
+   },
+   {
+    "raise": "interact",
+    "on": "@toll",
+    "other": "king"
+   },
+   {
+    "expect": "@toll.$open",
+    "within": 3
+   },
+   {
+    "cmd": "night"
+   },
+   {
+    "expect": "not @toll.$open",
+    "within": 10
+   }
+  ]
+ }
+}

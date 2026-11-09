@@ -1,0 +1,95 @@
+{
+ "example": 2,
+ "title": "Kills convert the victim",
+ "doc": "Expressiveness check 2",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex02",
+  "name": "Example 2: Convert on kill",
+  "units": [
+   {
+    "id": "converter",
+    "base": "vanilla:E Dark Warrior",
+    "name": "Converter",
+    "rules": [
+     {
+      "when": "kill",
+      "if": "other.is('unit and not king')",
+      "do": [
+       {
+        "do": "convert",
+        "target": "other",
+        "team": "=self.team",
+        "hpPct": 0.5
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "levels": [
+   {
+    "id": "ex02",
+    "name": "Example 2: Convert on kill",
+    "host": "Nordfels",
+    "logic": {
+     "vars": {
+      "kills": 0
+     },
+     "rules": [
+      {
+       "note": "fixture observer",
+       "when": {
+        "on": "kill",
+        "of": "is:converter"
+       },
+       "do": [
+        {
+         "do": "addVar",
+         "name": "kills",
+         "value": 1
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "cmd": "agent build castle"
+   },
+   {
+    "cmd": "night"
+   },
+   {
+    "do": [
+     {
+      "do": "spawn",
+      "entity": "vanilla:P Melee",
+      "count": 3,
+      "at": "vec(-4, -14)",
+      "spread": 1,
+      "team": "player"
+     },
+     {
+      "do": "spawn",
+      "entity": "converter",
+      "at": "vec(-4, -14)"
+     }
+    ]
+   },
+   {
+    "expect": "$kills >= 1",
+    "within": 30
+   },
+   {
+    "expect": "count('enemy and unit and not is:converter', 30) >= 1",
+    "within": 5
+   }
+  ]
+ }
+}

@@ -1,0 +1,113 @@
+{
+ "example": 17,
+ "title": "A lantern ghost: invulnerable unless near a lantern",
+ "doc": "Expressiveness check 17",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex17",
+  "name": "Example 17: Lantern ghost",
+  "units": [
+   {
+    "id": "ghost",
+    "base": "vanilla:E Ghost",
+    "name": "Lantern ghost",
+    "rules": [
+     {
+      "when": {
+       "on": "every",
+       "seconds": 0.5
+      },
+      "do": [
+       {
+        "do": "if",
+        "cond": "count('#lantern', 8) == 0",
+        "then": [
+         {
+          "do": "applyStatus",
+          "status": "veiled",
+          "for": 0.6
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "entities": [
+   {
+    "id": "lantern",
+    "kind": "prop",
+    "labels": [
+     "lantern"
+    ],
+    "visual": {
+     "mesh": "mesh:Graveyard Wall Post"
+    }
+   }
+  ],
+  "statuses": [
+   {
+    "id": "veiled",
+    "flags": [
+     "invulnerable"
+    ],
+    "visual": {
+     "tint": "#d0e0ff"
+    }
+   }
+  ],
+  "levels": [
+   {
+    "id": "ex17",
+    "name": "Example 17: Lantern ghost",
+    "host": "Nordfels",
+    "logic": {
+     "places": [
+      {
+       "id": "lamp",
+       "entity": "lantern",
+       "pos": [
+        -4,
+        0,
+        -40
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "cmd": "agent build castle"
+   },
+   {
+    "cmd": "night"
+   },
+   {
+    "do": [
+     {
+      "do": "spawn",
+      "entity": "ghost",
+      "at": "vec(-40, -60)"
+     },
+     {
+      "do": "spawn",
+      "entity": "ghost",
+      "at": "vec(-4, -41)"
+     }
+    ]
+   },
+   {
+    "wait": 1
+   },
+   {
+    "expect": "count('is:ghost and has:veiled') >= 1 and count('is:ghost and not has:veiled') >= 1",
+    "within": 3
+   }
+  ]
+ }
+}

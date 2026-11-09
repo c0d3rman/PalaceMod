@@ -1,0 +1,110 @@
+{
+ "example": 6,
+ "title": "A pressure-plate trap",
+ "doc": "Expressiveness check 6",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex06",
+  "name": "Example 6: Pressure plate",
+  "levels": [
+   {
+    "id": "ex06",
+    "name": "Example 6: Pressure plate",
+    "host": "Nordfels",
+    "logic": {
+     "vars": {
+      "hurt": 0
+     },
+     "places": [
+      {
+       "kind": "area",
+       "id": "plate1",
+       "pos": [
+        12,
+        0,
+        -4
+       ],
+       "area": {
+        "shape": {
+         "rect": {
+          "size": [
+           4,
+           4
+          ]
+         }
+        },
+        "watch": "enemy",
+        "show": "fill"
+       },
+       "rules": [
+        {
+         "when": {
+          "on": "every",
+          "seconds": 1
+         },
+         "if": "count('enemy and in:self') > 0",
+         "do": [
+          {
+           "do": "wait",
+           "seconds": 0.5
+          },
+          {
+           "do": "damage",
+           "target": "all('unit and in:@plate1')",
+           "amount": 30
+          },
+          {
+           "do": "effect",
+           "fx": "spikes",
+           "at": "self"
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "rules": [
+      {
+       "note": "fixture observer",
+       "when": {
+        "on": "damaged",
+        "of": "enemy and in:@plate1"
+       },
+       "do": [
+        {
+         "do": "addVar",
+         "name": "hurt",
+         "value": 1
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "cmd": "agent build castle"
+   },
+   {
+    "cmd": "night"
+   },
+   {
+    "do": [
+     {
+      "do": "spawn",
+      "entity": "vanilla:E Ogre",
+      "at": "vec(12, -4)"
+     }
+    ]
+   },
+   {
+    "expect": "$hurt >= 1",
+    "within": 5
+   }
+  ]
+ }
+}

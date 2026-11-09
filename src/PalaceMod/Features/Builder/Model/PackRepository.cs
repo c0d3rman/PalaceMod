@@ -50,6 +50,8 @@ namespace PalaceMod.Builder
             this.context = context;
             Root = root ?? Path.Combine(Paths.BepInExRootPath, "PalaceBuilder");
             Library = new LibraryStore(LibraryDir);
+            // Rules may use library presets by id (Model/Logic/Presets.cs).
+            PalaceMod.Builder.Model.Logic.Presets.Library = id => Library.Preset(id);
         }
 
         public PackEntry Find(string packId) => packs.FirstOrDefault(p => p.Pack != null && p.Pack.Id == packId);

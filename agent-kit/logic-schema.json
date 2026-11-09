@@ -1,0 +1,4620 @@
+{
+  "version": "1.0.0",
+  "events": [
+    {
+      "name": "spawn",
+      "group": "This unit",
+      "description": "It appears: placed ones at level start, spawned ones on creation. `other` is the spawner or launcher, if any.",
+      "params": [],
+      "other": "spawner",
+      "aliases": {
+        "spawner": "other"
+      },
+      "owners": [
+        "any"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "death",
+      "group": "Combat",
+      "description": "It dies (a unit) or is knocked out (a building or the king). `other` is the killer (may be none).",
+      "params": [],
+      "other": "killer",
+      "aliases": {
+        "killer": "other",
+        "victim": "subject"
+      },
+      "owners": [
+        "any"
+      ],
+      "example": "{ \"when\": \"death\", \"do\": [{ \"do\": \"spawn\", \"entity\": \"goblin\", \"count\": 2, \"at\": \"self\" }] }",
+      "since": "1.0.0"
+    },
+    {
+      "name": "damaged",
+      "group": "Combat",
+      "description": "It takes damage (not when modifiers reduce it to 0).",
+      "params": [
+        {
+          "name": "min",
+          "type": "number",
+          "description": "Only damage of at least this much."
+        }
+      ],
+      "other": "attacker",
+      "value": "number",
+      "valueMeaning": "the damage taken",
+      "aliases": {
+        "attacker": "other"
+      },
+      "owners": [
+        "any"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "healed",
+      "group": "Combat",
+      "description": "It is healed.",
+      "params": [],
+      "other": "healer",
+      "value": "number",
+      "valueMeaning": "the amount healed",
+      "aliases": {
+        "healer": "other"
+      },
+      "owners": [
+        "any"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "hpBelow",
+      "group": "Combat",
+      "description": "Its hp crosses below a fraction (edge-triggered; re-arms when healed above).",
+      "params": [
+        {
+          "name": "pct",
+          "type": "number",
+          "required": true,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "Fraction of max hp, 0..1."
+        }
+      ],
+      "value": "number",
+      "valueMeaning": "hpPct",
+      "owners": [
+        "any"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "attack",
+      "group": "Combat",
+      "description": "It attacks (any attack, vanilla ones included).",
+      "params": [
+        {
+          "name": "attack",
+          "type": "text",
+          "description": "Only this attack id."
+        }
+      ],
+      "other": "target",
+      "aliases": {
+        "target": "other"
+      },
+      "owners": [
+        "any"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "hit",
+      "group": "Combat",
+      "description": "Its attack, projectile or damage action damaged something.",
+      "params": [],
+      "other": "victim",
+      "value": "number",
+      "valueMeaning": "the damage dealt",
+      "aliases": {
+        "victim": "other"
+      },
+      "owners": [
+        "any"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "kill",
+      "group": "Combat",
+      "description": "Something it damaged died from that damage.",
+      "params": [],
+      "other": "victim",
+      "aliases": {
+        "victim": "other"
+      },
+      "owners": [
+        "any"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "every",
+      "group": "Time",
+      "description": "Periodically, from spawn (or level start).",
+      "params": [
+        {
+          "name": "seconds",
+          "type": "number",
+          "required": true,
+          "min": 0.1,
+          "description": "Seconds between firings (min 0.1)."
+        },
+        {
+          "name": "jitter",
+          "type": "number",
+          "min": 0.0,
+          "max": 1.0,
+          "description": "Random extra delay each time, 0..1 of seconds."
+        },
+        {
+          "name": "phase",
+          "type": "number",
+          "description": "Seconds before the first firing (default: seconds)."
+        },
+        {
+          "name": "during",
+          "type": "enum",
+          "default": "always",
+          "options": [
+            "always",
+            "night",
+            "day"
+          ],
+          "description": "Only at night, by day, or always."
+        }
+      ],
+      "value": "number",
+      "valueMeaning": "the tick count (1, 2, ...)",
+      "owners": [
+        "any"
+      ],
+      "global": true,
+      "example": "{ \"when\": { \"on\": \"every\", \"seconds\": 8, \"during\": \"night\" }, \"do\": [...] }",
+      "since": "1.0.0"
+    },
+    {
+      "name": "after",
+      "group": "Time",
+      "description": "Once, that long after spawn (or level start).",
+      "params": [
+        {
+          "name": "seconds",
+          "type": "number",
+          "required": true,
+          "min": 0.0,
+          "description": "Delay in seconds."
+        }
+      ],
+      "owners": [
+        "any"
+      ],
+      "global": true,
+      "since": "1.0.0"
+    },
+    {
+      "name": "near",
+      "group": "Areas",
+      "description": "A matching entity comes within (or leaves) a range of it.",
+      "params": [
+        {
+          "name": "filter",
+          "type": "filter",
+          "required": true,
+          "description": "What to watch for."
+        },
+        {
+          "name": "range",
+          "type": "number",
+          "required": true,
+          "min": 0.0,
+          "description": "Metres."
+        },
+        {
+          "name": "edge",
+          "type": "enum",
+          "default": "enter",
+          "options": [
+            "enter",
+            "exit",
+            "both"
+          ],
+          "description": "Fire on entering, leaving, or both."
+        }
+      ],
+      "other": "entity",
+      "owners": [
+        "any"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "enter",
+      "group": "Areas",
+      "description": "(areas) An entity matching the area's watch filter enters.",
+      "params": [],
+      "other": "entrant",
+      "aliases": {
+        "entrant": "other"
+      },
+      "owners": [
+        "area"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "exit",
+      "group": "Areas",
+      "description": "(areas) An entity leaves.",
+      "params": [],
+      "other": "entity",
+      "owners": [
+        "area"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "inside",
+      "group": "Areas",
+      "description": "(areas) For each entity inside, after every full `tick` it has spent inside.",
+      "params": [],
+      "other": "entity",
+      "owners": [
+        "area"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "empty",
+      "group": "Areas",
+      "description": "(areas) The last watched entity left.",
+      "params": [],
+      "owners": [
+        "area"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "occupied",
+      "group": "Areas",
+      "description": "(areas) The first watched entity entered.",
+      "params": [],
+      "other": "entity",
+      "owners": [
+        "area"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "impact",
+      "group": "Projectiles",
+      "description": "(projectiles) It hit something or the ground. `other` is what it hit (none for ground).",
+      "params": [],
+      "other": "hit entity",
+      "pos": true,
+      "owners": [
+        "projectile"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "expire",
+      "group": "Time",
+      "description": "Its lifetime (or projectile range) ran out; it's destroyed after its rules run.",
+      "params": [],
+      "owners": [
+        "any"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "arrive",
+      "group": "Movement",
+      "description": "(movers, path followers, moveTo) It reached a point.",
+      "params": [],
+      "value": "number",
+      "valueMeaning": "the point index",
+      "owners": [
+        "any"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "end",
+      "group": "Movement",
+      "description": "(movers, path followers) It reached the end of its path (before then: destroy acts).",
+      "params": [],
+      "owners": [
+        "any"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "pickup",
+      "group": "Pickups",
+      "description": "(pickups) Collected. `other` is the collector.",
+      "params": [],
+      "other": "collector",
+      "aliases": {
+        "collector": "other"
+      },
+      "owners": [
+        "pickup"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "interact",
+      "group": "King",
+      "description": "(interactables) The king used it, after paying its cost. event.choice is the chosen id with choices.",
+      "params": [],
+      "other": "king",
+      "fields": {
+        "choice": "text"
+      },
+      "owners": [
+        "unit",
+        "building",
+        "prop",
+        "projectile",
+        "area",
+        "pickup",
+        "logic",
+        "king"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "signal",
+      "group": "Signals",
+      "description": "It receives a signal. event.name is the signal's name, event.value its number.",
+      "params": [
+        {
+          "name": "name",
+          "type": "signal",
+          "description": "Only this signal (omit to hear every signal)."
+        }
+      ],
+      "other": "sender",
+      "value": "number",
+      "valueMeaning": "the signal's number",
+      "fields": {
+        "name": "text"
+      },
+      "aliases": {
+        "sender": "other"
+      },
+      "owners": [
+        "any"
+      ],
+      "global": true,
+      "since": "1.0.0"
+    },
+    {
+      "name": "varChanged",
+      "group": "Variables",
+      "description": "One of its variables changes (a level var, on the level script).",
+      "params": [
+        {
+          "name": "name",
+          "type": "var",
+          "description": "Only this variable."
+        }
+      ],
+      "value": "any",
+      "valueMeaning": "the new value",
+      "fields": {
+        "name": "text"
+      },
+      "owners": [
+        "any"
+      ],
+      "global": true,
+      "since": "1.0.0"
+    },
+    {
+      "name": "statusStart",
+      "group": "Statuses",
+      "description": "A status starts on it.",
+      "params": [
+        {
+          "name": "status",
+          "type": "status",
+          "description": "Only this status (required when watching one from outside a status)."
+        }
+      ],
+      "other": "applier",
+      "value": "number",
+      "valueMeaning": "stacks",
+      "fields": {
+        "name": "text"
+      },
+      "aliases": {
+        "applier": "other"
+      },
+      "owners": [
+        "any"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "statusEnd",
+      "group": "Statuses",
+      "description": "A status ends (expiry or removal).",
+      "params": [
+        {
+          "name": "status",
+          "type": "status",
+          "description": "Only this status."
+        }
+      ],
+      "other": "applier",
+      "value": "number",
+      "valueMeaning": "stacks",
+      "fields": {
+        "name": "text"
+      },
+      "aliases": {
+        "applier": "other"
+      },
+      "owners": [
+        "any"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "statusTick",
+      "group": "Statuses",
+      "description": "Every `tick` seconds of a status (in a status's own rules: of that status).",
+      "params": [
+        {
+          "name": "status",
+          "type": "status",
+          "description": "Only this status."
+        }
+      ],
+      "other": "applier",
+      "value": "number",
+      "valueMeaning": "stacks",
+      "fields": {
+        "name": "text"
+      },
+      "aliases": {
+        "applier": "other"
+      },
+      "owners": [
+        "any"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "targetChanged",
+      "group": "Combat",
+      "description": "Its attack or move target changes.",
+      "params": [],
+      "other": "target",
+      "aliases": {
+        "target": "other"
+      },
+      "owners": [
+        "any"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "built",
+      "group": "Buildings",
+      "description": "(build slots) The player builds it.",
+      "params": [
+        {
+          "name": "level",
+          "type": "int",
+          "description": "Only this level."
+        }
+      ],
+      "value": "number",
+      "valueMeaning": "the level",
+      "owners": [
+        "building"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "upgraded",
+      "group": "Buildings",
+      "description": "(build slots) The player upgrades it.",
+      "params": [
+        {
+          "name": "level",
+          "type": "int",
+          "description": "Only this level."
+        }
+      ],
+      "value": "number",
+      "valueMeaning": "the new level",
+      "owners": [
+        "building"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "repaired",
+      "group": "Buildings",
+      "description": "(build slots) It's revived at dawn.",
+      "params": [
+        {
+          "name": "level",
+          "type": "int",
+          "description": "Only this level."
+        }
+      ],
+      "value": "number",
+      "valueMeaning": "the level",
+      "owners": [
+        "building"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "coinDrop",
+      "group": "Gold",
+      "description": "A coin drops from a death (subject is the coin; listen with `of`).",
+      "params": [],
+      "other": "dead unit",
+      "owners": [
+        "coin"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "coinPickup",
+      "group": "Gold",
+      "description": "The king collects a coin (subject is the coin; listen with `of`).",
+      "params": [],
+      "other": "king",
+      "owners": [
+        "coin"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "lineSpawn",
+      "group": "Night",
+      "description": "(spawn lines) It spawns an enemy (a wave or spawnGroup). `other` is the new enemy.",
+      "params": [
+        {
+          "name": "line",
+          "type": "text",
+          "description": "Only this spawn line."
+        }
+      ],
+      "other": "new enemy",
+      "owners": [
+        "line"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "levelStart",
+      "group": "Night",
+      "description": "The level has loaded (after the overlay, before day 1).",
+      "params": [],
+      "owners": [
+        "any"
+      ],
+      "global": true,
+      "since": "1.0.0"
+    },
+    {
+      "name": "dusk",
+      "group": "Night",
+      "description": "Night is falling (the game's OnDusk).",
+      "params": [
+        {
+          "name": "night",
+          "type": "int",
+          "description": "Only this night."
+        }
+      ],
+      "value": "number",
+      "valueMeaning": "the night number",
+      "owners": [
+        "any"
+      ],
+      "global": true,
+      "since": "1.0.0"
+    },
+    {
+      "name": "nightStart",
+      "group": "Night",
+      "description": "The night's first enemies spawn.",
+      "params": [
+        {
+          "name": "night",
+          "type": "int",
+          "description": "Only this night."
+        }
+      ],
+      "value": "number",
+      "valueMeaning": "the night number",
+      "owners": [
+        "any"
+      ],
+      "global": true,
+      "since": "1.0.0"
+    },
+    {
+      "name": "dawn",
+      "group": "Night",
+      "description": "The sun rises (after income is paid).",
+      "params": [
+        {
+          "name": "night",
+          "type": "int",
+          "description": "Only after this night."
+        }
+      ],
+      "value": "number",
+      "valueMeaning": "the night just survived",
+      "owners": [
+        "any"
+      ],
+      "global": true,
+      "since": "1.0.0"
+    },
+    {
+      "name": "day",
+      "group": "Night",
+      "description": "The day phase begins (after dawn's sunrise).",
+      "params": [
+        {
+          "name": "night",
+          "type": "int",
+          "description": "Only before this night."
+        }
+      ],
+      "value": "number",
+      "valueMeaning": "the coming night",
+      "owners": [
+        "any"
+      ],
+      "global": true,
+      "since": "1.0.0"
+    },
+    {
+      "name": "waveCleared",
+      "group": "Night",
+      "description": "Spawning is done and no enemies are left.",
+      "params": [],
+      "value": "number",
+      "valueMeaning": "the night",
+      "owners": [
+        "any"
+      ],
+      "global": true,
+      "since": "1.0.0"
+    },
+    {
+      "name": "goldChanged",
+      "group": "Gold",
+      "description": "The player's balance changes.",
+      "params": [],
+      "value": "number",
+      "valueMeaning": "the change (negative = spent)",
+      "owners": [
+        "any"
+      ],
+      "global": true,
+      "since": "1.0.0"
+    },
+    {
+      "name": "kingAction",
+      "group": "King",
+      "description": "The player presses one of the level's action keys (logic.kingActions).",
+      "params": [
+        {
+          "name": "action",
+          "type": "text",
+          "required": true,
+          "description": "The king action's id."
+        }
+      ],
+      "other": "king",
+      "owners": [
+        "any"
+      ],
+      "global": true,
+      "since": "1.0.0"
+    },
+    {
+      "name": "levelEnd",
+      "group": "Night",
+      "description": "Win or loss, before the end screen. event.result is 'win' or 'lose'.",
+      "params": [
+        {
+          "name": "result",
+          "type": "enum",
+          "options": [
+            "win",
+            "lose"
+          ],
+          "description": "Only this result."
+        }
+      ],
+      "fields": {
+        "result": "text"
+      },
+      "owners": [
+        "any"
+      ],
+      "global": true,
+      "since": "1.0.0"
+    }
+  ],
+  "actions": [
+    {
+      "name": "spawn",
+      "group": "Make",
+      "description": "Creates entities from a template (a unit or an entity), e.g. split a slime, summon skeletons.",
+      "params": [
+        {
+          "name": "entity",
+          "type": "template",
+          "required": true,
+          "description": "The template (a pack unit or entity, or \"vanilla:<id>\"); \"=self.template\" for a copy of itself."
+        },
+        {
+          "name": "count",
+          "type": "int",
+          "default": 1,
+          "min": 1.0,
+          "max": 100.0,
+          "description": "How many."
+        },
+        {
+          "name": "at",
+          "type": "position",
+          "default": "self",
+          "description": "Where (an entity or a position)."
+        },
+        {
+          "name": "spread",
+          "type": "number",
+          "default": 0,
+          "min": 0.0,
+          "description": "Scatter radius in metres."
+        },
+        {
+          "name": "team",
+          "type": "enum",
+          "options": [
+            "player",
+            "enemy",
+            "neutral",
+            "owner"
+          ],
+          "description": "Its team (default: the template's; owner = the spawner's)."
+        },
+        {
+          "name": "elite",
+          "type": "enum",
+          "default": "false",
+          "options": [
+            "inherit",
+            "true",
+            "false"
+          ],
+          "description": "Whether spawned enemies are elite; inherit copies the spawner's."
+        },
+        {
+          "name": "facing",
+          "type": "number",
+          "description": "Yaw in degrees (default: the spawner's facing)."
+        },
+        {
+          "name": "then",
+          "type": "actions",
+          "binds": "spawned",
+          "description": "Run for each new entity, with `spawned` bound."
+        }
+      ],
+      "example": "{ \"do\": \"spawn\", \"entity\": \"=self.template\", \"count\": 2, \"at\": \"self\", \"spread\": 1.5 }",
+      "since": "1.0.0"
+    },
+    {
+      "name": "launch",
+      "group": "Make",
+      "description": "Fires an entity as a projectile from the owner toward a target (it uses the template's projectile block).",
+      "params": [
+        {
+          "name": "entity",
+          "type": "template",
+          "required": true,
+          "description": "A template with a projectile block."
+        },
+        {
+          "name": "from",
+          "type": "position",
+          "default": "self",
+          "description": "Start: an entity or position, or an [x, y, z] offset from self."
+        },
+        {
+          "name": "toward",
+          "type": "position",
+          "required": true,
+          "description": "The target: an entity (homing follows it) or a position."
+        },
+        {
+          "name": "speed",
+          "type": "number",
+          "description": "Overrides projectile.speed."
+        },
+        {
+          "name": "homing",
+          "type": "number",
+          "min": 0.0,
+          "max": 1.0,
+          "description": "Overrides projectile.homing."
+        },
+        {
+          "name": "arc",
+          "type": "number",
+          "description": "Overrides projectile.arc."
+        },
+        {
+          "name": "gravity",
+          "type": "number",
+          "description": "Overrides projectile.gravity."
+        },
+        {
+          "name": "hits",
+          "type": "filter",
+          "description": "Overrides projectile.hits."
+        },
+        {
+          "name": "pierce",
+          "type": "int",
+          "description": "Overrides projectile.pierce (-1 = all)."
+        },
+        {
+          "name": "range",
+          "type": "number",
+          "description": "Overrides projectile.range."
+        },
+        {
+          "name": "onImpact",
+          "type": "actions",
+          "binds": "spawned",
+          "description": "Extra actions on impact (the template's impact rules also run), with `spawned` = the projectile and `other` = what it hit."
+        },
+        {
+          "name": "then",
+          "type": "actions",
+          "binds": "spawned",
+          "description": "Run once it's launched, with `spawned` bound."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "spawnGroup",
+      "group": "Make",
+      "description": "A wave-style group of enemies now; they count toward the night.",
+      "params": [
+        {
+          "name": "unit",
+          "type": "template",
+          "required": true,
+          "description": "The enemy."
+        },
+        {
+          "name": "count",
+          "type": "int",
+          "default": 1,
+          "min": 1.0,
+          "max": 200.0,
+          "description": "How many."
+        },
+        {
+          "name": "interval",
+          "type": "number",
+          "default": 0.5,
+          "min": 0.0,
+          "description": "Seconds between spawns."
+        },
+        {
+          "name": "line",
+          "type": "text",
+          "description": "A spawn line's name."
+        },
+        {
+          "name": "at",
+          "type": "position",
+          "description": "A position instead of a line."
+        },
+        {
+          "name": "elite",
+          "type": "bool",
+          "default": false,
+          "description": "Elite enemies."
+        },
+        {
+          "name": "gold",
+          "type": "int",
+          "description": "Coins each drops (default: the unit's)."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "replace",
+      "group": "Make",
+      "description": "Swaps the entity for another template in place (morph, shapeshift).",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "with",
+          "type": "template",
+          "required": true,
+          "description": "The new template."
+        },
+        {
+          "name": "keep",
+          "type": "keep",
+          "default": [
+            "hp",
+            "vars",
+            "statuses",
+            "labels"
+          ],
+          "options": [
+            "hp",
+            "vars",
+            "statuses",
+            "labels"
+          ],
+          "description": "What carries over."
+        },
+        {
+          "name": "then",
+          "type": "actions",
+          "binds": "spawned",
+          "description": "Run with `spawned` = the replacement."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "damage",
+      "group": "Health",
+      "description": "Deals damage.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "amount",
+          "type": "number",
+          "required": true,
+          "min": 0.0,
+          "description": "Hit points."
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "default": "self",
+          "description": "Who is credited (fires their hit/kill events). Default self."
+        },
+        {
+          "name": "types",
+          "type": "types",
+          "description": "Damage-type labels (fire, ...) that status modifiers test."
+        },
+        {
+          "name": "splash",
+          "type": "bool",
+          "default": false,
+          "description": "Counts as splash damage (the game's splash modifiers)."
+        },
+        {
+          "name": "weapon",
+          "type": "text",
+          "description": "Apply a weapon's tag modifiers (\"vanilla:<weapon>\")."
+        }
+      ],
+      "example": "{ \"do\": \"damage\", \"target\": \"all('foe', 3)\", \"amount\": 25 }",
+      "since": "1.0.0"
+    },
+    {
+      "name": "heal",
+      "group": "Health",
+      "description": "Heals.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "amount",
+          "type": "number",
+          "required": true,
+          "min": 0.0,
+          "description": "Hit points."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "kill",
+      "group": "Health",
+      "description": "Kills it (fires death).",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "description": "Who is credited."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "revive",
+      "group": "Health",
+      "description": "Revives a knocked-out building or a dead hittable entity.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "hpPct",
+          "type": "number",
+          "default": 1,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "Hit points as a fraction of max."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "setHp",
+      "group": "Health",
+      "description": "Sets hit points without damaged/healed events (shared health pools).",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "value",
+          "type": "number",
+          "required": true,
+          "min": 0.0,
+          "description": "Hit points."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "setStat",
+      "group": "Stats",
+      "description": "Changes a stat, permanently or for a while. Give exactly one of value, add, mult.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "stat",
+          "type": "enum",
+          "required": true,
+          "description": "The stat (see Stats).",
+          "options": [
+            "maxHp",
+            "hp",
+            "moveSpeed",
+            "attackCooldown",
+            "attackRange",
+            "damageMult",
+            "damageTaken",
+            "projectileSpeed",
+            "scale",
+            "keepDistance",
+            "aggroTime",
+            "income",
+            "timeScale"
+          ]
+        },
+        {
+          "name": "value",
+          "type": "number",
+          "description": "Set to this."
+        },
+        {
+          "name": "add",
+          "type": "number",
+          "description": "Add this."
+        },
+        {
+          "name": "mult",
+          "type": "number",
+          "description": "Multiply by this."
+        },
+        {
+          "name": "for",
+          "type": "for",
+          "description": "Seconds, or \"night\"/\"day\" (until the next dawn/dusk); omit for permanent."
+        },
+        {
+          "name": "key",
+          "type": "text",
+          "description": "A timed change with the same key replaces the earlier one."
+        }
+      ],
+      "example": "{ \"do\": \"setStat\", \"target\": \"all('player and Tower')\", \"stat\": \"attackCooldown\", \"mult\": 0.5, \"for\": 5 }",
+      "since": "1.0.0"
+    },
+    {
+      "name": "applyStatus",
+      "group": "Stats",
+      "description": "Applies a status (a timed, stacking modifier set).",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "status",
+          "type": "status",
+          "required": true,
+          "description": "The status id."
+        },
+        {
+          "name": "for",
+          "type": "number",
+          "description": "Seconds (default: the status's duration)."
+        },
+        {
+          "name": "stacks",
+          "type": "int",
+          "default": 1,
+          "min": 1.0,
+          "description": "Stacks to add."
+        },
+        {
+          "name": "source",
+          "type": "entity",
+          "default": "self",
+          "description": "Who applied it (`other` in its rules). Default self."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "removeStatus",
+      "group": "Stats",
+      "description": "Removes a status (all stacks, or some).",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "status",
+          "type": "status",
+          "required": true,
+          "description": "The status id."
+        },
+        {
+          "name": "stacks",
+          "type": "int",
+          "min": 1.0,
+          "description": "Stacks to remove (default all)."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "convert",
+      "group": "Team",
+      "description": "Switches team (a dead target is raised as a new entity of that team).",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "team",
+          "type": "text",
+          "required": true,
+          "description": "\"player\" | \"enemy\" | \"neutral\", or an expression such as self.team."
+        },
+        {
+          "name": "keepLook",
+          "type": "bool",
+          "default": true,
+          "description": "Keep its look."
+        },
+        {
+          "name": "hpPct",
+          "type": "number",
+          "min": 0.0,
+          "max": 1.0,
+          "description": "Hit points as a fraction of max."
+        }
+      ],
+      "example": "{ \"do\": \"convert\", \"target\": \"other\", \"team\": \"=self.team\", \"hpPct\": 0.5 }",
+      "since": "1.0.0"
+    },
+    {
+      "name": "teleport",
+      "group": "Move",
+      "description": "Moves it instantly.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "at",
+          "type": "position",
+          "required": true,
+          "description": "Where."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "push",
+      "group": "Move",
+      "description": "A one-off shove (the game's knockback), on units (flyers included).",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "from",
+          "type": "position",
+          "description": "Push away from here (default self)."
+        },
+        {
+          "name": "toward",
+          "type": "position",
+          "description": "Pull toward here instead."
+        },
+        {
+          "name": "force",
+          "type": "number",
+          "required": true,
+          "description": "Metres of travel."
+        },
+        {
+          "name": "up",
+          "type": "number",
+          "default": 0,
+          "description": "Arc height."
+        },
+        {
+          "name": "stun",
+          "type": "number",
+          "default": 0,
+          "description": "Seconds stunned."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "drift",
+      "group": "Move",
+      "description": "A continuous velocity added to movement: a pull, a current, wind. Different keys add up; the same key replaces.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "dir",
+          "type": "position",
+          "description": "A direction vector (dir(deg) gives one)."
+        },
+        {
+          "name": "toward",
+          "type": "position",
+          "description": "Drift toward this."
+        },
+        {
+          "name": "from",
+          "type": "position",
+          "description": "Drift away from this."
+        },
+        {
+          "name": "speed",
+          "type": "number",
+          "required": true,
+          "description": "m/s."
+        },
+        {
+          "name": "for",
+          "type": "number",
+          "min": 0.0,
+          "description": "Seconds (omit for until removed)."
+        },
+        {
+          "name": "key",
+          "type": "text",
+          "default": "drift",
+          "description": "Replaces an earlier drift with the same key."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "moveTo",
+      "group": "Move",
+      "description": "Walks it to a point; fires arrive there.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "at",
+          "type": "position",
+          "required": true,
+          "description": "Where."
+        },
+        {
+          "name": "speed",
+          "type": "number",
+          "description": "m/s (default: its own)."
+        },
+        {
+          "name": "then",
+          "type": "enum",
+          "default": "resume",
+          "options": [
+            "resume",
+            "hold"
+          ],
+          "description": "After arriving."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "setMovement",
+      "group": "Move",
+      "description": "Changes its movement block (see Movement).",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "movement",
+          "type": "movement",
+          "required": true,
+          "description": "The new movement fields (merged)."
+        },
+        {
+          "name": "for",
+          "type": "number",
+          "description": "Seconds; reverts after."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "setTargeting",
+      "group": "Move",
+      "description": "Changes who it attacks and walks toward.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "targeting",
+          "type": "targeting",
+          "description": "Replace the whole list."
+        },
+        {
+          "name": "prepend",
+          "type": "targeting",
+          "description": "Put these first."
+        },
+        {
+          "name": "remove",
+          "type": "targeting",
+          "description": "Remove these entries."
+        },
+        {
+          "name": "for",
+          "type": "number",
+          "description": "Seconds; reverts after."
+        }
+      ],
+      "example": "{ \"do\": \"setTargeting\", \"target\": \"subject\", \"prepend\": [\"is:caravan\"] }",
+      "since": "1.0.0"
+    },
+    {
+      "name": "taunt",
+      "group": "Move",
+      "description": "Forces aggro onto an entity (the game's agro mechanism).",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "toward",
+          "type": "entity",
+          "required": true,
+          "description": "Who they go for."
+        },
+        {
+          "name": "for",
+          "type": "number",
+          "default": 5,
+          "description": "Seconds."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "command",
+      "group": "Move",
+      "description": "Orders player units as the king's own commands.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "order",
+          "type": "enum",
+          "required": true,
+          "options": [
+            "follow",
+            "hold",
+            "home"
+          ],
+          "description": "The order."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "signal",
+      "group": "Logic",
+      "description": "Sends a named signal (optionally with a number) to entities or everyone.",
+      "params": [
+        {
+          "name": "name",
+          "type": "signal",
+          "required": true,
+          "description": "The signal's name (a built-in input such as open, enable, destroy, or your own)."
+        },
+        {
+          "name": "to",
+          "type": "entities",
+          "default": "self",
+          "description": "Who receives it: a selector, or \"all\" (every listener and the level script)."
+        },
+        {
+          "name": "value",
+          "type": "number",
+          "default": 0,
+          "description": "A number it carries (event.value)."
+        },
+        {
+          "name": "delay",
+          "type": "number",
+          "default": 0,
+          "min": 0.0,
+          "description": "Seconds before it arrives."
+        }
+      ],
+      "example": "{ \"do\": \"signal\", \"name\": \"open\", \"to\": \"@gate1\" }",
+      "since": "1.0.0"
+    },
+    {
+      "name": "setVar",
+      "group": "Logic",
+      "description": "Sets a variable (an entity var on target, or a level var: target level, or a name with $).",
+      "params": [
+        {
+          "name": "name",
+          "type": "var",
+          "required": true,
+          "description": "The variable (declared in vars)."
+        },
+        {
+          "name": "value",
+          "type": "any",
+          "required": true,
+          "description": "The new value (an expression)."
+        },
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Whose variable (default self; \"level\" for a level var)."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "addVar",
+      "group": "Logic",
+      "description": "Adds to a number variable.",
+      "params": [
+        {
+          "name": "name",
+          "type": "var",
+          "required": true,
+          "description": "The variable."
+        },
+        {
+          "name": "value",
+          "type": "number",
+          "default": 1,
+          "description": "How much."
+        },
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Whose variable (default self; \"level\" for a level var)."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "listAdd",
+      "group": "Logic",
+      "description": "Appends to a list variable (max 256; oldest dropped).",
+      "params": [
+        {
+          "name": "name",
+          "type": "var",
+          "required": true,
+          "description": "The list variable."
+        },
+        {
+          "name": "value",
+          "type": "any",
+          "required": true,
+          "description": "The item."
+        },
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Whose variable."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "listRemove",
+      "group": "Logic",
+      "description": "Removes the first equal item, or the item at an index.",
+      "params": [
+        {
+          "name": "name",
+          "type": "var",
+          "required": true,
+          "description": "The list variable."
+        },
+        {
+          "name": "value",
+          "type": "any",
+          "description": "The item to remove."
+        },
+        {
+          "name": "index",
+          "type": "int",
+          "description": "Or the index to remove."
+        },
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Whose variable."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "listClear",
+      "group": "Logic",
+      "description": "Empties a list variable.",
+      "params": [
+        {
+          "name": "name",
+          "type": "var",
+          "required": true,
+          "description": "The list variable."
+        },
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Whose variable."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "addLabel",
+      "group": "Logic",
+      "description": "Adds a label (filters test #label).",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "label",
+          "type": "label",
+          "required": true,
+          "description": "The label."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "removeLabel",
+      "group": "Logic",
+      "description": "Removes a label.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "label",
+          "type": "label",
+          "required": true,
+          "description": "The label."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "enableRule",
+      "group": "Logic",
+      "description": "Turns a rule (by id) on.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "rule",
+          "type": "rule",
+          "required": true,
+          "description": "The rule's id."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "disableRule",
+      "group": "Logic",
+      "description": "Turns a rule (by id) off.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "rule",
+          "type": "rule",
+          "required": true,
+          "description": "The rule's id."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "enable",
+      "group": "Logic",
+      "description": "Switches the entity on: rules, components (solid, hittable) and visibility. On a spawn line, resumes spawning.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "disable",
+      "group": "Logic",
+      "description": "Switches the entity off. On a spawn line, pauses its spawning.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "toggle",
+      "group": "Logic",
+      "description": "Switches it on if off, off if on.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "wait",
+      "group": "Logic",
+      "description": "The rest of this action list resumes later.",
+      "params": [
+        {
+          "name": "seconds",
+          "type": "number",
+          "required": true,
+          "min": 0.05,
+          "description": "Seconds (min 0.05)."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "if",
+      "group": "Logic",
+      "description": "Runs then or else.",
+      "params": [
+        {
+          "name": "cond",
+          "type": "bool",
+          "required": true,
+          "description": "The condition."
+        },
+        {
+          "name": "then",
+          "type": "actions",
+          "description": "If true."
+        },
+        {
+          "name": "else",
+          "type": "actions",
+          "description": "If false."
+        }
+      ],
+      "example": "{ \"do\": \"if\", \"cond\": \"self.$hits % 5 == 0\", \"then\": [...] }",
+      "since": "1.0.0"
+    },
+    {
+      "name": "repeat",
+      "group": "Logic",
+      "description": "Runs actions several times (event.value = the iteration).",
+      "params": [
+        {
+          "name": "times",
+          "type": "int",
+          "required": true,
+          "min": 1.0,
+          "max": 100.0,
+          "description": "How many times (max 100)."
+        },
+        {
+          "name": "every",
+          "type": "number",
+          "default": 0,
+          "min": 0.0,
+          "description": "Seconds between (0 = all now)."
+        },
+        {
+          "name": "actions",
+          "type": "actions",
+          "required": true,
+          "description": "The actions (\"actions\", since \"do\" names the action itself)."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "forEach",
+      "group": "Logic",
+      "description": "Runs actions for each member of a set, with `it` bound.",
+      "params": [
+        {
+          "name": "in",
+          "type": "entities",
+          "required": true,
+          "description": "The set."
+        },
+        {
+          "name": "actions",
+          "type": "actions",
+          "required": true,
+          "description": "The actions (\"actions\", since \"do\" names the action itself)."
+        },
+        {
+          "name": "limit",
+          "type": "int",
+          "min": 1.0,
+          "max": 256.0,
+          "description": "At most this many (max 256)."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "choose",
+      "group": "Logic",
+      "description": "Picks one weighted option at random.",
+      "params": [
+        {
+          "name": "options",
+          "type": "options",
+          "required": true,
+          "description": "[{ \"weight\": 2, \"do\": [...] }, ...]"
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "stop",
+      "group": "Logic",
+      "description": "Ends this action list.",
+      "params": [],
+      "since": "1.0.0"
+    },
+    {
+      "name": "gold",
+      "group": "World",
+      "description": "Gives (or takes, negative) gold; floored at 0.",
+      "params": [
+        {
+          "name": "amount",
+          "type": "number",
+          "required": true,
+          "description": "Gold."
+        },
+        {
+          "name": "at",
+          "type": "position",
+          "description": "Show the coin effect here."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "dropCoins",
+      "group": "World",
+      "description": "Drops real coins for the king to collect.",
+      "params": [
+        {
+          "name": "count",
+          "type": "int",
+          "required": true,
+          "min": 1.0,
+          "max": 100.0,
+          "description": "How many."
+        },
+        {
+          "name": "at",
+          "type": "position",
+          "default": "self",
+          "description": "Where."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "building",
+      "group": "World",
+      "description": "Acts on a build slot.",
+      "params": [
+        {
+          "name": "slot",
+          "type": "slot",
+          "required": true,
+          "description": "The slot: @name, a selector, or a Studio key (\"slot:Tower 3\")."
+        },
+        {
+          "name": "op",
+          "type": "enum",
+          "required": true,
+          "options": [
+            "build",
+            "upgrade",
+            "knockOut",
+            "repair",
+            "demolish",
+            "lock",
+            "unlock",
+            "setCost",
+            "setIncome"
+          ],
+          "description": "What to do."
+        },
+        {
+          "name": "value",
+          "type": "number",
+          "description": "For setCost/setIncome: the amount; for demolish: gold refunded."
+        },
+        {
+          "name": "branch",
+          "type": "int",
+          "description": "For build/upgrade: the upgrade choice (0-based)."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "waves",
+      "group": "World",
+      "description": "Edits the night's waves.",
+      "params": [
+        {
+          "name": "op",
+          "type": "enum",
+          "required": true,
+          "options": [
+            "addSpawn",
+            "removeUnit",
+            "scaleCount",
+            "scaleHp",
+            "clearRemaining",
+            "startNight",
+            "endNight",
+            "skipNight"
+          ],
+          "description": "What to do."
+        },
+        {
+          "name": "night",
+          "type": "night",
+          "description": "Which night (default: the next; \"current\" edits the running night)."
+        },
+        {
+          "name": "unit",
+          "type": "template",
+          "description": "addSpawn/removeUnit/scale*: the enemy."
+        },
+        {
+          "name": "count",
+          "type": "int",
+          "min": 1.0,
+          "description": "addSpawn: how many."
+        },
+        {
+          "name": "interval",
+          "type": "number",
+          "description": "addSpawn: seconds between spawns."
+        },
+        {
+          "name": "delay",
+          "type": "number",
+          "description": "addSpawn: seconds into the night."
+        },
+        {
+          "name": "line",
+          "type": "text",
+          "description": "addSpawn/clearRemaining: the spawn line."
+        },
+        {
+          "name": "gold",
+          "type": "int",
+          "description": "addSpawn: coins each."
+        },
+        {
+          "name": "elite",
+          "type": "bool",
+          "description": "addSpawn: elite."
+        },
+        {
+          "name": "value",
+          "type": "number",
+          "description": "scaleCount/scaleHp: the factor."
+        }
+      ],
+      "example": "{ \"do\": \"waves\", \"op\": \"addSpawn\", \"unit\": \"brute\", \"count\": \"night - 2\", \"line\": \"North\" }",
+      "since": "1.0.0"
+    },
+    {
+      "name": "endLevel",
+      "group": "World",
+      "description": "Ends the run.",
+      "params": [
+        {
+          "name": "result",
+          "type": "enum",
+          "required": true,
+          "options": [
+            "win",
+            "lose"
+          ],
+          "description": "Win or lose."
+        },
+        {
+          "name": "message",
+          "type": "text",
+          "description": "Shown on the end screen."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "effect",
+      "group": "Show",
+      "description": "Plays a game effect.",
+      "params": [
+        {
+          "name": "fx",
+          "type": "fx",
+          "required": true,
+          "description": "The effect (`builder dump` lists them)."
+        },
+        {
+          "name": "at",
+          "type": "position",
+          "default": "self",
+          "description": "Where."
+        },
+        {
+          "name": "scale",
+          "type": "number",
+          "default": 1,
+          "description": "Size."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "sound",
+      "group": "Show",
+      "description": "Plays a sound.",
+      "params": [
+        {
+          "name": "sound",
+          "type": "sound",
+          "required": true,
+          "description": "\"asset:<key>\" or a game sound."
+        },
+        {
+          "name": "at",
+          "type": "position",
+          "description": "Where (omit for UI sound)."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "message",
+      "group": "Show",
+      "description": "Shows a message at the top of the screen.",
+      "params": [
+        {
+          "name": "text",
+          "type": "text",
+          "required": true,
+          "description": "The text ({expr} parts)."
+        },
+        {
+          "name": "kind",
+          "type": "enum",
+          "default": "info",
+          "options": [
+            "info",
+            "good",
+            "warn",
+            "bad"
+          ],
+          "description": "Its emblem."
+        },
+        {
+          "name": "seconds",
+          "type": "number",
+          "default": 4,
+          "description": "How long."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "floatText",
+      "group": "Show",
+      "description": "Floating text over a spot.",
+      "params": [
+        {
+          "name": "text",
+          "type": "text",
+          "required": true,
+          "description": "The text."
+        },
+        {
+          "name": "at",
+          "type": "position",
+          "default": "self",
+          "description": "Where."
+        },
+        {
+          "name": "color",
+          "type": "color",
+          "description": "#rrggbb."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "setVisual",
+      "group": "Show",
+      "description": "Changes its look.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "tint",
+          "type": "color",
+          "description": "#rrggbb."
+        },
+        {
+          "name": "scale",
+          "type": "number",
+          "description": "Size factor."
+        },
+        {
+          "name": "mesh",
+          "type": "text",
+          "description": "A model (mesh:/vanilla:/asset:)."
+        },
+        {
+          "name": "visible",
+          "type": "bool",
+          "description": "Shown or hidden."
+        },
+        {
+          "name": "glow",
+          "type": "color",
+          "description": "Glow colour."
+        },
+        {
+          "name": "for",
+          "type": "number",
+          "description": "Seconds; reverts after."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "hud",
+      "group": "Show",
+      "description": "Changes a level HUD line (logic.hud).",
+      "params": [
+        {
+          "name": "id",
+          "type": "text",
+          "required": true,
+          "description": "The HUD line's id."
+        },
+        {
+          "name": "text",
+          "type": "text",
+          "description": "New text."
+        },
+        {
+          "name": "icon",
+          "type": "text",
+          "description": "New icon."
+        },
+        {
+          "name": "visible",
+          "type": "bool",
+          "description": "Shown or hidden."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "shake",
+      "group": "Show",
+      "description": "Shakes the camera.",
+      "params": [
+        {
+          "name": "strength",
+          "type": "number",
+          "default": 1,
+          "description": "How hard."
+        },
+        {
+          "name": "seconds",
+          "type": "number",
+          "default": 0.5,
+          "description": "How long."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "marker",
+      "group": "Show",
+      "description": "A screen-edge marker like the game's wave markers.",
+      "params": [
+        {
+          "name": "on",
+          "type": "entity",
+          "required": true,
+          "description": "What it points at."
+        },
+        {
+          "name": "icon",
+          "type": "text",
+          "description": "Icon."
+        },
+        {
+          "name": "for",
+          "type": "number",
+          "description": "Seconds (omit: until it's gone)."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "destroy",
+      "group": "End",
+      "description": "Removes it.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "effects",
+          "type": "bool",
+          "default": true,
+          "description": "Play death effects."
+        },
+        {
+          "name": "drops",
+          "type": "bool",
+          "default": false,
+          "description": "Drop its coins."
+        },
+        {
+          "name": "silent",
+          "type": "bool",
+          "default": false,
+          "description": "No death event."
+        }
+      ],
+      "since": "1.0.0"
+    }
+  ],
+  "functions": [
+    {
+      "name": "vec",
+      "args": [
+        "number",
+        "number",
+        "number?"
+      ],
+      "returns": "position",
+      "description": "A position: vec(x, z) on the ground, or vec(x, y, z)."
+    },
+    {
+      "name": "nearest",
+      "args": [
+        "filter",
+        "number?"
+      ],
+      "returns": "entity",
+      "description": "The nearest match within r metres (anywhere if omitted), or none. Anchored at self; e.nearest(...) anchors at e.",
+      "method": true,
+      "example": "nearest('foe and Tower', 20)"
+    },
+    {
+      "name": "farthest",
+      "args": [
+        "filter",
+        "number?"
+      ],
+      "returns": "entity",
+      "description": "The farthest match within r metres (anywhere if omitted), or none. Anchored at self; e.farthest(...) anchors at e.",
+      "method": true,
+      "example": "farthest('foe and Tower', 20)"
+    },
+    {
+      "name": "weakest",
+      "args": [
+        "filter",
+        "number?"
+      ],
+      "returns": "entity",
+      "description": "The match with the least hp within r metres (anywhere if omitted), or none. Anchored at self; e.weakest(...) anchors at e.",
+      "method": true,
+      "example": "weakest('foe and Tower', 20)"
+    },
+    {
+      "name": "strongest",
+      "args": [
+        "filter",
+        "number?"
+      ],
+      "returns": "entity",
+      "description": "The match with the most hp within r metres (anywhere if omitted), or none. Anchored at self; e.strongest(...) anchors at e.",
+      "method": true,
+      "example": "strongest('foe and Tower', 20)"
+    },
+    {
+      "name": "random",
+      "args": [
+        "filter",
+        "number?"
+      ],
+      "returns": "entity",
+      "description": "A random match within r metres (anywhere if omitted), or none. Anchored at self; e.random(...) anchors at e.",
+      "method": true,
+      "example": "random('foe and Tower', 20)"
+    },
+    {
+      "name": "all",
+      "args": [
+        "filter",
+        "number?"
+      ],
+      "returns": "set",
+      "description": "Every match within r metres (anywhere if omitted), nearest first (max 256).",
+      "method": true,
+      "example": "all('ally and unit', 6)"
+    },
+    {
+      "name": "best",
+      "args": [
+        "filter",
+        "number",
+        "lazy"
+      ],
+      "returns": "entity",
+      "description": "The match with the highest score (an expression over `it`).",
+      "method": true,
+      "example": "best('foe', 20, -it.hp)"
+    },
+    {
+      "name": "count",
+      "args": [
+        "filter",
+        "number?"
+      ],
+      "returns": "number",
+      "description": "How many match within r metres (anywhere if omitted).",
+      "method": true,
+      "example": "count('enemy and in:self')"
+    },
+    {
+      "name": "pointNear",
+      "args": [
+        "position",
+        "number"
+      ],
+      "returns": "position",
+      "description": "A random walkable point within r metres of p."
+    },
+    {
+      "name": "ahead",
+      "args": [
+        "entity",
+        "number"
+      ],
+      "returns": "position",
+      "description": "d metres ahead of e (along its facing)."
+    },
+    {
+      "name": "toward",
+      "args": [
+        "position",
+        "position",
+        "number"
+      ],
+      "returns": "position",
+      "description": "d metres from a toward b."
+    },
+    {
+      "name": "lerp",
+      "args": [
+        "any",
+        "any",
+        "number"
+      ],
+      "returns": "any",
+      "description": "a + (b - a) * t, for numbers or positions."
+    },
+    {
+      "name": "spawnLine",
+      "args": [
+        "text"
+      ],
+      "returns": "position",
+      "description": "The centre of a spawn line by name."
+    },
+    {
+      "name": "dir",
+      "args": [
+        "number"
+      ],
+      "returns": "position",
+      "description": "A unit vector at deg degrees (0 = north, 90 = east)."
+    },
+    {
+      "name": "angle",
+      "args": [
+        "position",
+        "position"
+      ],
+      "returns": "number",
+      "description": "Degrees from a to b (0 = north)."
+    },
+    {
+      "name": "dist",
+      "args": [
+        "position",
+        "position?"
+      ],
+      "returns": "number",
+      "description": "Distance between two positions or entities; e.dist(x) from e.",
+      "method": true
+    },
+    {
+      "name": "min",
+      "args": [
+        "number",
+        "number",
+        "..."
+      ],
+      "returns": "number",
+      "description": "The smallest."
+    },
+    {
+      "name": "max",
+      "args": [
+        "number",
+        "number",
+        "..."
+      ],
+      "returns": "number",
+      "description": "The largest."
+    },
+    {
+      "name": "abs",
+      "args": [
+        "number"
+      ],
+      "returns": "number",
+      "description": "abs(x)."
+    },
+    {
+      "name": "floor",
+      "args": [
+        "number"
+      ],
+      "returns": "number",
+      "description": "floor(x)."
+    },
+    {
+      "name": "ceil",
+      "args": [
+        "number"
+      ],
+      "returns": "number",
+      "description": "ceil(x)."
+    },
+    {
+      "name": "round",
+      "args": [
+        "number"
+      ],
+      "returns": "number",
+      "description": "round(x)."
+    },
+    {
+      "name": "sqrt",
+      "args": [
+        "number"
+      ],
+      "returns": "number",
+      "description": "sqrt(x)."
+    },
+    {
+      "name": "sin",
+      "args": [
+        "number"
+      ],
+      "returns": "number",
+      "description": "sin(x), x in degrees."
+    },
+    {
+      "name": "cos",
+      "args": [
+        "number"
+      ],
+      "returns": "number",
+      "description": "cos(x), x in degrees."
+    },
+    {
+      "name": "clamp",
+      "args": [
+        "number",
+        "number",
+        "number"
+      ],
+      "returns": "number",
+      "description": "x limited to lo..hi."
+    },
+    {
+      "name": "pow",
+      "args": [
+        "number",
+        "number"
+      ],
+      "returns": "number",
+      "description": "x to the power y."
+    },
+    {
+      "name": "rand",
+      "args": [
+        "number?",
+        "number?"
+      ],
+      "returns": "number",
+      "description": "rand(): 0..1; rand(a, b): a..b (the level's seeded random)."
+    },
+    {
+      "name": "randInt",
+      "args": [
+        "number",
+        "number"
+      ],
+      "returns": "number",
+      "description": "A whole number a..b inclusive."
+    },
+    {
+      "name": "chance",
+      "args": [
+        "number"
+      ],
+      "returns": "bool",
+      "description": "True with probability p."
+    },
+    {
+      "name": "waveCount",
+      "args": [
+        "number",
+        "filter?"
+      ],
+      "returns": "number",
+      "description": "Enemies night n will spawn, optionally only templates matching a filter."
+    },
+    {
+      "name": "waveUnits",
+      "args": [
+        "number"
+      ],
+      "returns": "list",
+      "description": "The templates night n spawns."
+    },
+    {
+      "name": "strongestUnit",
+      "args": [
+        "number"
+      ],
+      "returns": "template",
+      "description": "Night n's strongest template (hp x damage)."
+    },
+    {
+      "name": "stacks",
+      "args": [
+        "status"
+      ],
+      "returns": "number",
+      "description": "Stacks of a status on it.",
+      "method": true,
+      "onlyOn": "entity"
+    },
+    {
+      "name": "is",
+      "args": [
+        "filter"
+      ],
+      "returns": "bool",
+      "description": "Whether it matches a filter.",
+      "method": true,
+      "onlyOn": "entity"
+    },
+    {
+      "name": "inside",
+      "args": [
+        "entity"
+      ],
+      "returns": "bool",
+      "description": "Whether it is inside an area.",
+      "method": true,
+      "onlyOn": "entity"
+    },
+    {
+      "name": "at",
+      "args": [
+        "number"
+      ],
+      "returns": "any",
+      "description": "The item at index i (0-based).",
+      "method": true,
+      "onlyOn": "list"
+    },
+    {
+      "name": "has",
+      "args": [
+        "any"
+      ],
+      "returns": "bool",
+      "description": "Whether the list or set contains x.",
+      "method": true,
+      "onlyOn": "list"
+    }
+  ],
+  "properties": [
+    {
+      "on": "entity",
+      "name": "hp",
+      "returns": "number",
+      "description": "Hit points."
+    },
+    {
+      "on": "entity",
+      "name": "maxHp",
+      "returns": "number",
+      "description": "Maximum hit points."
+    },
+    {
+      "on": "entity",
+      "name": "hpPct",
+      "returns": "number",
+      "description": "hp / maxHp, 0..1."
+    },
+    {
+      "on": "entity",
+      "name": "alive",
+      "returns": "bool",
+      "description": "Not dead (a knocked-out building is not alive)."
+    },
+    {
+      "on": "entity",
+      "name": "pos",
+      "returns": "position",
+      "description": "Its position."
+    },
+    {
+      "on": "entity",
+      "name": "x",
+      "returns": "number",
+      "description": "Its x."
+    },
+    {
+      "on": "entity",
+      "name": "y",
+      "returns": "number",
+      "description": "Its y (height)."
+    },
+    {
+      "on": "entity",
+      "name": "z",
+      "returns": "number",
+      "description": "Its z."
+    },
+    {
+      "on": "entity",
+      "name": "facing",
+      "returns": "number",
+      "description": "Its yaw in degrees (0 = north)."
+    },
+    {
+      "on": "entity",
+      "name": "team",
+      "returns": "text",
+      "description": "'player', 'enemy' or 'neutral'."
+    },
+    {
+      "on": "entity",
+      "name": "kind",
+      "returns": "text",
+      "description": "'unit', 'building', 'prop', 'projectile', 'area', 'pickup', 'logic', 'coin', 'king', 'line', 'point', 'path'."
+    },
+    {
+      "on": "entity",
+      "name": "template",
+      "returns": "template",
+      "description": "The template it was made from."
+    },
+    {
+      "on": "entity",
+      "name": "labels",
+      "returns": "list",
+      "description": "Its labels."
+    },
+    {
+      "on": "entity",
+      "name": "level",
+      "returns": "number",
+      "description": "A building's level (0 = built, 1 = first upgrade...)."
+    },
+    {
+      "on": "entity",
+      "name": "cost",
+      "returns": "number",
+      "description": "A slot's next build/upgrade cost."
+    },
+    {
+      "on": "entity",
+      "name": "buildingType",
+      "returns": "text",
+      "description": "A building's kind, e.g. 'Mill'."
+    },
+    {
+      "on": "entity",
+      "name": "age",
+      "returns": "number",
+      "description": "Seconds since it appeared."
+    },
+    {
+      "on": "entity",
+      "name": "target",
+      "returns": "entity",
+      "description": "Its current attack/move target."
+    },
+    {
+      "on": "entity",
+      "name": "owner",
+      "returns": "entity",
+      "description": "Who spawned or launched it."
+    },
+    {
+      "on": "entity",
+      "name": "id",
+      "returns": "text",
+      "description": "Its entity id."
+    },
+    {
+      "on": "entity",
+      "name": "moveSpeed",
+      "returns": "number",
+      "description": "Movement speed, m/s. (with modifiers)"
+    },
+    {
+      "on": "entity",
+      "name": "attackCooldown",
+      "returns": "number",
+      "description": "Seconds between attacks. (with modifiers)"
+    },
+    {
+      "on": "entity",
+      "name": "attackRange",
+      "returns": "number",
+      "description": "Attack range, m. (with modifiers)"
+    },
+    {
+      "on": "entity",
+      "name": "damageMult",
+      "returns": "number",
+      "description": "Multiplies damage dealt (mods may carry from/types/chance/when). (with modifiers)"
+    },
+    {
+      "on": "entity",
+      "name": "damageTaken",
+      "returns": "number",
+      "description": "Multiplies damage taken (mods may carry from/types/chance/when). (with modifiers)"
+    },
+    {
+      "on": "entity",
+      "name": "projectileSpeed",
+      "returns": "number",
+      "description": "Projectile speed. (with modifiers)"
+    },
+    {
+      "on": "entity",
+      "name": "scale",
+      "returns": "number",
+      "description": "Size factor (visual and body). (with modifiers)"
+    },
+    {
+      "on": "entity",
+      "name": "keepDistance",
+      "returns": "number",
+      "description": "Distance a ranged unit keeps. (with modifiers)"
+    },
+    {
+      "on": "entity",
+      "name": "aggroTime",
+      "returns": "number",
+      "description": "Seconds it chases after being hit. (with modifiers)"
+    },
+    {
+      "on": "entity",
+      "name": "income",
+      "returns": "number",
+      "description": "Gold a building pays at dawn. (with modifiers)"
+    },
+    {
+      "on": "entity",
+      "name": "timeScale",
+      "returns": "number",
+      "description": "Multiplies move speed, attack and rule timers, and its own projectiles. (with modifiers)"
+    },
+    {
+      "on": "position",
+      "name": "x",
+      "returns": "number",
+      "description": "x."
+    },
+    {
+      "on": "position",
+      "name": "y",
+      "returns": "number",
+      "description": "y."
+    },
+    {
+      "on": "position",
+      "name": "z",
+      "returns": "number",
+      "description": "z."
+    },
+    {
+      "on": "set",
+      "name": "len",
+      "returns": "number",
+      "description": "How many."
+    },
+    {
+      "on": "set",
+      "name": "first",
+      "returns": "entity",
+      "description": "The first (nearest)."
+    },
+    {
+      "on": "set",
+      "name": "last",
+      "returns": "entity",
+      "description": "The last (farthest)."
+    },
+    {
+      "on": "list",
+      "name": "len",
+      "returns": "number",
+      "description": "How many."
+    },
+    {
+      "on": "list",
+      "name": "first",
+      "returns": "any",
+      "description": "The first item."
+    },
+    {
+      "on": "list",
+      "name": "last",
+      "returns": "any",
+      "description": "The last item."
+    },
+    {
+      "on": "template",
+      "name": "id",
+      "returns": "text",
+      "description": "The template's id."
+    },
+    {
+      "on": "template",
+      "name": "hp",
+      "returns": "number",
+      "description": "The template's max hp (catalog)."
+    },
+    {
+      "on": "event",
+      "name": "value",
+      "returns": "any",
+      "description": "The event's number (see each event)."
+    },
+    {
+      "on": "event",
+      "name": "pos",
+      "returns": "position",
+      "description": "Where it happened."
+    },
+    {
+      "on": "event",
+      "name": "name",
+      "returns": "text",
+      "description": "signal: the name; varChanged: the var; status events: the status."
+    },
+    {
+      "on": "event",
+      "name": "choice",
+      "returns": "text",
+      "description": "interact with choices: the chosen id."
+    },
+    {
+      "on": "event",
+      "name": "result",
+      "returns": "text",
+      "description": "levelEnd: 'win' or 'lose'."
+    }
+  ],
+  "globals": [
+    {
+      "name": "night",
+      "description": "The current night (1-based), or the coming one by day.",
+      "type": "number"
+    },
+    {
+      "name": "isNight",
+      "description": "True during a night.",
+      "type": "bool"
+    },
+    {
+      "name": "isDay",
+      "description": "True by day.",
+      "type": "bool"
+    },
+    {
+      "name": "nights",
+      "description": "The level's total number of nights.",
+      "type": "number"
+    },
+    {
+      "name": "time",
+      "description": "Seconds since level start.",
+      "type": "number"
+    },
+    {
+      "name": "nightTime",
+      "description": "Seconds since this night began.",
+      "type": "number"
+    },
+    {
+      "name": "nightProgress",
+      "description": "0..1: the night's spawn schedule elapsed (1 once everything has spawned).",
+      "type": "number"
+    },
+    {
+      "name": "gold",
+      "description": "The player's gold.",
+      "type": "number"
+    },
+    {
+      "name": "income",
+      "description": "The last dawn's payout.",
+      "type": "number"
+    },
+    {
+      "name": "enemiesAlive",
+      "description": "Enemies on the map.",
+      "type": "number"
+    },
+    {
+      "name": "difficulty",
+      "description": "The run's difficulty multiplier.",
+      "type": "number"
+    }
+  ],
+  "roles": [
+    {
+      "name": "self",
+      "description": "The rule's owner (the level in the level script).",
+      "type": "entity"
+    },
+    {
+      "name": "subject",
+      "description": "Who the event happened to (self for its own events; the other entity for `of` listeners).",
+      "type": "entity"
+    },
+    {
+      "name": "other",
+      "description": "The event's counterpart: killer, victim, attacker, entrant, collector, sender...",
+      "type": "entity"
+    },
+    {
+      "name": "spawned",
+      "description": "Inside spawn/launch/replace `then`: the new entity.",
+      "type": "entity"
+    },
+    {
+      "name": "it",
+      "description": "The current candidate: inside a filter's where(), best()'s score, forEach, or an action applied to a set.",
+      "type": "entity"
+    },
+    {
+      "name": "king",
+      "description": "The player's king.",
+      "type": "entity"
+    },
+    {
+      "name": "castle",
+      "description": "The castle (its build slot's building).",
+      "type": "entity"
+    },
+    {
+      "name": "level",
+      "description": "The level itself (owner of level variables).",
+      "type": "level"
+    },
+    {
+      "name": "event",
+      "description": "The event's fields: event.value, event.pos, event.name, event.choice, event.result.",
+      "type": "event"
+    }
+  ],
+  "stats": [
+    {
+      "name": "maxHp",
+      "description": "Maximum hit points."
+    },
+    {
+      "name": "hp",
+      "description": "Current hit points."
+    },
+    {
+      "name": "moveSpeed",
+      "description": "Movement speed, m/s."
+    },
+    {
+      "name": "attackCooldown",
+      "description": "Seconds between attacks."
+    },
+    {
+      "name": "attackRange",
+      "description": "Attack range, m."
+    },
+    {
+      "name": "damageMult",
+      "description": "Multiplies damage dealt (mods may carry from/types/chance/when)."
+    },
+    {
+      "name": "damageTaken",
+      "description": "Multiplies damage taken (mods may carry from/types/chance/when)."
+    },
+    {
+      "name": "projectileSpeed",
+      "description": "Projectile speed."
+    },
+    {
+      "name": "scale",
+      "description": "Size factor (visual and body)."
+    },
+    {
+      "name": "keepDistance",
+      "description": "Distance a ranged unit keeps."
+    },
+    {
+      "name": "aggroTime",
+      "description": "Seconds it chases after being hit."
+    },
+    {
+      "name": "income",
+      "description": "Gold a building pays at dawn."
+    },
+    {
+      "name": "timeScale",
+      "description": "Multiplies move speed, attack and rule timers, and its own projectiles."
+    }
+  ],
+  "flags": [
+    {
+      "name": "stunned",
+      "description": "Can't move or attack."
+    },
+    {
+      "name": "disarmed",
+      "description": "Can't attack."
+    },
+    {
+      "name": "rooted",
+      "description": "Can't move."
+    },
+    {
+      "name": "untargetable",
+      "description": "Nothing targets it."
+    },
+    {
+      "name": "invulnerable",
+      "description": "Takes no damage."
+    },
+    {
+      "name": "silenced",
+      "description": "Its rules don't fire."
+    },
+    {
+      "name": "noIncome",
+      "description": "A building pays nothing at dawn."
+    }
+  ],
+  "filterTerms": [
+    {
+      "name": "foe",
+      "description": "The other side from self (for the level script: enemies)."
+    },
+    {
+      "name": "ally",
+      "description": "Self's side (level script: the player's)."
+    },
+    {
+      "name": "player",
+      "description": "The player's side."
+    },
+    {
+      "name": "enemy",
+      "description": "The enemy side."
+    },
+    {
+      "name": "neutral",
+      "description": "Neither side."
+    },
+    {
+      "name": "unit",
+      "description": "Units (not buildings)."
+    },
+    {
+      "name": "building",
+      "description": "Buildings."
+    },
+    {
+      "name": "prop",
+      "description": "Props."
+    },
+    {
+      "name": "projectile",
+      "description": "Projectiles."
+    },
+    {
+      "name": "area",
+      "description": "Areas."
+    },
+    {
+      "name": "pickup",
+      "description": "Pickups."
+    },
+    {
+      "name": "coin",
+      "description": "The game's coins."
+    },
+    {
+      "name": "king",
+      "description": "The king."
+    },
+    {
+      "name": "castle",
+      "description": "The castle."
+    },
+    {
+      "name": "self",
+      "description": "The rule's owner."
+    },
+    {
+      "name": "melee",
+      "description": "Melee fighters."
+    },
+    {
+      "name": "ranged",
+      "description": "Ranged fighters."
+    },
+    {
+      "name": "alive",
+      "description": "Alive."
+    },
+    {
+      "name": "dead",
+      "description": "Dead or knocked out."
+    },
+    {
+      "name": "logic",
+      "description": "Logic objects."
+    },
+    {
+      "name": "line",
+      "description": "Spawn lines."
+    },
+    {
+      "name": "point",
+      "description": "Points."
+    },
+    {
+      "name": "path",
+      "description": "Paths."
+    },
+    {
+      "name": "#label",
+      "description": "Has a label."
+    },
+    {
+      "name": "is:<template>",
+      "description": "Made from a template."
+    },
+    {
+      "name": "in:@area",
+      "description": "Inside an area (in:self inside this area)."
+    },
+    {
+      "name": "has:<status>",
+      "description": "Has a status."
+    },
+    {
+      "name": "type:<Kind>",
+      "description": "A building of that kind (Mill, Tower...)."
+    },
+    {
+      "name": "where(expr)",
+      "description": "An expression over `it`."
+    },
+    {
+      "name": "<Tag>",
+      "description": "Any game tag (TagManager.ETag, case-sensitive): Tower, Flying, Wall, ..."
+    }
+  ],
+  "inputs": {
+    "any": [
+      "enable",
+      "disable",
+      "toggle",
+      "destroy"
+    ],
+    "mover": [
+      "start",
+      "stop",
+      "reverse",
+      "goto"
+    ],
+    "area": [
+      "show",
+      "hide"
+    ],
+    "interact": [
+      "lock",
+      "unlock"
+    ]
+  },
+  "paramTypes": {
+    "number": "a number, or an expression string (\"night * 2\")",
+    "int": "a whole number, or an expression string",
+    "bool": "true/false, or an expression string",
+    "text": "text with {expr} parts (\"Souls {$souls}/10\"); \"=expr\" makes the whole field an expression",
+    "position": "an expression giving a position or an entity (self, other, @name, vec(x, z), pointNear(self, 3)), or [x, y, z]",
+    "entity": "a selector expression giving one entity (self, other, @name, nearest('foe', 10))",
+    "entities": "a selector expression giving one entity or a set (all('foe', 6)); the action runs on each member with `it` bound",
+    "template": "a template id: a pack unit, a pack entity, or \"vanilla:<id>\"; \"=expr\" for an expression (\"=self.template\")",
+    "filter": "a filter string (\"foe and Building and not Wall\")",
+    "status": "a status id from the pack's statuses",
+    "rule": "a rule's id",
+    "var": "a variable name (declared in vars; \"$name\" or target \"level\" for a level variable)",
+    "signal": "a signal name (a built-in input or your own)",
+    "label": "a label name (without #)",
+    "enum": "one of the listed options",
+    "actions": "a nested list of actions",
+    "options": "[{ \"weight\": 2, \"do\": [actions] }, ...]",
+    "targeting": "a targeting list: filter strings or { \"filter\", \"range\", \"prefer\", \"score\" }",
+    "movement": "a movement block (mode, path, speed, keepDistance, kite, flee, wander, home)",
+    "any": "an expression of any type",
+    "for": "seconds, or \"night\" / \"day\" (until the next dawn / dusk)",
+    "night": "a night number expression, or \"current\"",
+    "slot": "a build slot: @name, a selector, or a Studio key (\"slot:Tower 3\", \"add:<id>\", \"castle\")",
+    "types": "a list of damage-type labels ([\"fire\"])",
+    "keep": "a list of the listed options",
+    "fx": "a game effect name",
+    "sound": "\"asset:<key>\" or a game sound",
+    "color": "\"#rrggbb\"",
+    "json": "a JSON block"
+  },
+  "tags": [
+    "AUTO_Alive",
+    "AUTO_Commanded",
+    "AUTO_KnockedOutAndHealOnDawn",
+    "AUTO_NoReviveNextMorning",
+    "ArmoredAgainstRanged",
+    "BlockableEnemyProjectile",
+    "Boss",
+    "Bridge",
+    "Building",
+    "CastleCenter",
+    "EnemyOwned",
+    "Exploding",
+    "FastMoving",
+    "FireAndExplosionResistant",
+    "Flying",
+    "Group1",
+    "Group2",
+    "Group3",
+    "Healer",
+    "House",
+    "Humanoid",
+    "InfrastructureEconomy",
+    "LargeUnit",
+    "MagicProjectile",
+    "MeeleFighter",
+    "Monster",
+    "NaturallyHighHealthTarget",
+    "NaturallyVulnerableToSplash",
+    "OnDeathEnemySpawner",
+    "Player",
+    "PlayerHeroUnit",
+    "PlayerOwned",
+    "PlayerOwnedPriorityTarget",
+    "PlayerShrine",
+    "PlayerUnit",
+    "PracticeTargets",
+    "RangedFighter",
+    "SiegeWeapon",
+    "TakesIncreasedDamageFromTowers",
+    "TakesReducedDamageFromPlayerAttacks",
+    "Tower",
+    "TrainingFacility",
+    "Undead",
+    "UnreachableForBigEnemiesDueToLevelDesign",
+    "UselessWallThatDoesNotBlockPath",
+    "Vampire",
+    "VodooCursed",
+    "VulnerableVsRanged",
+    "Wall",
+    "WallOrTower"
+  ],
+  "caps": {
+    "entities": {
+      "default": 300,
+      "max": 2000
+    },
+    "units": {
+      "default": 200,
+      "max": 1000
+    },
+    "projectiles": {
+      "default": 400,
+      "max": 2000
+    },
+    "perTemplate": {
+      "default": 100,
+      "max": 1000
+    },
+    "firingsPerFrame": {
+      "default": 400,
+      "max": 4000
+    },
+    "actionsPerFrame": {
+      "default": 4000,
+      "max": 40000
+    }
+  },
+  "presets": [
+    {
+      "id": "timer",
+      "name": "Timer",
+      "description": "Sends \"{signal}\" every {seconds} s ({during}). Inputs: enable, disable, toggle.",
+      "category": "Logic",
+      "kind": "logic",
+      "params": {
+        "seconds": {
+          "type": "number",
+          "default": 5,
+          "min": 0.1,
+          "description": "Seconds between signals."
+        },
+        "signal": {
+          "type": "signal",
+          "default": "tick",
+          "description": "The signal it sends."
+        },
+        "to": {
+          "type": "entities",
+          "default": "all",
+          "description": "Who receives it (\"all\" = every listener)."
+        },
+        "during": {
+          "type": "enum",
+          "default": "always",
+          "options": [
+            "always",
+            "night",
+            "day"
+          ],
+          "description": "When it runs."
+        }
+      },
+      "rules": [
+        {
+          "id": "timer",
+          "when": {
+            "on": "every",
+            "seconds": "{seconds}",
+            "during": "{during}"
+          },
+          "do": [
+            {
+              "do": "signal",
+              "name": "{signal}",
+              "to": "{to}",
+              "value": "event.value"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "counter",
+      "name": "Counter",
+      "description": "Counts \"{input}\" signals; at {target} it sends \"{signal}\" and starts again.",
+      "category": "Logic",
+      "kind": "logic",
+      "params": {
+        "input": {
+          "type": "signal",
+          "default": "count",
+          "description": "The signal it counts."
+        },
+        "target": {
+          "type": "number",
+          "default": 3,
+          "min": 1.0,
+          "description": "How many to count."
+        },
+        "signal": {
+          "type": "signal",
+          "default": "done",
+          "description": "Sent when it reaches the target."
+        },
+        "to": {
+          "type": "entities",
+          "default": "all",
+          "description": "Who receives it."
+        }
+      },
+      "vars": {
+        "count": 0
+      },
+      "rules": [
+        {
+          "id": "count",
+          "when": {
+            "on": "signal",
+            "name": "{input}"
+          },
+          "do": [
+            {
+              "do": "addVar",
+              "name": "count",
+              "value": 1
+            }
+          ]
+        },
+        {
+          "id": "reach",
+          "when": {
+            "on": "varChanged",
+            "name": "count"
+          },
+          "if": "self.$count >= {target}",
+          "do": [
+            {
+              "do": "setVar",
+              "name": "count",
+              "value": 0
+            },
+            {
+              "do": "signal",
+              "name": "{signal}",
+              "to": "{to}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "relay",
+      "name": "Relay (delay)",
+      "description": "Passes \"{input}\" on as \"{signal}\" after {seconds} s.",
+      "category": "Logic",
+      "kind": "logic",
+      "params": {
+        "input": {
+          "type": "signal",
+          "default": "in",
+          "description": "The signal it listens for."
+        },
+        "seconds": {
+          "type": "number",
+          "default": 1,
+          "min": 0.0,
+          "description": "Delay."
+        },
+        "signal": {
+          "type": "signal",
+          "default": "out",
+          "description": "The signal it sends."
+        },
+        "to": {
+          "type": "entities",
+          "default": "all",
+          "description": "Who receives it."
+        }
+      },
+      "rules": [
+        {
+          "id": "relay",
+          "when": {
+            "on": "signal",
+            "name": "{input}"
+          },
+          "do": [
+            {
+              "do": "signal",
+              "name": "{signal}",
+              "to": "{to}",
+              "value": "event.value",
+              "delay": "{seconds}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gate",
+      "name": "Gate (AND)",
+      "description": "Sends \"{signal}\" once it has heard each of \"{a}\" and \"{b}\" (then resets).",
+      "category": "Logic",
+      "kind": "logic",
+      "params": {
+        "a": {
+          "type": "signal",
+          "default": "a",
+          "description": "First input."
+        },
+        "b": {
+          "type": "signal",
+          "default": "b",
+          "description": "Second input."
+        },
+        "signal": {
+          "type": "signal",
+          "default": "open",
+          "description": "Sent when both arrived."
+        },
+        "to": {
+          "type": "entities",
+          "default": "all",
+          "description": "Who receives it."
+        }
+      },
+      "vars": {
+        "gotA": false,
+        "gotB": false
+      },
+      "rules": [
+        {
+          "id": "a",
+          "when": {
+            "on": "signal",
+            "name": "{a}"
+          },
+          "do": [
+            {
+              "do": "setVar",
+              "name": "gotA",
+              "value": "true"
+            }
+          ]
+        },
+        {
+          "id": "b",
+          "when": {
+            "on": "signal",
+            "name": "{b}"
+          },
+          "do": [
+            {
+              "do": "setVar",
+              "name": "gotB",
+              "value": "true"
+            }
+          ]
+        },
+        {
+          "id": "both",
+          "when": "varChanged",
+          "if": "self.$gotA and self.$gotB",
+          "do": [
+            {
+              "do": "setVar",
+              "name": "gotA",
+              "value": "false"
+            },
+            {
+              "do": "setVar",
+              "name": "gotB",
+              "value": "false"
+            },
+            {
+              "do": "signal",
+              "name": "{signal}",
+              "to": "{to}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "toggle-switch",
+      "name": "Toggle",
+      "description": "Each \"{input}\" flips it, sending \"{on}\" or \"{off}\".",
+      "category": "Logic",
+      "kind": "logic",
+      "params": {
+        "input": {
+          "type": "signal",
+          "default": "flip",
+          "description": "The signal that flips it."
+        },
+        "on": {
+          "type": "signal",
+          "default": "on",
+          "description": "Sent when it turns on."
+        },
+        "off": {
+          "type": "signal",
+          "default": "off",
+          "description": "Sent when it turns off."
+        },
+        "to": {
+          "type": "entities",
+          "default": "all",
+          "description": "Who receives it."
+        }
+      },
+      "vars": {
+        "on": false
+      },
+      "rules": [
+        {
+          "id": "flip",
+          "when": {
+            "on": "signal",
+            "name": "{input}"
+          },
+          "do": [
+            {
+              "do": "setVar",
+              "name": "on",
+              "value": "not self.$on"
+            },
+            {
+              "do": "if",
+              "cond": "self.$on",
+              "then": [
+                {
+                  "do": "signal",
+                  "name": "{on}",
+                  "to": "{to}"
+                }
+              ],
+              "else": [
+                {
+                  "do": "signal",
+                  "name": "{off}",
+                  "to": "{to}"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "random-router",
+      "name": "Random router",
+      "description": "Passes \"{input}\" on as \"{a}\" or \"{b}\" at random ({chanceA} for the first).",
+      "category": "Logic",
+      "kind": "logic",
+      "params": {
+        "input": {
+          "type": "signal",
+          "default": "in",
+          "description": "The signal it listens for."
+        },
+        "a": {
+          "type": "signal",
+          "default": "left",
+          "description": "One output."
+        },
+        "b": {
+          "type": "signal",
+          "default": "right",
+          "description": "The other output."
+        },
+        "chanceA": {
+          "type": "number",
+          "default": 0.5,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "Chance of the first output."
+        },
+        "to": {
+          "type": "entities",
+          "default": "all",
+          "description": "Who receives it."
+        }
+      },
+      "rules": [
+        {
+          "id": "route",
+          "when": {
+            "on": "signal",
+            "name": "{input}"
+          },
+          "do": [
+            {
+              "do": "if",
+              "cond": "chance({chanceA})",
+              "then": [
+                {
+                  "do": "signal",
+                  "name": "{a}",
+                  "to": "{to}"
+                }
+              ],
+              "else": [
+                {
+                  "do": "signal",
+                  "name": "{b}",
+                  "to": "{to}"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "spawner",
+      "name": "Spawner",
+      "description": "On \"{input}\", spawns {count} {unit} here.",
+      "category": "Logic",
+      "kind": "logic",
+      "params": {
+        "input": {
+          "type": "signal",
+          "default": "spawn",
+          "description": "The signal that spawns."
+        },
+        "unit": {
+          "type": "template",
+          "default": "vanilla:E Racer",
+          "description": "What it spawns."
+        },
+        "count": {
+          "type": "number",
+          "default": 1,
+          "min": 1.0,
+          "max": 100.0,
+          "description": "How many."
+        },
+        "spread": {
+          "type": "number",
+          "default": 2,
+          "min": 0.0,
+          "description": "Scatter radius."
+        }
+      },
+      "rules": [
+        {
+          "id": "spawn",
+          "when": {
+            "on": "signal",
+            "name": "{input}"
+          },
+          "do": [
+            {
+              "do": "spawn",
+              "entity": "{unit}",
+              "count": "{count}",
+              "at": "self",
+              "spread": "{spread}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "lever",
+      "name": "Lever",
+      "description": "The king pulls it ({when}) to send \"{signal}\".",
+      "category": "Logic",
+      "kind": "logic",
+      "params": {
+        "prompt": {
+          "type": "text",
+          "default": "Pull the lever",
+          "description": "Shown when the king is near."
+        },
+        "signal": {
+          "type": "signal",
+          "default": "pulled",
+          "description": "The signal it sends."
+        },
+        "to": {
+          "type": "entities",
+          "default": "all",
+          "description": "Who receives it."
+        },
+        "cost": {
+          "type": "number",
+          "default": 0,
+          "min": 0.0,
+          "description": "Gold the king pays."
+        },
+        "when": {
+          "type": "enum",
+          "default": "day",
+          "options": [
+            "day",
+            "night",
+            "always"
+          ],
+          "description": "When it can be used."
+        },
+        "repeat": {
+          "type": "bool",
+          "default": true,
+          "description": "Can be pulled again."
+        }
+      },
+      "rules": [
+        {
+          "id": "pull",
+          "when": "interact",
+          "do": [
+            {
+              "do": "signal",
+              "name": "{signal}",
+              "to": "{to}"
+            }
+          ]
+        }
+      ],
+      "visual": {
+        "mesh": "mesh:Graveyard Wall Post"
+      },
+      "interact": {
+        "prompt": "{prompt}",
+        "cost": "{cost}",
+        "when": "{when}",
+        "repeat": "{repeat}",
+        "radius": 3
+      }
+    },
+    {
+      "id": "pressure-plate",
+      "name": "Pressure plate",
+      "description": "Sends \"{pressed}\" when a {watch} steps on it and \"{released}\" when it's empty.",
+      "category": "Logic",
+      "kind": "area",
+      "params": {
+        "size": {
+          "type": "number",
+          "default": 3,
+          "min": 0.5,
+          "description": "Width of the square plate."
+        },
+        "watch": {
+          "type": "filter",
+          "default": "unit or king",
+          "description": "What presses it."
+        },
+        "pressed": {
+          "type": "signal",
+          "default": "pressed",
+          "description": "Sent when something steps on."
+        },
+        "released": {
+          "type": "signal",
+          "default": "released",
+          "description": "Sent when it's empty again."
+        },
+        "to": {
+          "type": "entities",
+          "default": "all",
+          "description": "Who receives them."
+        }
+      },
+      "rules": [
+        {
+          "id": "press",
+          "when": "occupied",
+          "do": [
+            {
+              "do": "signal",
+              "name": "{pressed}",
+              "to": "{to}"
+            }
+          ]
+        },
+        {
+          "id": "release",
+          "when": "empty",
+          "do": [
+            {
+              "do": "signal",
+              "name": "{released}",
+              "to": "{to}"
+            }
+          ]
+        }
+      ],
+      "area": {
+        "shape": {
+          "rect": {
+            "size": [
+              "{size}",
+              "{size}"
+            ]
+          }
+        },
+        "watch": "{watch}",
+        "show": "fill",
+        "color": "#8a7a5a"
+      }
+    },
+    {
+      "id": "door",
+      "name": "Door",
+      "description": "A solid door. Signals \"open\" and \"closed\" swing it (poses).",
+      "category": "Logic",
+      "kind": "prop",
+      "params": {
+        "angle": {
+          "type": "number",
+          "default": 90,
+          "description": "How far it swings open, degrees."
+        },
+        "startOpen": {
+          "type": "bool",
+          "default": false,
+          "description": "Starts open."
+        }
+      },
+      "rules": [
+        {
+          "id": "start",
+          "when": "spawn",
+          "if": "{startOpen}",
+          "do": [
+            {
+              "do": "signal",
+              "name": "open",
+              "to": "self"
+            }
+          ]
+        }
+      ],
+      "visual": {
+        "mesh": "mesh:Totend Gate Segment"
+      },
+      "body": {
+        "box": [
+          4,
+          0.6
+        ],
+        "height": 3,
+        "solid": true
+      },
+      "mover": {
+        "pose": {
+          "open": {
+            "rotY": "{angle}"
+          },
+          "closed": {
+            "rotY": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "moving-wall",
+      "name": "Moving wall",
+      "description": "A solid wall that moves along a path ({mode}) at {speed} m/s. Inputs: start, stop, reverse.",
+      "category": "Logic",
+      "kind": "prop",
+      "params": {
+        "path": {
+          "type": "entity",
+          "default": "@path",
+          "description": "A placed path (@name)."
+        },
+        "speed": {
+          "type": "number",
+          "default": 2,
+          "min": 0.0,
+          "description": "m/s."
+        },
+        "mode": {
+          "type": "enum",
+          "default": "pingpong",
+          "options": [
+            "loop",
+            "pingpong",
+            "once"
+          ],
+          "description": "How it travels."
+        },
+        "wait": {
+          "type": "number",
+          "default": 1,
+          "min": 0.0,
+          "description": "Seconds paused at each point."
+        }
+      },
+      "visual": {
+        "mesh": "mesh:Wall Segment lvl2"
+      },
+      "body": {
+        "box": [
+          4,
+          1
+        ],
+        "height": 3,
+        "solid": true
+      },
+      "mover": {
+        "path": "{path}",
+        "mode": "{mode}",
+        "speed": "{speed}",
+        "wait": "{wait}"
+      }
+    },
+    {
+      "id": "sign",
+      "name": "Sign",
+      "description": "Shows \"{text}\" when the king comes near.",
+      "category": "Logic",
+      "kind": "prop",
+      "params": {
+        "text": {
+          "type": "text",
+          "default": "Beware!",
+          "description": "The message."
+        },
+        "range": {
+          "type": "number",
+          "default": 4,
+          "min": 1.0,
+          "description": "How near, metres."
+        }
+      },
+      "rules": [
+        {
+          "id": "read",
+          "when": {
+            "on": "near",
+            "range": "={range}",
+            "filter": "king"
+          },
+          "do": [
+            {
+              "do": "message",
+              "text": "{text}"
+            }
+          ],
+          "cooldown": 10.0
+        }
+      ],
+      "visual": {
+        "mesh": "mesh:Gravestone"
+      }
+    },
+    {
+      "id": "gold-pickup",
+      "name": "Gold pickup",
+      "description": "The king collects it for {amount} gold.",
+      "category": "Logic",
+      "kind": "pickup",
+      "params": {
+        "amount": {
+          "type": "number",
+          "default": 5,
+          "description": "Gold."
+        }
+      },
+      "rules": [
+        {
+          "id": "collect",
+          "when": "pickup",
+          "do": [
+            {
+              "do": "gold",
+              "amount": "{amount}",
+              "at": "self"
+            }
+          ]
+        }
+      ],
+      "visual": {
+        "mesh": "mesh:Stepping Stone"
+      },
+      "pickup": {
+        "by": "king",
+        "radius": 1.5,
+        "magnet": 3
+      }
+    },
+    {
+      "id": "hud-counter",
+      "name": "HUD counter",
+      "description": "Each \"{input}\" adds 1 to the level variable ${var}; at {target} it sends \"{signal}\".",
+      "category": "Logic",
+      "kind": "logic",
+      "params": {
+        "var": {
+          "type": "var",
+          "default": "count",
+          "description": "A level variable (declare it in logic.vars)."
+        },
+        "input": {
+          "type": "signal",
+          "default": "add",
+          "description": "The signal that counts."
+        },
+        "target": {
+          "type": "number",
+          "default": 10,
+          "min": 1.0,
+          "description": "The goal."
+        },
+        "signal": {
+          "type": "signal",
+          "default": "goal",
+          "description": "Sent at the goal."
+        }
+      },
+      "rules": [
+        {
+          "id": "add",
+          "when": {
+            "on": "signal",
+            "name": "{input}"
+          },
+          "do": [
+            {
+              "do": "addVar",
+              "name": "${var}",
+              "value": 1
+            }
+          ]
+        },
+        {
+          "id": "goal",
+          "when": {
+            "on": "signal",
+            "name": "{input}"
+          },
+          "if": "${var} >= {target}",
+          "do": [
+            {
+              "do": "signal",
+              "name": "{signal}",
+              "to": "all"
+            }
+          ],
+          "once": true
+        }
+      ]
+    },
+    {
+      "id": "split-on-death",
+      "name": "Split on death",
+      "description": "Splits into {count} copies, {depth} times.",
+      "category": "Enemy",
+      "params": {
+        "count": {
+          "type": "number",
+          "default": 2,
+          "min": 1.0,
+          "max": 6.0,
+          "description": "Copies per split."
+        },
+        "depth": {
+          "type": "number",
+          "default": 3,
+          "min": 1.0,
+          "max": 6.0,
+          "description": "Generations."
+        },
+        "into": {
+          "type": "template",
+          "default": "=self.template",
+          "description": "What it splits into (default: itself)."
+        },
+        "shrink": {
+          "type": "number",
+          "default": 0.75,
+          "min": 0.1,
+          "max": 1.0,
+          "description": "Size of each generation relative to the last."
+        }
+      },
+      "vars": {
+        "gen": 0
+      },
+      "rules": [
+        {
+          "id": "split",
+          "when": "death",
+          "if": "self.$gen < {depth}",
+          "do": [
+            {
+              "do": "spawn",
+              "entity": "{into}",
+              "count": "{count}",
+              "at": "self",
+              "spread": 1.5,
+              "elite": "inherit",
+              "then": [
+                {
+                  "do": "setVar",
+                  "target": "spawned",
+                  "name": "gen",
+                  "value": "self.$gen + 1"
+                },
+                {
+                  "do": "setStat",
+                  "target": "spawned",
+                  "stat": "scale",
+                  "mult": "{shrink}"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "spawn-on-death",
+      "name": "Spawn on death",
+      "description": "When it dies, {count} {unit} appear where it fell.",
+      "category": "Enemy",
+      "params": {
+        "unit": {
+          "type": "template",
+          "default": "vanilla:E Racer",
+          "description": "What appears."
+        },
+        "count": {
+          "type": "number",
+          "default": 1,
+          "min": 1.0,
+          "max": 20.0,
+          "description": "How many."
+        }
+      },
+      "rules": [
+        {
+          "id": "spawn-on-death",
+          "when": "death",
+          "do": [
+            {
+              "do": "spawn",
+              "entity": "{unit}",
+              "count": "{count}",
+              "at": "self",
+              "spread": 1,
+              "elite": "inherit"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aura",
+      "name": "Aura",
+      "description": "Every second, gives {status} to {who} within {range} m.",
+      "category": "Enemy",
+      "params": {
+        "status": {
+          "type": "status",
+          "description": "The status (from the pack's statuses)."
+        },
+        "who": {
+          "type": "filter",
+          "default": "ally and unit",
+          "description": "Who gets it."
+        },
+        "range": {
+          "type": "number",
+          "default": 6,
+          "min": 0.5,
+          "description": "Metres."
+        }
+      },
+      "rules": [
+        {
+          "id": "aura",
+          "when": {
+            "on": "every",
+            "seconds": 1
+          },
+          "do": [
+            {
+              "do": "applyStatus",
+              "status": "{status}",
+              "for": 1.2,
+              "target": "all('{who}', {range})"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "explode-near",
+      "name": "Explode when near",
+      "description": "When a {filter} is within {trigger} m, it explodes for {damage} damage in {radius} m.",
+      "category": "Enemy",
+      "params": {
+        "filter": {
+          "type": "filter",
+          "default": "foe",
+          "description": "What sets it off."
+        },
+        "trigger": {
+          "type": "number",
+          "default": 2,
+          "min": 0.5,
+          "description": "Trigger range."
+        },
+        "damage": {
+          "type": "number",
+          "default": 40,
+          "min": 0.0,
+          "description": "Damage."
+        },
+        "radius": {
+          "type": "number",
+          "default": 3,
+          "min": 0.5,
+          "description": "Blast radius."
+        }
+      },
+      "rules": [
+        {
+          "id": "explode",
+          "when": {
+            "on": "near",
+            "range": "={trigger}",
+            "filter": "{filter}"
+          },
+          "do": [
+            {
+              "do": "damage",
+              "target": "all('foe', {radius})",
+              "amount": "{damage}"
+            },
+            {
+              "do": "effect",
+              "fx": "explosion",
+              "at": "self"
+            },
+            {
+              "do": "destroy",
+              "drops": true
+            }
+          ],
+          "once": true
+        }
+      ]
+    },
+    {
+      "id": "multiply",
+      "name": "Multiply",
+      "description": "Every {seconds} s at night it makes a copy of itself, up to {max} alive.",
+      "category": "Enemy",
+      "params": {
+        "seconds": {
+          "type": "number",
+          "default": 8,
+          "min": 1.0,
+          "description": "Seconds between copies."
+        },
+        "max": {
+          "type": "number",
+          "default": 40,
+          "min": 1.0,
+          "max": 200.0,
+          "description": "Cap on live copies."
+        }
+      },
+      "rules": [
+        {
+          "id": "multiply",
+          "when": {
+            "on": "every",
+            "seconds": "{seconds}",
+            "during": "night"
+          },
+          "if": "count('ally and where(it.template == self.template)') < {max}",
+          "do": [
+            {
+              "do": "spawn",
+              "entity": "=self.template",
+              "at": "pointNear(self, 2)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "regenerate",
+      "name": "Regenerate",
+      "description": "Heals {amount} hp every {seconds} s.",
+      "category": "Enemy",
+      "params": {
+        "amount": {
+          "type": "number",
+          "default": 5,
+          "min": 0.0,
+          "description": "Hit points per tick."
+        },
+        "seconds": {
+          "type": "number",
+          "default": 1,
+          "min": 0.1,
+          "description": "Seconds between heals."
+        }
+      },
+      "rules": [
+        {
+          "id": "regenerate",
+          "when": {
+            "on": "every",
+            "seconds": "{seconds}"
+          },
+          "if": "self.hpPct < 1",
+          "do": [
+            {
+              "do": "heal",
+              "amount": "{amount}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "blink-away",
+      "name": "Blink away",
+      "description": "Below {pct} health, once, it teleports near {to} and heals {heal}.",
+      "category": "Enemy",
+      "params": {
+        "pct": {
+          "type": "number",
+          "default": 0.5,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "Health fraction."
+        },
+        "to": {
+          "type": "position",
+          "default": "castle",
+          "description": "Where it blinks to."
+        },
+        "heal": {
+          "type": "number",
+          "default": 0.3,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "Fraction of max hp healed."
+        }
+      },
+      "rules": [
+        {
+          "id": "blink",
+          "when": {
+            "on": "hpBelow",
+            "pct": "{pct}"
+          },
+          "do": [
+            {
+              "do": "effect",
+              "fx": "smoke",
+              "at": "self"
+            },
+            {
+              "do": "teleport",
+              "at": "pointNear({to}, 10)"
+            },
+            {
+              "do": "heal",
+              "amount": "self.maxHp * {heal}"
+            }
+          ],
+          "once": true
+        }
+      ]
+    }
+  ]
+}

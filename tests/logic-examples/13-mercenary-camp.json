@@ -1,0 +1,111 @@
+{
+ "example": 13,
+ "title": "Mercenary camp",
+ "doc": "Expressiveness check 13",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex13",
+  "name": "Example 13: Mercenary camp",
+  "units": [
+   {
+    "id": "merc",
+    "side": "player",
+    "base": "vanilla:P Melee",
+    "name": "Mercenary",
+    "rules": [
+     {
+      "when": "dawn",
+      "do": [
+       {
+        "do": "destroy",
+        "silent": true
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "levels": [
+   {
+    "id": "ex13",
+    "name": "Example 13: Mercenary camp",
+    "host": "Nordfels",
+    "logic": {
+     "places": [
+      {
+       "kind": "area",
+       "id": "camp",
+       "pos": [
+        10,
+        0,
+        -10
+       ],
+       "area": {
+        "shape": {
+         "circle": {
+          "radius": 4
+         }
+        },
+        "watch": "king",
+        "tick": 3
+       },
+       "rules": [
+        {
+         "when": "inside",
+         "if": "isDay and gold >= 10",
+         "cooldown": 60,
+         "do": [
+          {
+           "do": "gold",
+           "amount": -10
+          },
+          {
+           "do": "spawn",
+           "entity": "merc",
+           "count": 3,
+           "at": "self",
+           "spread": 2,
+           "team": "player",
+           "then": [
+            {
+             "do": "command",
+             "target": "spawned",
+             "order": "follow"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "cmd": "agent build castle"
+   },
+   {
+    "do": [
+     {
+      "do": "gold",
+      "amount": 20
+     },
+     {
+      "do": "teleport",
+      "target": "king",
+      "at": "vec(10, -10)"
+     }
+    ]
+   },
+   {
+    "expect": "count('is:merc') == 3",
+    "within": 6
+   }
+  ]
+ }
+}

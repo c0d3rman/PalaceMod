@@ -7,8 +7,9 @@ using UnityEngine;
 using Object = UnityEngine.Object;
 
 /*
-    The Enemy Studio's live test: N copies of the enemy against a few defenders, on the stage, in the Studio's own edit
-    scene (no reload, no night).
+    The Enemy Studio's live test: N copies of the enemy against a few defenders, on a platform of its own outside the
+    level (ArenaZone: its own pathfinding graph, and target searches that never cross its edge), in the Studio's edit
+    scene (no reload, no night). The turntable is hidden while it runs and comes back when it's cleared.
 
     The game's attackers only act at night (AutoAttack.Update and its overrides return in the day), so while a fight
     runs, an attack script on a unit marked BuilderArenaUnit runs as if it were night: EnemyStudioManager's patch flips
@@ -89,17 +90,18 @@ namespace PalaceMod.Builder.Studio.Enemies
             if (!EnemyStage.Ready) throw new InvalidOperationException("no stage");
             var template = BuilderServices.Units.Resolve(pack, unitRef, out string error) ?? throw new InvalidOperationException(error ?? "unit not found");
             before = new HashSet<Hp>(Object.FindObjectsOfType<Hp>());
-            center = EnemyStage.Point;
+            // Its own ground, outside the level (ArenaZone): no level geometry, no king, no buildings.
+            ArenaZone.Create(StudioScene.Scene, EnemyStage.Point.y);
+            center = ArenaZone.Center;
+            EnemyStage.SetVisible(false);
             DamageToDefenders = DamageToEnemies = 0f;
             FirstKill = LastKill = null;
             Elapsed = 0f;
             Result = "";
             HasResult = false;
 
-            // Defenders in a ring on the stage's side toward the camera's left; enemies come from 16 m away.
-            var away = Quaternion.Euler(0f, EnemyStage.Yaw + 90f, 0f) * Vector3.forward;
-            away.y = 0f;
-            away = away.sqrMagnitude < 1e-4f ? Vector3.forward : away.normalized;
+            // Defenders in an arc on one side of the platform; enemies come from 16 m away on the other.
+            var away = Vector3.right;
             int total = Defenders.Sum(d => Mathf.Clamp(d.Count, 0, 20));
             int k = 0;
             foreach (var d in Defenders)
@@ -109,32 +111,34 @@ namespace PalaceMod.Builder.Studio.Enemies
                 for (int i = 0; i < Mathf.Clamp(d.Count, 0, 20); i++, k++)
                 {
                     float a = total <= 1 ? 0f : (k / (float)total - 0.5f) * 140f;
-                    var pos = EnemyStage.Snap(center + Quaternion.Euler(0f, a, 0f) * away * 3f);
+                    var pos = ArenaZone.At(-away * (Distance * 0.5f) + Quaternion.Euler(0f, a, 0f) * away * 3f);
                     var go = Object.Instantiate(unit.Prefab, pos, Quaternion.LookRotation(away));
                     go.name = "PalaceBuilder arena " + d.Id;
                     go.AddComponent<BuilderArenaUnit>();
+                    ArenaZone.Bind(go);
                     if (!go.activeSelf) go.SetActive(true);
                     Track(go, enemy: false);
                 }
             }
-            var spawnAt = EnemyStage.Snap(center + away * Distance);
+            var spawnAt = -away * (Distance * 0.5f) + away * Distance;
             var tagged = template.GetComponentInChildren<TaggedObject>(true);
             bool flying = tagged != null && tagged.Tags.Contains(TagManager.ETag.Flying);
             for (int i = 0; i < Mathf.Clamp(Count, 1, 50); i++)
             {
-                var jitter = Quaternion.Euler(0f, (i % 7 - 3) * 9f, 0f) * away * (i / 7 * 1.5f);
-                var pos = EnemyStage.Snap(spawnAt + jitter + Vector3.Cross(Vector3.up, away) * ((i % 7) - 3) * 1.2f);
+                var jitter = away * (i / 7 * 1.5f) + Vector3.Cross(Vector3.up, away) * ((i % 7) - 3) * 1.2f;
+                var pos = ArenaZone.At(spawnAt + jitter);
                 if (flying) pos += Vector3.up * 5f;
                 var go = Object.Instantiate(template, pos, Quaternion.LookRotation(-away));
                 go.name = "PalaceBuilder arena enemy";
                 go.AddComponent<BuilderArenaUnit>().enemy = true;
+                ArenaZone.Bind(go);
                 if (!go.activeSelf) go.SetActive(true);
                 Prepare(go);
                 Track(go, enemy: true);
             }
             Running = true;
             Version++;
-            EnemyStage.FrameArea(center + away * (Distance * 0.5f), Distance * 0.9f);
+            EnemyStage.FrameArea(center, Distance * 0.9f);
             GameplayImpact.Mark("Builder: enemy studio arena");
             return $"fight: {EnemiesTotal}x {unitRef} vs {DefendersTotal} defenders";
         }
@@ -179,6 +183,7 @@ namespace PalaceMod.Builder.Studio.Enemies
                 if (t == null || !t.Tags.Contains(TagManager.ETag.EnemyOwned)) continue;
                 if ((hp.transform.position - center).sqrMagnitude > 60f * 60f) continue;
                 hp.gameObject.AddComponent<BuilderArenaUnit>().enemy = true;
+                ArenaZone.Bind(hp.gameObject); // too late for its Start if it already ran; it was spawned on the arena anyway
                 hp.coinCount = 0;
                 tracked.Add(new Tracked { Hp = hp, Enemy = true, LastHp = hp.HpValue });
             }
@@ -225,6 +230,14 @@ namespace PalaceMod.Builder.Studio.Enemies
             Running = false;
             foreach (var marker in Object.FindObjectsOfType<BuilderArenaUnit>(true))
                 if (marker != null) Object.Destroy(marker.gameObject);
+            bool hadZone = ArenaZone.Active;
+            ArenaZone.Remove();
+            if (hadZone)
+            {
+                // Back to the turntable.
+                EnemyStage.SetVisible(true);
+                EnemyStage.ResetView();
+            }
             tracked.Clear();
             Version++;
             HasResult = false;

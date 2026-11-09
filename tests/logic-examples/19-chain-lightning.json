@@ -1,0 +1,162 @@
+{
+ "example": 19,
+ "title": "Chain lightning",
+ "doc": "Expressiveness check 19",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex19",
+  "name": "Example 19: Chain lightning",
+  "units": [
+   {
+    "id": "stormcaller",
+    "side": "player",
+    "base": "vanilla:P Support Mage",
+    "name": "Stormcaller",
+    "attacks": [
+     {
+      "replace": true,
+      "cooldown": 3,
+      "range": 15,
+      "targeting": [
+       "foe"
+      ],
+      "launch": {
+       "entity": "spark",
+       "from": [
+        0,
+        2,
+        0
+       ]
+      }
+     }
+    ]
+   }
+  ],
+  "entities": [
+   {
+    "id": "spark",
+    "kind": "projectile",
+    "vars": {
+     "jumps": 3,
+     "power": 30
+    },
+    "projectile": {
+     "speed": 30,
+     "homing": 1,
+     "hits": "foe"
+    },
+    "rules": [
+     {
+      "when": "impact",
+      "do": [
+       {
+        "do": "damage",
+        "target": "other",
+        "amount": "self.$power",
+        "source": "self.owner"
+       },
+       {
+        "do": "if",
+        "cond": "self.$jumps > 0 and count('foe and not has:shocked', 8) > 0",
+        "then": [
+         {
+          "do": "applyStatus",
+          "target": "other",
+          "status": "shocked",
+          "for": 0.5
+         },
+         {
+          "do": "launch",
+          "entity": "spark",
+          "from": "other",
+          "toward": "nearest('foe and not has:shocked', 8)",
+          "then": [
+           {
+            "do": "setVar",
+            "target": "spawned",
+            "name": "jumps",
+            "value": "self.$jumps - 1"
+           },
+           {
+            "do": "setVar",
+            "target": "spawned",
+            "name": "power",
+            "value": "self.$power * 0.7"
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "statuses": [
+   {
+    "id": "shocked",
+    "duration": 0.5
+   }
+  ],
+  "levels": [
+   {
+    "id": "ex19",
+    "name": "Example 19: Chain lightning",
+    "host": "Nordfels",
+    "logic": {
+     "vars": {
+      "sparks": 0
+     },
+     "rules": [
+      {
+       "note": "fixture observer",
+       "when": {
+        "on": "spawn",
+        "of": "is:spark"
+       },
+       "do": [
+        {
+         "do": "addVar",
+         "name": "sparks",
+         "value": 1
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "cmd": "agent build castle"
+   },
+   {
+    "cmd": "night"
+   },
+   {
+    "do": [
+     {
+      "do": "spawn",
+      "entity": "stormcaller",
+      "team": "player",
+      "at": "vec(-4, -20)"
+     },
+     {
+      "do": "spawn",
+      "entity": "vanilla:E Ogre",
+      "count": 4,
+      "at": "vec(-4, -30)",
+      "spread": 3
+     }
+    ]
+   },
+   {
+    "expect": "$sparks >= 2",
+    "within": 20
+   }
+  ]
+ }
+}

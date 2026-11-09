@@ -39,7 +39,7 @@ from pathlib import Path
 
 VERSION = "1.0"
 HERE = Path(__file__).resolve().parent
-PACK_VERSION = 2
+PACK_VERSION = 3
 
 
 class Fail(Exception):
@@ -465,12 +465,60 @@ def library_origins(root):
     return found
 
 
+def migrate_pack(obj):
+    """Upgrades pack JSON in place to PACK_VERSION, as the mod's Migrations do (Model/PackSerializer.cs)."""
+    v = obj.get("version") if isinstance(obj.get("version"), int) else 0
+    if v < 2:
+        for lv in obj.get("levels") or []:
+            adds = ((lv.get("buildSlots") or {}).get("add")) or []
+            ids = {a.get("id") for a in adds if isinstance(a, dict)}
+            for a in adds:
+                act, lvl = a.pop("activator", None), a.pop("activatorLevel", None)
+                if isinstance(act, str) and "requires" not in a:
+                    a["requires"] = {"slot": "add:" + act if act in ids else act, "level": lvl if isinstance(lvl, int) else 0}
+    if v < 3:
+        # behaviours [{"type": "SpawnOnDeath", "unit": U}] -> a rule at the front of rules (the unit factory runs it
+        # on the game's own enemyToSpawnOnDeath, so it plays as before).
+        for u in obj.get("units") or []:
+            bs = u.pop("behaviours", None)
+            if not isinstance(bs, list):
+                continue
+            rules, unknown = [], []
+            for b in bs:
+                if isinstance(b, dict) and b.get("type") == "SpawnOnDeath" and isinstance(b.get("unit"), str):
+                    rules.append({"when": "death", "do": [{"do": "spawn", "entity": b["unit"], "at": "self", "elite": "inherit"}]})
+                else:
+                    unknown.append(b)
+            if unknown:
+                u["behaviours"] = unknown
+            if rules:
+                u["rules"] = rules + (u.get("rules") or [])
+    if v and v < PACK_VERSION:
+        obj["version"] = PACK_VERSION
+    return obj
+
+
+LOGIC_KINDS = ("entities", "statuses", "presets")
+LOGIC_KIND_NAME = {"entities": "entity", "statuses": "status", "presets": "preset"}
+
+
 def load_library(ref):
     data = {"format": "palace-builder", "version": PACK_VERSION, "id": LIBRARY_ID, "name": "My library", "assets": {},
-            "units": [], "waveSets": [], "levels": []}
+            "units": [], "waveSets": [], "levels": [], "entities": [], "statuses": [], "presets": []}
+    # The behaviour engine's shared definitions: library/<entities|statuses|presets>/<id>.json, one item each.
+    for kind in LOGIC_KINDS:
+        for f in _item_files(ref.root, kind):
+            item = migrate_pack(json.loads(f.read_text(encoding="utf-8")))
+            d = (item.get(kind) or [None])[0]
+            if not isinstance(d, dict):
+                continue
+            d["id"] = f.stem
+            data[kind].append(d)
+            ref.snapshot[(kind, f.stem)] = json.dumps(d, sort_keys=True)
+            ref.meta[(kind, f.stem)] = item.get("library") or {}
     for kind in ("levels", "enemies"):
         for f in _item_files(ref.root, kind):
-            item = json.loads(f.read_text(encoding="utf-8"))
+            item = migrate_pack(json.loads(f.read_text(encoding="utf-8")))
             meta = item.get("library") or {}
             if kind == "levels":
                 if ref.origin and meta.get("origin") != ref.origin:
@@ -537,12 +585,26 @@ def save_library(ref, data):
         _write_json(ref.root / "enemies" / (u["id"] + ".json"), {"format": "palace-builder", "version": PACK_VERSION, "id": u["id"],
                     "name": u.get("name") or u["id"], "units": [u], "library": meta})
         ref.snapshot[key] = json.dumps(u, sort_keys=True)
+    for kind in LOGIC_KINDS:
+        for d in data.get(kind) or []:
+            if not ID_RE.match(d.get("id") or ""):
+                raise Fail(f"{LOGIC_KIND_NAME[kind]} id {d.get('id')!r}: 1-64 of a-z 0-9 . _ -")
+            key = (kind, d["id"])
+            seen.add(key)
+            if ref.snapshot.get(key) == json.dumps(d, sort_keys=True):
+                continue
+            meta = dict(ref.meta.get(key) or {"created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+            meta["kind"] = LOGIC_KIND_NAME[kind]
+            _write_json(ref.root / kind / (d["id"] + ".json"), {"format": "palace-builder", "version": PACK_VERSION, "id": d["id"],
+                        "name": d.get("name") or d["id"], kind: [d], "library": meta})
+            ref.snapshot[key] = json.dumps(d, sort_keys=True)
     for key in [k for k in ref.snapshot if isinstance(k, tuple) and k not in seen]:
         kind, iid = key
         f = ref.root / kind / (iid + ".json")
         if f.exists():
             (ref.root / "trash").mkdir(parents=True, exist_ok=True)
-            os.replace(f, ref.root / "trash" / f"{'level' if kind == 'levels' else 'enemy'}-{iid}-{stamp}.json")
+            prefix = {"levels": "level", "enemies": "enemy"}.get(kind, kind)
+            os.replace(f, ref.root / "trash" / f"{prefix}-{iid}-{stamp}.json")
         del ref.snapshot[key]
     assets = json.dumps(data.get("assets") or {}, sort_keys=True)
     if assets != ref.snapshot.get("assets"):
@@ -572,7 +634,7 @@ def load_pack(env, pack):
         return path, load_library(path)
     if not path.exists():
         raise Fail(f"No pack at {path}. Make a library level with `palace.py new <level> --host <map>`.")
-    return path, json.loads(path.read_text(encoding="utf-8"))
+    return path, migrate_pack(json.loads(path.read_text(encoding="utf-8")))
 
 
 def save_pack(path, data):
@@ -1323,16 +1385,41 @@ class Ops:
         entry = next((m for m in self.ref.scenery.get("meshes", []) if m["name"] == name), None)
         return (entry["home"] if entry else lv["host"]).split("(")[0]
 
+    @staticmethod
+    def tilt(v, field):
+        """A tilt angle (rotX/rotZ) as stored: degrees in -180..180."""
+        a = Ops.numbers([v], 1, field)[0]
+        return round(((a + 180) % 360) - 180, 2)
+
+    @staticmethod
+    def with_tilt(prop, op):
+        """Puts op's rotX/rotZ into the prop, right after rotY (left out at 0, as the game writes them)."""
+        out_ = {}
+        for k, v in prop.items():
+            if k in ("rotX", "rotZ"):
+                continue
+            out_[k] = v
+            if k == "rotY":
+                for t in ("rotX", "rotZ"):
+                    a = Ops.tilt(op[t], t) if t in op else prop.get(t, 0)
+                    if a:
+                        out_[t] = a
+        prop.clear()
+        prop.update(out_)
+        return prop
+
     def op_add_prop(self, op):
-        """{"op":"add_prop","id":"rock1","mesh":"Rock A","at":[x,z],"rotY":0,"scale":1,"solid":true,"colors":"original"}"""
+        """{"op":"add_prop","id":"rock1","mesh":"Rock A","at":[x,z],"rotY":0,"rotX":0,"rotZ":0,"scale":1,"solid":true,"colors":"original"}
+        rotY turns it (its heading); rotX tips it about its own sideways axis (+ front down; 90 lays an upright piece on
+        its back), rotZ rolls it onto its side. The tilts apply before rotY."""
         lv = self.level(op)
         props = ensure(lv, "props", [])
         pid = op.get("id") or self.new_prop_id(props, op["mesh"])
         if pid in self.prop_ids(props)[2]:
             raise Fail(f"prop {pid!r} exists (to re-apply a whole ops file, `apply --fresh`)")
         base = self.prop_base(lv, op["mesh"])
-        prop = {"id": pid, "base": base, "pos": self.pos(lv, op, strict=False), "rotY": float(op.get("rotY", 0)),
-                "scale": float(op.get("scale", 1)), "solid": bool(op.get("solid", True))}
+        prop = self.with_tilt({"id": pid, "base": base, "pos": self.pos(lv, op, strict=False), "rotY": float(op.get("rotY", 0)),
+                               "scale": float(op.get("scale", 1)), "solid": bool(op.get("solid", True))}, op)
         if (colors := self.prop_colors(lv, base, op.get("colors"))) is not None:
             prop["colors"] = colors
         props.append(prop)
@@ -1364,6 +1451,32 @@ class Ops:
             n += 1
         free[stem] = n
         return f"{stem}-{n}"
+
+    def op_set_prop(self, op):
+        """{"op":"set_prop","id":"rock1","at":[x,z],"rotY":90,"rotX":90,"rotZ":0,"scale":1.2,"solid":false,"colors":"original"}:
+        changes a placed prop, only the fields given ("ids": [...] for several; "pos": [x,y,z] instead of "at")."""
+        lv = self.level(op)
+        ids = op["ids"] if "ids" in op else [op["id"]]
+        found = {p.get("id"): p for p in lv.get("props") or [] if p.get("id") in ids}
+        if missing := [i for i in ids if i not in found]:
+            raise Fail(f"no prop {', '.join(map(repr, missing))} on this level")
+        for p in found.values():
+            if "at" in op or "pos" in op:
+                p["pos"] = self.pos(lv, op, strict=False)
+            if "rotY" in op:
+                p["rotY"] = float(op["rotY"])
+            if "scale" in op:
+                p["scale"] = float(op["scale"])
+            if "solid" in op:
+                p["solid"] = bool(op["solid"])
+            if "colors" in op:
+                c = self.prop_colors(lv, p["base"], op["colors"])
+                if c is None:
+                    p.pop("colors", None)
+                else:
+                    p["colors"] = c
+            self.with_tilt(p, op)
+        return f"set {len(found)} prop{'s' if len(found) != 1 else ''}"
 
     def op_remove_prop(self, op):
         lv = self.level(op)
@@ -1591,6 +1704,214 @@ class Ops:
         units[:] = [x for x in units if x.get("id") != u["id"]]
         units.append(u)
         return f"unit {u['id']}"
+
+    # ---- behaviour engine (level-building.md, "Behaviour"; logic-schema.json) -------------------------------------
+
+    def logic(self, op):
+        """The op's level's logic block (created on first use)."""
+        return ensure(self.level(op), "logic", {})
+
+    @staticmethod
+    def _upsert(lst, item, key="id"):
+        for i, x in enumerate(lst):
+            if isinstance(x, dict) and x.get(key) is not None and x.get(key) == item.get(key):
+                lst[i] = item
+                return "replaced"
+        lst.append(item)
+        return "added"
+
+    def _def(self, op, kind, what):
+        d = {k: v for k, v in op.items() if k not in ("op", "level")}
+        if not ID_RE.match(str(d.get("id", ""))):
+            raise Fail(f"{what} needs an \"id\" (1-64 of a-z 0-9 . _ -)")
+        return f"{what} {d['id']} " + self._upsert(ensure(self.data, kind, []), d)
+
+    def op_entity(self, op):
+        """{"op":"entity","id":"tree-missile","kind":"projectile","visual":{...},"projectile":{...},"rules":[...]}: adds or
+        replaces a non-unit template (prop, projectile, area, pickup, logic). Fields: the guide's EntityDef."""
+        if op.get("kind") not in ("prop", "projectile", "area", "pickup", "logic"):
+            raise Fail("kind is prop | projectile | area | pickup | logic")
+        return self._def(op, "entities", "entity")
+
+    def op_status(self, op):
+        """{"op":"status","id":"burning","duration":4,"stacking":"refresh","tick":1,"mods":{"moveSpeed":{"mult":0.8}},
+        "flags":[],"rules":[...]}: adds or replaces a status."""
+        return self._def(op, "statuses", "status")
+
+    def op_preset(self, op):
+        """{"op":"preset","id":"my-trap","name":"...","params":{"dmg":{"type":"number","default":10}},"rules":[...]}:
+        adds or replaces a pack preset (used as {"preset": id, "with": {...}} in rules, or a place's "preset")."""
+        return self._def(op, "presets", "preset")
+
+    def op_place(self, op):
+        """{"op":"place","id":"plate1","entity":"<template>" | "preset":"timer","with":{...} | "kind":"area"|"path"|"point"|"logic"|...,
+        "at":[x,z] | "pos":[x,y,z],"rotY":0,"name":"plate","active":true,"vars":{},"rules":[...], ...inline fields}: places
+        an entity in the level (replaces one with the same id). A path takes "points":[[x,z],...] instead of at."""
+        lv = self.level(op)
+        d = {k: v for k, v in op.items() if k not in ("op", "level", "at")}
+        if not ID_RE.match(str(d.get("id", ""))):
+            raise Fail("place needs an \"id\" (1-64 of a-z 0-9 . _ -)")
+        if not (d.get("entity") or d.get("preset") or d.get("kind")):
+            raise Fail("give \"entity\" (a template id), \"preset\" (e.g. \"timer\") or an inline \"kind\"")
+        if d.get("kind") == "path":
+            pts = d.get("points")
+            if not isinstance(pts, list) or len(pts) < 2:
+                raise Fail("a path needs \"points\": [[x, z], ...] (2 or more)")
+            d["points"] = [[round(c, 2) for c in self.numbers(pt, len(pt) if isinstance(pt, list) else 2, "points[]")] for pt in pts]
+            if op.get("at") is not None or op.get("pos") is not None:
+                d["pos"] = self.pos(lv, op, strict=False)
+        else:
+            d["pos"] = self.pos(lv, op, strict=False)
+        return f"place {d['id']} " + self._upsert(ensure(self.logic(op), "places", []), d)
+
+    def op_remove_place(self, op):
+        """{"op":"remove_place","id":"plate1"}"""
+        places = self.logic(op).get("places") or []
+        n = len(places)
+        places[:] = [x for x in places if x.get("id") != op["id"]]
+        if len(places) == n:
+            raise Fail(f"no place {op['id']!r}")
+        return f"removed place {op['id']}"
+
+    ATTACH_PREFIXES = ("slot:", "add:", "prop:", "line:")
+
+    def rule_owner(self, op, create=True):
+        """(rules list, description) for "on": level | unit:<id> | entity:<id> | status:<id> | place:<id> | a Studio key."""
+        on = op.get("on")
+        if not isinstance(on, str):
+            raise Fail("\"on\" is level | unit:<id> | entity:<id> | status:<id> | place:<id> | slot:<name> | add:<id> | prop:<id> | line:<name> | castle")
+        if on == "level":
+            return ensure(self.logic(op), "rules", []), "the level script"
+        kind, _, oid = on.partition(":")
+        if kind in ("unit", "entity", "status"):
+            lst = self.data.get({"unit": "units", "entity": "entities", "status": "statuses"}[kind]) or []
+            owner = next((x for x in lst if x.get("id") == oid), None)
+            if owner is None:
+                raise Fail(f"no {kind} {oid!r} (add it first with the {'unit' if kind == 'unit' else kind} op)")
+            return ensure(owner, "rules", []), on
+        if kind == "place":
+            owner = next((x for x in self.logic(op).get("places") or [] if x.get("id") == oid), None)
+            if owner is None:
+                raise Fail(f"no place {oid!r} in the level")
+            return ensure(owner, "rules", []), on
+        if on == "castle" or on.startswith(self.ATTACH_PREFIXES):
+            a = ensure(ensure(self.logic(op), "attach", {}), on, {})
+            return ensure(a, "rules", []), on
+        raise Fail(f"unknown owner {on!r}")
+
+    def op_rule(self, op):
+        """{"op":"rule","on":"level"|"unit:<id>"|"entity:<id>"|"status:<id>"|"place:<id>"|"slot:Tower 3"|"castle"...,
+        "rule":{"id":"split","when":"death","if":"...","do":[...]}} (or "rules":[...]): adds rules; one with the same
+        id as an existing rule replaces it."""
+        rules, where = self.rule_owner(op)
+        new = op.get("rules") if op.get("rules") is not None else [op["rule"]]
+        if not isinstance(new, list) or not all(isinstance(r, dict) for r in new):
+            raise Fail("\"rule\" is one rule object, \"rules\" a list of them")
+        notes = []
+        for r in new:
+            if r.get("id") is not None:
+                notes.append(self._upsert(rules, r))
+            else:
+                rules.append(r)
+                notes.append("added")
+        return f"{len(new)} rule(s) on {where}: {', '.join(notes)}"
+
+    def op_remove_rule(self, op):
+        """{"op":"remove_rule","on":"unit:slime","id":"split"}"""
+        rules, where = self.rule_owner(op)
+        n = len(rules)
+        rules[:] = [r for r in rules if r.get("id") != op["id"]]
+        if len(rules) == n:
+            raise Fail(f"no rule {op['id']!r} on {where}")
+        return f"removed rule {op['id']} from {where}"
+
+    BUILT_IN_INPUTS = {"enable", "disable", "toggle", "destroy", "start", "stop", "reverse", "goto", "show", "hide", "lock", "unlock"}
+
+    def op_wire(self, op):
+        """{"op":"wire","from":"place:lever"|"slot:Tower 3"|...,"event":"interact","to":"bridge","input":"up","value":0,
+        "delay":0,"do":[...]}: a rule on the source that signals the target when the event fires. "to" is a place id or
+        name (or an attach name). For an input that isn't built in (enable, disable, toggle, destroy, start, stop,
+        reverse, goto, show, hide, lock, unlock, or a mover pose's name), "do" adds the target's listener rule."""
+        src_rules, src = self.rule_owner({**op, "on": op["from"]})
+        to = op["to"].lstrip("@")
+        logic = self.logic(op)
+        target = next((x for x in logic.get("places") or [] if to in (x.get("id"), x.get("name"))), None)
+        attach = next(((k, a) for k, a in (logic.get("attach") or {}).items() if a.get("name") == to or k == op["to"]), None)
+        if target is None and attach is None:
+            raise Fail(f"no place or attached object named {to!r} (attach a name first: {{\"op\":\"attach\",\"key\":\"slot:...\",\"name\":\"{to}\"}})")
+        if attach is not None and target is None:
+            if not attach[1].get("name"):
+                raise Fail(f"give {attach[0]!r} a name with the attach op so a wire can reach it")
+            to = attach[1]["name"]
+        sig = {"do": "signal", "name": op["input"], "to": "@" + to}
+        if op.get("value") is not None:
+            sig["value"] = op["value"]
+        if op.get("delay"):
+            sig["delay"] = op["delay"]
+        when = op.get("event", "interact")
+        src_rules.append({"when": when, "do": [sig], "note": f"wire: {when} -> {to}.{op['input']}"})
+        poses = set(((target or {}).get("mover") or {}).get("pose") or {})
+        if op["input"] in self.BUILT_IN_INPUTS or op["input"] in poses:
+            return f"wire {src} {when} -> {to}.{op['input']} (built-in input)"
+        if op.get("do") is None:
+            return f"wire {src} {when} -> {to}.{op['input']} (nothing on {to} listens to {op['input']!r} yet: give \"do\")"
+        listener = {"when": {"on": "signal", "name": op["input"]}, "do": op["do"], "note": f"wire: on {op['input']}"}
+        (ensure(target, "rules", []) if target is not None else ensure(attach[1], "rules", [])).append(listener)
+        return f"wire {src} {when} -> {to}.{op['input']} (+ listener)"
+
+    def op_var(self, op):
+        """{"op":"var","name":"souls","value":0}: a level variable and its start value (a number, bool, "'text'",
+        "vec(x, z)", [] or {"type": ..., "value": ...}); with "on":"unit:<id>"|"entity:<id>"|"place:<id>"|<Studio key>: an
+        entity variable's default there."""
+        if op.get("on") in (None, "level"):
+            ensure(self.logic(op), "vars", {})[op["name"]] = op["value"]
+            return f"level var ${op['name']}"
+        rules, where = self.rule_owner(op)
+        on = op["on"]
+        kind, _, oid = on.partition(":")
+        if kind in ("unit", "entity"):
+            owner = next(x for x in self.data.get({"unit": "units", "entity": "entities"}[kind]) or [] if x.get("id") == oid)
+        elif kind == "place":
+            owner = next(x for x in self.logic(op).get("places") or [] if x.get("id") == oid)
+        else:
+            owner = self.logic(op)["attach"][on]
+        ensure(owner, "vars", {})[op["name"]] = op["value"]
+        return f"var {op['name']} on {where}"
+
+    def op_attach(self, op):
+        """{"op":"attach","key":"slot:Tower 3"|"add:<id>"|"prop:<id>"|"line:<name>"|"castle","name":"northTower",
+        "labels":["lit"],"vars":{},"statuses":[]}: names, labels and vars on an object the level already has."""
+        key = op["key"]
+        if not (key == "castle" or key.startswith(self.ATTACH_PREFIXES)):
+            raise Fail("key is slot:<host slot name> | add:<added slot id> | prop:<prop id> | line:<spawn line> | castle")
+        a = ensure(ensure(self.logic(op), "attach", {}), key, {})
+        for f in ("name", "labels", "vars", "statuses", "targeting"):
+            if op.get(f) is not None:
+                a[f] = op[f]
+        return f"attach {key}" + (f" as @{a['name']}" if a.get("name") else "")
+
+    def op_king_action(self, op):
+        """{"op":"king_action","id":"horn","name":"War horn","when":"day","cooldown":0,"uses":{"count":1,"per":"day"}}:
+        one of the level's three action keys (fires kingAction with this id)."""
+        d = {k: v for k, v in op.items() if k not in ("op", "level")}
+        lst = ensure(self.logic(op), "kingActions", [])
+        r = self._upsert(lst, d)
+        if len(lst) > 3:
+            raise Fail("at most 3 king actions")
+        return f"king action {d['id']} {r}"
+
+    def op_hud(self, op):
+        """{"op":"hud","id":"souls","text":"Souls {$souls}/10","icon":null,"visible":"$souls > 0"}: a level HUD line."""
+        d = {k: v for k, v in op.items() if k not in ("op", "level")}
+        return f"hud {d['id']} " + self._upsert(ensure(self.logic(op), "hud", []), d)
+
+    def op_logic(self, op):
+        """{"op":"logic","seed":1234,"caps":{"entities":600}}: level logic settings (caps above the defaults may lag)."""
+        lg = self.logic(op)
+        for f in ("seed", "caps"):
+            if f in op:
+                lg[f] = op[f]
+        return "logic settings"
 
     # ---- terrain -----------------------------------------------------------------------------------------------------
 
@@ -2073,28 +2394,78 @@ class Terrain:
 # Analysis: walk grid for the level, paths, economy, waves, checks
 # =====================================================================================================================
 
-SLOPE_LIMIT = 32.0
-# The game's ground graphs (`dev.py cmd "builder-level graphs"`): recast, 0.2 m voxels, max slope 30 degrees, agent
-# radius 0.5 m on the small-enemy and king graphs and 4 m on the large-enemy graph. The clearances are what the offline
-# model needs to reproduce the widths measured in game (level-building.md section 7).
-WALK_SLOPE = 30.0
+# The game's ground graphs (`dev.py cmd "builder-level graphs"`): recast, 0.2 m voxels, agent radius 0.5 m on the
+# small-enemy and king graphs; the large-enemy graph's radius and the walkable slope are the host map's own. A level's
+# terrain is walkable up to the strictest ground graph's slope (GroundLayer), and its cliffs are walls for every graph.
+# The clearances are what the offline model needs to reproduce the widths measured in game (level-building.md
+# section 7). A reference built by a newer game copy carries them (map dump "graphs"); HOST_GRAPHS is the fallback,
+# measured on game 2.14.
 SMALL_CLEARANCE = 0.5
-LARGE_CLEARANCE = 4.0
+HOST_GRAPHS = {
+    # host: (large-enemy radius m, walkable slope degrees)
+    "Durststein": (1.5, 45), "Freifort": (2, 50), "Frostsee": (2, 20), "Moorweg": (2, 40), "Nordfels": (4, 30),
+    "Sturmklamm": (2, 40), "Totend": (2, 50), "Uferwind": (2, 40), "Wildbach": (2, 40),
+}
+
+
+def host_graphs(ref, host):
+    """(large-enemy radius, walkable slope) of a host map's ground graphs."""
+    g = (ref.map(host) or {}).get("graphs") if ref else None
+    if g and "Enemy Units L" in g:
+        ground = [v["slope"] for k, v in g.items() if k != "Enemy Units Air"]
+        return float(g["Enemy Units L"]["radius"]), float(min(ground))
+    return HOST_GRAPHS.get(host, (4.0, 30.0))
+
+
+def quat_matrix(q):
+    """Rows of the rotation matrix of a Unity quaternion [x, y, z, w]."""
+    x, y, z, w = q
+    return [[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]]
+
+
+def euler_matrix(ex, ey, ez):
+    """Unity's Quaternion.Euler(ex, ey, ez) as a matrix: z first, then x, then y (degrees)."""
+    def m(a, axis):
+        c, s = math.cos(math.radians(a)), math.sin(math.radians(a))
+        return {"x": [[1, 0, 0], [0, c, -s], [0, s, c]], "y": [[c, 0, s], [0, 1, 0], [-s, 0, c]], "z": [[c, -s, 0], [s, c, 0], [0, 0, 1]]}[axis]
+
+    def mul(a, b):
+        return [[sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
+    return mul(m(ey, "y"), mul(m(ex, "x"), m(ez, "z")))
+
+
+def box_extents(rot, half):
+    """Half extents (world axes) of a box with these half extents turned by rot."""
+    return [sum(abs(rot[i][j]) * half[j] for j in range(3)) for i in range(3)]
 
 
 def prop_radius(ref, level, p):
     """Half the footprint of a placed prop, metres: the host map's own use of the mesh if it has one (map dump,
-    footprint x/z), else the scenery library's (mesh size x/y before it's stood upright), else 1.5."""
+    footprint x/z), else the scenery library's (mesh size x/y before it's stood upright), else 1.5. A tilted prop
+    (rotX/rotZ) gets its tilted bounding box's footprint, centred on its position (an approximation: the mesh's pivot
+    isn't known here)."""
     name = p["base"][5:].split("@")[0]
-    size = None
+    size = upright = None
     for s in ref.map(level["host"]).get("scenery", []):
         if s["base"] == "mesh:" + name and s.get("size"):
-            size = (s["size"][0], s["size"][2])
+            size = s["size"]   # already stood upright: x, height, z
     if size is None:
         for m_ in ref.scenery.get("meshes", []):
             if m_["name"] == name and m_.get("size"):
-                size = (m_["size"][0], m_["size"][1])
-    return (max(size) / 2 if size else 1.5) * float(p.get("scale", 1))
+                size, upright = m_["size"], m_.get("upright") or [-0.70711, 0, 0, 0.70711]   # mesh space, z up
+    scale = float(p.get("scale", 1))
+    tx, tz = float(p.get("rotX", 0) or 0), float(p.get("rotZ", 0) or 0)
+    if size is None:
+        return 1.5 * scale
+    if not tx and not tz:
+        return (max(size[0], size[1]) if upright else max(size[0], size[2])) / 2 * scale
+    half = [v / 2 for v in size]
+    if upright:
+        half = box_extents(quat_matrix(upright), half)
+    e = box_extents(euler_matrix(tx, 0, tz), half)
+    return max(e[0], e[2]) * scale
 
 
 class LevelGround:
@@ -2105,6 +2476,7 @@ class LevelGround:
         m = ref.map(level["host"])
         t = level.get("terrain")
         self.flat = level.get("base") == "flat"
+        self.large_r, self.walk_slope = host_graphs(ref, level["host"])
         # Fine model (flat terrain): clearance per half-cell quad, see clearance(). corner_ok refines diagonal steps.
         self.clear = None
         if self.flat and t:
@@ -2134,14 +2506,14 @@ class LevelGround:
 
     def clearance(self, T, level, ref):
         """Flat terrain, modelled the way the game's recast graphs see it: the ground mesh's triangles (split as
-        GroundLayer splits each cell) steeper than WALK_SLOPE, water/blocked columns, solid props and the field's edge
+        GroundLayer splits each cell) steeper than the host's walkable slope, water/blocked columns, solid props and the field's edge
         are obstacles; every half-cell quad gets its distance to the nearest obstacle (its clearance), and a 2 m cell is
         open to an enemy size when one of its quads has that size's clearance. Steps between cells need clearance where
         the cells meet, so a diagonal causeway one quad wide still connects."""
         Q = 2
         QW, QH, qs = T.w * Q, T.h * Q, T.cell / Q
         W1 = T.w + 1
-        lim = math.tan(math.radians(WALK_SLOPE)) * T.cell
+        lim = math.tan(math.radians(self.walk_slope)) * T.cell
         blocked = bytearray(QW * QH)
 
         def mark(i, j, qi, qj):
@@ -2157,16 +2529,18 @@ class LevelGround:
                     continue
                 h00, h10 = T.hts[j * W1 + i] / 100.0, T.hts[j * W1 + i + 1] / 100.0
                 h01, h11 = T.hts[(j + 1) * W1 + i] / 100.0, T.hts[(j + 1) * W1 + i + 1] / 100.0
+                # A quad the cell's diagonal runs through is an obstacle if either triangle is steep: the game walls
+                # off every steep triangle (GroundLayer's cliff walls) and erodes its graphs from those walls.
                 if abs(h00 - h11) <= abs(h10 - h01):
                     # Split 00-11: triangle (00,01,11) above the diagonal, (00,11,10) below it.
                     a = math.hypot(h11 - h01, h01 - h00) > lim
                     b = math.hypot(h10 - h00, h11 - h10) > lim
-                    steep = {(0, 1): a, (1, 0): b, (0, 0): a and b, (1, 1): a and b}
+                    steep = {(0, 1): a, (1, 0): b, (0, 0): a or b, (1, 1): a or b}
                 else:
                     # Split 10-01: triangle (00,01,10) below the anti-diagonal, (10,01,11) above it.
                     c = math.hypot(h10 - h00, h01 - h00) > lim
                     d = math.hypot(h11 - h01, h11 - h10) > lim
-                    steep = {(0, 0): c, (1, 1): d, (0, 1): c and d, (1, 0): c and d}
+                    steep = {(0, 0): c, (1, 1): d, (0, 1): c or d, (1, 0): c or d}
                 for (qi, qj), s in steep.items():
                     if s:
                         mark(i, j, qi, qj)
@@ -2211,7 +2585,7 @@ class LevelGround:
             row = []
             for i in range(T.w):
                 best = max(self.qclear(i, j, qi, qj) for qi in range(Q) for qj in range(Q))
-                row.append("w" if best >= LARGE_CLEARANCE else "s" if best >= SMALL_CLEARANCE else ".")
+                row.append("w" if best >= self.large_r else "s" if best >= SMALL_CLEARANCE else ".")
             self.kind.append(row)
 
     def qclear(self, i, j, qi, qj):
@@ -2225,7 +2599,7 @@ class LevelGround:
             return False
         if self.clear is None:
             return not (di and dj) or (self.ok(i + di, j, large) and self.ok(i, j + dj, large))
-        r = LARGE_CLEARANCE if large else SMALL_CLEARANCE
+        r = self.large_r if large else SMALL_CLEARANCE
         a = 1 if di > 0 else 0   # this cell's quad column (row) facing the neighbour
         b = 1 if dj > 0 else 0
         if di and dj:
@@ -2444,8 +2818,57 @@ def unit_info(ref, data, uref):
     return uref, 0, False, False, False
 
 
+def _expanded_units(data):
+    """Units with preset uses expanded (palace_logic), or as they are when the module isn't there."""
+    try:
+        pl = logic_module()
+        return {u.get("id"): u for u in (pl.expand_presets(copy.deepcopy(data), []).get("units") or [])}
+    except Exception:   # an estimate: fall back to the raw rules
+        return {u.get("id"): u for u in data.get("units") or []}
+
+
+def death_extras(ref, data, uref, units=None, depth=0, gen=0):
+    """What one enemy adds when it dies, from its own `death` rules: (enemies spawned, their HP, gold given), followed
+    through the spawned units' rules. Conditions are ignored except `self.$gen < N` (presets like split-on-death), so
+    it's an upper estimate for chance-based rules."""
+    units = units if units is not None else _expanded_units(data)
+    uid = uref.split("/")[-1].replace("unit:", "")
+    u = units.get(uid)
+    if u is None or depth > 6:
+        return 0, 0.0, 0
+    count, hp, gold = 0, 0.0, 0
+    for r in u.get("rules") or []:
+        w = r.get("when")
+        if (w if isinstance(w, str) else (w or {}).get("on")) != "death" or (isinstance(w, dict) and w.get("of")):
+            continue
+        cond = r.get("if") if isinstance(r.get("if"), str) else ""
+        m = re.search(r"self\.\$(\w+)\s*<\s*(\d+)", cond)
+        if m and gen >= int(m.group(2)):
+            continue
+        for a in r.get("do") or []:
+            if a.get("do") == "gold" and isinstance(a.get("amount"), (int, float)):
+                gold += int(a["amount"])
+            if a.get("do") not in ("spawn", "spawnGroup"):
+                continue
+            ent = a.get("entity") or a.get("unit")
+            n = a.get("count", 1)
+            if not isinstance(ent, str) or not isinstance(n, (int, float)):
+                continue
+            if ent.startswith("="):
+                if ent.replace(" ", "") != "=self.template":
+                    continue
+                ent = uid
+            _, uhp, _, _, _ = unit_info(ref, data, ent if ent.startswith("vanilla:") else "unit:" + ent)
+            sub = death_extras(ref, data, ent, units, depth + 1, gen + 1) if not ent.startswith("vanilla:") else (0, 0.0, 0)
+            count += int(n) * (1 + sub[0])
+            hp += int(n) * (uhp + sub[1])
+            gold += int(n) * sub[2]
+    return count, hp, gold
+
+
 def wave_summary(ref, data, ws):
     rows = []
+    units = _expanded_units(data) if data else {}
     for i, n in enumerate(ws.get("nights", [])):
         diff = float(n.get("difficulty", 1))
         count = hp = gold = fly = large = boss = elite = 0
@@ -2456,8 +2879,10 @@ def wave_summary(ref, data, ws):
             name, uhp, f, l, b = unit_info(ref, data, s["unit"])
             c = int(s.get("count", 1))
             mult = diff * (4 if s.get("elite") else 1)
-            count += c
-            hp += c * uhp * mult
+            dc, dhp, dgold = death_extras(ref, data, s["unit"], units) if units else (0, 0.0, 0)
+            count += c * (1 + dc)
+            hp += c * (uhp + dhp) * mult
+            gold += c * dgold
             gold += int(s.get("gold", 0))
             fly += c if f else 0
             large += c if l else 0
@@ -2568,6 +2993,7 @@ def unit_world(slot):
 
 
 MODEL_LOOKS = ("own", "unit")
+HEX_COLOR = re.compile(r"^#?[0-9a-fA-F]{6}$")
 MODEL_MOTIONS = ("auto", "bob", "none")
 
 
@@ -2602,6 +3028,19 @@ def check_unit(ref, u):
         errs.append((".visuals.meshLook", f"one of {MODEL_LOOKS}"))
     if v.get("motion") is not None and v["motion"] not in MODEL_MOTIONS:
         errs.append((".visuals.motion", f"one of {MODEL_MOTIONS}"))
+    for key in ("tint",):
+        if v.get(key) is not None and not HEX_COLOR.match(str(v[key])):
+            errs.append((f".visuals.{key}", '"#rrggbb"'))
+    colors = v.get("colors")
+    if colors is not None:
+        if not isinstance(colors, dict):
+            errs.append((".visuals.colors", '{"body": "#rrggbb", "<material>": "#rrggbb"}'))
+        else:
+            for part, hexc in colors.items():
+                if not str(part).strip():
+                    errs.append((".visuals.colors", "a part name can't be empty"))
+                elif not HEX_COLOR.match(str(hexc)):
+                    errs.append((f".visuals.colors.{part}", '"#rrggbb"'))
     return errs
 
 
@@ -2837,6 +3276,15 @@ def check_pack(ref, data):
                 k = ground.index(l["center"][0], l["center"][2])
                 if k is None or ground.kind[k[1]][k[0]] == "#":
                     err(f"{p}.spawnLines", f"spawn line {l['name']} is off the map")
+            if l["flying"] and lv.get("base") == "flat" and lv.get("terrain"):
+                # On a flat field the fliers' surface covers the field only: a flier spawned further out starts at
+                # its edge (the game moves it there), not on the line. `palace.py paths` measures it in game ("air").
+                T = Terrain(lv["terrain"])
+                x0, z0, x1, z1 = T.ox, T.oz, T.ox + T.w * T.cell, T.oz + T.h * T.cell
+                off = max(math.hypot(max(x0 - x, 0, x - x1), max(z0 - z, 0, z - z1)) for x, _, z in (l["points"] or [l["center"]]))
+                if off > 30:   # the maps' own flier lines sit up to ~15 m out; that only shifts where fliers appear
+                    warn(f"{p}.spawnLines", f"flier line {l['name']} reaches {off:.0f} m beyond the field: fliers can only fly over "
+                                            "the field, so they start at its edge; move the line over the field")
         if castle in slots:
             for r in offline_routes(ref, data, lv, slots, castle):
                 if not r["reachable"]:
@@ -2851,6 +3299,11 @@ def check_pack(ref, data):
         ws, vanilla = level_waveset(ref, data, lv)
         if vanilla:
             warn(p + ".waveSet", "no wave set: the map's vanilla nights play (their spawn lines must exist)")
+    # The behaviour engine's rules, entities, statuses and presets (palace_logic.py, the mod's own checks).
+    try:
+        issues.extend(logic_issues(data))
+    except Fail as e:
+        warn("logic", str(e))
     return issues
 
 
@@ -3415,10 +3868,11 @@ def reference_markdown(ref):
         c = m["castle"]["pos"]
         x0, x1 = g["origin"][0] + 12, g["origin"][0] + g["size"][0] * g["cell"] - 12
         z0, z1 = g["origin"][1] + 12, g["origin"][1] + g["size"][1] * g["cell"] - 12
+        large_r, slope = host_graphs(ref, name)
         heads.append(f"| {name} | {x1 - x0:.0f} x {z1 - z0:.0f} | {c[0] - x0:.0f} / {x1 - c[0]:.0f} / {c[2] - z0:.0f} / {z1 - c[2]:.0f} | "
-                     f"{c[1]:.1f} | {Terrain.max_world(c[1]) - c[1]:+.1f} / {Terrain.MIN_Y - c[1]:+.1f} |")
-    L.append("\n| Host | Playable rectangle (m) | Castle to west / east / south / north edge (m) | Castle y | Terrain headroom up / down from the castle (m) |")
-    L.append("|---|---|---|---|---|")
+                     f"{c[1]:.1f} | {Terrain.max_world(c[1]) - c[1]:+.1f} / {Terrain.MIN_Y - c[1]:+.1f} | {large_r:g} | {slope:g} |")
+    L.append("\n| Host | Playable rectangle (m) | Castle to west / east / south / north edge (m) | Castle y | Terrain headroom up / down from the castle (m) | Large-enemy clearance (m) | Walkable slope (°) |")
+    L.append("|---|---|---|---|---|---|---|")
     L += heads
     L.append("")
 
@@ -3637,6 +4091,18 @@ def cmd_check(env, args):
     if args.live:
         g = Game(env)
         result["game"] = g.agent(f"validate {data['id']}" + (f" {args.level}" if args.level else ""))
+        # The level loaded in the game: what its last pathfinding rescan left wrong (an empty graph, a ground line
+        # with no route to the castle, a flier line off the fliers' graph). The game logs these as warnings too.
+        try:
+            status = g.agent("status")
+            loaded = (status.get("session") or {}).get("level")
+            if loaded and (not args.level or loaded == args.level) and any(l["id"] == loaded for l in data.get("levels", [])):
+                problems = g.agent("paths").get("problems") or []
+                result["game"]["pathProblems"] = {"level": loaded, "problems": problems}
+                if problems:
+                    result["game"]["ok"] = False
+        except Fail:
+            pass
     result["ok"] = not any(i["severity"] == "error" for i in issues) and (not args.live or result["game"].get("ok", False))
     out(result)
     if not result["ok"]:
@@ -4248,6 +4714,345 @@ def cmd_play_quiet(g, data, level, timeout):
     time.sleep(2.5)
 
 
+# Behaviour engine: schema, offline checks, live trace and the example fixtures
+# =====================================================================================================================
+
+def logic_schema(env):
+    """The behaviour engine's registry: the game's (catalog.json "logic", cached by `ref build`) when it's there, else
+    the kit's own logic-schema.json (generated from the same code)."""
+    cat = env.ref / "catalog.json"
+    if cat.exists():
+        try:
+            lg = json.loads(cat.read_text()).get("logic")
+            if lg:
+                return lg
+        except ValueError:
+            pass
+    f = Path(__file__).with_name("logic-schema.json")
+    if not f.exists():
+        raise Fail(f"no logic-schema.json next to palace.py ({f})")
+    return json.loads(f.read_text())
+
+
+def logic_module():
+    sys.path.insert(0, str(Path(__file__).parent))
+    try:
+        import palace_logic
+    except ImportError as e:
+        raise Fail(f"palace_logic.py (next to palace.py) is missing: {e}")
+    return palace_logic
+
+
+def logic_issues(data):
+    """The behaviour engine's offline checks, as check_pack issues."""
+    pl = logic_module()
+    raw = []
+    pl.validate_logic(data, raw)
+    return [{"severity": sev, "path": path, "message": msg} for sev, path, msg in raw]
+
+
+def _schema_entry(schema, kind, name):
+    key = {"event": "events", "action": "actions", "fn": "functions", "function": "functions", "stat": "stats", "flag": "flags",
+           "preset": "presets", "global": "globals", "role": "roles", "filter": "filterTerms"}.get(kind)
+    if key is None:
+        raise Fail("kind is event | action | fn | stat | flag | preset | global | role | filter")
+    items = schema.get(key) or []
+    hit = next((x for x in items if x.get("name", x.get("id")) == name), None)
+    if hit is None:
+        names = [x.get("name", x.get("id")) for x in items]
+        close = sorted(names, key=lambda n: _edit_distance(n.lower(), name.lower()))[:3]
+        raise Fail(f"no {kind} {name!r}; closest: {', '.join(close)}")
+    if key == "properties":
+        return hit
+    return hit
+
+
+def _edit_distance(a, b):
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def cmd_logic(env, args):
+    sub = args.what
+    rest = list(args.rest or [])
+    for flag in ("--kit", "--json"):   # flags after the subcommand land in rest (argparse REMAINDER)
+        if flag in rest:
+            rest.remove(flag)
+            setattr(args, flag[2:], True)
+    if sub == "schema":
+        schema = logic_schema(env)
+        if len(rest) >= 2:
+            out(_schema_entry(schema, rest[0], rest[1]))
+            return
+        if rest and rest[0] not in ("--json",):
+            key = {"events": "events", "actions": "actions", "functions": "functions", "fns": "functions", "stats": "stats", "flags": "flags",
+                   "presets": "presets", "globals": "globals", "roles": "roles", "properties": "properties", "filters": "filterTerms",
+                   "tags": "tags", "inputs": "inputs", "caps": "caps"}.get(rest[0])
+            if key is None:
+                raise Fail("logic schema [events|actions|functions|properties|globals|roles|stats|flags|filters|tags|inputs|presets|caps] "
+                           "| logic schema <event|action|fn|stat|flag|preset|global|role|filter> <name>")
+            out(schema.get(key))
+            return
+        if args.json:
+            out(schema)
+            return
+        out({"version": schema.get("version"),
+             "events": {e["name"]: e["description"] for e in schema["events"]},
+             "actions": {a["name"]: a["description"] for a in schema["actions"]},
+             "functions": [f["name"] for f in schema["functions"]],
+             "globals": [g["name"] for g in schema["globals"]],
+             "stats": [x["name"] for x in schema["stats"]], "flags": [x["name"] for x in schema["flags"]],
+             "presets": {pr["id"]: pr.get("description") for pr in schema.get("presets") or []},
+             "more": "palace.py logic schema <event|action|fn|preset|...> <name> for params, roles and examples"})
+        return
+    if sub == "check":
+        if not rest:
+            raise Fail("logic check <pack> [level]")
+        _, data = load_pack(env, rest[0])
+        if len(rest) > 1:
+            find_level(data, rest[1])
+            data = scope_levels(data, {rest[1]})
+        issues = logic_issues(data)
+        ok = not any(i["severity"] == "error" for i in issues)
+        out({"ok": ok, "errors": [i for i in issues if i["severity"] == "error"], "warnings": [i for i in issues if i["severity"] == "warning"]})
+        if not ok:
+            sys.exit(1)
+        return
+    if sub == "doc":
+        text = logic_reference_markdown(logic_schema(env) if not args.kit else json.loads(Path(__file__).with_name("logic-schema.json").read_text()))
+        target = Path(rest[0]) if rest else Path(__file__).with_name("logic-reference.md")
+        target.write_text(text, encoding="utf-8")
+        out({"written": str(target.resolve())})
+        return
+    if sub == "fixture":
+        if not rest:
+            raise Fail("logic fixture <fixture.json> [--keep]")
+        out(run_fixture(env, Path(rest[0]), timeout=args.timeout))
+        return
+    # Everything else goes to the game's `logic` command (status, vars, trace, entities, budget, eval, do, fire, raise, set).
+    g = Game(env)
+    text = "logic " + " ".join([sub] + rest)
+    out({"command": text, "result": g.raw(text, timeout=args.timeout).strip()})
+
+
+def _md(text):
+    return str(text if text is not None else "").replace("|", "\\|").replace("\n", " ")
+
+
+def logic_reference_markdown(schema):
+    """agent-kit/logic-reference.md: the behaviour engine's whole vocabulary, generated from logic-schema.json."""
+    L = ["# Behaviour engine reference", "",
+         f"Generated from the engine's registry (`palace.py logic doc`; schema version {schema.get('version')}). The guide's "
+         "\"Behaviour\" chapter explains how the pieces fit; this lists every piece. `palace.py logic schema <kind> <name>` "
+         "prints one entry as JSON.", ""]
+    L += ["## Param types", "", "| Type | Accepts |", "|---|---|"]
+    pt = schema.get("paramTypes") or {}
+    for k, v in (pt.items() if isinstance(pt, dict) else ((t, "") for t in pt)):
+        L.append(f"| `{k}` | {_md(v)} |")
+    L += ["", "## Roles", "", "Names an expression can use for entities in a rule.", "", "| Role | Type | Meaning |", "|---|---|---|"]
+    L += [f"| `{r['name']}` | {r['type']} | {_md(r['description'])} |" for r in schema["roles"]]
+    L += ["", "## Globals", "", "| Name | Type | Meaning |", "|---|---|---|"]
+    L += [f"| `{g['name']}` | {g['type']} | {_md(g['description'])} |" for g in schema["globals"]]
+    L += ["", "## Events", "", "`when` takes the name, or `{\"on\": name, ...params}`; add `\"of\": \"<filter>\"` (and `\"range\"`) to hear "
+          "the event on other entities (then `subject` is who it happened to). `other` and `event.value` are as listed; "
+          "aliases name `other`/`subject` per event.", ""]
+    groups = {}
+    for e in schema["events"]:
+        groups.setdefault(e["group"], []).append(e)
+    for gname, evs in groups.items():
+        L += [f"### {gname}", "", "| Event | Params | other | event.value | Fires when |", "|---|---|---|---|---|"]
+        for e in evs:
+            ps = ", ".join(f"`{p['name']}`{'*' if p.get('required') else ''}" for p in e["params"]) or ""
+            other = e.get("other") or ""
+            if e.get("aliases"):
+                other += " (" + ", ".join(f"{k} = {v}" for k, v in e["aliases"].items()) + ")"
+            val = f"{e['value']}: {e.get('valueMeaning') or ''}" if e.get("value") else ""
+            extra = (" Fields: " + ", ".join(f"event.{k}" for k in e["fields"]) + ".") if e.get("fields") else ""
+            scope = "" if "any" in e.get("owners", ["any"]) else f" ({'/'.join(e['owners'])})"
+            L.append(f"| `{e['name']}`{scope} | {ps} | {_md(other)} | {_md(val)} | {_md(e['description'] + extra)}{' Level script: no `of` needed.' if e.get('global') else ''} |")
+        L.append("")
+    L += ["`*` = required.", "", "## Actions", "",
+          "Each action is `{\"do\": \"<name>\", ...params}`. `target` (where listed) is a selector, default `self`; on a set the action "
+          "runs once per member with `it` bound to it.", ""]
+    groups = {}
+    for a in schema["actions"]:
+        groups.setdefault(a["group"], []).append(a)
+    for gname, acts in groups.items():
+        L += [f"### {gname}", ""]
+        for a in acts:
+            L.append(f"**`{a['name']}`**: {_md(a['description'])}")
+            L.append("")
+            for p in a["params"]:
+                bits = [p["type"]]
+                if p.get("required"):
+                    bits.append("required")
+                if "default" in p:
+                    bits.append("default " + json.dumps(p["default"]))
+                if p.get("min") is not None or p.get("max") is not None:
+                    bits.append(("" if p.get("min") is None else f"{p['min']:g}") + ".." + ("" if p.get("max") is None else f"{p['max']:g}"))
+                if p.get("options"):
+                    bits.append("one of " + ", ".join(map(str, p["options"])))
+                if p.get("binds"):
+                    bits.append(f"binds `{p['binds']}`")
+                L.append(f"- `{p['name']}` ({'; '.join(bits)}): {_md(p.get('description'))}")
+            if a.get("example"):
+                L += ["", f"  `{a['example']}`"]
+            L.append("")
+    L += ["## Functions", "", "Selector functions anchor at `self`; call them as methods (`castle.count('enemy', 10)`) to anchor elsewhere. "
+          "A filter argument is a quoted filter string.", "", "| Function | Returns | Meaning |", "|---|---|---|"]
+    for f in schema["functions"]:
+        sig = f"{f['name']}({', '.join(f['args'])})"
+        if f.get("onlyOn"):
+            sig = f"<{f['onlyOn']}>." + sig
+        elif f.get("method"):
+            sig += " (also e." + f["name"] + "(...))"
+        L.append(f"| `{sig}` | {f['returns']} | {_md(f['description'])}{(' e.g. `' + f['example'] + '`') if f.get('example') else ''} |")
+    L += ["", "## Properties", "", "`<value>.<property>`; `.$name` reads an entity variable.", "", "| On | Property | Type | Meaning |", "|---|---|---|---|"]
+    L += [f"| {p['on']} | `.{p['name']}` | {p['returns']} | {_md(p['description'])} |" for p in schema["properties"]]
+    L += ["", "## Stats", "", "For `setStat` and status `mods` (`{\"mult\"}` | `{\"add\"}` | `{\"value\"}`; damageTaken/damageMult mods may add "
+          "`from`, `types`, `chance`, `when`).", ""]
+    L += [f"- `{x['name']}`: {_md(x['description'])}" for x in schema["stats"]]
+    L += ["", "## Status flags", ""] + [f"- `{x['name']}`: {_md(x['description'])}" for x in schema["flags"]]
+    L += ["", "## Filter terms", "", "Combine with `and`, `or`, `not` and parentheses.", ""]
+    L += [f"- `{x['name']}`: {_md(x['description'])}" for x in schema["filterTerms"]]
+    L += ["", "Game tags: " + ", ".join(f"`{t}`" for t in schema.get("tags") or []), ""]
+    L += ["## Built-in signal inputs", "", "Every entity takes these signals without a listener rule:", ""]
+    for k, v in (schema.get("inputs") or {}).items():
+        L.append(f"- {'every entity' if k == 'any' else 'with a ' + k}: " + ", ".join(f"`{x}`" for x in v))
+    L += ["- a mover's named poses: the pose's name moves it there", "", "## Caps", "",
+          "Per level in `logic.caps`; above the default draws a \"may lag\" warning, above the maximum an error.", "",
+          "| Cap | Default | Max |", "|---|---|---|"]
+    L += [f"| `{k}` | {v['default']} | {v['max']} |" for k, v in (schema.get("caps") or {}).items()]
+    L += ["", "## Built-in presets", "", "Use one in a rules list as `{\"preset\": \"<id>\", \"with\": {params}}`, or place a logic object with "
+          "`{\"op\": \"place\", \"preset\": \"<id>\", \"with\": {...}}`.", ""]
+    for pr in schema.get("presets") or []:
+        L.append(f"**`{pr['id']}`** ({pr.get('category', '')}{', places a ' + pr['kind'] if pr.get('kind') else ''}): {_md(pr.get('description'))}")
+        L.append("")
+        for k, v in (pr.get("params") or {}).items():
+            d = f"; default {json.dumps(v['default'])}" if "default" in v else "; required"
+            L.append(f"- `{k}` ({v.get('type', 'number')}{d}): {_md(v.get('description'))}")
+        L.append("")
+    return "\n".join(L).rstrip() + "\n"
+
+
+def _fixture_into_library(env, fx):
+    """Copies a fixture's pack (its level, units, entities, statuses, presets) into the library; returns the level id."""
+    ref = LibraryRef(env.library)
+    data = load_library(ref)
+    pk = migrate_pack(copy.deepcopy(fx["pack"]))
+    for kind in ("units", "entities", "statuses", "presets", "waveSets"):
+        have = data.setdefault(kind, [])
+        for item in pk.get(kind) or []:
+            have[:] = [x for x in have if x.get("id") != item.get("id")]
+            have.append(item)
+    lv = pk["levels"][0]
+    data["levels"] = [x for x in data["levels"] if x.get("id") != lv["id"]] + [lv]
+    save_library(ref, data)
+    return lv["id"]
+
+
+def _truthy(text):
+    t = text.strip().lower()
+    try:
+        v = json.loads(t)
+        if isinstance(v, dict):
+            v = v.get("value")
+        return bool(v) and v not in ("false", "0")
+    except ValueError:
+        return t in ("true", "1", "yes")
+
+
+def run_fixture(env, path, timeout=180):
+    """Runs one tests/logic-examples fixture in the game: imports its pack into the library, plays its level (fast
+    mode), runs its play steps and reports each. Steps: {"cmd": dev command}, {"do": [actions]} (run as the level
+    script), {"wait": game seconds}, {"expect": "<bool expression>", "within": s}, {"raise": event, "on": selector,
+    "other": selector, "name": event.name}, {"expectLog": text, "within": s}."""
+    fx = json.loads(path.read_text())
+    g = Game(env)
+    level = _fixture_into_library(env, fx)
+    mark = g.log_size()
+    g.agent(f"play {LIBRARY_ID} {level}")
+    # The previous fixture's level may still be up for a moment: wait for this one.
+    g.wait(lambda st: not st.get("loading") and st.get("inLevel") and (st.get("session") or {}).get("level") == level,
+           timeout, f"the level {level} to load")
+    g.wait_level_day(timeout=timeout)
+    time.sleep(2.5)
+    try:
+        g.agent("fast on")
+    except Fail:
+        pass
+
+    def game_time():
+        try:
+            return float(g.raw("logic eval time", timeout=30).strip())
+        except (ValueError, Fail):
+            return None
+
+    results, ok = [], True
+    for i, step in enumerate(fx.get("play", {}).get("steps") or []):
+        r = {"step": i, **{k: v for k, v in step.items()}}
+        try:
+            if "cmd" in step:
+                r["result"] = g.raw(step["cmd"], timeout=timeout).strip()[:300]
+            elif "do" in step:
+                r["result"] = g.raw("logic do " + json.dumps(step["do"]), timeout=60).strip()[:300]
+            elif "raise" in step:
+                parts = [step["raise"], step.get("on", "level"), step.get("other") or "-", step.get("name") or "-"] + \
+                    ([str(step["value"])] if step.get("value") is not None else [])
+                r["result"] = g.raw("logic raise " + " ".join(parts), timeout=60).strip()[:300]
+            elif "wait" in step:
+                t0 = game_time()
+                end = time.time() + max(5.0, float(step["wait"]) * 2 + 5)
+                while time.time() < end:
+                    t = game_time()
+                    if t0 is None or t is None or t - t0 >= float(step["wait"]):
+                        break
+                    time.sleep(0.2)
+                if t0 is None:
+                    time.sleep(float(step["wait"]))
+            elif "expect" in step or "expectLog" in step:
+                within = float(step.get("within", 5))
+                t0 = game_time()
+                wall_end = time.time() + within * 2 + 20
+                passed, last = False, None
+                while True:
+                    if "expect" in step:
+                        last = g.raw("logic eval " + step["expect"], timeout=30).strip()
+                        passed = _truthy(last)
+                    else:
+                        last = None
+                        passed = any(step["expectLog"] in (l.get("message") if isinstance(l, dict) else str(l)) for l in g.log_since(mark))
+                    t = game_time()
+                    if passed or time.time() > wall_end or (t0 is not None and t is not None and t - t0 > within):
+                        break
+                    time.sleep(0.3)
+                r["passed"] = passed
+                if last is not None:
+                    r["value"] = last[:300]
+                if not passed:
+                    ok = False
+                    r["error"] = f"not true within {within:g} s"
+        except Fail as e:
+            r["error"] = str(e)
+            ok = False
+        results.append(r)
+        if not ok:
+            break
+    errors = g.log_since(mark, min_level="error")
+    try:
+        trace = g.raw("logic trace 30", timeout=30).strip().splitlines()
+    except Fail as e:
+        trace = [str(e)]
+    # ok is the steps' verdict; log errors (often the game's own, e.g. on a scene change) are listed for a look.
+    return {"fixture": path.name, "example": fx.get("example"), "title": fx.get("title"), "ok": ok,
+            "steps": results, "logErrors": errors[:10], "trace": trace, "status": g.status()}
+
+
 def cmd_edit(env, args):
     """Opens the level in the in-game Studio (for the player to look at or edit by hand)."""
     g = Game(env)
@@ -4467,6 +5272,13 @@ def main(argv=None):
         if name == "waves":
             p.add_argument("--compare", nargs="?", const="host", help="also a map's vanilla nights (default: the host)")
 
+    p = sub.add_parser("logic", help="behaviour engine: schema [kind] [name] | check <pack> [level] | fixture <file> | "
+                                     "(in the game) status | vars | trace | entities | budget | eval <expr> | do <json> | fire <signal> [to] | raise <event> <on> [other] [name]")
+    p.add_argument("what")
+    p.add_argument("rest", nargs=argparse.REMAINDER)
+    p.add_argument("--json", action="store_true", help="schema: the whole registry")
+    p.add_argument("--kit", action="store_true", help="doc: from the kit's logic-schema.json, not the game's")
+    p.add_argument("--timeout", type=float, default=180)
     p = sub.add_parser("render", help="top-down picture with slots, requirement arrows, spawn lines and routes")
     p.add_argument("pack")
     p.add_argument("level", nargs="?")

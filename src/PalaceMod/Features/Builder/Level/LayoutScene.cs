@@ -146,26 +146,40 @@ namespace PalaceMod.Builder.Level
         private static string Readable(string mesh) => mesh.Replace('_', ' ').Trim();
 
         /// <summary>A prop: a plain mesh object in the host scene, a solid obstacle when solid.</summary>
-        public static GameObject MakeProp(Scene scene, PropBase b, string name, Vector3 pos, float yaw, float scale, bool solid)
+        public static GameObject MakeProp(Scene scene, PropBase b, string name, Vector3 pos, float yaw, float scale, bool solid, float tiltX = 0f, float tiltZ = 0f)
         {
             var go = new GameObject(AddedPrefix + name);
             if (scene.IsValid()) SceneManager.MoveGameObjectToScene(go, scene);
             go.AddComponent<MeshFilter>().sharedMesh = b.Mesh;
             go.AddComponent<MeshRenderer>().sharedMaterials = b.Materials;
-            go.transform.SetPositionAndRotation(pos, Quaternion.Euler(0f, yaw, 0f) * b.Upright);
+            go.transform.SetPositionAndRotation(pos, PropRotation(b, yaw, tiltX, tiltZ));
             go.transform.localScale = b.Scale * scale;
             SetSolid(go, solid);
             return go;
         }
 
+        /// <summary>A placed prop's rotation (PropDef rotX/rotY/rotZ): stood upright like the host's own copies, tilted
+        /// about its own sideways (x) and forward (z) axes, then turned to its heading. Its solid blocker is a child, so
+        /// it tilts with it.</summary>
+        public static Quaternion PropRotation(PropBase b, float yaw, float tiltX = 0f, float tiltZ = 0f) =>
+            Quaternion.Euler(tiltX, yaw, tiltZ) * b.Upright;
+
         internal const string BlockerName = AddedPrefix + "blocker";
+        /// <summary>The ground layer's walls over cliff faces (one part per chunk, named with this after AddedPrefix).</summary>
+        internal const string CliffWallsPrefix = "cliff walls ";
+
+        /// <summary>Walls for ground units only, which the fliers' graph is scanned without: blocked cells, solid props'
+        /// blockers and the walls over cliff faces.</summary>
+        internal static bool GroundOnlyWall(GameObject go) =>
+            go.name == BlockerName || go.name.StartsWith(AddedPrefix + CliffWallsPrefix, StringComparison.Ordinal);
         private static Mesh blockerMesh;
 
         /// <summary>Makes a prop block pathfinding and movement, or not. The host's recast graphs rasterize renderer
         /// meshes (not colliders) on the Ground and Obstacle layers, but skip meshes that aren't CPU-readable, which
         /// the host's scenery meshes aren't. So a solid prop gets an invisible child on the obstacle layer: a readable
         /// box mesh around the prop's mesh with a matching box collider, or, for a readable mesh (the scenery library's),
-        /// the mesh itself with a mesh collider.</summary>
+        /// the mesh itself with a mesh collider. (Tested at scale: 1,865 solid library trees on a Totend flat field
+        /// rescan in ~7 s with every lane open; boxes round the same trees closed two lanes under their canopies.)</summary>
         public static void SetSolid(GameObject go, bool solid)
         {
             go.layer = 0;
