@@ -50,8 +50,17 @@ namespace PalaceMod.Builder.Logic.Bodies
         private string prompt;
         private CostDisplay display;
 
-        public static System.Func<string, LogicEntity, string> EvalText = (text, self) => text;
-        public static System.Func<string, LogicEntity, double?> EvalNumber = (text, self) => null;
+        public static string EvalText(string text, LogicEntity self)
+        {
+            try { return LogicExpr.Text(text)(LogicExpr.Context(self)); }
+            catch (LogicError e) { return text + " (" + e.Message + ")"; }
+        }
+
+        public static double? EvalNumber(string text, LogicEntity self)
+        {
+            try { var v = LogicExpr.Compile(text)(LogicExpr.Context(self)); return v.Kind is ValueKind.Number or ValueKind.Bool ? v.Num : null; }
+            catch (LogicError) { return null; }
+        }
 
         private string When => (string)Def["when"] ?? "always";
 

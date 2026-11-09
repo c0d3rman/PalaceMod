@@ -25,7 +25,7 @@ using Object = UnityEngine.Object;
 */
 namespace PalaceMod.Builder.Logic.Bodies
 {
-    internal sealed class EntityFactory
+    internal sealed class EntityFactory : IEntityFactory
     {
         public static readonly EntityFactory Instance = new();
 
@@ -54,8 +54,24 @@ namespace PalaceMod.Builder.Logic.Bodies
 
         public static PackEntry PackEntry => BuilderServices.Sessions.Current?.Pack is { } p ? BuilderServices.Packs.Find(p.Id) : null;
 
-        public JObject UnitDef(string id) { Refresh(); return id != null && units.TryGetValue(id, out var o) ? o : null; }
-        public JObject EntityDef(string id) { Refresh(); return id != null && entities.TryGetValue(id, out var o) ? o : null; }
+        public JObject UnitDef(string id)
+        {
+            if (id == null) return null;
+            if (LogicWorld.Current?.Templates.TryGetValue(id, out var t) == true && (string)t["kind"] is null or "unit") return t;
+            Refresh();
+            return units.TryGetValue(id, out var o) ? o : null;
+        }
+
+        public JObject EntityDef(string id)
+        {
+            if (id == null) return null;
+            if (LogicWorld.Current?.Templates.TryGetValue(id, out var t) == true && (string)t["kind"] is { } k && k != "unit") return t;
+            Refresh();
+            return entities.TryGetValue(id, out var o) ? o : null;
+        }
+
+        /// <summary>Set by `spawn` with an explicit "neutral" team (the core's default team is also "neutral").</summary>
+        public static bool PendingNeutral;
 
         public bool IsUnit(string template) =>
             template != null && (template.StartsWith("vanilla:") || UnitDef(template) != null || (template.Contains("/") && ContentRef.Parse(template).Kind == RefKind.PackUnit));
@@ -107,11 +123,14 @@ namespace PalaceMod.Builder.Logic.Bodies
             if (enemySide) Spawn.AdjustEnemyParametersAfterSpawn(go, PendingElite);
             e.Kind = "unit";
             e.Def ??= UnitDef(e.Template);
+            // The core defaults a template without a team to "neutral": a unit then keeps its own side.
             string team = e.Team ?? side;
+            if (team == "neutral" && e.Def?["team"] == null && !PendingNeutral) team = side;
             if (team != side)
             {
                 var (converted, why) = Teams.Convert(e, go, team);
                 if (converted == null) { Object.Destroy(go); error = why; return false; }
+                if (converted != go) Object.Destroy(go);
                 go = converted;
             }
             e.Team = team;

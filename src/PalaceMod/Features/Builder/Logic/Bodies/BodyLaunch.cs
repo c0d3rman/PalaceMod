@@ -11,7 +11,14 @@ namespace PalaceMod.Builder.Logic.Bodies
     internal static class BodyLaunch
     {
         /// <summary>Spawns an entity through the core (caps, ids, rules). Swapped to the core's spawn once it lands.</summary>
-        public static System.Func<string, Vector3, float, string, LogicEntity, LogicContext, LogicEntity> SpawnVia = DirectSpawn;
+        public static System.Func<string, Vector3, float, string, LogicEntity, LogicContext, LogicEntity> SpawnVia = CoreSpawn;
+
+        private static LogicEntity CoreSpawn(string template, Vector3 pos, float rotY, string team, LogicEntity owner, LogicContext ctx)
+        {
+            if (template != null && template.StartsWith("{")) return DirectSpawn(template, pos, rotY, team, owner, ctx);   // dev
+            var world = LogicWorld.Current ?? throw new LogicError("no logic session");
+            return world.Spawn(template, pos.ToVec(), rotY, team == "owner" ? owner?.Team : team, owner, ctx);
+        }
 
         private static LogicEntity DirectSpawn(string template, Vector3 pos, float rotY, string team, LogicEntity owner, LogicContext ctx)
         {

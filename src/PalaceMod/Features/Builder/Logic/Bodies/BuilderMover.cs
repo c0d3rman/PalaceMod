@@ -51,7 +51,10 @@ namespace PalaceMod.Builder.Logic.Bodies
             if (poseObj != null)
                 foreach (var kv in poseObj)
                     if (kv.Value is JObject p)
+                    {
                         Poses[kv.Key] = (p.Value<float?>("rotY"), V(p["pos"]), V(p["offset"]));
+                        BodyActions.RegisterInput(kv.Key);
+                    }
         }
 
         public JToken PathToken;

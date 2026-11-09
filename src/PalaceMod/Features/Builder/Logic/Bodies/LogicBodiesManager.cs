@@ -22,6 +22,11 @@ namespace PalaceMod
             Launcher.Launch = BodyLaunch.Launch;
             Projectiles.Redirect = BodyLaunch.Redirect;
             LogicServices.Areas = AreaPoller.Instance;
+            LogicServices.Factory = EntityFactory.Instance;
+            LogicServices.ExtraCandidates = (c, r, into) => VanillaProjectiles.Query(c.ToVector3(), r, into);
+            LogicWorld.Polled += (w, t) => { corePolledAt = Time.time; Poll(t); };
+            LogicWorld.Started += _ => SessionChanged();
+            LogicWorld.Ending += _ => SessionChanged();
             BodyActions.Register();
             DevCommands.Register("logic-l2", "logic-l2 status | nav ... | act <action> [json] [self=<role>] [other=<role>] | build <template> <x> <z> [rotY] | signal <entity> <input> [value]   bodies (L2): spikes, actions with literal params, entities", args =>
             {
@@ -40,6 +45,7 @@ namespace PalaceMod
             });
         }
 
+        private static float corePolledAt = -10f;
         private float pollTimer;
         private double pollTime;
         private object world;
@@ -56,7 +62,8 @@ namespace PalaceMod
             if (w == null) return;
             Walkables.Tick();
             Surfaces.Tick();
-            // 10 Hz steps of game time (until the core drives Polled).
+            // 10 Hz steps of game time: the core's (LogicWorld.Polled), or our own for a dev world it doesn't drive.
+            if (Time.time - corePolledAt < 0.5f) return;
             pollTimer += Time.deltaTime;
             while (pollTimer >= 0.1f)
             {

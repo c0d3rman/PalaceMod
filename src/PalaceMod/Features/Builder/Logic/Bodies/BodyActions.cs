@@ -17,6 +17,27 @@ namespace PalaceMod.Builder.Logic.Bodies
         {
             LogicActions.Register("spawn", Spawn);
             LogicActions.Register("launch", Launch);
+            foreach (var name in BuilderMover.BuiltInInputs.Concat(["show", "hide", "lock", "unlock"])) RegisterInput(name);
+            LogicActions.RegisterInput("enable", (e, ev) => { SetEnabled(e); return false; });
+            LogicActions.RegisterInput("disable", (e, ev) => { SetEnabled(e); return false; });
+            LogicActions.InputsOf = InputsOf;
+        }
+
+        private static readonly HashSet<string> registered = [];
+
+        /// <summary>Registers an input name (pose names are registered as movers with them are built).</summary>
+        public static void RegisterInput(string name)
+        {
+            if (!registered.Add(name)) return;
+            LogicActions.RegisterInput(name, (e, ev) => Input(e, name, ev?.Value ?? 0));
+        }
+
+        /// <summary>enable/disable reached a body: its object follows (cut, collider, hittability, area, mover, look).</summary>
+        private static void SetEnabled(LogicEntity e)
+        {
+            var go = e?.Go();
+            if (go == null || go.GetComponent<BuilderBody>() == null) return;
+            if (go.activeSelf != e.Enabled) go.SetActive(e.Enabled);
         }
 
         // spawn: entity, count, at, spread, team, elite, facing, then
@@ -40,9 +61,10 @@ namespace PalaceMod.Builder.Logic.Bodies
                     pos += new Vector3(Mathf.Sin((float)a), 0f, Mathf.Cos((float)a)) * spread;
                 }
                 EntityFactory.PendingElite = p.Has("elite") && (p.Text("elite") == "inherit" ? ctx.Self?.Hp()?.Elite == true : p.Bool("elite"));
+                EntityFactory.PendingNeutral = team == "neutral";
                 LogicEntity e;
                 try { e = BodyLaunch.SpawnVia(template, pos, facing, team, ctx.Self, ctx); }
-                finally { EntityFactory.PendingElite = false; }
+                finally { EntityFactory.PendingElite = false; EntityFactory.PendingNeutral = false; }
                 if (e == null) continue;
                 if (then != null && then.Count > 0) ctx.With(spawned: e).Run(then);
             }
@@ -116,7 +138,7 @@ namespace PalaceMod.Builder.Logic.Bodies
     internal static class BodyDefer
     {
         /// <summary>Installed with the core's world.Defer once it's there; until then runs in place.</summary>
-        public static System.Action<ActionList, LogicContext> Defer = (list, ctx) => ctx.Run(list);
+        public static System.Action<ActionList, LogicContext> Defer = (list, ctx) => (ctx.World ?? LogicWorld.Current)?.Defer(list, ctx);
 
         public static void Run(ActionList list, LogicContext ctx)
         {

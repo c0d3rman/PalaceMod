@@ -13,7 +13,11 @@ namespace PalaceMod.Builder.Logic.Bodies
     internal static class BodyFilter
     {
         /// <summary>The core's compiler: filter text → (self, it) → match. Null until installed.</summary>
-        public static Func<string, Func<LogicEntity, LogicEntity, bool>> Core;
+        public static Func<string, Func<LogicEntity, LogicEntity, bool>> Core = src =>
+        {
+            var f = LogicExpr.Filter(src);
+            return (self, it) => it != null && LogicWorld.Current != null && f(LogicExpr.Context(self, it), it);
+        };
 
         private static readonly Dictionary<string, Func<LogicEntity, LogicEntity, bool>> cache = new(StringComparer.Ordinal);
 
