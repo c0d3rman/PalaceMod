@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using PalaceMod.Builder.Model.Logic;
 
 /*
     Level overlays (stage 2, WP4b/c). Features/Builder/Level/LevelOverlay applies them when a session loads the host
@@ -34,6 +35,9 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("colors")] public string Colors { get; set; }
         /// <summary>Editor groups (Studio metadata, ignored when playing).</summary>
         [JsonProperty("groups")] public List<GroupDef> Groups { get; set; }
+        /// <summary>The behaviour engine: level script, variables, placed entities, attached rules, HUD, king actions
+        /// (Model/Logic/LogicDefs.cs, docs/builder-engine.md).</summary>
+        [JsonProperty("logic")] public LogicDef Logic { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 

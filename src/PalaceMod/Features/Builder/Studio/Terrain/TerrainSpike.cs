@@ -58,7 +58,7 @@ namespace PalaceMod.Builder.Level
                             sb.Append($" layers=[{Layers(c.layerMask.value)}] colliders={c.rasterizeColliders} meshes={c.rasterizeMeshes} mode={c.collectionMode} " +
                                       $"tiles={r.tileXCount}x{r.tileZCount} useTiles={r.useTiles} tileSize={r.editorTileSize} cell={r.cellSize} " +
                                       $"bounds={r.forcedBoundsCenter}/{r.forcedBoundsSize} rot={r.rotation} radius={r.characterRadius} " +
-                                      $"maxSlope={r.maxSlope} climb={r.walkableClimb} height={r.walkableHeight} minRegion={r.minRegionSize}");
+                                      $"maxSlope={r.maxSlope} climb={r.walkableClimb} height={r.walkableHeight} minRegion={r.minRegionSize} relevantSurfaces={r.relevantGraphSurfaceMode}");
                         }
                         if (g is NavMeshGraph n)
                             sb.Append($" source={n.sourceMesh?.name} readable={n.sourceMesh?.isReadable} verts={n.sourceMesh?.vertexCount} offset={n.offset} rot={n.rotation} scale={n.scale}");
@@ -67,6 +67,8 @@ namespace PalaceMod.Builder.Level
                     var layers = new List<string>();
                     for (int i = 0; i < 32; i++) if (!string.IsNullOrEmpty(LayerMask.LayerToName(i))) layers.Add($"{i}:{LayerMask.LayerToName(i)}");
                     sb.AppendLine("layers " + string.Join(" ", layers));
+                    foreach (var s in Object.FindObjectsOfType<Pathfinding.Graphs.Navmesh.RelevantGraphSurface>())
+                        sb.AppendLine($"RelevantGraphSurface {Path(s.transform)} at {s.transform.position}");
                     break;
                 }
                 case "helper":
