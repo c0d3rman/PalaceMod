@@ -22,13 +22,25 @@ namespace PalaceMod.Builder.Logic
             Go = go;
             hp = go.GetComponentInChildren<Hp>(true);
             tagged = hp != null ? hp.GetComponent<TaggedObject>() : go.GetComponentInChildren<TaggedObject>(true);
+            _ = Position;
         }
 
         public Hp Hp => hp;
         public TaggedObject Tagged => tagged;
         public bool Exists => Go != null;
         public bool Alive => Go != null && Go.activeInHierarchy && (hp == null || !hp.KnockedOut);
-        public Vec Position => Go != null ? (tagged != null ? tagged.transform.position : Go.transform.position).ToVec() : Vec.Zero;
+        private Vec last;
+
+        /// <summary>The object's position, or where it last was once it's gone (a dead unit's `death` rules still
+        /// read `subject.pos`).</summary>
+        public Vec Position
+        {
+            get
+            {
+                if (Go != null) last = (tagged != null ? tagged.transform.position : Go.transform.position).ToVec();
+                return last;
+            }
+        }
         public float Facing => Go != null ? Go.transform.eulerAngles.y : 0f;
         float IEntityBody.Hp => hp != null ? hp.HpValue : 0f;
         public float MaxHp => hp != null ? hp.maxHp : 0f;
