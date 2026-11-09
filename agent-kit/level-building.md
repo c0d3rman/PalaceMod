@@ -29,7 +29,8 @@ that pack. A folder under `packs/` (an installed pack) is read and written as be
 6. Look: `python3 palace.py render library <level-id> -o map.png --labels reqs` (then read the PNG), `show`,
    `economy --compare`, `waves --compare`.
 7. Test in the game: `python3 palace.py test library <level-id> --plan plan.json --shots shots/` (buys what a player
-   would, plays the nights at 3x speed, reports each night), or `play` / `sandbox` and drive it step by step.
+   would, plays the nights at 3x speed in fast simulation, reports each night), or `play` / `sandbox` and drive it
+   step by step. After editing only later nights' waves, `test ... --from-night N` replays just nights N.. .
    `render --live` draws your overlay on a real top-down picture and the game's own enemy routes.
 8. Iterate: change the ops file and `apply --fresh` it (the level is emptied back to what `level` made, its nights kept,
    then the whole file runs again; ops aren't idempotent, so a plain second `apply` of the same file fails at the first
@@ -306,7 +307,7 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 | `play <pack> <level>` | load as a normal run (real gold); prints load warnings |
 | `sandbox <pack> <level> [--at X Z]` | Studio test play: unlimited gold, king at X,Z |
 | `edit <pack> <level>` | open the level in the in-game Studio (the player's editor: F5 there test-plays); it edits its own copy and Ctrl+S writes pack.json, so don't `apply` while the player has unsaved Studio changes |
-| `test <pack> <level> [--nights 1-3] [--plan p.json] [--carry] [--save] [--catchup play\|free\|none] [--free] [--king castle\|<slot>\|X,Z] [--build all] [--god] [--invulnerable] [--gold N] [--speed 3] [--shots dir] [--quiet]` | load, buy per plan each day once its gold is in, play nights, report each (one progress line per night on stderr) |
+| `test <pack> <level> [--nights 1-3] [--plan p.json] [--carry] [--save] [--catchup play\|free\|none] [--free] [--king castle\|<slot>\|X,Z] [--build all] [--god] [--invulnerable] [--gold N] [--speed 3] [--no-fast] [--from-night N] [--no-states] [--shots dir] [--quiet]` | load, buy per plan each day once its gold is in, play nights, report each (one progress line per night on stderr); fast simulation unless `--no-fast`; saves a resume state each dawn for `--from-night` |
 | `night [N] [--speed 3]` | start the next night (or jump to night N) and wait for its report |
 | `build <slot> [level] [branch] [--pay]` | build/upgrade now (free unless --pay); `castle`, an added id, or a host name; exit 1 if refused |
 | `enemy <id> [--difficulty D] [--elite] [--studio] [--fight N] [--portrait]` | a library enemy's numbers (offline: HP, damage per hit/second against buildings, the king and troops, troops' time to kill it); with the game: open it in the Enemy Studio, fight N copies in its arena, save its portrait |
@@ -402,6 +403,26 @@ income paid), then the full `nights` reports. Each night report:
   (the next morning once income and the night's coins are in: what the next day can spend).
 - `income`: the next dawn's `nominal` income (every building), `blocked` (knocked out that night) and `paid`.
 - `after`: the game status at that same moment (the next morning; the end screen after the last night).
+
+**Test fidelity and speed.** `test` runs in *fast simulation* by default: every frame advances the game by the same
+fixed step a smooth 60 fps game sees at `--speed` (1/60 s x 3 at the default 3x), and frames run back to back as fast
+as the computer allows, without drawing them (the game window shows a picture about 10 times a second). A 5-night
+test takes under a minute instead of several. The step matters: bigger steps (a high `--speed`, or a game held to a
+low frame rate because it's in the background or on battery) make defences do measurably better than in real play,
+so keep `--speed` at 3 or less (5 still matched real time in our tests; 8 did not). `--no-fast` plays in real time
+at `--speed` (for watching). Screenshots in fast mode are a render of the game camera: the 3D view without the HUD.
+The game has some randomness of its own; for a close call, run the test two or three times.
+
+**Resuming from a later night.** Every full `test` saves a savestate at each dawn (once that morning's gold is in,
+before buying). `test ... --from-night N` loads the one before night N and plays only nights N.. with the current
+plan's days N.., so after changing night 8's waves you replay nights 8-10 instead of all ten. It refuses (and says
+why) when the state no longer matches: the level itself (terrain, slots, props, spawn lines, costs), the waves of
+nights 1..N-1 (or starting gold), a library enemy used in those nights, the plan's days 1..N-1 (or its options and
+king posts), or the flags `--free --build --gold --god --invulnerable --king --carry --save` changed since. Waves
+of nights N.. (and enemies only they use) and the plan from day N on may change freely. The report's
+`resumedFrom.earlierNights` has the earlier nights from the run that saved the state. `--force-resume` uses a stale
+state anyway; `--no-states` skips saving them. It needs savestates to work in Builder levels (a game that can't save
+them says so once in the report's `warnings`).
 
 The king does nothing during `test` (he stands where he was, or where `--king` put him), so a defence that holds in `test` holds without the
 player's help; a real player adds his own damage (roughly one strong unit). Use `--god` to keep the king alive,
@@ -562,7 +583,8 @@ island with three causeways; if that's where yours is heading, check whether ano
 4. `test --plan` with a realistic plan for all nights: survives with some damage early, close calls late. If night
    1-3 are lost, they're too hard; if nothing is ever knocked out, too easy.
 5. `test --nights N --plan` to probe a late night: it plays the earlier nights first, so night N starts with a real
-   player's kingdom (slow; `--catchup free` jumps there with the earlier days built for free instead).
+   player's kingdom (`--catchup free` jumps there with the earlier days built for free instead). After a full run,
+   `test --from-night N` replays only nights N.. from that run's dawn state while you tune the late waves.
 6. Screenshots (`--shots`) of the first and last night: does it read well?
 
 ## 10. Troubleshooting
