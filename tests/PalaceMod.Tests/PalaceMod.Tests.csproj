@@ -59,6 +59,7 @@
     <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Terrain/TerrainBrushes.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Level/UnitSpread.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Enemies/EnemyMath.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Logic/Bodies/Stats/StatMath.cs" />
     <EmbeddedResource Include="../../src/PalaceMod/Assets/builder-sample.json" LogicalName="builder-sample.json" />
   </ItemGroup>
 
