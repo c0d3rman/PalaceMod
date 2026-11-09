@@ -32,7 +32,7 @@ namespace PalaceMod
         internal const string Usage =
             "builder-studio open <pack> <level> | new <pack> <scene> [cleared] | state | dock | select <key...> | add <key...> | clear | tool <id> | arm slot <type>|prop <name>|lib <id> " +
             "| cursor <x> <z>|off | click | drag <sx> <sy> <ex> <ey> [left|right|middle] [shift|ctrl|alt] | dragw <x1> <z1> <x2> <z2> [button] [mods] | rclick <x> <z> | press <tile|row> " +
-            "| cam <x> <z> [zoom] [yaw] | delete | dup | copy | paste <x> <z> | group | ungroup | frame | snap <m> | cost <level> <gold|base> | labels | issues | check | audit (place every palette kind, compare with its ghost) | play [start] | leave | json   the level Studio";
+            "| cam <x> <z> [zoom] [yaw] | delete | dup | copy | paste <x> <z> | group | ungroup | frame | snap <m> | axis turn|tilt|roll | pose <key> | cost <level> <gold|base> | labels | issues | check | audit (place every palette kind, compare with its ghost) | play [start] | leave | json   the level Studio";
     }
 }
 
@@ -149,6 +149,18 @@ namespace PalaceMod.Builder.Studio
                 case "ungroup": Require(); StudioEdits.Ungroup(StudioSelection.Keys); return "ungrouped";
                 case "frame": Require(); StudioShell.FrameSelection(); return "framed";
                 case "snap": StudioShell.SnapStep = F(args, 1); return "snap " + StudioShell.SnapStep;
+                case "pose":
+                {
+                    Require();
+                    var it = StudioScene.Find(Arg(args, 1)) ?? throw new ArgumentException("no item " + Arg(args, 1));
+                    if (it.Proxy == null) return $"{it.Key}: pos {it.Pos} yaw {it.Yaw:0.#} (no proxy)";
+                    var t = it.Proxy.transform;
+                    var r = it.Proxy.GetComponent<Renderer>();
+                    return $"{it.Key}: pos {t.position} euler {t.eulerAngles} tilt {it.TiltX:0.#}/{it.TiltZ:0.#}" + (r != null ? $" bounds {r.bounds.size}" : "");
+                }
+                case "axis":   // the Rotate tool's axis, as X / Z switch it
+                    StudioShell.Rotate.Axis = Arg(args, 1) switch { "tilt" => 1, "roll" => 2, _ => 0 };
+                    return "rotate axis " + (StudioShell.Rotate.AxisLabel ?? "Turn");
                 case "cost":
                 {
                     Require();
