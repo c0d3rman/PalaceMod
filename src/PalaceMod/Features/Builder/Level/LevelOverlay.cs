@@ -99,6 +99,7 @@ namespace PalaceMod.Builder.Level
                 go.transform.SetPositionAndRotation(LayoutScene.ToVector(add.Pos), LayoutScene.WithYaw(source.transform.rotation, add.RotY));
                 LayoutScene.SetGuid(go, LayoutScene.Guid(pack.Id, level.Id, add.Id));
                 var clone = go.GetComponent<BuildSlot>();
+                WalkableDeck(clone);
                 if (UnitHomes.ApplyOffsets(clone, add.Units) > 0) units++;
                 ApplyCosts(clone, add.Upgrades);
                 clones.Add((add, clone, parent));
@@ -312,6 +313,38 @@ namespace PalaceMod.Builder.Level
             t.GetChild(0).position = center - half;
             t.GetChild(1).position = center + half;
             return line;
+        }
+
+        /// <summary>A building whose built look has a flat Ground-layer surface (Uferwind's Bridge: its deck) is walked on.
+        /// The map's own bridges get that from the bake: the deck is in the navmesh and a "Block While Unbuilt" cut hides
+        /// it until the bridge is built. A copy stands somewhere else, so the graphs have no deck there (a NavmeshAdd
+        /// doesn't join the ground round it): the graphs are rescanned once it's built, with its deck active.</summary>
+        internal static int WalkableDeck(BuildSlot slot)
+        {
+            if (slot == null) return 0;
+            int n = 0;
+            foreach (var r in slot.GetComponentsInChildren<MeshRenderer>(true))
+            {
+                var mf = r.GetComponent<MeshFilter>();
+                if (r.gameObject.layer != 6 || mf == null || mf.sharedMesh == null || r.GetComponentInParent<Hp>(true) == null) continue;
+                if (WorldHeight(mf.sharedMesh.bounds, r.transform) > 0.5f) continue; // the bridge's body, not its deck
+                n++;
+            }
+            if (n > 0) slot.OnUpgrade.AddListener(() => GroundGraphs.ScanSoon(slot.name));
+            return n;
+        }
+
+        private static float WorldHeight(Bounds b, Transform t)
+        {
+            float lo = float.MaxValue, hi = float.MinValue;
+            for (int i = 0; i < 8; i++)
+            {
+                var c = b.center + Vector3.Scale(b.extents, new Vector3((i & 1) == 0 ? -1 : 1, (i & 2) == 0 ? -1 : 1, (i & 4) == 0 ? -1 : 1));
+                float y = t.TransformPoint(c).y;
+                lo = Mathf.Min(lo, y);
+                hi = Mathf.Max(hi, y);
+            }
+            return hi - lo;
         }
 
         private static void ApplyCosts(BuildSlot slot, List<UpgradeEdit> edits)

@@ -2525,7 +2525,9 @@ def check_pack(ref, data):
         flat = lv.get("base") == "flat" and lv.get("terrain")
         T = Terrain(lv["terrain"]) if flat else None
         g = None if flat else Grid(m["grid"])
-        pts = [(s.label, s.pos) for s in slots.values() if s.added or any(e.get("ref") == s.key and e.get("pos") for e in bs.get("edit") or [])]
+        # A Bridge (Uferwind's) is built over water or a gap: its centre is off the ground by design.
+        pts = [(s.label, s.pos) for s in slots.values() if s.kind != "Bridge"
+               and (s.added or any(e.get("ref") == s.key and e.get("pos") for e in bs.get("edit") or []))]
         for label, pos in pts:
             x, y, z = pos
             gy = T.height_at(x, z) if T else g.height(x, z)
@@ -2594,7 +2596,7 @@ def check_pack(ref, data):
                 if h and any(s.get("line") == name for n in h["vanillaWaves"].get("nights", []) for s in n.get("spawns", [])):
                     err(rp, f"spawn line {name!r} is removed, but the map's own nights spawn from it: give the level a wave set")
         for l in lines:
-            if l["added"]:
+            if l["added"] and (l["ground"] or l["large"]):  # flyer-only lines may sit over the sea, like the maps' own
                 k = ground.index(l["center"][0], l["center"][2])
                 if k is None or ground.kind[k[1]][k[0]] == "#":
                     err(f"{p}.spawnLines", f"spawn line {l['name']} is off the map")
