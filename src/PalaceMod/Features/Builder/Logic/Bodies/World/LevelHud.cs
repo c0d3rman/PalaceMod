@@ -110,11 +110,18 @@ namespace PalaceMod.Builder.Logic.Bodies
             if (!defaultsLoaded && WorldCommon.InMatch) EnsureDefaults();
             if (lines.Count == 0) return;
             bool show = WorldCommon.InMatch && (UIFrameManager.instance == null || UIFrameManager.instance.ActiveFrame == null);
-            if (Time.unscaledTime < nextRefresh && show == lastShow) return;
-            nextRefresh = Time.unscaledTime + 0.25f;
-            lastShow = show;
-            if (show && !EnsureTemplate()) return;
-            float y = Gutter;
+            if (Time.unscaledTime >= nextRefresh || show != lastShow)
+            {
+                nextRefresh = Time.unscaledTime + 0.25f;
+                lastShow = show;
+                if (show && !EnsureTemplate()) return;
+                Refresh(world, show);
+            }
+            Place();
+        }
+
+        private static void Refresh(LogicWorld world, bool show)
+        {
             foreach (var l in lines)
             {
                 bool visible = false;
@@ -143,6 +150,24 @@ namespace PalaceMod.Builder.Logic.Bodies
                 if (l.Panel == null) Build(l);
                 l.Panel.gameObject.SetActive(true);
                 if (text != l.Shown || l.IconImage.sprite == null != string.IsNullOrEmpty(l.Icon)) Layout(l, text);
+            }
+        }
+
+        // Every frame: the column starts under the game's night-score panel while it's up (it shares the top right).
+        private static void Place()
+        {
+            float y = Gutter;
+            var score = NightscoreUI.instance != null ? NightscoreUI.instance.nightScorePanel : null;
+            if (score != null && score.activeInHierarchy && score.transform is RectTransform rt)
+            {
+                var corners = new Vector3[4];
+                rt.GetWorldCorners(corners);   // screen space: the game's HUD canvas is an overlay
+                float bottom = Mathf.Min(corners[0].y, corners[3].y);
+                y = Mathf.Max(y, (Screen.height - bottom) / WorldOverlay.ScaleFactor + Gap);
+            }
+            foreach (var l in lines)
+            {
+                if (l.Panel == null || !l.Panel.gameObject.activeSelf) continue;
                 l.Panel.anchoredPosition = new Vector2(-Gutter, -y);
                 y += l.Panel.sizeDelta.y + Gap;
             }
