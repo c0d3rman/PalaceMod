@@ -298,7 +298,7 @@ the hit box and every stat you don't set):
 
 ```jsonc
 "visuals": {
-  "mesh": "mesh:Tree_02",          // a scenery mesh (`palace.py ref scenery`: any map's, drawn in the level's colours),
+  "mesh": "mesh:Cone Tree",          // a scenery mesh (`palace.py ref scenery`: any map's, drawn in the level's colours),
                                    // "vanilla:P Knight" (another unit's model, `ref enemies [--player]`),
                                    // or "asset:<key>" (an OBJ/glTF in the library's assets)
   "meshScale": 0.8,                // omit to fit it to the base's height
@@ -921,7 +921,7 @@ one level.)
 **Hurls homing trees** (an enemy with a projectile attack):
 
 ```jsonc
-{"op": "entity", "id": "tree-missile", "kind": "projectile", "visual": {"mesh": "mesh:Tree_02", "meshScale": 0.4}, "lifetime": 6,
+{"op": "entity", "id": "tree-missile", "kind": "projectile", "visual": {"mesh": "mesh:Cone Tree", "meshScale": 0.4}, "lifetime": 6,
  "projectile": {"speed": 9, "homing": 0.6, "arc": 0.2, "spin": [0, 0, 360], "hits": "foe"},
  "rules": [{"when": "impact", "do": [{"do": "damage", "target": "all('foe', 2)", "amount": 25, "source": "self.owner"},
                                      {"do": "effect", "fx": "dust_large", "at": "self"}]}]}

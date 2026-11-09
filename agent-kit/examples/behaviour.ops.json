@@ -2,7 +2,7 @@
  {"op": "level", "name": "The Grove Rite", "description": "Treants hurl trees, a mercenary camp sells swords by day, and ten souls in the ritual circle win the run."},
 
  {"op": "entity", "id": "tree-missile", "kind": "projectile", "name": "Hurled tree",
-  "visual": {"mesh": "mesh:Tree_02", "meshScale": 0.4}, "lifetime": 6,
+  "visual": {"mesh": "mesh:Cone Tree", "meshScale": 0.4}, "lifetime": 6,
   "projectile": {"speed": 9, "homing": 0.6, "arc": 0.2, "spin": [0, 0, 360], "hits": "foe"},
   "rules": [{"when": "impact", "do": [
     {"do": "damage", "target": "all('foe', 2)", "amount": 25, "source": "self.owner"},
