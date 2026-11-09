@@ -73,8 +73,21 @@ namespace PalaceMod.Builder.Logic
                 case ExprKind.Bool: { var v = Value.Bool((bool)n.Literal); return _ => v; }
                 case ExprKind.Text: { var v = Value.Text((string)n.Literal); return _ => v; }
                 case ExprKind.Template: { var v = Value.Template(n.Name); return _ => v; }
-                case ExprKind.LevelVar: { string name = n.Name; return ctx => ctx.World.Level.Vars.TryGetValue(name, out var v) ? v : Value.None; }
-                case ExprKind.Named: { string name = n.Name; return ctx => Value.Entity(ctx.World.FindNamed(name)); }
+                // Level-bound references resolve against the level the rule runs in. A shared template may be used by a
+                // level that lacks the name: that's a clear error naming the template, not a silent none.
+                case ExprKind.LevelVar:
+                {
+                    string name = n.Name;
+                    return ctx => ctx.World.Level.Vars.TryGetValue(name, out var v) ? v
+                        : throw new LogicError($"this level has no variable \"${name}\" (declare it in logic.vars){TemplateNote(ctx)}");
+                }
+                case ExprKind.Named:
+                {
+                    string name = n.Name;
+                    return ctx => ctx.World.FindNamed(name) is { } e ? Value.Entity(e)
+                        : ctx.World.IsKnownName(name) ? Value.None
+                        : throw new LogicError($"nothing on this level is named \"@{name}\"{TemplateNote(ctx)}");
+                }
                 case ExprKind.Role: return Role(n.Name);
                 case ExprKind.Global: return Global(n.Name);
                 case ExprKind.Member: return Member(n);
@@ -103,6 +116,12 @@ namespace PalaceMod.Builder.Logic
             }
             throw new LogicError($"col {n.Col + 1}: unsupported expression");
         }
+
+        /// <summary>" (in template X: ...)" when the rule belongs to a template rather than the level's own logic.</summary>
+        internal static string TemplateNote(LogicContext ctx) =>
+            ctx?.Self is { } self && self != ctx.World?.Level && self.Template != null && !self.Template.StartsWith("vanilla:")
+                ? $" (in template \"{self.Template}\": a shared template that names a level's $variables or @names only works in levels that have them)"
+                : "";
 
         private static string ResolveAlias(string name) => LogicSchema.RoleAliases.TryGetValue(name, out var to) ? to : name;
 
