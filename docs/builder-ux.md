@@ -47,10 +47,12 @@ Stages 3 to 7 repeat many times, so their actions are one or two inputs each, wi
 
 ```text
 Title / pause menu
-  └ Builder (home: packs)                      ModFrame, as today (PackListPage)
-      └ Pack (Units · Wave Sets · Levels · Pack · Problems)
-          ├ Levels row "Open"  ───────────────►  STUDIO (in-world, on the level's map)
-          └ "New level" → Start popup ────────►  STUDIO
+  └ Builder home (My Levels · My Enemies)      ModFrame, wide tabs of preview tiles (Designs/LibraryHome.cs)
+      ├ level tile ─────────────────────────►  STUDIO (in-world, on the level's map)
+      ├ "New level" → Start popup ──────────►  STUDIO
+      ├ enemy tile / "New enemy" ───────────►  ENEMY STUDIO (StudioServices.Enemies; else the unit page)
+      ├ right-click: Rename · Duplicate · Delete · Export
+      └ Import · Export (packs exist only here)
 STUDIO
   ├ Edit mode: toolbar · palette · inspector/outliner/level · top bar · status line
   ├ popups: context menu, requirement picker, chain preset, start/base, nights, problems, Studio menu
@@ -58,7 +60,7 @@ STUDIO
   └ F5 ⇄ Play mode: the level as it plays + sandbox panel
 ```
 
-Leaving the Studio (Studio menu → Leave) returns to the pack screen where it was opened (today's `EditorReturn`).
+Leaving the Studio (Studio menu → Leave) returns to the home (`EditorReturn`; `BuilderEditor.CurrentPlace` counts the home).
 
 ## The Studio (edit mode)
 
@@ -90,7 +92,8 @@ or the edge.
 - **Toolbar** (left, 56 px tiles in one column): the tools, each a `ModTile` with its icon, the key in the corner
   badge, and its name in the tooltip.
 - **Palette** (300 px, collapsible with Tab). Tabs:
-  - **Slots:** every slot kind on the host. Shows the icon, the cost chain and the count on the map.
+  - **Slots:** every slot kind on the host, plus every other kind as the game's standard building (see "Building
+    kinds the host lacks"). Shows the icon, the cost chain and the count on the map.
   - **Scenery:** the host's scenery meshes, with a text filter.
   - **Spawns:** spawn lines: moving the host's, adding new ones, and removing the host's (`spawnLines.remove`: deactivated at load, so no enemies, routes or markers; Studio Delete toggles it, undoable).
   - **Library:** the asset browser slot (see "Asset browser slot").
@@ -99,7 +102,8 @@ or the edge.
 - **Right panel** (340 px). Tabs:
   - **Inspector:** the selection.
   - **Outliner:** every object, filterable.
-  - **Level:** name, description, base map, nights, starting gold, and the path check with its result.
+  - **Level:** name and description (each value under its label at the panel's full width), the map, base and
+    nights, the path check with its result, and the changes as one row per count ("Slots added 36").
 
   The panel scrolls (`ModScrollArea`).
 - **Status line** (32 px): on the left, what is under the cursor (name, cost chain, requirement, coordinates). In the
@@ -113,8 +117,10 @@ or the edge.
 |---|---|---|
 | Select | V | Click selects. Shift-click adds, Ctrl/Cmd-click toggles. **Dragging from empty ground draws a marquee**, using the same Shift/Ctrl rules. Dragging a selected object moves the whole selection. |
 | Lasso | L | Drag a free shape. Selects the objects whose ground point falls inside it, with Shift/Ctrl as above. |
-| Paint select | B | A ground brush (wheel+Alt sizes it). Dragging adds what it passes over, and Alt+drag removes. |
-| Move | G | Grab: the selection follows the cursor. Click commits; Esc or a right click (without a drag) cancels. X/Z lock an axis, and arrow keys nudge by the snap step (Shift ×5). |
+| Paint select | B | A ground**Dev:** `builder-terrain flat [cell] | host [cell] | brush (wheel+Alt sizes it). Dragging adds what it passes over, and Alt+drag removes. |
+| Move | G | Grab: the selection follows the cursor. Click commits; Esc or a right click (without a drag) cancels. X/Z lock an axis, and arrow keys nudge by theking <x> <z> | walk <dx> <dz> <s> | probe <x> <z> [y] [r] | snap | scan | grid | encode | save <pack> | clear`.
+`host` puts a sculptable grid on the map's own ground; `walk` moves the king through his CharacterController (what he
+can climb); `probe` lists the colliders he meets around a point. `save` writesstep (Shift ×5). |
 | Rotate | R | Turns the selection about its centre by mouse. `,` and `.` step by the turn step (they also work in Select). |
 | Place | (palette) | A ghost of the kind follows the cursor. Click places. Shift keeps placing. `,`/`.` turn the ghost. |
 | Link | K | Click dependents (or use the selection), then click their prerequisite: a slot or the castle. See "Requirements". |
@@ -171,6 +177,37 @@ The Studio owns input this way:
 4. In play mode the claim is dropped (the level plays normally); only F5 and the sandbox keys keep a play-context
    claim.
 
+### Text and hover descriptions
+
+- Text never clips or is cut into uselessness: popups widen to their longest row (up to the screen less 48 px) and a
+  row still too long wraps; side-panel rows wrap onto a second line (`StudioDock.Compact` with the page width); tile
+  labels shrink to 60 % before an ellipsis.
+- Names with a hidden meaning (tags, slot kinds, upgrade choices, weapons, behaviours, stats, flags) get their tooltip
+  from one table, `Features/Builder/Model/Descriptions.cs` (`Descriptions.For(kind, name)`), written from the
+  decompiled game; the Enemy Studio and agent kit read the same table.
+
+### Mouse on the UI never reaches the game
+
+The game's menus read the mouse at the controller level, but gameplay reads Rewired actions, and some of it ignores
+the frozen player (`PlayerScept` raises the sceptre on every "Interact"). `KeybindsManager.MouseGate` switches off the
+mouse bindings of every game action while the pointer is on a `ModDock` panel or a mod menu (ModFrame, ModPopup, the
+Studio's frozen dock) is the active frame, and back on once no mouse button is held.
+
+### Placement audit
+
+`dev.py cmd "builder-studio audit"` places every palette kind of the open map (Slots, Scenery, every Library item),
+checks the placed object has the ghost's meshes at the ghost's size, resizes one of two copies of each prop to check
+the other stays put, and undoes everything. Root causes it caught: `LayoutScene.Props` counted the Studio's own prop
+copies (renamed to their item keys) as host scenery, so a resized copy set the host base's scale for every copy of
+that mesh; and the library ghost was drawn at scale 1 while placing used the start scale.
+
+"Placing X made Y" was the click, not the placement: hovering a tile selects it, and `ModScroll` scrolled the
+selection into view, so a tile near the palette's edge scrolled up under the still pointer, the tile now under it was
+selected and scrolled to in turn, and the click landed one or two rows further on (Defense Tower lvl 1 → Stepping
+Stone, Rock A Alternate: the tiles 3 and 6 after it, three per row). Hover selection no longer scrolls. The library
+tiles' click path is checked with the simulated mouse (`uikit mouse <tile>`, `uikit click`, then `builder-studio
+state`); `builder-studio focus` shows the active frame's selection, focus and last applied element.
+
 ### Selection and multi-edit
 
 - The selection is an ordered list of item keys (`slot:<name>`, `add:<id>`, `prop:<id>`, `line:<name>`,
@@ -199,7 +236,8 @@ The Studio owns input this way:
 ### Outliner
 
 - Filter chips: Slots, Castle, Scenery, Spawns, Groups, Changed, Problems, No requirement. There's also a text filter.
-- Rows show the icon, name, kind, cost chain and requirement. Clicking selects (Shift/Ctrl as on the map) and
+- Rows show the icon and name on the first line, and the kind, cost chain, requirement and state on a smaller second
+  line (side by side, a 340 px panel cut both to a few letters). Clicking selects (Shift/Ctrl as on the map) and
   double-click frames. It scrolls (`ModScrollArea`) and is never cut short.
 
 ### Context menu (ModPopup at the cursor)
@@ -259,6 +297,40 @@ returns), Leave (back to the pack screen, map unloaded), Studio settings (label 
 The "Check enemy paths" button is in the Level tab and in View ▾ Routes. It runs automatically, debounced 1.5 s
 after an edit that moves solid things, while Routes is on. Each check is a rescan (120 to 220 ms warm on
 Nordfels). The result is a status chip in the Level tab and the top bar's Problems badge ("Blocked: Forest").
+
+### Unit positions
+
+A training building's units (barracks, archery range, hero's quarter...) are children of its slot, at offsets the
+map's author placed around the building. `PathfindMovementPlayerunit.Start` makes wherever a unit stands its home
+(`homePosition`, `homePositionOriginal`): it returns there each morning and respawns next to it, and the build preview
+draws it there. A slot the Builder moves, turns or copies carries the offsets along, so on a river bank the units
+stood (and were previewed, and appeared) in the water until they first walked.
+
+- **Play** (`Level/UnitHomes.cs`, pure part `Level/UnitSpread.cs`, unit-tested): right after the level-start rescan
+  (`GroundGraphs.Scan`, so on the graphs the level plays on), every unit home of every slot on a Builder level that
+  is more than 0.6 m off its own graph (`Seeker.graphMask`) moves to the nearest walkable point, 0.8 m further in,
+  or, if a unit placed before it is within 1.3 m, the nearest free walkable spot in rings around it: a formation
+  stays spread out. Never across water: a new home must be reachable from its building by a walk at most 1.5x the
+  straight line + 4 m (`UnitSpread.Flood`: Dijkstra on a 1 m lattice of the unit's walkable ground, 24 m round the
+  slot), so the far bank of a river, reachable only round by a ford, doesn't count; a unit whose nearest ground is
+  over there walks back towards its building to the first ground on the way (one standing in the water within
+  0.6 m of the far bank counts as off the ground too). The Studio's "Move units onto ground" does the same.
+  The unit's transform moves (its Start, the build preview and respawns use it); units that
+  already started (a building loaded built) get `homePosition`/`homePositionOriginal` too. Logged with the rescan;
+  `builder-units [live] | settle` (dev).
+- **Data:** `units: [[x, z], ...]` on a `buildSlots` edit or add: per unit spot (an Outpost holds 5 upgrade choices
+  x 12 units on 12 shared spots; units on one spot move together, and play moves them to one new spot), metres from the
+  slot's centre in its frame (x right, z forward; turns with the slot); null entries and absent = the map's. Applied
+  by `LevelOverlay` before Start; play's settle still runs after.
+- **Studio** (`Studio/Units/`): a selected or hovered training slot shows a disc per unit (verdigris); a unit on
+  unwalkable ground (terrain water, blocked or steeper than 30° on the grid, else off its graph) is a red disc with a
+  cross, shown at all times and listed in Problems ("Outpost camp: 2 of 4 units stand off walkable ground"). With
+  the Select tool, dragging a selected slot's disc moves that unit (one undo step). The Inspector's Units section
+  says how many stand off the ground and has "Move units onto ground" (the same spread as play, on the Studio's
+  ground) and "Reset unit positions"; the context menu has "Move units onto ground". Dev: `builder-units studio |
+  ground | set <key> <i> <x> <z> | reset`.
+- **Agent kit:** the reference lists each map slot's `units`; `check` warns about units off walkable ground;
+  `set_units` places them.
 
 ### Removed
 
@@ -485,6 +557,78 @@ Non-modal dock like the Studio's. Keys in brackets (context `BuilderPlay`).
      `EditorReturn.OnTransition` whenever it redirects.
 3. **Del deletes nothing and says "Nothing to undo today."** See "Input ownership".
 
+## Library: levels and enemies (R2-C1)
+
+The Builder is centred on two libraries, **My Levels** and **My Enemies**; packs exist only at export and import.
+
+**Storage** (`Model/LibraryStore.cs`, pure C#, tested in `tests/PalaceMod.Tests/LibraryTests.cs`):
+
+```text
+BepInEx/PalaceBuilder/library/
+  levels/<id>.json  levels/<id>.png      a level and the wave set(s) it owns; its saved preview
+  enemies/<id>.json enemies/<id>.png     one unit (enemy or custom troop); its saved portrait
+  assets.json  assets/                   the shared asset map and files
+  trash/                                 deleted and replaced items
+  .migrated                              written once the old packs were moved in (lists what moved)
+```
+
+- Item files are ordinary pack files (`palace-builder`, same version and migrations) holding one level or one unit,
+  plus `"library": {kind, created, origin}`. The file name is the id; ids never change (Rename sets the name).
+- **Wave sets belong to their level** (nights are per map: lines and gold are the host's). Their ids are unique across
+  the library; SaveWorkspace renames a clash in the workspace too.
+- **Enemies are shared**: any level spawns any library enemy by its plain unit id. Custom player troops live in the same
+  library (shown with an "ally" badge).
+- At runtime the library is one composed pack, id `library` (`LibraryStore.PackId`), registered in `PackRepository`
+  with the library root as its folder, so sessions, the unit factory, assets and validation are unchanged. Playing a
+  library level validates only that level, its nights and the units they use (`TestPacks.Play`).
+
+**Editing = workspaces** (`Designs/DesignLibrary.cs`). `DesignLibrary.OpenLevel(id)` gives a `PackDraft` holding that
+level, its nights and every enemy and asset; `OpenEnemies()` every enemy and no level. Both have pack id `library`
+(`draft.IsLibrary`). `draft.Save` writes only items that differ from the workspace's baseline (an untouched stale enemy
+never overwrites another workspace's save); enemies removed in the workspace go to trash. A dirty cached workspace is
+rebased on reopen (`PackDraft.RebaseLibrary`: untouched enemies follow the library). Level and enemy edits made from
+the Level Studio share its undo history and its save.
+
+**Previews** are saved snapshots, never live renders: `PackDraft.Saved` → `DesignLibraryManager` pictures the open
+Studio level from above (framing its items) into `levels/<id>.png` on every save; the Enemy Studio saves a portrait
+with `DesignLibrary.SavePreview(DesignKind.Enemy, id, texture)`. `DesignLibrary.Preview(kind, id)` loads a sprite,
+cached until the file changes.
+
+**Home** (`Designs/LibraryHome.cs`; `BuilderEditor.Open` opens it, the old pack list is `BuilderEditor.OpenPackList` for
+dev and installed packs). Two wide tabs, My Levels and My Enemies. A toolbar row (New, Import, Export, a search tile that
+types in place, Sort: Recent / Name / Map or Base) over a grid of 268×214 tiles: the saved snapshot (fallback: the map's
+thumbnail, or the base enemy's icon), the name, and one line of facts (map · nights; base · levels that use it).
+Click opens; right-click gives Open, Name, Duplicate, Export… (levels) or Used in (enemies), Delete… (to trash, with
+the levels that use an enemy named). Tiles of installed packs' levels and enemies follow under a header, dimmed; a
+click copies one into the library (with the enemies it needs). The Export popup picks levels and extra enemies (the
+ones the chosen levels use are listed as included) and saves a `.tfpack` (opens the exports folder) or copies a share
+code. In the Level Studio, the Studio menu's Share/Pack editor rows become Export… for library levels, and each spawn
+group in the nights page gets Edit enemy… / Customize enemy… / New enemy… (`Designs/EnemyEditing.cs`). Dev:
+`library home|open|enemy|new-enemy|rename|duplicate|delete|list|preview|export|code|import`.
+
+**Enemy Studio hook** (`StudioServices.Enemies`, `IStudioEnemyEditor.Open(draft, unitId | null, returnToLevelStudio,
+onReturn, out error)`): R2-C2 implements it; the Level Studio's spawn-group picker ("Edit enemy…", "New enemy…") and
+the home's enemy tiles call it. `DesignLibrary.NewEnemy(draft, baseRef, name)` adds a unit with a free id (one undo
+step).
+
+**Export / import.** `DesignLibrary.ExportFile/ShareCode(levels, enemies, name)` build a pack of the chosen levels, the
+chosen enemies, every enemy they use (spawns, troops, behaviours, transitively) and every asset named, in a staging
+folder, then write it with the existing `.tfpack`/share-code code. Every import (`IPackRepository.InstallNew`: share
+codes, `.tfpack` files, the import folder) adds the pack's levels and enemies to the library: an identical item is
+reused, an item from the same pack (`origin`) is replaced (old file to trash), any other clash gets a new id
+(`goblin-2`) and every reference (spawns, troops, behaviour params, `asset:` keys) is rewritten. Wave sets no level uses
+aren't imported (a warning says so).
+
+**Migration.** On the first scan, every pack folder in `packs/` (the player's own, e.g. `my-designs`, and installed
+demo packs) is imported with origin = its pack id and moved to `PalaceBuilder/migrated-packs/` (kept, never deleted).
+Unreadable packs stay where they are. Later folders in `packs/`, plugin and built-in packs stay installed packs: the
+home lists their levels read-only and copies one into the library to edit it. An old pack id still resolves (agent
+bridge `FindPack`, `palace.py`) to the levels that came from it.
+
+**Agent kit.** `palace.py` treats `library` as a pack (load composes the files, save writes changed items);
+`new <level> --host` makes a library level, `list` shows the library, `export` writes a `.tfpack` through the game
+(`agent library export ...`). `apply` checks only the levels its ops touched.
+
 ## Starting a level, and the empty map
 
 **Start popup** (`Studio/Start/StartPopup.cs`, `StartPopup.Open(draft)`; Pack › Levels › "New level"):
@@ -542,6 +686,33 @@ changes applied by the overlay at load (after Awake, before Start):
 
 Cost: Cleared is S-M and low risk, since it only removes things and keeps the host's ground, walls and graphs
 semantics. Flat field is M on top of W4's ground layer.
+
+### Building kinds the host lacks (`building:<kind>`)
+
+An added slot used to be only a copy of a host slot, so a kind the host lacks couldn't be placed (no Mill on
+Frostsee). Every player building kind is also a `Resources` prefab in `resources.assets` (the `ResourceManager`
+container lists them: `mill variant`, `field variant`, `mine shaft`, `fishing harbour`, `heros quarter variant`,
+`archer hut`, `swordsmen hut`, `temple`, ...), and that prefab is the **whole build slot**, not just a mesh: `BuildSlot`
+with its upgrade tree, the blueprint and built parents, interactor, cost display, health bar, feedbacks, troops and the
+upgrade-effect objects (e.g. the Mill's `Mill_ImprovedPlow`, `Mill_ImprovementExplosiveTrap`,
+`Mill_Improvement_Scarecrows`). The maps' slots are instances of these prefabs. So no harvest and no reading of other
+level files is needed: `Resources.Load` works in any scene.
+
+- **Data:** `buildSlots.add[].base` takes `"building:<kind>"` besides `"scene:<host slot>"` (`Model/ContentRef.cs`,
+  `BuildingRefs`: archery-range, barracks, barricades, blacksmith, bridge, defense-tower, field, gold-mine, harbour,
+  heros-quarter, house, mill, royal-forge, shrine, summoning-circle, temple). No version bump; the validator refuses
+  an unknown kind. Walls aren't offered: every map has them and a wall piece is part of its gate.
+- **Play (`LevelOverlay`):** the prefab is instantiated exactly like a cloned host slot (inactive holder, deterministic
+  save GUID, cost edits, requirements, then activation under the castle's parent). The prefab has no map wiring, so
+  with no `requires` it needs castle level 1 (`LevelRequirements.Effective` and `ApplyRequirements` agree).
+- **Studio:** `StudioScene.Enter` adds a palette base (`NativeSlot.Standard`, named by its base) for each kind the
+  host has no copyable slot of, with its proxy look from the prefab; it is never an object on the map. Placing one
+  writes `building:<kind>` and the castle level 1 default (then auto-link). Kinds the host has still copy the nearest
+  host slot, so the map's own tuning wins where it exists.
+- **Agents:** `agent host` adds `buildings` (each standard building in the slots' shape, named `building:<kind>`);
+  `palace.py add_slot {"kind": "Mill"}` falls back to it when the host has none.
+- Dev: `builder-level buildings` prints each standard building's tree and how the loaded map's own slots of that kind
+  differ from it.
 
 ## Terrain
 
@@ -617,7 +788,7 @@ night starts).
 | Walkable ramps and plateaus as pieces | yes | M | Needs a generated readable mesh plus a `MeshCollider` (the king) on the Ground layer. |
 | Water planes and shorelines | yes | M | Visual: the ocean or water material. Blocking: a footprint cut from the heightfield, or a layer-7 blocker. |
 | Sculpting on a **Flat field** (heightfield replaces the ground) | built | L | Air surface (recast on layer 9: generated), minimap rebuild, rescan time, boundary walls, y ≥ -8. |
-| Sculpting **on a vanilla map's ground** | partly | L+ | The host ground is one combined mesh with hand-made walls and colliders. Raising is possible (heightfield patches on top); lowering and digging aren't, without replacing the ground. Later. |
+| Sculpting **on a vanilla map's ground** | built (R2) | L+ | Sculpted cells replace the host's ground: `Level/HostCut.cs` cuts them out of the host's Ground-layer meshes and colliders (exact clipping), so raise, lower, ramps and water all work. Fliers keep the host's flier surface. |
 | Removing parts of a vanilla map piecemeal | partly | M-L | MeshFusion can cut sources from combined meshes (`CombinedObject.cs:109-112`), but whether the scenes keep their sources is unverified. v1 only does all-or-nothing (Cleared). |
 
 ### Design (W4, as built)
@@ -631,7 +802,8 @@ night starts).
 | T2 brushes | done | Raise/lower, flatten, set height, smooth, material paint; live re-mesh while dragging. |
 | T3 walkable paint + pieces | paint done; pieces not built | Block/unblock on any base. Cliffs, plateaus and ramps are brush work on a flat field (a hard-edged Set height makes a plateau with cliff sides; the Ramp brush cuts a walkable slope). Blocking rock and cliff *pieces* on a map's own ground are the existing solid props (`LayoutScene.SetSolid`); walkable ramp pieces on a map's own ground are deferred (see "Not built"). |
 | T4 water | done (flat field) | Water brush and water level; the bed is dug 1 m below the surface, banks turn to sand, water cells are blocked for ground units and the king. |
-| Later | | Raise-only patches on a map's own ground, piecemeal scenery removal on vanilla maps. |
+| R2 | done | Sculpting on a map's own ground (HostCut), smooth paint (format 2), cliff walls for the king, live ramp preview and an exact cursor on cliffs, the brush strip as icons, the height ceiling relative to the castle. |
+| Later | | Piecemeal scenery removal on vanilla maps; fliers over raised host ground. |
 
 **Data** (`LevelDef.terrain`, `Model/TerrainDef.cs`; encoded by `Level/GroundCodec.cs`, unit-tested):
 
@@ -643,8 +815,10 @@ night starts).
   "y": 0.0,                   // world height of 0 (the castle's height for a new field)
   "heights": "<b64>",         // (w+1)*(h+1) corners, row-major (z*(w+1)+x): int16 cm relative to y, delta-coded along
                               // that order, little-endian, raw deflate
-  "materials": "<b64>",       // byte per cell (z*w+x), raw deflate: 0 grass, 1 high grass, 2 low grass, 3 earth,
-                              // 4 sand, 5 road, 6 rock
+  "format": 2,                // 1 (absent): materials per cell; 2: per paint sample
+  "materials": "<b64>",       // byte per paint sample ((w*paintRes) x (h*paintRes), row-major), raw deflate: 0 grass,
+                              // 1 high grass, 2 low grass, 3 earth, 4 sand, 5 road, 6 rock
+  "paintRes": 2,              // paint samples per cell edge (format 2)
   "blocked": "<b64>",         // bit per cell (LSB first), raw deflate: ground units and the king can't enter; fliers can
   "water": { "level": -1.0, "cells": "<b64 bitmask>" }   // level relative to y; water cells are unwalkable
 }
@@ -655,8 +829,14 @@ night starts).
 - Measured sizes: a plain field ~100 characters; the acceptance field (plateau, ramp, hill, pond, road patch, blocked
   strip) ~800. Share codes stay under the 2,000-character chat size for typical sculpting; heavy sculpting goes
   through `.tfpack` as `SharingUI` already suggests.
-- Heights are clamped to [-8, +30] m world. Below -10 the game respawns the king.
-- `heights`, `materials` and `water` only show on `"base": "flat"`; `blocked` works on every base.
+- Heights reach from world -8 m (below -10 the game respawns the king) to 30 m above `y` (at least world 30 m:
+  `TerrainGrid.MaxWorld`), so a high host (Sturmklamm, castle y 31) can still build up.
+- On `"base": "flat"` heights are relative to `y`. On any other base they are **offsets from the host's ground**
+  (sampled at each corner by raycasting its Ground-layer colliders when the terrain is shown; 0 = untouched), and a
+  cell any of whose corners moved is *sculpted*: the terrain draws it and the host's ground is cut away under it.
+  Every field works on every base.
+- Format 2 (R2): materials per paint sample. Format-1 packs (a material per cell) decode with each cell spread over its
+  samples and save as format 2; a format newer than the mod's is refused with "update PalaceMod".
 
 **Runtime (play and the Studio's edit load):** `LevelOverlay` calls `GroundLayer.Apply(scene, pack, level, issues)`
 after the empty base's scenery hide, before Start.
@@ -665,8 +845,26 @@ after the empty base's scenery hide, before Start.
   hidden (and MeshFusion is kept off them), with the Ground-layer colliders, the invisible walls and the flier surface.
   Ocean-material planes go too unless they reach past both opposite edges of the field (a sea, e.g. Frostsee's,
   stays so the field reads as an island): Moorweg draws its ponds with the ocean material. The generated ground
-  replaces them. Steep faces (> 32°: the graphs' max slope is 30°) are drawn with the rock material, so cliffs read
-  as cliffs; grass next to water is drawn as sand. Slots and the king are put on the new ground.
+  replaces them. Triangles steeper than the ground graphs' max slope (30° on every host; read from the graphs) are
+  drawn with the rock material, so cliffs read as cliffs, and each gets an invisible wall (a prism on the Obstacle
+  layer with a collider only, so the graphs don't see it) the king can't pass: what the king can walk down, he can
+  walk back up, exactly where enemies can. (The Far Bank bug: the river bank was a 60° face of one 2 m cell; the king,
+  slope limit 45°, slid down it, landed against the water's blocker columns and couldn't climb back; the "invisible
+  warrior" to the left was the ford's own bank, another face he couldn't climb.) Slots and the king are put on the
+  new ground.
+- Paint is drawn as smooth outlines over the ground (`Level/PaintOutline.cs`): per material, the paint samples' "is
+  this material" field is blurred (3x3 binomial), sampled bilinearly on a 0.5 m lattice and filled by marching squares
+  at 0.42 (just under half, so neighbouring paints overlap instead of leaving a seam); each material is a submesh a
+  few cm over the ground (later materials higher), on layer Default (not rasterized, no collider); whole cells use the
+  ground's own two triangles. Cliff cells keep their rock. Grass by water and under it is drawn as sand, so the shore
+  follows the bank; the water plane also covers the bank cells that cross its level, so the shoreline is where the
+  slope meets the water.
+- A map's own ground (`Level/HostCut.cs`): when the terrain is shown, the host's Ground-layer renderers (the
+  MeshFusion-combined ground the graphs rasterize) and MeshColliders are collected; whenever the sculpted set changes,
+  each is swapped for a copy with the sculpted cells' rectangles subtracted from every triangle (convex pieces,
+  attributes interpolated). Sculpted cells get a 1 m skirt along edges that meet the host's ground, hiding the few-cm
+  seam between the host's surface and the grid's 2 m sampling of it. Paint outside sculpted cells lies on the host's
+  ground (raycast). The graphs' height range is widened to the sculpted heights.
 - The field draws with copies of the host's seven ground materials (`GroundLayer.Recolour`, re-run on
   `ColorAndLightManager.OnColorChange`): the scheme's colours are copied over, then `GroundPalette.Resolve` moves
   paints apart where the scheme gives several one colour (every scheme has ground = high = low; Moorweg, Nordfels and
@@ -689,14 +887,23 @@ after the empty base's scenery hide, before Start.
 | Flatten | Levels to the height under the press | | Size, Softness |
 | Set height | Levels to the strip's height (Softness 0: a plateau with cliff sides) | Alt-click samples | Size, Height, Softness |
 | Smooth | Averages with neighbours | | Size, Strength |
-| Ramp | From the press (top) to the release (bottom): a straight slope between the two heights | | Width |
-| Material | Paints the chosen material | | Size, Material |
+| Ramp | From the press (top) to the release (bottom): a straight incline between the ground's heights there; the ground previews while dragging, the status bar shows the incline and the guide lines turn red past 30° | | Width |
+| Material | Paints the chosen material (smooth edges) | | Size, swatches |
 | Block | The walkable mask | Shift unblocks | Size |
 | Water | Water cells (the bed is dug to 1 m below the level) | Shift dries | Size, Water level |
 
-- On a map's own ground only Block is offered; the others need a Flat field (chosen in the Start popup).
-- `[` and `]` size the brush. A ring on the ground (an `IStudioOverlay`) shows it; the ramp shows its line while
-  dragging. Blocked cells are drawn as a red wash in edit mode only.
+- The strip: the eight brushes as icon tiles (1-8 pick them while the tool is active: `StudioTool.Digit`; the lit
+  tile is the brush, its number in the corner, a tooltip says what it does), one line with the brush's modifier
+  (Shift lowers / unblocks / dries, Alt-click picks a height), its numbers (Size or Width, Strength, Softness, Height,
+  Water level), and for Material the seven paints as swatches in the colours the field draws them (`PaintColour`).
+- Every brush works on every base (a map's own ground included, see HostCut).
+- `[` and `]` or Alt+wheel size the brush. A ring on the ground (an `IStudioOverlay`) shows it, in the brush's colour
+  (Shift's inverse colour while Shift is held), with an inner ring where a soft brush's full strength ends; the ramp
+  shows its centre line and both sides while dragging. Blocked cells are drawn as a red wash in edit mode only.
+- The cursor meets sculpted ground exactly (`TerrainGrid.Raycast` marches the heightfield; on a map's own ground a
+  Ground-layer raycast). It used to intersect a horizontal plane at the camera pivot's height and then sample the
+  ground there, which put a press near a plateau's far edge on the low ground behind it: the ramp's top came out at
+  the bottom's height, so the "ramp" cut a level trench (the R1 ramp bug).
 - Each stroke is one undo step (`Studio.Edit` writing `LevelDef.terrain`). Undo, redo and other edits rebuild the
   shown ground from the level when it differs (`Studio.ItemsChanged`, compared by `GroundLayer.KeyOf`).
 - Esc during a stroke drops it.
@@ -707,17 +914,19 @@ at once. On release the graphs are **stale** (`IStudioTerrain.PathsStale`; the s
 and updates them on click). A local `GraphUpdateObject` costs a full scan (one-tile graphs), so `UpdatePaths` is a
 full `GroundGraphs.Scan`: 400-800 ms on a Nordfels field. Play reloads the map, so F5 needs no rescan of its own.
 
-**Dev:** `builder-terrain flat [cell] | brush <name> [size] | stroke [shift] <x> <z> ... | raise/flatten/smooth/ramp/
-paint/block/water ... | waterlevel | marks | king <x> <z> | snap | scan | grid | encode | save <pack> | clear`.
-`save` writes the shown terrain into a one-level pack; `builder-req play <pack>` plays it.
+**Dev:** `builder-terrain flat [cell] | host [cell] | brush <name> [size] | stroke [shift] <x> <z> ... |
+raise/flatten/smooth/ramp/paint/block/water ... | waterlevel | marks | king <x> <z> | walk <dx> <dz> <s> |
+probe <x> <z> [y] [r] | snap | scan | grid | encode | save <pack> | clear`. `host` puts a sculptable grid on the map's
+own ground; `walk` moves the king through his CharacterController (what he can climb); `probe` lists the colliders he
+meets around a point. `save` writes the shown terrain into a one-level pack; `builder-req play <pack>` plays it.
 
 **Not built (and why):**
 
-- **Sculpting a map's own ground** (raise, lower, ramps as pieces on vanilla maps): the host ground is one combined
-  mesh with hand-placed walls and colliders. Raising would need heightfield patches drawn over it that blend at their
-  edges and cut the host's ground for the king's collider; lowering needs the host ground replaced. Flat field covers
-  sculpting; on vanilla maps, Block paint plus solid scenery props shape the walkable area.
-- **Water on a map's own ground:** the water plane needs ground below it, which only the flat field controls.
+- **Fliers over raised host ground:** on a map's own ground the fliers keep the host's flier surface (a fixed mesh
+  5 m over the original ground), so they pass through hills raised more than ~5 m. Replacing it would mean building a
+  flier surface over the whole host, which the flat field does.
+- **Offline checks of sculpted host ground:** `palace.py check`/`render` model a flat field's heights but not
+  sculpting on a map's own ground; `paths` in game is the truth there.
 
 **Acceptance (T1 + T2), verified in a pool instance on Nordfels** (a flat field with a 4 m plateau round the castle,
 a ramp, a hill, a pond and a blocked strip, saved as a pack and played):
@@ -777,9 +986,18 @@ placed on any map.
   and logged once (Warn); a level that uses it gets the usual "no scenery" warning, and the rest still loads.
 - **Colours:** a library mesh is drawn with the loaded level's material of the same name (the FlatKit materials
   `ColorAndLightManager` recolours per level: Trees, Mountain, Buildings, Enemy, Ground Patches), so it takes the host
-  map's colours. "Keep the donor map's colours" (cloning a material with the donor level's `Colorscheme`) is deferred:
-  the colorschemes live in each level's own file as MonoBehaviour data, which needs a type-tree-free reader for that
-  class too.
+  map's colours by default. **Original colours** (`Library/MapColors.cs`): the catalog also records where each main
+  map's `Colorscheme` asset is (`colorschemes`: all ten live in `sharedassets1.assets`, found through each level's
+  `ColorAndLightManager.colorscheme` reference by the generator). `AssetFileReader.ReadColorscheme` reads one from
+  the install (fixed layout: the MonoBehaviour header, then the colour fields in declaration order with
+  `dayLightColor` skipped as readonly and the particles prefab reference in between; checked by name and exact
+  size) into a new `Colorscheme`, cached for the session. A prop's `colors: "<Map>"` swaps each material
+  `ColorAndLightManager` recolours (found by reference on its fields) for a clone coloured from that scheme the way
+  `ApplyColorScheme` does it; the clones' outlines follow the host's sunlight through dusk and dawn
+  (`OnColorChange`). Inspector: "Colours" on any scenery selection toggles between "Level's" and the map it comes
+  from (the library entry's "@Map" or home map; the host for its own scenery). The level's `colors` (Level tab,
+  "Colours") gives the whole level another map's scheme through the game's own `EasySwitchEntireColorSchemeTo` (set
+  before `ColorAndLightManager.Start` in play), keeping the host's weather particles.
 - **Refs:** placed library items are ordinary `props` entries with `base: "mesh:<name>"`, optionally
   `"mesh:<name>@<Map>"` should two maps ever ship a mesh by the same name (the catalog generator refuses that case
   today). `SceneryLibrary.Resolve(scene, base)` looks in the host's own scenery first (so existing levels look the
@@ -805,6 +1023,152 @@ placed on any map.
   [spacing] | walkable <x> <z> | clear | thumb <mesh> | thumbs [reset]"`. Unit tests (`SceneryLibraryTests`) cover
   the reader on a synthetic file, ref parsing, the catalog, and, where the game is installed, read every catalog mesh.
 
+## Enemy Studio
+
+The custom-enemy editor, rebuilt the way the Level Studio was: an in-world tool around the live model instead of a
+settings-shaped page. Code: `Features/Builder/Studio/Enemies/`. An enemy is still a `UnitDef` in a `PackDraft`
+(R2-C1's library composes them into the `library` pack), so the runtime, validation and wave sets don't change.
+
+### Decisions
+
+1. **In place, on a loaded map.** The Enemy Studio runs on whatever map the Studio has loaded. Opened from the Level
+   Studio it takes over the same edit scene with no reload: the Level Studio's dock, labels and tools are suspended
+   (`StudioShell.Suspended`), its view is captured (`StudioViewState`), and Back restores it exactly (camera,
+   selection, tool, palette tabs, undo history: the draft is the Level Studio's own `Studio.Draft`, so enemy edits are
+   undo steps of the same history and the level sees them at once). Opened on its own (the library's Enemies tiles),
+   it first opens a throwaway **arena**: a Studio edit session on Nordfels with the "cleared" base (an in-memory pack
+   that is never saved); Back leaves the Studio.
+2. **The model is live, in the world.** A stage at a clear ground point (the Level Studio's camera pivot, or the arena's
+   castle square): a turntable disc with the enemy standing on it at its real size, lit by the level, seen by the
+   Studio's orbit camera (the game camera, turned to perspective while the Enemy Studio is up). Every edit rebuilds the
+   model from the same template the game spawns (`IUnitFactory.Resolve`), so what the stage shows is what a wave
+   spawns, scripts stripped.
+3. **Any asset as the body** (`visuals.mesh`), each with offset, rotation, scale and a material choice:
+   - `asset:<key>`: an imported OBJ/glTF of the pack (as before);
+   - `mesh:<name>[@Map]`: any scenery mesh of the cross-map library or the map (a tree, a rock, a ruin wall, a tower);
+   - `vanilla:<unit id>`: another unit's model (a knight's look on an enemy, a boss's body on a small one).
+   Meshes without a rig get a procedural walk (`motion`).
+4. **Test in the arena, not in a run.** Fight spawns N copies against defenders on the stage, right there in the edit
+   scene. The game's attackers only act at night (`AutoAttack.Update`, `AutoAttackTower.Update` return in the day), so
+   while a fight runs those two treat the arena's own units as if it were night; nothing else changes and nothing
+   outside the arena wakes up. Numbers (DPS, hits and time to kill against the map's towers) are computed from the
+   same damage formula the game uses (`DamageModifyer.CalculateDamageOnTarget`), live and without a fight.
+5. **Save snapshots a portrait** for the library tile (`DesignLibrary.SavePreview(DesignKind.Enemy, id, tex)`), taken
+   by the stage camera on a transparent background.
+
+### Screen
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ [← Level]  Goblin Brute · library ●unsaved  [↶][↷]   ⟳ Turn   ⚠ 1             [Save]   [⚔ Fight (F5)]   │ top bar
+├──────────────────┬──────────────────────────────────────────────────────────┬────────────────────────────┤
+│ Enemies Base Look│                                                          │ Stats Attack Tags Look Abil│
+│ ┌──┐┌──┐┌──┐┌──┐ │                                                          │ Name     Goblin Brute      │
+│ │  ││  ││  ││+ │ │                 the stage (3D, live)                    │ Base     Brute ▸           │
+│ └──┘└──┘└──┘└──┘ │            turntable · model · defenders                │ Hit points  800  (base 600)│
+│ Look: Units ·    │                                                          │ Move speed  4.5            │
+│ Scenery · Import │                                                          │ … (scrolls)                │
+├──────────────────┴──────────────────────────────────────────────────────────┴────────────────────────────┤
+│ Arena  [5]× ☐elite  vs [Knights 3][Archers 3][none]  [Fight] [Reset]  │ 800 HP · 24 dmg/1.2 s · Tower 1: 9 s│ readout
+└─────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+- **Top bar:** Back (to the level when opened from one, else Leave), name, pack, save dot, undo/redo, Turn (the
+  turntable spins; off holds the angle), the Problems badge (this enemy's issues; click: the field), Save, Fight.
+- **Palette (left, 300 px), tabs:**
+  - **Enemies:** the draft's custom enemies as tiles (portrait if saved, else the base unit's icon). Click switches the
+    one being edited (undo stays); "+" makes a new one from the selected base (`DesignLibrary.NewEnemy`, or a plain
+    `pack.Units` add before the library lands); right-click: Duplicate, Delete.
+  - **Base:** every vanilla enemy as icon tiles grouped Ground / Large / Flying; click sets `base`. Hover: its stats.
+  - **Look:** the model source, chips Units / Scenery / Imported plus a filter. Scenery tiles use the library's thumbnails;
+    Units the unit icons; Imported the pack's mesh assets. Click sets `visuals.mesh`; the first tile "Base model"
+    clears it.
+- **Inspector (right, 340 px), tabs** (all rows the pack editor's, reused from `UnitPage` so validation markers,
+  typing, base values and reset work the same):
+  - **Stats:** name, id, description, hit points, move speed, attack cooldown, range, keep distance, chase time.
+  - **Attack:** weapon, damage multiplier, projectile speed, damage and splash modifiers.
+  - **Tags:** add/remove; movement (Flying, Large) shown read-only from the base. Hover descriptions everywhere come
+    from `Model/Descriptions.cs` (R2-A).
+  - **Look:** size, tint, icon, the model source with Fit (auto / scale), offset X/Y/Z, turn X/Y/Z, materials (own /
+    enemy: the enemy material takes tint and the elite look), motion (auto / bob / none), texture, sounds.
+  - **Abilities:** behaviours (spawns on death) and what the base unit already does.
+- **Readout (bottom right):** effective HP at the arena's night difficulty, damage per hit and DPS against a building,
+  a knight and the king, and time to kill (and hits) by each tower kind on the map at each level. During a fight:
+  elapsed time, enemies alive, defenders standing, damage dealt each way, and the result.
+
+### Stage and camera
+
+- Orbit: left-drag turns (yaw and pitch, 3-75°), wheel zooms (1.5-60 m), right/middle-drag pans the focus, F frames
+  the model, Home resets.
+- As built, the game's own camera is used: the `CameraRig` is paused and the rig itself is moved so its main camera sits
+  on the orbit, and every camera of the rig switches from orthographic to a 30° perspective (stacked cameras stay
+  aligned, post-processing and outlines unchanged). Back restores the projection, the rig's pose and the rig; the Level
+  Studio's markers, labels and overlays are hidden meanwhile (`StudioShell.HideForSuspend`).
+- The model is an instance of the template with every `MonoBehaviour` removed except the visual ones (`Animator`
+  stays): the base's idle animation plays; a `BuilderVisualMotion` component (also on spawned enemies) adds the
+  procedural walk to a body without a rig.
+- **Portrait:** an offscreen camera renders the model alone (moved far below the map for the shot) at 256×256 on a
+  transparent background, framed on its bounds at 20° pitch from the front-left; Save writes it with
+  `DesignLibrary.SavePreview` (a library draft) or to `PalaceBuilder/cache/portraits/<pack>/<unit>.png` (any other).
+
+### Any-asset visuals (data, additive)
+
+```jsonc
+"visuals": {
+  "mesh": "mesh:Tree_02",            // "asset:<key>" | "mesh:<name>[@Map]" | "vanilla:<unit id>"
+  "meshScale": 0.8,                  // null: fit to the base model's height (as before)
+  "meshRotY": 180, "meshRotX": 0, "meshRotZ": 0,
+  "meshOffset": [0, 0.2, 0],         // metres, after the fit
+  "meshLook": "own",                 // "own": the source's materials; "unit": the enemy body material (tint, elite)
+                                     // null: own for mesh:/vanilla:, unit for asset: (as before)
+  "motion": "auto"                   // "auto" | "bob" | "none"; auto bobs a body that the base's rig doesn't move
+}
+```
+
+- `mesh:` resolves like a prop (`SceneryLibrary.Resolve`: the host map's own mesh first, then the library), with the
+  loaded level's materials, so the tree takes the map's colours. The template's hash includes the scene for these, so
+  each level rebuilds them with its own materials.
+- `vanilla:` takes every visible renderer of that unit's prefab (skinned ones in their bind pose), with its own
+  materials.
+- The source is attached as a child of the base model's biggest body part (so a rigid walk animation still moves it);
+  a skinned body's parts are hidden (the existing `hiddenMesh` trick, since `GPUInstanced` draws hidden renderers)
+  and the child goes on the root. Imported meshes keep the baked path (their UVs and baked colours).
+- `motion` (`BuilderVisualMotion`): bob = a hop of 6 % of the height and a ±6° waddle at the unit's step rate while
+  it moves (measured from its position each frame), a slow breathe when still. Auto = bob when the body was a skinned
+  mesh or the source isn't an imported mesh baked into an animated part.
+- Validation: `mesh` must be one of the three forms (asset keys checked as before, unit ids against the catalog);
+  rotations in [-360, 360], offset components in [-50, 50], `meshLook`/`motion` from their lists.
+
+### Arena fight
+
+- Fight (F5, or the button) spawns `count` (1-50) copies 16 m from the stage, made like the game's `Spawn` makes them
+  (the arena difficulty on hit points and damage, the elite material; no coins), and the chosen defenders (catalog
+  player units, default 3 swordsmen and 3 archers) in an arc on the stage. Every arena unit gets a `BuilderArenaUnit`
+  marker; enemies an arena enemy spawns on death are marked too. Attack scripts of marked units run as at night;
+  unmarked ones don't.
+- Defenders hold their spot (their home is where they stand); enemies target what their priorities find nearest, which
+  is the defenders. The fight ends when one side is down or after 90 s; the units stay until the next fight, Stop (the
+  Fight button again), an edit that rebuilds the template, or Back.
+- Measured by polling hit points (from each unit's first frame alive): damage each way, the first and last kill, who is
+  left. Checked in a pool instance: 4 Iron Brutes (120 HP) beat 3 swordsmen and 3 archers in 33.8 s; 4 Goblin Runners
+  (8 HP) lose in 3.1 s without landing a hit.
+
+### Level Studio hooks
+
+- `StudioServices.Enemies` (`IStudioEnemyEditor.Open(draft, unitId, returnToLevelStudio, onReturn, out error)`, R2-C1's
+  interface) is `EnemyStudioService`. Callers: the wave page's spawn-group rows, the library's Enemies tiles, and the
+  Level Studio's right-click on empty ground ("Enemy Studio…"). With a Level Studio up it opens in place whatever the
+  flag says (the scene is there); menus over the Studio (the wave page) are closed first.
+- Checked: Level Studio (lasso tool, camera at (10, -20) zoom 1.2 yaw 30) → Enemy Studio → an edit → Back gives the
+  same camera, tool and selection, the dock back, and the edit as the undo step "Set maxHp" of the level's draft.
+- Keys: context `BuilderEnemyStudio`, claimed exclusive while its dock is the active menu: Esc Back, Cmd/Ctrl+Z, redo,
+  Cmd/Ctrl+S, F5 Fight, Space turntable, W walk preview, F frame, Home reset view.
+- Dev: `builder-enemy level [unit] | library [unit] | new [base] | state | dock | press <tile> | select <unit> | tab
+  <palette> [panel] [look source] | set <field> <value> | look <ref|base> | fit <scale|-> | offset x y z | rot x y z |
+  material own|unit | motion auto|bob|none | walk on|off | fight [n] | stop | readout | portrait | orbit <yaw> <pitch>
+  <dist> | spin <deg> | undo | redo | save | back`.
+- Not built: a building (a slot's built look) as the body; towers and walls are in the scenery library already.
+
 ## Data-model changes (summary)
 
 All are additive except one, `DesignPack.CurrentVersion` 1 → 2: `Migrations.Steps[1]` moves `add.activator` and
@@ -818,6 +1182,8 @@ All are additive except one, `DesignPack.CurrentVersion` 1 → 2: `Migrations.St
 | `spawnLines.add` applied (fields exist) | `LevelOverlay` | W3 |
 | `terrain {…}` | `LevelDef` (see "Terrain") | W4 |
 | `props[].base`: `"mesh:<name>[@<Map>]"` also resolves from the scenery library | `PropDef.Base` | W5 |
+| `buildSlots.add[].base`: `"building:<kind>"` (the game's standard building, any map) | `BuildSlotAdd.Base` | R2-D |
+| `units [[x, z], …]` (see "Unit positions") | `BuildSlotEdit`, `BuildSlotAdd` | R2-B |
 
 The validator covers each, with paths so the Problems popup can select the object.
 

@@ -47,10 +47,10 @@ namespace PalaceMod.Builder.Studio.Requirements
                 var caps = deps.Select(RequirementState.Cap).Distinct().ToList();
                 bool capped = caps.All(c => c != -100 && c > -100);
                 page.Toggle("Upgrades ≤ castle level", () => capped, on => RequirementEdits.ApplyCap(deps, on ? 0 : -100),
-                    () => caps.Count > 1 ? "Mixed: some are capped" : "Never upgraded above the castle's level (plus the allowance below)");
+                    () => (caps.Count > 1 ? "Mixed: some are capped. " : "") + Descriptions.For(DescKind.Flag, "upgradeCap"));
                 if (capped)
                     page.Number("Allowance", () => caps.Count == 1 ? caps[0] : 0, (int v) => RequirementEdits.ApplyCap(deps, v), 0, 5,
-                        format: (int v) => caps.Count > 1 ? Mixed : v == 0 ? "None" : $"+{v}", tooltip: () => "Levels above the castle's they may reach");
+                        format: (int v) => caps.Count > 1 ? Mixed : v == 0 ? "None" : $"+{v}", tooltip: () => Descriptions.For(DescKind.Flag, "Allowance"));
                 page.Button(deps.Count > 1 ? "Chain…" : "Chain from here…", () => ChainPopup.Open(deps.Count > 1 ? deps : SameKind(deps[0])),
                     tooltip: "Link the selection in a chain from the castle");
             }

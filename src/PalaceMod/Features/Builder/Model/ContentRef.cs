@@ -12,6 +12,8 @@ namespace PalaceMod.Builder.Model
         Scene,
         /// <summary>"asset:&lt;key&gt;" - an entry of the pack's "assets".</summary>
         Asset,
+        /// <summary>"building:&lt;kind id&gt;" - the game's standard building of a kind (BuildingRefs), on any map.</summary>
+        Building,
         /// <summary>"&lt;unitId&gt;" or "unit:&lt;unitId&gt;" - a unit in the same pack.</summary>
         LocalUnit,
         /// <summary>"&lt;packId&gt;/&lt;unitId&gt;" - a unit in another installed pack.</summary>
@@ -45,6 +47,7 @@ namespace PalaceMod.Builder.Model
                     "scene" => new ContentRef(RefKind.Scene, rest, null, raw),
                     "asset" => new ContentRef(RefKind.Asset, rest, null, raw),
                     "unit" => new ContentRef(RefKind.LocalUnit, rest, null, raw),
+                    "building" => new ContentRef(RefKind.Building, rest, null, raw),
                     _ => new ContentRef(RefKind.Invalid, null, null, raw),
                 };
             }
@@ -58,6 +61,46 @@ namespace PalaceMod.Builder.Model
         public static string Asset(string key) => "asset:" + key;
 
         public override string ToString() => Raw;
+    }
+
+    /// <summary>The game's standard building of each kind: a whole build slot (blueprint, building, upgrade tree,
+    /// troops) the game keeps as a Resources prefab, the one every map's slots of that kind are instances of. Lets a
+    /// level add a kind its host map doesn't have ("building:mill" on Frostsee). Walls aren't here: every map has
+    /// them, and a wall piece only exists as part of its gate.</summary>
+    public static class BuildingRefs
+    {
+        public const string Prefix = "building:";
+
+        /// <summary>Kind id and Resources path. Ids are the kind's English name, lower case with dashes.</summary>
+        public static readonly (string Id, string Path)[] Kinds =
+        [
+            ("archery-range", "archer hut"),
+            ("barracks", "swordsmen hut"),
+            ("barricades", "barricades"),
+            ("blacksmith", "blacksmith"),
+            ("bridge", "bridge variant"),
+            ("defense-tower", "defense tower variant"),
+            ("field", "field variant"),
+            ("gold-mine", "mine shaft"),
+            ("harbour", "fishing harbour"),
+            ("heros-quarter", "heros quarter variant"),
+            ("house", "house variant"),
+            ("mill", "mill variant"),
+            ("royal-forge", "royal forge"),
+            ("shrine", "shrine"),
+            ("summoning-circle", "summoning circle"),
+            ("temple", "temple"),
+        ];
+
+        public static string Ref(string id) => Prefix + id;
+        public static bool IsBuilding(string baseRef) => baseRef != null && baseRef.StartsWith(Prefix, StringComparison.Ordinal);
+
+        /// <summary>The Resources path of a kind id, or null when there's no such kind.</summary>
+        public static string PathOf(string id)
+        {
+            foreach (var (k, path) in Kinds) if (k == id) return path;
+            return null;
+        }
     }
 
     public static class Ids

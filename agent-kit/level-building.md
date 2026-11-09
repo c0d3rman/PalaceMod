@@ -5,9 +5,16 @@ Builder. This guide plus `palace.py` (next to it) is everything you need: the da
 the tools, and how to test. `reference.md` holds the generated tables (maps, buildings, enemies, vanilla curves,
 scenery); `palace.py ref ...` prints the same data as JSON.
 
-Everything you make is a **pack**: one JSON file (`pack.json`) that the game reads from its packs folder and reloads
-when it changes. You never edit the game; you write the pack (through `palace.py apply`), then test it in the running
-game through the **Agent bridge**.
+Everything you make goes into the player's **library**: each level is one file (`library/levels/<id>.json`, the level
+and its nights) and each custom enemy is one file (`library/enemies/<id>.json`). Any level can spawn any library enemy by
+its id. `palace.py` shows the whole library as one pack named `library` (pass `library` wherever a command takes a
+pack); the game reloads it within ~2 s of a change. Packs only exist for sharing: `palace.py export` writes a `.tfpack`
+of chosen levels with every enemy and asset they use. You never edit the game; you write the library (through
+`palace.py apply`), then test it in the running game through the **Agent bridge**.
+
+Old packs: packs the player had before the library existed were moved into it (the folders are kept in
+`PalaceBuilder/migrated-packs/`); their old pack id still works in every command and names the levels that came from
+that pack. A folder under `packs/` (an installed pack) is read and written as before.
 
 ## 1. The loop
 
@@ -15,13 +22,13 @@ game through the **Agent bridge**.
 2. `python3 palace.py ref build` – once (game running, bridge on): caches every map's layout and the enemy data
    (about a minute; it loads each map). Then `ref maps`, `ref slots <map>`, `ref render <map> -o base.png`.
 3. Design on paper first (section 9): map, entrances, castle defence, economy, nights.
-4. `python3 palace.py new <pack-id> --name "..."`, then `python3 palace.py level <pack-id> <level-id> --host <Map> --base cleared`
-   (its new wave set has no nights yet: the game refuses the pack until you add them with the `waves` op).
-5. Write ops to a JSON file and `python3 palace.py apply <pack-id> ops.json`. It saves, then prints `errors` and
-   `warnings` (offline checks). Fix errors before anything else.
-6. Look: `python3 palace.py render <pack-id> -o map.png --labels reqs` (then read the PNG), `show`, `economy --compare`,
-   `waves --compare`.
-7. Test in the game: `python3 palace.py test <pack-id> <level-id> --plan plan.json --shots shots/` (buys what a player
+4. `python3 palace.py new <level-id> --host <Map> --base cleared` (its new nights are empty: the game refuses to play
+   the level until you add them with the `waves` op). `python3 palace.py list` shows the library.
+5. Write ops to a JSON file and `python3 palace.py apply library ops.json --level <level-id>`. It saves, then prints
+   `errors` and `warnings` (offline checks of the levels the ops touched). Fix errors before anything else.
+6. Look: `python3 palace.py render library <level-id> -o map.png --labels reqs` (then read the PNG), `show`,
+   `economy --compare`, `waves --compare`.
+7. Test in the game: `python3 palace.py test library <level-id> --plan plan.json --shots shots/` (buys what a player
    would, plays the nights at 3x speed, reports each night), or `play` / `sandbox` and drive it step by step.
    `render --live` draws your overlay on a real top-down picture and the game's own enemy routes.
 8. Iterate: change the ops file and `apply --fresh` it (the level is emptied back to what `level` made, its nights kept,
@@ -94,6 +101,12 @@ All commands print JSON. Errors go to stderr as `{"error": "..."}` with exit cod
 
 ## 5. The pack format (every field)
 
+The library's files and shared packs use this one format. A library level file holds one level and the wave set it
+uses (`levels: [one]`, `waveSets: [its nights]`) plus a `"library": {kind, created, origin}` field; an enemy file holds
+`units: [one]`; the library's assets map is `library/assets.json`. Wave set ids are unique across the library
+(`palace.py` names a level's nights `<level-id>-nights`). `palace.py` reads and writes them through the `library` pack,
+so you edit the composed view below.
+
 ```jsonc
 {
   "format": "palace-builder", "version": 2,          // fixed
@@ -119,12 +132,15 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
                                    // castle removed and scenery hidden; "flat" = cleared + the map's ground replaced by
                                    // your terrain grid (section 7)
   "waveSet": "gorge-nights",       // a wave set id in this pack; absent = the map's vanilla nights
+  "colors": "Frostsee",            // another main map's colour scheme for the whole level (ground, scenery,
+                                   // buildings, light); absent = the host's
   "buildSlots": {
     "remove": ["House Variant (3)"],               // host slots to take away (slots they unlock never appear)
     "edit": [{ "ref": "Mill Variant",              // a host slot by name (ref slots <map>)
                "pos": [x,y,z], "rotY": 0,           // move it (the castle can't move)
                "requires": { "slot": "castle", "level": 1 },   // see Requirements; absent = keep the map's
                "upgradeCap": 0,                     // see Requirements; absent = keep
+               "units": [[-3, 2], null, [3, 2]],    // training slots: where each unit stands (below); absent = the map's
                "upgrades": [{ "cost": 2 }, null, { "cost": 9 }] }],   // per level (index 0 = build); null keeps
     "add": [{ "id": "h1",                           // new slot, unique in the level
               "base": "scene:House Variant",        // the host slot it copies: kind, tree, costs, look
@@ -139,7 +155,8 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
                                                                      // north-south; which enemies may use it
     "remove": ["Forest", "Right Bridge"]   // host lines taken off the map: no enemies, routes or markers
   },
-  "props": [{ "id": "rock-1", "base": "mesh:Rock A", "pos": [x,y,z], "rotY": 0, "scale": 1.0, "solid": true }],
+  "props": [{ "id": "rock-1", "base": "mesh:Rock A", "pos": [x,y,z], "rotY": 0, "scale": 1.0, "solid": true,
+              "colors": "Totend" }],   // optional: keep that map's colours (absent = the level's)
   "terrain": { ... }                                  // section 7
 }
 ```
@@ -149,8 +166,9 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
   you don't use (`remove_spawn_line`), or they keep showing in `paths`, renders and the minimap. A wave set that
   still spawns from a removed line is an error, and so is removing a line the map's own nights use while the level
   has no wave set. Every slot you add defaults to "needs the castle built" when you use ops.
-- **The host still decides a lot**, even on `flat`: which building kinds exist (`add_slot` copies a host slot of that
-  kind, so a kind the host lacks can't be placed: Frostsee has no Mill), the castle position, the playable rectangle
+- **The host still decides a lot**, even on `flat`: `add_slot` copies the host's own slot of a kind when it has one, and
+  places the game's standard building of a kind it lacks (base `building:<kind>`, e.g. a Mill on Frostsee; it needs
+  the castle built unless you say otherwise), the castle position, the playable rectangle
   (`terrain_init`'s default grid), the light and ground palette, and how much room the terrain has above the castle
   (heights are world heights, clamped to [-8, 30] m: Sturmklamm's castle sits at 31 m, so nothing there can rise above
   it). `reference.md` > Maps > "What the host decides" has the kinds-by-host table and each host's rectangle and
@@ -158,11 +176,22 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
 - `base: null` (the map as it is) keeps all vanilla slots, scenery and routes; you then remove, move, re-price and
   add. Good for remixes; for original designs use `cleared` or `flat`.
 - Added slots are named `PalaceBuilder <id>` in the running game; `palace.py build`/plans accept the bare id.
+- **Training slots' units** (barracks, archery range, hero's quarter...): each unit stands at an offset from its
+  building that moves and turns with the slot: a copy placed on a river bank can put them in the water. `units` on an
+  edit or add sets them: one `[x, z]` per unit spot in the order the reference lists them (`ref slots <map>` shows the
+  map's as `units`; each upgrade choice's units, Knights or Spears, share the same spots), metres from the slot's centre in its own frame (x right, z forward); `null` entries keep the
+  map's. Whatever you set, play moves any unit home that is off walkable ground to the nearest free ground on its building's side of
+  any water at level start, keeping them spread out; `check` warns about units off the ground, and `set_units` places them (`at` takes
+  world points).
 - Props: `mesh:<name>` from the map's own scenery or the cross-map scenery library (`ref scenery`, reference.md);
   `mesh:<name>@<Map>` picks one map's mesh. `solid: true` props block units (pathfinding is rebuilt at level start);
   `scale` 0.1-10, relative to how the map itself uses the mesh (a map's own rocks are often scaled up: "Rock A" on
   Nordfels is ~30 m across at scale 1), so check sizes with `render --live`. Props are decoration and walls of rock;
   slots are the gameplay.
+- Colours: every map recolours the same materials, so a library prop takes the level's colours (a Totend tree on
+  Frostsee is Frostsee-coloured). `colors: "<Map>"` on a prop keeps that map's colours (the ops' `"colors":
+  "original"` picks the map the mesh comes from); `colors` on the level gives the whole level another map's scheme
+  (`{"op":"level","colors":"Totend"}`). Maps: Neuland and the nine main maps.
 
 ### Requirements (castle level, prerequisites, house chains)
 
@@ -230,6 +259,33 @@ Stats are absolute (difficulty, elite and perks still multiply them). Ranges: ma
 attackCooldown 0.05-120. Gold is set per spawn group, not per unit. `palace.py ref enemies` gives every base's stats
 and damage list. Use custom units sparingly; vanilla enemies are well balanced and readable.
 
+**Any model as the body.** `visuals.mesh` replaces the base's model (the base still supplies the animations, the AI,
+the hit box and every stat you don't set):
+
+```jsonc
+"visuals": {
+  "mesh": "mesh:Tree_02",          // a scenery mesh (`palace.py ref scenery`: any map's, drawn in the level's colours),
+                                   // "vanilla:P Knight" (another unit's model, `ref enemies [--player]`),
+                                   // or "asset:<key>" (an OBJ/glTF in the library's assets)
+  "meshScale": 0.8,                // omit to fit it to the base's height
+  "meshRotY": 180, "meshRotX": 0, "meshRotZ": 0,   // degrees; meshRotY faces it the way it walks
+  "meshOffset": [0, 0.2, 0],       // metres after the fit: right, up, forward
+  "meshLook": "own",               // "own" colours (default for mesh:/vanilla:) or "unit" (the enemy material: takes
+                                   // tint and the elite look; default for asset:)
+  "motion": "auto"                 // "auto"/"bob": a model without its own animation hops and waddles as it walks; "none"
+}
+```
+
+A tall thin model (a tree) on a small base reads well with `meshScale` omitted; pick a base whose size and attack fit
+the model (a Large base for a big one).
+
+**Numbers and testing.** `palace.py enemy <id>` prints what the enemy is as it spawns: hit points, speed, damage per
+hit and per second against a house, a wall, a tower, the king and each troop, and how long each troop takes to kill
+one (`--difficulty D`, `--elite`). `--studio` opens it in the game's Enemy Studio (an arena on Nordfels), `--fight N`
+then fights N copies against swordsmen and archers and reports who won, the damage each way and the first and last
+kill; `--portrait` saves its library picture. The player edits enemies the same way in the Enemy Studio (from the
+library's Enemies tab, or from a level in the Studio), so keep them in the library format.
+
 ## 6. palace.py commands and ops
 
 | Command | Does |
@@ -238,9 +294,11 @@ and damage list. Use custom units sparingly; vanilla enemies are well balanced a
 | `ref build [--maps A,B] [--force]` | cache catalog + map dumps from the game (needed once) |
 | `ref maps` / `ref slots <map> [--kind House]` / `ref buildings [--kind]` / `ref enemies [--player]` / `ref waves <map> [--raw]` / `ref scenery [map]` | reference data |
 | `ref render <map> -o f.png` / `ref doc` | base map picture (with offline enemy routes) / regenerate reference.md |
-| `new <pack>` / `level <pack> <level> --host M [--base map\|cleared\|flat] [--waves empty\|vanilla\|none] [--force]` | create (`--base flat` also runs a default `terrain_init`; `--force` replaces the level) |
+| `new <level> --host M [--base map\|cleared\|flat] [--waves empty\|vanilla\|none] [--name N] [--force]` | a new library level (`--base flat` also runs a default `terrain_init`; `--force` replaces it). `level library <level> --host M ...` is the same; `new <pack>` without `--host` / `level <pack> ...` still make an old-style pack folder |
+| `list` | the library: levels (map, nights, where they came from, whether a preview was saved) and enemies (base, which levels use them) |
+| `export "<name>" <level,...> [--enemies a,b]` | through the game: a `.tfpack` with those levels, the extra enemies, and every enemy and asset they use (JSON: `written` path) |
 | `apply <pack> ops.json [--level L] [--dry-run] [--fresh]` | run ops; saves; prints offline errors/warnings. `--fresh` first empties the level (nights kept) so the same file can be re-applied |
-| `check <pack> [--live]` | offline checks; `--live` adds the game's validator (exit 1 on errors) |
+| `check <pack> [level] [--live]` | offline checks (of that level and its nights only, if given); `--live` adds the game's validator (exit 1 on errors) |
 | `show <pack> [level]` | the level as it will play: every slot, what it needs, costs, income, lines |
 | `render <pack> [level] -o f.png [--labels names\|costs\|reqs\|none] [--live]` | top-down picture; routes in one colour per line, named, lengths in the legend; offline they're an estimate, `--live` = real game render + the game's routes (level loaded) |
 | `economy <pack> [level] [--compare] [--report test.json]` | gold curve of a greedy all-economy player (harbours grow and mines run dry each dawn as in the game; assumes nothing is ever knocked out); vs the base map's vanilla; `--report`: what a saved `test` run actually received per dawn and which buildings were knocked out most |
@@ -251,6 +309,7 @@ and damage list. Use custom units sparingly; vanilla enemies are well balanced a
 | `test <pack> <level> [--nights 1-3] [--plan p.json] [--carry] [--save] [--catchup play\|free\|none] [--free] [--king castle\|<slot>\|X,Z] [--build all] [--god] [--invulnerable] [--gold N] [--speed 3] [--shots dir] [--quiet]` | load, buy per plan each day once its gold is in, play nights, report each (one progress line per night on stderr) |
 | `night [N] [--speed 3]` | start the next night (or jump to night N) and wait for its report |
 | `build <slot> [level] [branch] [--pay]` | build/upgrade now (free unless --pay); `castle`, an added id, or a host name; exit 1 if refused |
+| `enemy <id> [--difficulty D] [--elite] [--studio] [--fight N] [--portrait]` | a library enemy's numbers (offline: HP, damage per hit/second against buildings, the king and troops, troops' time to kill it); with the game: open it in the Enemy Studio, fight N copies in its arena, save its portrait |
 | `spawn <unit> [count] [--elite] [--line L \| --at X Z]` | spawn enemies now |
 | `cheat god\|invulnerable\|infinitegold [on\|off]`, `cheat gold N`, `cheat speed X`, `cheat kill`, `cheat heal`, `cheat endnight`, `cheat teleport X,Z` (or `X Z`; negatives are fine) | test helpers |
 | `paths [--rescan] [--points]` | the game's own route from every ground line to the castle, on the graph its enemies use (`Enemy Units L` if the line spawns large ones): `length` m from the line itself, `at` (the line's middle), `start` (where that lands on walkable ground), `snap` (m between them) and a `warning` when the line is over 10 m off walkable ground; `--points` adds the waypoints `[[x, z], ...]` |
@@ -264,14 +323,15 @@ and damage list. Use custom units sparingly; vanilla enemies are well balanced a
 
 | Op | Fields |
 |---|---|
-| `level` | `name`, `description`, `base` (`cleared`/`flat`/null), `waveSet`, `host` |
-| `add_slot` | `id`, `kind` (e.g. `"House"`, `"Defense Tower"`, `"Barracks"`; copies the host's slot of that kind) or `from` (a host slot name), `at` [x,z] or `pos`, `rotY`, `requires` (shorthand), `upgradeCap`, `costs` [per level, null keeps] |
+| `level` | `name`, `description`, `base` (`cleared`/`flat`/null), `waveSet`, `host`, `colors` |
+| `add_slot` | `id`, `kind` (e.g. `"House"`, `"Defense Tower"`, `"Barracks"`; copies the host's slot of that kind, or places the game's standard one, base `building:<kind>`, when the host has none) or `from` (a host slot name), `at` [x,z] or `pos`, `rotY`, `requires` (shorthand), `upgradeCap`, `costs` [per level, null keeps] |
 | `move_slot` | `slot` (added id, host name, `castle` can't move), `at`/`pos`, `rotY` |
 | `set_slot` | `slot` (or `castle`), `requires` (null = back to the map's), `upgradeCap`, `costs` |
+| `set_units` | `slot`, `units` [[x,z] in the slot's frame, null keeps that one] or `at` [[x,z] world points]; `units: null` = back to the map's |
 | `remove_slot` | `slot` |
 | `chain` | `slots` [ids/names], `mode` `tree`\|`nearest`\|`order`, `first` (requirement of the root(s), default `"castle"`), `every` N (order/nearest: every N-th link needs one more castle level instead) |
-| `add_prop` | `mesh`, `at`/`pos`, `rotY`, `scale`, `solid`, `id` (auto) |
-| `scatter` | `mesh` (name or list), `count`, shape (`circle`/`rect`/`line`/`polygon`), `spacing` (3), `avoid` (6 m from slots and lines), `scale` [min,max], `solid`, `seed` |
+| `add_prop` | `mesh`, `at`/`pos`, `rotY`, `scale`, `solid`, `colors` (a map or `original`), `id` (auto) |
+| `scatter` | `mesh` (name or list), `count`, shape (`circle`/`rect`/`line`/`polygon`), `spacing` (3), `avoid` (6 m from slots and lines), `scale` [min,max], `solid` (default true: solid scatter can close a lane; `false` for decoration), `colors`, `seed` |
 | `remove_prop` | `id` or `ids` |
 | `add_spawn_line` | `id`, `at`/`pos`, `rotY`, `width`, `ground`, `large`, `flying` |
 | `move_spawn_line` | `line` (added id or host name), `at`/`pos`, `rotY` (added lines also `width`, flags) |
@@ -280,13 +340,13 @@ and damage list. Use custom units sparingly; vanilla enemies are well balanced a
 | `night` | `night` (1-based; = count+1 appends), plus night fields |
 | `copy_waves` | `from` (map), `lines` {old name: new name} |
 | `unit` | a whole UnitDef (adds or replaces) |
-| `terrain_init` | `origin` [x,z], `cell` (2), `size` [W,H] cells (≤400), `y` (default castle height), `flat` (true: sets base flat) |
-| `terrain` | `mode` `set`\|`raise`\|`lower`\|`smooth`, `height` (m, relative to terrain y), shape, `falloff` (m) |
+| `terrain_init` | `origin` [x,z], `cell` (2), `size` [W,H] cells (≤400), `y` (default castle height), `flat` (true: sets base flat; false: sculpt the map's own ground) |
+| `terrain` | `mode` `set`\|`raise`\|`lower`\|`smooth`, `height` (m, relative to terrain y), shape, `falloff` (m); any base |
 | `ramp` | `from` [x,z], `to` [x,z], `width`, `fromHeight`, `toHeight`, `falloff` |
-| `paint` | `material` `ground`\|`high`\|`low`\|`earth`\|`sand`\|`road`\|`rock`, shape |
+| `paint` | `material` `ground`\|`high`\|`low`\|`earth`\|`sand`\|`road`\|`rock`, shape; painted per 1 m sample and drawn with smooth edges; any base |
 | `block` | `on` (true), shape: ground units and the king can't enter; works on any base |
 | `water` | `level` (m relative to y, default -1), `on`, shape; digs the ground to level-1 m. `on: false` makes the cells land again and raises the dug ground back to `height` (default 0; `fill: false` keeps it dug) |
-| `set` | `path` (e.g. `"levels[0].waveSet"`), `value` (or `delete: true`): raw edit |
+| `set` | `path`, `value` (or `delete: true`): raw edit. `level.` starts in the op's level (`"level.colors"`), `nights.` in its wave set (`"nights.startingGold"`); `levels[i]`/`waveSets[i]` index the whole pack, and in the library (every level) must be the op's own |
 
 Shapes: `"circle": {"center": [x,z], "radius": r}`, `"rect": {"min": [x,z], "max": [x,z]}`,
 `"line": {"points": [[x,z], ...], "width": w}`, `"polygon": {"points": [[x,z], ...]}`; `"falloff": m` softens edges.
@@ -347,20 +407,28 @@ The king does nothing during `test` (he stands where he was, or where `--king` p
 player's help; a real player adds his own damage (roughly one strong unit). Use `--god` to keep the king alive,
 `--invulnerable` to test pathing alone.
 
-## 7. Terrain (base "flat")
+## 7. Terrain
 
-A flat base replaces the map's ground with a heightfield you sculpt; the sky, light and castle position stay the
-host's. The castle keeps its host x/z and stands on whatever height you give the ground there; slots snap to the
-ground too.
+A flat base (`"base": "flat"`) replaces the map's ground with a heightfield you sculpt; the sky, light and castle
+position stay the host's. The castle keeps its host x/z and stands on whatever height you give the ground there;
+slots snap to the ground too. On any other base (`map`, `cleared`) the same ops sculpt **the map's own ground**: every
+cell you move off the host's ground is replaced by the terrain's (the host's ground is cut out under it, so lowering
+and digging work as well as raising); untouched cells stay the host's own.
 
 - Grid: `origin` [x,z] is the min corner, `cell` metres (default 2), `size` [W,H] cells (each ≤ 400). Corner heights,
-  metres relative to `y` (default: the castle's height); the resulting **world** height is clamped to [-8, +30] m
-  (not relative to the castle: on a high host like Sturmklamm, castle y 31, nothing can rise above the castle; see
-  reference.md > "What the host decides" for each host's headroom). The grid's edge is a
-  wall. `terrain_init` without origin/size covers the map's walkable area.
+  metres relative to `y` (default: the castle's height). Heights reach from world y -8 (the king respawns below -10)
+  up to **30 m above `y`** (at least world +30), so a high host like Sturmklamm (castle y 31) can still build up.
+  reference.md > "What the host decides" lists each host's headroom. A flat field's edge is a wall. `terrain_init`
+  without origin/size covers the map's walkable area.
+- On a map's own ground the pack stores heights as **offsets from the host's ground** (0 = untouched). `raise`/`lower`
+  are exact; `set`, `ramp` and `water` aim at a height relative to `y`, worked out from the reference's sampled ground
+  (a few cm off where the host's ground is uneven). `check`/`render` don't model sculpted host ground yet: confirm
+  routes with `paths` in game. Fliers fly over the host's own flier surface there, not over raised ground.
 - Heights: `terrain` with `set` (flat plateau/basin to a height), `raise`/`lower` (add), `smooth`; `ramp` for slopes.
-  Slopes steeper than ~32° are cliffs: unwalkable for ground units and the king, painted as rock. A plateau with one
-  ramp is a choke point; fliers ignore it.
+  Ground steeper than the graphs' max slope (30°) is a cliff: unwalkable for ground units **and the king** (it's
+  walled off for him too, so he can't slide down a face he can't climb back up), drawn as rock. A plateau with one
+  ramp is a choke point; fliers ignore it. In the Studio the Ramp brush is dragged from the top to the bottom: the
+  ground previews while you drag and the guide turns red past 30°.
 - **Width matters.** The game paths ground units on two graphs: small enemies and the king keep 0.5 m from any
   obstacle, large enemies (ogres, rams, big spiders; every spawn line with `large: true` is path-checked for them)
   keep 4 m. Water and blocked cells, cliff faces steeper than 30° and the field's edge are obstacles, and a dug water
@@ -386,11 +454,15 @@ ground too.
 - The field is drawn in the host's own ground palette, which is not always green: teal on Nordfels, dark blue on
   Moorweg, pink on Wildbach, near-black on Totend, orange on Freifort, white on Frostsee (the vanilla maps look the
   same). Look at the host first if colour matters.
-- `paint`: looks only. All seven are distinct on every host: `ground` the host's grass (the unpainted field), `high` a
+- `paint`: looks only, painted per paint sample (2 per cell edge: 1 m on the default grid) and drawn as smooth
+  outlines, so a 4 m road is a road, not a staircase of 2 m squares. All seven are distinct on every host: `ground` the host's grass (the unpainted field), `high` a
   lighter and `low` a darker grass shade, `earth` a bank colour, `sand` the host's sand, `road` a path that stands out
   from the grass, `rock` the host's pale cliff colour. `block`: invisible no-walk cells (works on any base, also on
   vanilla ground). `water`: unwalkable cells drawn as water, the ground dug under it to `level` - 1 m; `on: false`
   makes the cells land again and raises the dug ground back to `height` (default 0; `"fill": false` keeps it dug).
+  The shore is drawn where the bank meets the water, not along the cell edges.
+- Format: `terrain.format` 2 (written by the game and `palace.py`) stores `materials` per paint sample with
+  `paintRes`; older packs (one material per cell) are read and upgraded on their next save.
 - On a flat base the host's own rivers, lakes and ponds are hidden (only the field's `water` cells show); a sea all
   round the map (Frostsee) stays round the field. On `cleared` the host's water stays.
 - Each level stores terrain compressed in the pack (a few KB); big terrain levels share as `.tfpack` files rather

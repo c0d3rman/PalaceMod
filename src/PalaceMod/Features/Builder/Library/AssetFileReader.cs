@@ -9,7 +9,8 @@ using System.Text;
     2022.3), and the Mesh layout of 2022.3 up to m_VertexData. Thronefall's builds carry no type trees, so the layout is
     fixed here (from Unity's 2022.3 Mesh type tree) and every read is checked: the Unity version in the header must be
     the catalog's, the object must be a Mesh with the expected name and vertex count, and anything unexpected (blend
-    shapes, compressed or streamed vertex data, type trees) is refused rather than guessed at.
+    shapes, compressed or streamed vertex data, type trees) is refused rather than guessed at. It also reads the maps'
+    Colorscheme assets (ReadColorscheme), checked by name and exact size.
 
     Pure C# (no UnityEngine) so it's unit-testable; SceneryLibrary turns a RawMesh into a UnityEngine.Mesh.
 */
@@ -77,6 +78,34 @@ namespace PalaceMod.Builder.Library
             }
             return result;
         }
+    }
+
+    /// <summary>A map's Colorscheme as stored: colour field name → (r, g, b, a).</summary>
+    internal sealed class RawColorscheme
+    {
+        public const string Particles = "particlesToAttachToPlayer";
+
+        /// <summary>Colorscheme's serialized fields in order (dayLightColor is readonly, so not serialized); all are
+        /// Colors except Particles, a prefab reference.</summary>
+        public static readonly string[] Fields =
+        [
+            "sunsetLightColor", "nightLightColor", "globalShadowColor", "bonfireLightColor",
+            "enemyLightColor", "enemyMidColor",
+            "allyLightColor", "allyMidColor", "allyRangedLightColor", "allyRangedMidColor", "allyMeleeIndicatorColor", "allyRangedIndicatorColor",
+            "playerLightColor", "playerMidColor", "playerCapeLightColor", "playerCapeMidColor", "playerCrownLightColor", "playerCrownMidColor",
+            "horseLightColor", "horseMidColor",
+            "buildingLightColor", "buildingMidColor", "coinLightColor", "coinMidColor",
+            "groundColor", "groundColorHigh", "groundColorLow", "earthLightColor", "earthMidColor", "sandColor",
+            "treeLightColor", "treeMidColor", "rockLightColor", "rockMidColor", "waterLightColor", "waterSecondaryColor", "roadColor",
+            "upgradeInteractorColor",
+            Particles,
+            "RangeIndicatorPreviewLightColor", "RangeIndicatorPreviewMidColor", "RangeIndicatorPreviewBaseColor",
+            "RangeIndicatorBuiltLightColor", "RangeIndicatorBuiltMidColor",
+            "Group1Color", "Group2Color", "Group3Color",
+        ];
+
+        public string Name;
+        public Dictionary<string, float[]> Colors = new(StringComparer.Ordinal);
     }
 
     internal sealed class AssetFileReader : IDisposable
@@ -202,6 +231,33 @@ namespace PalaceMod.Builder.Library
             if (m.VertexData.Length < needed) throw new InvalidDataException($"vertex data is {m.VertexData.Length} bytes, the channels need {needed}");
             return m;
         }
+
+        /// <summary>Reads a Colorscheme asset (a ScriptableObject, class 114): its name and every colour field. The
+        /// layout is RawColorscheme.Fields; the object's size must match it exactly and its name must be
+        /// expectedName (the catalog's), else InvalidDataException.</summary>
+        public RawColorscheme ReadColorscheme(long pathId, string expectedName)
+        {
+            if (!objects.TryGetValue(pathId, out var obj)) throw new InvalidDataException($"no object {pathId}");
+            if (obj.classId != MonoBehaviourClassId) throw new InvalidDataException($"object {pathId} is class {obj.classId}, not a MonoBehaviour");
+            stream.Position = dataOffset + obj.start;
+            long end = stream.Position + obj.size;
+            reader.ReadBytes(12);      // m_GameObject
+            reader.ReadByte();         // m_Enabled
+            Align();
+            reader.ReadBytes(12);      // m_Script
+            var scheme = new RawColorscheme { Name = AlignedString() };
+            if (scheme.Name != expectedName) throw new InvalidDataException($"object {pathId} is \"{scheme.Name}\", expected \"{expectedName}\"");
+            long need = (RawColorscheme.Fields.Length - 1) * 16 + 12;
+            if (end - stream.Position != need) throw new InvalidDataException($"the colour scheme has {end - stream.Position} bytes of fields; the layout needs {need}");
+            foreach (var field in RawColorscheme.Fields)
+            {
+                if (field == RawColorscheme.Particles) { reader.ReadBytes(12); continue; }   // a PPtr to a prefab
+                scheme.Colors[field] = [F32(), F32(), F32(), F32()];
+            }
+            return scheme;
+        }
+
+        public const int MonoBehaviourClassId = 114;
 
         // ---- Primitives (the endianness of the part being read) ------------------------------------------------
 

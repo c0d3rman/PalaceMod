@@ -35,13 +35,16 @@ namespace PalaceMod.Tests
                  {"op": "add_slot", "id": "h3", "kind": "House", "at": [0, 10]},
                  {"op": "chain", "slots": ["h1", "h2", "h3"], "mode": "order"},
                  {"op": "set_slot", "slot": "h3", "costs": [5], "upgradeCap": 0},
+                 {"op": "add_slot", "id": "m1", "kind": "Mill", "at": [12, -6]},
                  {"op": "add_spawn_line", "id": "north", "at": [0, 30], "width": 12, "flying": false},
                  {"op": "terrain", "mode": "set", "height": 5, "circle": {"center": [0, 0], "radius": 15}, "falloff": 2},
                  {"op": "ramp", "from": [0, -12], "to": [0, -30], "width": 14, "fromHeight": 5, "toHeight": 0},
                  {"op": "water", "level": -1, "rect": {"min": [20, -20], "max": [30, 0]}},
                  {"op": "block", "circle": {"center": [-30, -30], "radius": 4}},
                  {"op": "paint", "material": "road", "line": {"points": [[0, -12], [0, -40]], "width": 4}},
-                 {"op": "add_prop", "id": "r1", "mesh": "Rock A", "at": [-20, 30]},
+                 {"op": "add_prop", "id": "r1", "mesh": "Rock A", "at": [-20, 30], "colors": "original"},
+                 {"op": "add_prop", "id": "r2", "mesh": "Rock A", "at": [-25, 35], "colors": "Frostsee"},
+                 {"op": "set", "path": "levels[0].colors", "value": "Totend"},
                  {"op": "waves", "startingGold": 9, "nights": [{"spawns": [{"unit": "E Melee", "count": 3, "line": "north", "gold": 4}]}]}
                 ]
                 """);
@@ -67,6 +70,8 @@ namespace PalaceMod.Tests
                 Assert.Equal(5, adds[2].Upgrades[0].Cost, "cost edit");
                 Assert.Equal(0, adds[2].UpgradeCap, "cap");
                 Assert.Equal(5f, adds[2].Pos[1], "y from the terrain plateau");
+                Assert.Equal("building:mill", adds[3].Base, "a kind the map lacks is the game's standard building");
+                Assert.Equal("castle", adds[3].Requires.Slot, "which needs the castle");
 
                 var grid = GroundCodec.Decode(level.Terrain);
                 Assert.True(Math.Abs(grid.HeightAt(0f, 0f) - 5f) < 0.02f, $"plateau height {grid.HeightAt(0f, 0f)}");
@@ -74,8 +79,62 @@ namespace PalaceMod.Tests
                 Assert.True(Math.Abs(grid.HeightAt(-40f, 30f)) < 0.01f, "untouched ground stays at 0");
                 Assert.True(grid.CellAt(25f, -10f, out int wx, out int wz) && grid.Water[grid.CellIndex(wx, wz)], "water cell");
                 Assert.True(grid.CellAt(-30f, -30f, out int bx, out int bz) && grid.Blocked[grid.CellIndex(bx, bz)], "blocked cell");
-                Assert.True(grid.CellAt(0f, -30f, out int rx, out int rz) && grid.Materials[grid.CellIndex(rx, rz)] == (byte)GroundMaterial.Road, "road cell");
+                Assert.True(grid.MaterialAt(0f, -30f) == GroundMaterial.Road, "road cell");
                 Assert.Equal(9, pack.FindWaveSet(level.WaveSet).StartingGold, "starting gold");
+                Assert.Equal("Totend", level.Colors, "level colours");
+                Assert.True(level.Props.First(x => x.Id == "r1").Colors == null, "original colours of the host's own scenery are the level's");
+                Assert.Equal("Frostsee", level.Props.First(x => x.Id == "r2").Colors, "prop colours");
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch (IOException) { }
+            }
+        }
+
+        /// <summary>The library model: `new <level> --host` writes library/levels/<id>.json, apply edits it through the
+        /// "library" pack, units are their own files, LibraryStore reads them, and a migrated pack id still works.</summary>
+        public static void PalacePyLibraryLevels()
+        {
+            string script = FindScript();
+            if (script == null || !HasPython()) { Console.WriteLine("  (skipped: no python3 or agent-kit/palace.py)"); return; }
+            string root = Path.Combine(Path.GetTempPath(), "palace-agent-test-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                string game = Path.Combine(root, "game");
+                Directory.CreateDirectory(Path.Combine(game, "BepInEx"));
+                string refDir = Path.Combine(root, "ref");
+                WriteReference(refDir);
+                string ops = Path.Combine(root, "ops.json");
+                File.WriteAllText(ops, """
+                [
+                 {"op": "add_slot", "id": "h1", "kind": "House", "at": [6, 5]},
+                 {"op": "add_spawn_line", "id": "north", "at": [0, 30], "width": 12, "flying": false},
+                 {"op": "waves", "startingGold": 9, "nights": [{"spawns": [{"unit": "E Melee", "count": 3, "line": "north", "gold": 4}]}]}
+                ]
+                """);
+                Run(script, game, refDir, "new", "lv", "--host", "Testmap", "--base", "cleared");
+                Run(script, game, refDir, "new", "lv2", "--host", "Testmap");
+                string applied = Run(script, game, refDir, "apply", "library", ops, "--level", "lv");
+                Assert.True(JObject.Parse(applied)["errors"]!.Count() == 0, "no errors: " + applied);
+                string libDir = Path.Combine(game, "BepInEx", "PalaceBuilder", "library");
+                Assert.True(File.Exists(Path.Combine(libDir, "levels", "lv.json")) && File.Exists(Path.Combine(libDir, "levels", "lv2.json")), "level files");
+
+                var lib = new LibraryStore(libDir);
+                lib.Load();
+                Assert.Equal(0, lib.Issues.Count, "reads cleanly: " + string.Join("; ", lib.Issues));
+                var level = lib.Level("lv");
+                Assert.Equal("cleared", level.Base, "base");
+                Assert.Equal(1, level.BuildSlots.Add.Count, "slot added");
+                var ws = lib.Workspace("lv").FindWaveSet(level.WaveSet);
+                Assert.Equal(9, ws.StartingGold, "nights live with the level");
+                Assert.True(lib.Level("lv2").WaveSet != level.WaveSet, "each level owns its nights");
+
+                // An old pack id that was moved into the library resolves to the levels that came from it.
+                lib.Import(new DesignPack { Id = "old.pack", Levels = [new LevelDef { Id = "legacy", Host = "Testmap" }] }, null);
+                string shown = Run(script, game, refDir, "show", "old.pack");
+                Assert.True(shown.Contains("legacy") || shown.Contains("castle"), "old id resolves: " + shown);
+                string listed = Run(script, game, refDir, "list");
+                Assert.Equal(3, JObject.Parse(listed)["levels"]!.Count(), "list: " + listed);
             }
             finally
             {
@@ -190,6 +249,49 @@ print("ok")
             string output = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
             p.WaitForExit();
             Assert.True(p.ExitCode == 0 && output.Trim() == "ok", "plan buyer: " + output);
+        }
+
+        /// <summary>palace.py's enemy numbers match the mod's (EnemyMath) and its unit check knows the model refs.</summary>
+        public static void PalacePyEnemyCardAndModelChecks()
+        {
+            string script = FindScript();
+            if (script == null || !HasPython()) { Console.WriteLine("  (skipped: no python3 or agent-kit/palace.py)"); return; }
+            const string code = """
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("palace", sys.argv[1]); P = importlib.util.module_from_spec(spec); spec.loader.exec_module(P)
+mods = [{"tags": [], "add": 10, "mult": 1}, {"tags": ["Tower"], "add": 5, "mult": 2}]
+assert P.hit_damage(mods, P.ENEMY_TARGETS["tower"]) == 30, P.hit_damage(mods, P.ENEMY_TARGETS["tower"])
+assert P.hit_damage(mods, P.ENEMY_TARGETS["house"], 0.5) == 5
+assert P.time_to_kill(100, 30, 2) == (4, 6)
+assert P.time_to_kill(100, 0, 2) is None
+class Ref:
+    catalog = {"units": [{"id": "E Melee", "side": "enemy", "maxHp": 25, "attackCooldown": 1, "weapon": "W", "tags": ["EnemyOwned", "MeeleFighter"]},
+                         {"id": "P Knight", "side": "player", "maxHp": 40, "attackCooldown": 2, "weapon": "K", "tags": ["PlayerOwned", "PlayerUnit"]}],
+               "weapons": [{"id": "W", "damage": [{"tags": [], "add": 4, "mult": 1}]}, {"id": "K", "damage": [{"tags": ["MeeleFighter"], "add": 10, "mult": 1}]}]}
+    scenery = {"meshes": [{"name": "Tree_02"}]}
+    def unit(self, uid): return next((u for u in self.catalog["units"] if u["id"] == uid), None)
+r = Ref()
+u = {"id": "tree", "base": "vanilla:E Melee", "stats": {"maxHp": 50}, "visuals": {"mesh": "mesh:Tree_02", "meshOffset": [0, 1, 0], "motion": "bob"}}
+assert P.check_unit(r, u) == [], P.check_unit(r, u)
+c = P.enemy_card(r, u)
+assert c["hp"] == 50 and c["deals"]["house"]["perHit"] == 4 and c["deals"]["house"]["perSecond"] == 4, c
+assert c["killedBy"]["P Knight"] == {"hits": 5, "seconds": 8}, c["killedBy"]
+assert P.enemy_card(r, u, difficulty=2, elite=True)["hp"] == 400
+bad = {"id": "x", "base": "vanilla:E Nope", "visuals": {"mesh": "mesh:Nope", "meshRotZ": 999, "meshLook": "shiny", "motion": "fly"}}
+paths = sorted(p for p, _ in P.check_unit(r, bad))
+assert paths == [".base", ".visuals.meshLook", ".visuals.meshRotZ", ".visuals.mesh", ".visuals.motion"] or set(paths) == {".base", ".visuals.mesh", ".visuals.meshRotZ", ".visuals.meshLook", ".visuals.motion"}, paths
+assert [p for p, _ in P.check_unit(r, {"base": "vanilla:E Melee", "visuals": {"mesh": "tree"}})] == [".visuals.mesh"]
+assert P.check_unit(r, {"base": "vanilla:E Melee", "visuals": {"mesh": "vanilla:P Knight"}}) == []
+print("ok")
+""";
+            var psi = new ProcessStartInfo("python3") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+            psi.ArgumentList.Add("-c");
+            psi.ArgumentList.Add(code);
+            psi.ArgumentList.Add(script);
+            using var p = Process.Start(psi);
+            string output = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
+            p.WaitForExit();
+            Assert.True(p.ExitCode == 0 && output.Trim() == "ok", "enemy card: " + output);
         }
 
         public static void PalacePyHarbourMineAndKingPost()
@@ -402,6 +504,9 @@ print("ok")
                "upgrades": [{"cost": 3, "branches": [{}]}, {"cost": 7, "branches": [{}]}]},
               {"name": "House Variant", "kind": "House", "pos": [5, 0, 8], "startDeactivated": true, "activator": "Castle", "activatorLevel": 0,
                "upgradeCap": 0, "canBeBase": true, "upgrades": [{"cost": 2, "branches": [{"income": 1}]}]}],
+             "buildings": [
+              {"name": "building:mill", "kind": "Mill", "startDeactivated": true, "canBeBase": true,
+               "upgrades": [{"cost": 4, "branches": [{"income": 1}]}, {"cost": 6, "branches": [{"income": 1}]}]}],
              "spawnLines": [{"name": "Gate", "center": [0, 0, -45], "points": [[-5, 0, -45], [5, 0, -45]], "flying": true, "smallGround": true, "bigGround": true}],
              "scenery": [{"base": "mesh:Rock A", "name": "Rock A", "count": 3, "size": [4, 4, 4]}]}
             """);

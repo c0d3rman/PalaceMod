@@ -48,6 +48,13 @@ namespace PalaceMod.Builder.Studio.Requirements
                     caps[s.name] = s.RequiredRootLevelDifference;
                     income[s.name] = s.OwnUpgrades.Select(u => u?.upgradeBranches?.FirstOrDefault()?.goldIncomeChange ?? 0).ToList();
                 }
+                // The game's standard buildings, the bases of added kinds the host lacks ("building:mill").
+                foreach (var (id, s) in BuildingPrefabs.All())
+                {
+                    string name = BuildingRefs.Ref(id);
+                    caps[name] = s.RequiredRootLevelDifference;
+                    income[name] = s.OwnUpgrades.Select(u => u?.upgradeBranches?.FirstOrDefault()?.goldIncomeChange ?? 0).ToList();
+                }
                 hostScene = level.Host;
                 version++;
                 return host;

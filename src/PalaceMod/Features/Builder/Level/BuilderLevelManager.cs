@@ -26,10 +26,11 @@ namespace PalaceMod
         public override void Update()
         {
             if (LevelOverlay.ScanAfterFrame >= 0 && Time.frameCount >= LevelOverlay.ScanAfterFrame) ScanAfterLevelStart();
+            GroundGraphs.RunPendingScan();
         }
 
         // Once per custom level start, after Start has run (slots placed, removed ones gone): rebuild the graphs with
-        // the new props and check every ground spawn line still reaches the castle.
+        // the new props, check every ground spawn line still reaches the castle, and put unit homes on walkable ground.
         private static void ScanAfterLevelStart()
         {
             LevelOverlay.ScanAfterFrame = -1;
@@ -39,7 +40,9 @@ namespace PalaceMod
             {
                 long ms = PathCheck.Rescan();
                 var routes = PathCheck.Check(scene);
-                Log.For<BuilderManager>().Info($"level start rescan took {ms} ms; paths: {PathCheck.Describe(routes)}");
+                // On the graphs the level plays on: barracks units standing in water or on a cliff get walkable homes.
+                UnitHomes.Settle(scene);
+                Log.For<BuilderManager>().Info($"level start rescan took {ms} ms; paths: {PathCheck.Describe(routes)}; {UnitHomes.LastSettle}");
                 var blocked = routes.Where(r => !r.Reachable).Select(r => r.Line).ToList();
                 if (blocked.Count > 0)
                     Notify.Show($"This layout blocks enemies from {string.Join(", ", blocked)}: they can't reach the castle", NotifyKind.Warning, 8f, "builder-paths");
@@ -54,7 +57,7 @@ namespace PalaceMod
         private void RegisterDevCommand()
         {
             DevCommands.Register("builder-level",
-                "builder-level paths | graphs | spike ... | <any builder-studio subcommand>   level tools (editing: see builder-studio)", args =>
+                "builder-level paths | graphs | spike ... | buildings [kind] | <any builder-studio subcommand>   level tools (editing: see builder-studio)", args =>
             {
                 string sub = args.FirstOrDefault()?.ToLowerInvariant();
                 switch (sub)
@@ -68,6 +71,8 @@ namespace PalaceMod
                         return "\n" + PathCheck.DescribeGraphs() + "\n" + string.Join("\n", PathCheck.Check(Builder.Studio.StudioShell.Editing ? Builder.Studio.StudioScene.Scene : LayoutScene.Host(BuilderServices.Sessions.Current?.HostScene)).Select(r => $"{r.Line} on {r.Graph}: {r.Detail}"));
                     case "spike":
                         return LevelSpike.Run(args.Length > 1 ? args[1] : "");
+                    case "buildings":
+                        return "\n" + (args.Length > 1 ? BuildingPrefabs.Diff(EnemySpawner.instance.gameObject.scene, args[1]) : BuildingPrefabs.Describe(EnemySpawner.instance != null ? EnemySpawner.instance.gameObject.scene : default));
                     default:
                         return Builder.Studio.StudioDev.Run(args);
                 }

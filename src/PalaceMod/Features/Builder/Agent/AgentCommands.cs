@@ -25,7 +25,7 @@ namespace PalaceMod.Builder.Agent
         private static readonly Log log = Log.For<AgentBridgeManager>();
 
         private const string Usage =
-            "agent status | slots | catalog <file> | host <file> [cell] | packs | reload | validate <pack> | " +
+            "agent status | slots | catalog <file> | host <file> [cell] | packs | reload | validate <pack> [level] | library list|export|code|import ... | " +
             "play <pack> <level> | sandbox <pack> <level> [x z] | edit <pack> <level> | infinitegold on|off | spawn <unit> [count] [elite] [line <name>|at <x> <z>] | vanilla <scene> | menu | night [n] | endnight | report | build <slot|all> [level] [branch] [pay] | " +
             "gold <n> | god on|off | invulnerable on|off | speed <x> | kill | heal | teleport <x> <z> | paths [rescan] | reach <x1> <z1> <x2> <z2> | " +
             "share code <pack> [clipboard] | share export <pack> [path] | capture <file> [pixels] | screenshot <file>   agent bridge: JSON state, level tests, map dumps (see agent-kit/)";
@@ -77,11 +77,12 @@ namespace PalaceMod.Builder.Agent
                 case "validate":
                 {
                     var entry = FindPack(Arg(args, 1));
+                    var issues = PlayIssues(entry, args.Length > 2 ? args[2] : null);
                     return Json(new JObject
                     {
                         ["pack"] = entry.Id,
-                        ["ok"] = !entry.HasErrors,
-                        ["issues"] = new JArray(entry.Issues.Select(i => new JObject
+                        ["ok"] = !issues.Any(i => i.Severity == Severity.Error),
+                        ["issues"] = new JArray(issues.Select(i => new JObject
                         {
                             ["severity"] = i.Severity == Severity.Error ? "error" : "warning", ["path"] = i.Path, ["message"] = i.Message,
                         })),
@@ -90,8 +91,9 @@ namespace PalaceMod.Builder.Agent
                 case "play":
                 {
                     var entry = FindPack(Arg(args, 1));
-                    if (entry.HasErrors) throw new InvalidOperationException($"{entry.Id} has errors; run `agent validate {entry.Id}`");
                     string level = Arg(args, 2);
+                    if (PlayIssues(entry, level).Any(i => i.Severity == Severity.Error))
+                        throw new InvalidOperationException($"{entry.Id} has errors; run `agent validate {entry.Id} {level}`");
                     if (entry.Pack.FindLevel(level) == null) throw new ArgumentException($"{entry.Id} has no level \"{level}\"");
                     if (!BuilderServices.Sessions.Launch(new SessionRequest { Pack = entry.Pack, LevelId = level }, out string error))
                         throw new InvalidOperationException(error);
@@ -105,7 +107,7 @@ namespace PalaceMod.Builder.Agent
                     string level = Arg(args, 2);
                     if (entry.Pack.FindLevel(level) == null) throw new ArgumentException($"{entry.Id} has no level \"{level}\"");
                     Vector3? at = args.Length >= 5 ? new Vector3(F(args[3]), 0f, F(args[4])) : null;
-                    if (!Studio.Play.StudioPlay.Instance.PlayLevel(new Editor.PackDraft(entry), level, at))
+                    if (!Studio.Play.StudioPlay.Instance.PlayLevel(Draft(entry, level), level, at))
                         throw new InvalidOperationException("test play didn't start (see `agent status` and the log)");
                     NightRecorder.Reset();
                     return Json(new JObject { ["loading"] = $"{entry.Id}/{level}", ["sandbox"] = true });
@@ -116,12 +118,19 @@ namespace PalaceMod.Builder.Agent
                     var entry = FindPack(Arg(args, 1));
                     string level = Arg(args, 2);
                     if (entry.Pack.FindLevel(level) == null) throw new ArgumentException($"{entry.Id} has no level \"{level}\"");
-                    Editor.BuilderEditor.OpenPack(entry.Id);
-                    var draft = Editor.BuilderEditor.Draft ?? throw new InvalidOperationException("the Builder couldn't open the pack");
+                    Editor.PackDraft draft;
+                    if (entry.Id == DesignLibrary.PackId) draft = Draft(entry, level);
+                    else
+                    {
+                        Editor.BuilderEditor.OpenPack(entry.Id);
+                        draft = Editor.BuilderEditor.Draft ?? throw new InvalidOperationException("the Builder couldn't open the pack");
+                    }
                     if (!Studio.Studio.Open(draft, level, out string error)) throw new InvalidOperationException(error);
                     NightRecorder.Reset();
                     return Json(new JObject { ["loading"] = $"{entry.Id}/{level}", ["studio"] = true });
                 }
+                case "library":
+                    return PalaceMod.DesignLibraryManager.Command(args.Skip(1).ToArray());
                 case "infinitegold":
                     Studio.Play.SandboxActions.InfiniteGold = OnOff(args);
                     return Json(new JObject { ["infiniteGold"] = Studio.Play.SandboxActions.InfiniteGold, ["appliesIn"] = "sandbox play only" });
@@ -435,10 +444,21 @@ namespace PalaceMod.Builder.Agent
         internal static PackEntry FindPack(string id)
         {
             BuilderServices.Packs.Refresh();
-            var entry = BuilderServices.Packs.Find(id) ?? throw new ArgumentException($"no pack \"{id}\" (`agent packs` lists them)");
+            var entry = BuilderServices.Packs.Find(id);
+            // A pack that was moved into the library: its levels are library levels now.
+            if (entry == null && id != null && DesignLibrary.Items(DesignKind.Level).Any(i => i.Origin == id)) entry = BuilderServices.Packs.Find(DesignLibrary.PackId);
+            if (entry == null) throw new ArgumentException($"no pack \"{id}\" (`agent packs` lists them)");
             if (entry.Pack == null) throw new InvalidOperationException($"{entry.Id} can't be read: {string.Join("; ", entry.Issues.Select(i => i.ToString()))}");
             return entry;
         }
+
+        /// <summary>What blocks playing a level: for the library only that level, its nights and the units they use
+        /// (other library items don't matter); for a pack, the whole pack.</summary>
+        private static List<ValidationIssue> PlayIssues(PackEntry entry, string level) => DesignLibrary.PlayIssues(entry, level).ToList();
+
+        /// <summary>A draft to open a level in: the library's workspace for that level, or the pack itself.</summary>
+        private static Editor.PackDraft Draft(PackEntry entry, string level) =>
+            entry.Id == DesignLibrary.PackId ? DesignLibrary.OpenLevel(level) ?? throw new ArgumentException($"no library level \"{level}\"") : new Editor.PackDraft(entry);
 
         private static string Json(JObject o) => o.ToString(Formatting.None);
 

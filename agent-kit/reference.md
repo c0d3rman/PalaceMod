@@ -20,7 +20,7 @@ The castle slot of each map is named in `palace.py ref slots <map>` (`"castle": 
 
 ### What the host decides
 
-Even on a `cleared` or `flat` base the host map fixes: **which building kinds you can place** (`add_slot` copies a slot of that kind from the host, so a kind the host lacks can't be added: no Mill on Frostsee), the castle's position, the playable rectangle (`terrain_init`'s default grid is the host's walkable extent), the sky, light and ground palette, and the starting gold default. Terrain heights are **world** heights clamped to [-8, 30] m, so a high castle leaves little room to build up (headroom below). Pick the host from this table before designing.
+Even on a `cleared` or `flat` base the host map fixes: **which of its slots `add_slot` copies** (a kind the host has is a copy of its most complete slot of that kind; a kind it lacks, like a Mill on Frostsee, is the game's standard building of that kind, `building:<kind>`, the same tree as the table below), the castle's position, the playable rectangle (`terrain_init`'s default grid is the host's walkable extent), the sky, light and ground palette, and the starting gold default. Terrain heights go from world y -8 m (the king respawns below -10) up to 30 m above the terrain's `y` (the castle's height; at least world 30 m), so every host has room to build up (headroom below). Pick the host from this table before designing.
 
 | Kind | Nordfels | Durststein | Frostsee | Uferwind | Sturmklamm | Wildbach | Moorweg | Freifort | Totend |
 |---|---|---|---|---|---|---|---|---|---|
@@ -45,18 +45,18 @@ Even on a `cleared` or `flat` base the host map fixes: **which building kinds yo
 | Host | Playable rectangle (m) | Castle to west / east / south / north edge (m) | Castle y | Terrain headroom up / down from the castle (m) |
 |---|---|---|---|---|
 | Nordfels | 134 x 116 | 52 / 82 / 93 / 23 | 0.0 | +30.0 / -8.0 |
-| Durststein | 298 x 194 | 132 / 166 / 68 / 126 | 13.5 | +16.5 / -21.5 |
-| Frostsee | 190 x 180 | 157 / 33 / 122 / 58 | 13.5 | +16.5 / -21.5 |
-| Uferwind | 176 x 204 | 118 / 58 / 112 / 92 | 17.6 | +12.4 / -25.6 |
-| Sturmklamm | 142 x 182 | 96 / 46 / 96 / 86 | 31.0 | -1.0 / -39.0 |
-| Wildbach | 158 x 192 | 84 / 74 / 174 / 18 | 17.6 | +12.4 / -25.6 |
-| Moorweg | 210 x 204 | 110 / 100 / 105 / 99 | 19.2 | +10.8 / -27.2 |
-| Freifort | 208 x 262 | 112 / 96 / 162 / 100 | 8.7 | +21.3 / -16.7 |
-| Totend | 184 x 294 | 119 / 65 / 145 / 149 | 27.9 | +2.1 / -35.9 |
+| Durststein | 298 x 194 | 132 / 166 / 68 / 126 | 13.5 | +30.0 / -21.5 |
+| Frostsee | 190 x 180 | 157 / 33 / 122 / 58 | 13.5 | +30.0 / -21.5 |
+| Uferwind | 176 x 204 | 118 / 58 / 112 / 92 | 17.6 | +30.0 / -25.6 |
+| Sturmklamm | 142 x 182 | 96 / 46 / 96 / 86 | 31.0 | +30.0 / -39.0 |
+| Wildbach | 158 x 192 | 84 / 74 / 174 / 18 | 17.6 | +30.0 / -25.6 |
+| Moorweg | 210 x 204 | 110 / 100 / 105 / 99 | 19.2 | +30.0 / -27.2 |
+| Freifort | 208 x 262 | 112 / 96 / 162 / 100 | 8.7 | +30.0 / -16.7 |
+| Totend | 184 x 294 | 119 / 65 / 145 / 149 | 27.9 | +30.0 / -35.9 |
 
 ## Buildings (slot kinds)
 
-Per level: cost in gold, then each choice (branch) with its income change (+g per dawn), extra HP and what it adds. Hidden tiers exist in the data but are switched off in normal play (PalaceMod's optional "Level 4 buildings" turns them on). `add_slot` copies the most complete slot of the kind on the host map, so these trees are what you get.
+Per level: cost in gold, then each choice (branch) with its income change (+g per dawn), extra HP and what it adds. Hidden tiers exist in the data but are switched off in normal play (PalaceMod's optional "Level 4 buildings" turns them on). `add_slot` copies the most complete slot of the kind on the host map, or places the game's standard building of a kind the host lacks (`building:<kind>`: `archery-range`, `barracks`, `barricades`, `blacksmith`, `bridge`, `defense-tower`, `field`, `gold-mine`, `harbour`, `heros-quarter`, `house`, `mill`, `royal-forge`, `shrine`, `summoning-circle`, `temple`), so these trees are what you get.
 
 ### Archery Range
 

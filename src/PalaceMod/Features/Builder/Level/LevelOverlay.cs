@@ -12,7 +12,8 @@ using UnityEngine.SceneManagement;
     Awake/Start register it like any native slot. Props are mesh objects; solid ones get an invisible blocker box
     (LayoutScene.SetSolid). Spawn lines are moved as a whole; new ones are copies of a host line under its spawner.
     The pathfinding graphs are rescanned once, a frame after Start (see BuilderLevelManager), then every ground spawn
-    line is checked for a path to the castle.
+    line is checked for a path to the castle and every training slot's unit homes are moved onto walkable ground
+    (UnitHomes.Settle; a level's own unit positions, buildSlots units, are applied here first).
 
     Requirements (docs/builder-ux.md, "Requirements") use the game's own mechanism only: each slot's one prerequisite
     is BuildSlot.activatorBuilding + activatorLevel (+ startDeactivated), and its upgrade cap requiredRootLevelDifference.
@@ -46,8 +47,10 @@ namespace PalaceMod.Builder.Level
                 GroundLayer.Apply(scene, pack, level, issues);
                 return;
             }
+            // The level's colour scheme (the Studio applies it itself while editing).
+            if (level.Colors != null) Library.MapColors.ApplyLevel(level.Colors);
             if (!HasEdits(level)) return;
-            int moved = 0, added = 0, removed = 0, props = 0, lines = 0, wired = 0;
+            int moved = 0, added = 0, removed = 0, props = 0, lines = 0, wired = 0, units = 0;
             var all = LayoutScene.Slots(scene);
             var slots = all.GroupBy(s => s.name, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
             var host = LayoutScene.HostSlots(all);
@@ -64,6 +67,7 @@ namespace PalaceMod.Builder.Level
                         edit.RotY is float yaw ? LayoutScene.WithYaw(t.rotation, yaw) : t.rotation);
                     moved++;
                 }
+                if (UnitHomes.ApplyOffsets(slot, edit.Units) > 0) units++;
                 ApplyCosts(slot, edit.Upgrades);
             }
 
@@ -75,15 +79,30 @@ namespace PalaceMod.Builder.Level
             {
                 if (add?.Id == null) continue;
                 var baseRef = ContentRef.Parse(add.Base ?? "");
-                if (baseRef.Kind != RefKind.Scene || !slots.TryGetValue(baseRef.Id, out var source)) { issues.Add(Warn($"slot \"{add.Id}\": no build slot \"{add.Base}\" on {level.Host} to copy")); continue; }
-                if (!LayoutScene.CanBeBase(source)) { issues.Add(Warn($"slot \"{add.Id}\": {source.name} can't be copied")); continue; }
+                BuildSlot source;
+                Transform parent;
+                if (baseRef.Kind == RefKind.Building)
+                {
+                    // The game's standard building of a kind (any map): its Resources prefab, placed beside the castle.
+                    source = BuildingPrefabs.Load(baseRef.Id);
+                    if (source == null) { issues.Add(Warn($"slot \"{add.Id}\": no standard building \"{baseRef.Id}\"")); continue; }
+                    parent = all.FirstOrDefault(LayoutScene.IsCastle)?.transform.parent;
+                }
+                else
+                {
+                    if (baseRef.Kind != RefKind.Scene || !slots.TryGetValue(baseRef.Id, out source)) { issues.Add(Warn($"slot \"{add.Id}\": no build slot \"{add.Base}\" on {level.Host} to copy")); continue; }
+                    if (!LayoutScene.CanBeBase(source)) { issues.Add(Warn($"slot \"{add.Id}\": {source.name} can't be copied")); continue; }
+                    parent = source.transform.parent;
+                }
                 var go = UnityEngine.Object.Instantiate(source.gameObject, holder.transform);
                 go.name = LayoutScene.AddedPrefix + add.Id;
                 go.transform.SetPositionAndRotation(LayoutScene.ToVector(add.Pos), LayoutScene.WithYaw(source.transform.rotation, add.RotY));
                 LayoutScene.SetGuid(go, LayoutScene.Guid(pack.Id, level.Id, add.Id));
                 var clone = go.GetComponent<BuildSlot>();
+                WalkableDeck(clone);
+                if (UnitHomes.ApplyOffsets(clone, add.Units) > 0) units++;
                 ApplyCosts(clone, add.Upgrades);
-                clones.Add((add, clone, source.transform.parent));
+                clones.Add((add, clone, parent));
             }
 
             wired = ApplyRequirements(level, host, slots, clones.ToDictionary(c => SlotRefs.Added(c.def.Id), c => c.slot, StringComparer.Ordinal), issues);
@@ -91,6 +110,7 @@ namespace PalaceMod.Builder.Level
             foreach (var (_, clone, parent) in clones)
             {
                 clone.transform.SetParent(parent, true);
+                if (parent == null && clone.gameObject.scene != scene) SceneManager.MoveGameObjectToScene(clone.gameObject, scene);
                 added++;
             }
             UnityEngine.Object.Destroy(holder);
@@ -144,7 +164,8 @@ namespace PalaceMod.Builder.Level
                 // The host's own scenery first, then the cross-map library (Library/SceneryLibrary).
                 if (prop.Base == null || !bases.TryGetValue(prop.Base, out var b)) b = Library.SceneryLibrary.Resolve(scene, prop.Base);
                 if (b == null) { issues.Add(Warn($"prop \"{prop.Id}\": no scenery \"{prop.Base}\" on {level.Host} or in the library")); continue; }
-                LayoutScene.MakeProp(scene, b, prop.Id, LayoutScene.ToVector(prop.Pos), prop.RotY, Mathf.Clamp(prop.Scale, 0.1f, 10f), prop.Solid);
+                var go = LayoutScene.MakeProp(scene, b, prop.Id, LayoutScene.ToVector(prop.Pos), prop.RotY, Mathf.Clamp(prop.Scale, 0.1f, 10f), prop.Solid);
+                if (prop.Colors != null) Library.MapColors.Paint(go, b, prop.Colors);
                 props++;
             }
 
@@ -154,7 +175,7 @@ namespace PalaceMod.Builder.Level
             ScanAfterFrame = Time.frameCount + 2;
             ScanHost = level.Host;
             Log.For<BuilderManager>().Info($"level {pack.Id}/{level.Id} on {level.Host}{(level.Base != null ? $" ({level.Base})" : "")}: {moved} slots moved, {added} added, {removed} removed, " +
-                $"{wired} requirements set, {lines} spawn lines moved, {newLines} added, {gone} removed, {props} props{(hidden > 0 ? $", {hidden} scenery renderers hidden" : "")}");
+                $"{wired} requirements set, {lines} spawn lines moved, {newLines} added, {gone} removed, {props} props{(units > 0 ? $", {units} slots' units placed" : "")}{(hidden > 0 ? $", {hidden} scenery renderers hidden" : "")}");
         }
 
         /// <summary>The empty base's look: the scenery hidden (and, for a flat field, the ground replaced).</summary>
@@ -192,7 +213,7 @@ namespace PalaceMod.Builder.Level
             foreach (var a in level.BuildSlots?.Add ?? [])
                 if (a?.Id != null && clones.ContainsKey(SlotRefs.Added(a.Id)))
                     if (a.Requires != null) wanted[SlotRefs.Added(a.Id)] = a.Requires;
-                    else if (LevelBases.IsEmpty(level)) wanted[SlotRefs.Added(a.Id)] = LevelRequirements.CastleLevel(1);
+                    else if (LevelBases.IsEmpty(level) || BuildingRefs.IsBuilding(a.Base)) wanted[SlotRefs.Added(a.Id)] = LevelRequirements.CastleLevel(1);
 
             // Drop what can't be applied, and loops (checked against the whole graph, host prerequisites included).
             foreach (var key in wanted.Keys.ToList())
@@ -292,6 +313,38 @@ namespace PalaceMod.Builder.Level
             t.GetChild(0).position = center - half;
             t.GetChild(1).position = center + half;
             return line;
+        }
+
+        /// <summary>A building whose built look has a flat Ground-layer surface (Uferwind's Bridge: its deck) is walked on.
+        /// The map's own bridges get that from the bake: the deck is in the navmesh and a "Block While Unbuilt" cut hides
+        /// it until the bridge is built. A copy stands somewhere else, so the graphs have no deck there (a NavmeshAdd
+        /// doesn't join the ground round it): the graphs are rescanned once it's built, with its deck active.</summary>
+        internal static int WalkableDeck(BuildSlot slot)
+        {
+            if (slot == null) return 0;
+            int n = 0;
+            foreach (var r in slot.GetComponentsInChildren<MeshRenderer>(true))
+            {
+                var mf = r.GetComponent<MeshFilter>();
+                if (r.gameObject.layer != 6 || mf == null || mf.sharedMesh == null || r.GetComponentInParent<Hp>(true) == null) continue;
+                if (WorldHeight(mf.sharedMesh.bounds, r.transform) > 0.5f) continue; // the bridge's body, not its deck
+                n++;
+            }
+            if (n > 0) slot.OnUpgrade.AddListener(() => GroundGraphs.ScanSoon(slot.name));
+            return n;
+        }
+
+        private static float WorldHeight(Bounds b, Transform t)
+        {
+            float lo = float.MaxValue, hi = float.MinValue;
+            for (int i = 0; i < 8; i++)
+            {
+                var c = b.center + Vector3.Scale(b.extents, new Vector3((i & 1) == 0 ? -1 : 1, (i & 2) == 0 ? -1 : 1, (i & 4) == 0 ? -1 : 1));
+                float y = t.TransformPoint(c).y;
+                lo = Mathf.Min(lo, y);
+                hi = Mathf.Max(hi, y);
+            }
+            return hi - lo;
         }
 
         private static void ApplyCosts(BuildSlot slot, List<UpgradeEdit> edits)

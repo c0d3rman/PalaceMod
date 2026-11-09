@@ -108,6 +108,10 @@ namespace PalaceMod
             tile.Label.raycastTarget = false;
             tile.Label.enableWordWrapping = false;
             tile.Label.overflowMode = TextOverflowModes.Ellipsis;
+            // A label too long for its tile (narrow tabs and chips) shrinks before it is cut.
+            tile.Label.enableAutoSizing = true;
+            tile.Label.fontSizeMax = textSize;
+            tile.Label.fontSizeMin = Mathf.Max(12f, textSize * 0.6f);
             tile.Label.characterSpacing = 0f;
 
             tile.Badge = GameWidgets.Text(tile.body, "Badge", "", ModStyle.BoldFont, Mathf.Max(14f, textSize * 0.8f), ModStyle.Bright, TextAlignmentOptions.TopRight);

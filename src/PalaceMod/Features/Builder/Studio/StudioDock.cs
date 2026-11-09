@@ -294,7 +294,7 @@ namespace PalaceMod.Builder.Studio
             var d = Studio.Draft;
             var lv = Studio.Level;
             string dot = d?.Dirty == true ? $"  <color=#{ModStyle.Hex(ModStyle.Accent)}>●</color> <size=70%>unsaved</size>" : "";
-            title.text = $"{ModFields.TMPEscape(lv?.Name ?? Studio.LevelId ?? "")} <color=#{ModStyle.Hex(ModStyle.Dim)}>· {ModFields.TMPEscape(d?.Pack.Name ?? "")}</color>{dot}";
+            title.text = $"{ModFields.TMPEscape(lv?.Name ?? Studio.LevelId ?? "")} {(d?.IsLibrary == true ? "" : $"<color=#{ModStyle.Hex(ModStyle.Dim)}>· {ModFields.TMPEscape(d?.Pack.Name ?? "")}</color>")}{dot}";
             undoTile?.SetDim(d?.History.CanUndo != true);
             redoTile?.SetDim(d?.History.CanRedo != true);
             snapTile?.SetText(StudioShell.SnapStep <= 0f ? "Snap off" : $"Snap {StudioShell.SnapStep:0.#} m");
@@ -318,6 +318,7 @@ namespace PalaceMod.Builder.Studio
             var blocked = StudioScene.Routes.Where(r => !r.Reachable).Select(r => r.Line).ToList();
             if (blocked.Count > 0) list.Add(new Model.ValidationIssue(Model.Severity.Warning, prefix, "Blocked: " + string.Join(", ", blocked)));
             if (StudioServices.Terrain?.PathsStale == true) list.Add(new Model.ValidationIssue(Model.Severity.Warning, prefix, "Paths out of date"));
+            list.AddRange(Units.StudioUnits.Issues(prefix));
             return list;
         }
 
@@ -505,9 +506,9 @@ namespace PalaceMod.Builder.Studio
             RefreshAll();
         }
 
-        /// <summary>A list row in a side panel: shorter, one line (ellipsis), with room kept for its value on the right;
-        /// lit when on.</summary>
-        public static void Compact(ModRow row, bool on = false, float valueRoom = 60f)
+        /// <summary>A list row in a side panel: shorter, with room kept for its value on the right; lit when on. A label
+        /// too long for its line wraps onto a second one (never cut short), so pass the page's width.</summary>
+        public static void Compact(ModRow row, bool on = false, float valueRoom = 60f, float width = 0f)
         {
             var b = row.Button;
             var le = b.GetComponent<LayoutElement>();
@@ -516,8 +517,11 @@ namespace PalaceMod.Builder.Studio
             if (text != null)
             {
                 text.fontSize = Mathf.Min(text.fontSize, 23f);
-                text.enableWordWrapping = false;
-                text.overflowMode = TextOverflowModes.Ellipsis;
+                // The game's menu rows grow a lot when hovered; in a list that's a jump (and room kept for nothing).
+                foreach (var style in new[] { b.selectedStyle, b.focussedStyle, b.focussedAndSelectedStyle })
+                    if (style != null && style.fontSize > text.fontSize * 1.1f) style.fontSize = text.fontSize * 1.1f;
+                text.enableWordWrapping = true;
+                text.overflowMode = TextOverflowModes.Overflow;
                 var value = b.transform.Find("Value")?.GetComponent<TextMeshProUGUI>();
                 if (value != null)
                 {
@@ -525,9 +529,26 @@ namespace PalaceMod.Builder.Studio
                     if (!string.IsNullOrEmpty(value.text)) valueRoom = Mathf.Max(valueRoom, value.GetPreferredValues(value.text).x + 10f);
                 }
                 text.margin = new Vector4(text.margin.x, 0f, valueRoom, 0f);
+                if (width <= 0f && b.transform.parent is RectTransform parent && parent.rect.width > 1f) width = parent.rect.width;
+                if (width > 0f && le != null)
+                {
+                    float room = Mathf.Max(40f, width - text.margin.x - valueRoom);
+                    le.preferredHeight = Mathf.Max(40f, ModPopup.LabelWidth(b, text, room).y + 10f);
+                }
                 if (on) text.color = ModStyle.Bright;
             }
             if (on) ModStyle.AddEmblem(b.transform, 10f).anchoredPosition = new Vector2(-4f, 0f);
+        }
+
+        /// <summary>A list row in a side panel with its details on a second, smaller line under the name (so neither is
+        /// cut short); lit when on.</summary>
+        public static ModRow DetailRow(ModPage page, string name, string detail, bool on, Sprite icon, Action click, Func<string> tooltip = null)
+        {
+            string label = string.IsNullOrEmpty(detail) ? name : $"{name}\n<size=75%><color=#{ModStyle.Hex(ModStyle.Dim)}>{detail}</color></size>";
+            var row = page.Row(label, null, tooltip, click, icon);
+            Compact(row, on, 8f, page.Size.x);
+            if (row.Button.GetComponent<TextMeshProUGUI>() is { } t) t.lineSpacing = -12f;
+            return row;
         }
 
         /// <summary>A heading that fits a side panel.</summary>

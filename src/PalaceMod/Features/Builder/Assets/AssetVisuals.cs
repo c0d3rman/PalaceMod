@@ -31,14 +31,22 @@ namespace PalaceMod.Builder.Assets
         public static void Apply(GameObject go, PackEntry entry, VisualsDef v, List<string> notes, List<Object> owned)
         {
             if (v == null) return;
+            var kind = ModelRef.Kind(v.Mesh, out string modelId);
+            // Scenery and other units' models need no pack files.
+            if (kind is ModelKind.Scenery or ModelKind.Unit)
+            {
+                var source = kind == ModelKind.Scenery ? SceneryParts(v.Mesh, out string why) : UnitParts(modelId, out why);
+                if (source == null) notes.Add($"mesh {v.Mesh}: {why}, kept the base model");
+                else if (!AttachModel(go, source, v, out string error)) notes.Add($"mesh {v.Mesh}: {error}");
+            }
             if (entry == null)
             {
-                if (v.Mesh != null || v.Texture != null || v.Sounds != null) notes.Add("pack not installed: imported assets skipped");
+                if (kind == ModelKind.Asset || v.Texture != null || v.Sounds != null) notes.Add("pack not installed: imported assets skipped");
                 return;
             }
             var assets = BuilderServices.Assets;
             Texture2D meshColours = null;
-            if (v.Mesh != null)
+            if (kind == ModelKind.Asset)
             {
                 var mesh = assets.GetMesh(entry, v.Mesh);
                 if (mesh == null) notes.Add($"mesh {v.Mesh}: {Reason(entry, v.Mesh, AssetUse.Mesh)}, kept the base mesh");
@@ -124,14 +132,7 @@ namespace PalaceMod.Builder.Assets
 
             // Fit: mesh space -> root space. Unless meshScale is given, the mesh is scaled to fit inside the model's
             // box (as tall as the model, or as wide if it's squat). The bottom centre lands on the model's bottom centre.
-            var rotation = Quaternion.Euler(0, v.MeshRotY ?? 0, 0);
-            var turned = Transform(source.bounds, Matrix4x4.Rotate(rotation));
-            float scale = v.MeshScale ?? Mathf.Min(
-                model.size.y / Mathf.Max(turned.size.y, 1e-4f),
-                Mathf.Max(model.size.x, model.size.z) / Mathf.Max(turned.size.x, turned.size.z, 1e-4f));
-            var bottom = new Vector3(turned.center.x, turned.min.y, turned.center.z) * scale;
-            var target = new Vector3(model.center.x, model.min.y, model.center.z);
-            var fit = Matrix4x4.TRS(target - bottom, rotation, Vector3.one * scale);
+            var fit = Fit(model, source.bounds, v);
 
             hiddenMesh ??= MakeHiddenMesh();
             var root = go.transform;
@@ -157,10 +158,125 @@ namespace PalaceMod.Builder.Assets
                 var mats = body.Renderer.sharedMaterials;
                 renderer.sharedMaterials = [mats.FirstOrDefault(IsBodyMaterial) ?? mats.FirstOrDefault(m => m != null)];
                 Hide(body);
+                // A static child doesn't follow any animation: give it the procedural walk unless told not to.
+                if (v.Motion != ModelRef.MotionNone) AddMotion(go, child.transform, model.size.y);
             }
             owned.Add(baked);
             foreach (var p in parts) if (p != body) Hide(p);
+            if (body.Filter != null && v.Motion == ModelRef.MotionBob) AddMotion(go, body.Renderer.transform, model.size.y);
             return true;
+        }
+
+        /// <summary>Source space -> unit root space: turned by meshRot X/Y/Z, scaled to fit inside the base model's box
+        /// (as tall as the model, or as wide if it's squat) unless meshScale is given, its bottom centre on the model's
+        /// bottom centre, then moved by meshOffset.</summary>
+        internal static Matrix4x4 Fit(Bounds model, Bounds source, VisualsDef v)
+        {
+            var rotation = Quaternion.Euler(v.MeshRotX ?? 0, v.MeshRotY ?? 0, v.MeshRotZ ?? 0);
+            var turned = Transform(source, Matrix4x4.Rotate(rotation));
+            float scale = v.MeshScale ?? Mathf.Min(
+                model.size.y / Mathf.Max(turned.size.y, 1e-4f),
+                Mathf.Max(model.size.x, model.size.z) / Mathf.Max(turned.size.x, turned.size.z, 1e-4f));
+            var bottom = new Vector3(turned.center.x, turned.min.y, turned.center.z) * scale;
+            var target = new Vector3(model.center.x, model.min.y, model.center.z);
+            var offset = v.MeshOffset is { Length: 3 } o ? new Vector3(o[0], o[1], o[2]) : Vector3.zero;
+            return Matrix4x4.TRS(target - bottom + offset, rotation, Vector3.one * scale);
+        }
+
+        // ---- Any asset as the body: scenery meshes and other units' models --------------------------------------
+
+        /// <summary>A model to attach: meshes with their materials, placed in the source's own space.</summary>
+        internal sealed class SourcePart
+        {
+            public Mesh Mesh;
+            public Material[] Materials;
+            public Matrix4x4 Matrix;
+        }
+
+        /// <summary>A scenery mesh ("mesh:&lt;name&gt;[@Map]") from the loaded map or the cross-map library, with the
+        /// level's own materials, stood upright as the maps place it.</summary>
+        internal static List<SourcePart> SceneryParts(string reference, out string why)
+        {
+            var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            var b = Library.SceneryLibrary.Resolve(scene, reference, out why);
+            if (b?.Mesh == null) { why ??= "not on this map or in the library"; return null; }
+            return [new SourcePart { Mesh = b.Mesh, Materials = b.Materials, Matrix = Matrix4x4.TRS(Vector3.zero, b.Upright, b.Scale) }];
+        }
+
+        /// <summary>Every visible mesh of a catalog unit's model (skinned ones in their bind pose), with its materials.</summary>
+        internal static List<SourcePart> UnitParts(string unitId, out string why)
+        {
+            why = null;
+            var unit = BuilderServices.Catalog?.FindUnit(unitId);
+            if (unit?.Prefab == null) { why = $"no unit \"{unitId}\""; return null; }
+            var root = unit.Prefab.transform;
+            var list = new List<SourcePart>();
+            foreach (var p in ModelParts(unit.Prefab))
+                list.Add(new SourcePart { Mesh = p.Mesh, Materials = p.Renderer.sharedMaterials, Matrix = root.worldToLocalMatrix * p.Renderer.transform.localToWorldMatrix });
+            if (list.Count == 0) { why = "that unit has no visible mesh"; return null; }
+            return list;
+        }
+
+        /// <summary>The template needs rebuilding on another map: its model uses that map's materials.</summary>
+        internal static bool SceneDependent(VisualsDef v) => ModelRef.Kind(v?.Mesh) == ModelKind.Scenery;
+
+        /// <summary>Puts a source model on a unit in place of its own: the base's parts are hidden, the source goes on a
+        /// static child of the root ("PalaceBuilder Model") fitted to the base's size, with its own materials or the
+        /// unit's body material (meshLook). It gets the procedural walk unless motion is "none".</summary>
+        internal static bool AttachModel(GameObject go, List<SourcePart> source, VisualsDef v, out string error)
+        {
+            error = null;
+            var parts = ModelParts(go);
+            if (parts.Count == 0) { error = "the base unit has no visible mesh to replace"; return false; }
+            var model = parts[0].RootBounds;
+            foreach (var p in parts.Skip(1)) model.Encapsulate(p.RootBounds);
+            var bodyMaterial = parts.SelectMany(p => p.Renderer.sharedMaterials).FirstOrDefault(IsBodyMaterial)
+                ?? parts[0].Renderer.sharedMaterials.FirstOrDefault(m => m != null);
+            int layer = parts[0].Renderer.gameObject.layer;
+
+            var sourceBounds = Transform(source[0].Mesh.bounds, source[0].Matrix);
+            foreach (var s in source.Skip(1)) sourceBounds.Encapsulate(Transform(s.Mesh.bounds, s.Matrix));
+            var fit = Fit(model, sourceBounds, v);
+            bool own = ModelRef.Look(v) == ModelRef.LookOwn;
+
+            hiddenMesh ??= MakeHiddenMesh();
+            var container = new GameObject("PalaceBuilder Model");
+            container.layer = layer;
+            container.transform.SetParent(go.transform, false);
+            SetLocal(container.transform, fit);
+            foreach (var s in source)
+            {
+                var child = new GameObject(s.Mesh.name);
+                child.layer = layer;
+                child.transform.SetParent(container.transform, false);
+                SetLocal(child.transform, s.Matrix);
+                child.AddComponent<MeshFilter>().sharedMesh = s.Mesh;
+                var renderer = child.AddComponent<MeshRenderer>();
+                int slots = Mathf.Max(1, s.Mesh.subMeshCount);
+                var mats = new Material[slots];
+                for (int i = 0; i < slots; i++)
+                    mats[i] = own && s.Materials != null && s.Materials.Length > 0 ? s.Materials[Mathf.Min(i, s.Materials.Length - 1)] : bodyMaterial;
+                renderer.sharedMaterials = mats;
+            }
+            foreach (var p in parts) Hide(p);
+            if (v.Motion != ModelRef.MotionNone) AddMotion(go, container.transform, model.size.y);
+            return true;
+        }
+
+        private static void SetLocal(Transform t, Matrix4x4 m)
+        {
+            t.localPosition = m.GetColumn(3);
+            var forward = (Vector3)m.GetColumn(2);
+            var up = (Vector3)m.GetColumn(1);
+            t.localRotation = forward.sqrMagnitude > 1e-12f && up.sqrMagnitude > 1e-12f ? Quaternion.LookRotation(forward, up) : Quaternion.identity;
+            t.localScale = new Vector3(((Vector3)m.GetColumn(0)).magnitude, up.magnitude, forward.magnitude) * (m.determinant < 0 ? -1f : 1f);
+        }
+
+        private static void AddMotion(GameObject go, Transform target, float height)
+        {
+            var motion = go.GetComponent<BuilderVisualMotion>() ?? go.AddComponent<BuilderVisualMotion>();
+            motion.target = target;
+            motion.height = Mathf.Max(0.2f, height);
         }
 
         private static void Hide(Part p)
@@ -260,5 +376,53 @@ namespace PalaceMod.Builder.Assets
     public sealed class BuilderUnitSounds : MonoBehaviour
     {
         public string pack, attack, hurt, death;
+    }
+
+    /// <summary>
+    /// A procedural walk for a body no rig moves (a tree, a rock, another unit's static model): while the unit moves,
+    /// the target hops (6 % of its height) and waddles (±6°) at a step rate that follows the speed; standing still it
+    /// breathes slowly. Copied onto every spawned clone with the template (fields are serialized).
+    /// </summary>
+    public sealed class BuilderVisualMotion : MonoBehaviour
+    {
+        public Transform target;
+        public float height = 1f;
+        /// <summary>Set by the Enemy Studio's stage: walk in place at this speed (m/s) instead of measuring movement.</summary>
+        public float previewSpeed = -1f;
+
+        private Vector3 basePos, lastPos;
+        private Quaternion baseRot;
+        private float phase, speed;
+        private bool ready;
+
+        private void Start()
+        {
+            if (target == null) { enabled = false; return; }
+            basePos = target.localPosition;
+            baseRot = target.localRotation;
+            lastPos = transform.position;
+            phase = Random.value * 10f;
+            ready = true;
+        }
+
+        private void LateUpdate()
+        {
+            if (!ready || target == null) return;
+            float dt = Time.deltaTime;
+            if (dt <= 0f) return;
+            var pos = transform.position;
+            float measured = new Vector2(pos.x - lastPos.x, pos.z - lastPos.z).magnitude / dt;
+            lastPos = pos;
+            float wanted = previewSpeed >= 0f ? previewSpeed : measured;
+            speed = Mathf.Lerp(speed, Mathf.Min(wanted, 30f), 1f - Mathf.Exp(-dt * 10f));
+            float walk = Mathf.Clamp01(speed / 1.5f);
+            // About two steps per body height walked, at least 2.2 steps a second while moving.
+            phase += dt * Mathf.Max(2.2f * walk, speed / Mathf.Max(height, 0.2f) * 2f) * Mathf.PI;
+            float breathe = 0.5f + 0.5f * Mathf.Sin(Time.time * 2.2f);
+            float hop = Mathf.Abs(Mathf.Sin(phase)) * 0.06f * height * walk + breathe * 0.01f * height * (1f - walk);
+            float waddle = Mathf.Sin(phase) * 6f * walk;
+            target.localPosition = basePos + Vector3.up * (hop / Mathf.Max(transform.lossyScale.y, 1e-3f));
+            target.localRotation = Quaternion.Euler(0f, 0f, waddle) * baseRot;
+        }
     }
 }

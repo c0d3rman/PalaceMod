@@ -172,6 +172,15 @@ namespace PalaceMod
             return false;
         }
 
+        /// <summary>The pointer is over a visible panel of any shown dock (or a popup over one).</summary>
+        internal static bool AnyPointerOver()
+        {
+            var at = ModTile.MousePosition;
+            foreach (var d in docks)
+                if (d.root != null && d.root.activeInHierarchy && d.Over(at)) return true;
+            return false;
+        }
+
         internal static bool IsDockFrame(UIFrame f) => f != null && docks.Any(d => d.frame == f);
 
         // Keyboard and controller navigation would move between the dock's tiles on WASD and arrows (the game's frames
@@ -290,6 +299,9 @@ namespace PalaceMod
                 Log.Core.Caught($"ModDock panel \"{Name}\": building it failed", e);
                 Page.Text("Couldn't be shown; see the log.");
             }
+            // A narrow panel: a plain row whose label and value don't fit side by side wraps its label instead of
+            // running under the value.
+            foreach (var row in Page.Elements.OfType<TFUITextButton>()) ModPopup.WrapIfLong(row, size.x);
             LayoutRebuilder.ForceRebuildLayoutImmediate(Scroll.Content);
             Scroll.SetContentHeight(LayoutUtility.GetPreferredHeight(Scroll.Content));
             Scroll.ScrollTo(keep);

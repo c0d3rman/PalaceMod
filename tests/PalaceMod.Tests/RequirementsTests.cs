@@ -142,6 +142,25 @@ namespace PalaceMod.Tests
             Assert.Equal(0, eff["add:x"].Level, "castle level 1");
         }
 
+        public static void StandardBuildingDefaultsToCastleAndValidates()
+        {
+            var l = Level();
+            l.BuildSlots.Add.Add(new BuildSlotAdd { Id = "m", Base = "building:mill", Pos = [0, 0, 0] });
+            l.BuildSlots.Add.Add(new BuildSlotAdd { Id = "f", Base = "building:field", Pos = [0, 0, 0], Requires = new SlotRequirement { Slot = "add:m" } });
+            var eff = LevelRequirements.Effective(l, Host());
+            Assert.Equal("Castle", eff["add:m"].Slot, "a standard building needs the castle by default");
+            Assert.Equal(0, eff["add:m"].Level, "castle level 1");
+            Assert.Equal("add:m", eff["add:f"].Slot, "explicit requirement kept");
+            Assert.Equal(RefKind.Building, ContentRef.Parse("building:mill").Kind, "building ref");
+            Assert.Equal("mill variant", BuildingRefs.PathOf("mill"), "kind path");
+
+            var pack = Read(V1Pack(@"{ ""id"": ""m"", ""base"": ""building:mill"", ""pos"": [1,0,1] },
+                                      { ""id"": ""z"", ""base"": ""building:castle"", ""pos"": [1,0,5] }"));
+            var errors = Validator.Validate(pack).Where(i => i.Severity == Severity.Error).ToList();
+            Assert.Equal(1, errors.Count, "only the unknown kind is an error: " + string.Join("; ", errors));
+            Assert.True(errors[0].Path.EndsWith("add[1].base"), "error on the unknown kind");
+        }
+
         public static void SetAndPruneHostEdits()
         {
             var l = Level();

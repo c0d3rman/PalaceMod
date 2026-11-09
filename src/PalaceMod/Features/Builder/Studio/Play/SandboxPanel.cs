@@ -81,7 +81,7 @@ namespace PalaceMod.Builder.Studio.Play
             var current = units.FirstOrDefault(u => u.Ref == UnitRef);
             page.Row("Unit", current?.Name ?? "-", (string)null, () => PickUnit(units), current?.Icon);
             page.Number("Count", () => Count, v => Count = v, 1, 50);
-            page.Toggle("Elite", () => Elite, on => Elite = on);
+            page.Toggle("Elite", () => Elite, on => Elite = on, () => PalaceMod.Builder.Model.Descriptions.For(PalaceMod.Builder.Model.DescKind.Flag, "Elite"));
             var lines = SandboxActions.Lines().Select(l => l.name).ToList();
             var at = new List<string> { "Click on the map" };
             at.AddRange(lines);

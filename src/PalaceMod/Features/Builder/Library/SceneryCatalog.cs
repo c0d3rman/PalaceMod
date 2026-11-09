@@ -17,13 +17,13 @@ namespace PalaceMod.Builder.Library
 {
     internal sealed class SceneryEntry
     {
-        [JsonProperty("name")] public string Name;
+        [JsonProperty("name")] public string Name = null;
         /// <summary>The scene that uses it most (a scene name, e.g. "Neuland(Tutorial)").</summary>
         [JsonProperty("home")] public string Home;
         /// <summary>Scene name → how many times that map places it.</summary>
         [JsonProperty("maps")] public Dictionary<string, int> Maps = [];
-        [JsonProperty("file")] public string File;
-        [JsonProperty("pathId")] public long PathId;
+        [JsonProperty("file")] public string File = null;
+        [JsonProperty("pathId")] public long PathId = 0;
         [JsonProperty("category")] public string Category;
         /// <summary>Material names, one per submesh, matched by name to the loaded level's own materials.</summary>
         [JsonProperty("materials")] public List<string> Materials = [];
@@ -40,6 +40,14 @@ namespace PalaceMod.Builder.Library
         public string Ref => SceneryCatalog.Prefix + Name;
     }
 
+    internal sealed class SchemeRef
+    {
+        [JsonProperty("file")] public string File = null;
+        [JsonProperty("pathId")] public long PathId = 0;
+        /// <summary>The asset's own name (checked when it's read).</summary>
+        [JsonProperty("name")] public string Name = null;
+    }
+
     internal sealed class SceneryCatalog
     {
         public const string Prefix = "mesh:";
@@ -47,6 +55,27 @@ namespace PalaceMod.Builder.Library
         [JsonProperty("unity")] public string Unity;
         [JsonProperty("maps")] public List<string> Maps = [];
         [JsonProperty("meshes")] public List<SceneryEntry> Meshes = [];
+        /// <summary>Scene name → where that map's Colorscheme asset is (read at runtime by MapColors).</summary>
+        [JsonProperty("colorschemes")] public Dictionary<string, SchemeRef> Colorschemes = [];
+
+        /// <summary>The scene name of a main map with a colour scheme, from a scene or display name ("Neuland" or
+        /// "Neuland(Tutorial)"); null if there's none.</summary>
+        public string SchemeMap(string map)
+        {
+            if (string.IsNullOrEmpty(map)) return null;
+            if (Colorschemes.ContainsKey(map)) return map;
+            foreach (var k in Colorschemes.Keys) if (DisplayMap(k) == map) return k;
+            return null;
+        }
+
+        /// <summary>The map whose colours a library prop was made in: its "@Map", else the map that uses it most.</summary>
+        public string DonorOf(string baseRef)
+        {
+            var e = Find(baseRef);
+            if (e == null) return null;
+            TryParseRef(baseRef, out _, out var map);
+            return SchemeMap(map) ?? SchemeMap(e.Home);
+        }
 
         public static SceneryCatalog Parse(string json)
         {
