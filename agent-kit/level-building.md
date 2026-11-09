@@ -875,7 +875,7 @@ open water floats on the surface (a raft).
 **Riding.** Whatever stands on a walkable body's top moves with it: the king and units are carried by a deck on a
 mover path, a spinning one, a teleported raft, a lift whose path climbs (`"path": [[x, 0, z], [x, 6, z]]`) or a
 walkable part linked to a moving unit. Pathing units are carried too but snap back to the ground's paths when they walk,
-so give riders `command hold` (troops) or `setMovement hold`. Movers with `pose`s snap between poses (their poses are
+so give riders `command hold` (troops) or `setMovement hold`: their hold point moves with the deck. Movers with `pose`s snap between poses (their poses are
 pre-scanned for paths) and carry riders at the snap.
 
 **Surfaces follow their area**: one placed `"active": false` and enabled later starts stopping units then, disabled it

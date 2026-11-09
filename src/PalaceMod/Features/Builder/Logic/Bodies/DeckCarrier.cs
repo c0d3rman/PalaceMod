@@ -76,11 +76,30 @@ namespace PalaceMod.Builder.Logic.Bodies
                 if (to.y < top) to.y = top;
                 var cc = r.GetComponent<CharacterController>();
                 if (cc != null) cc.enabled = false;
+                var delta = to - r.position;
                 r.position = to;
+                Anchors(r, delta);
                 float yaw = turn.eulerAngles.y;
                 if (Mathf.Abs(Mathf.DeltaAngle(0f, yaw)) > 0.01f) r.rotation = Quaternion.Euler(0f, yaw, 0f) * r.rotation;
                 if (cc != null) cc.enabled = true;
                 Carried++;
+            }
+        }
+
+        private static readonly HarmonyLib.AccessTools.FieldRef<PathfindMovementPlayerunit, Vector3> P_home = HarmonyLib.AccessTools.FieldRefAccess<PathfindMovementPlayerunit, Vector3>("homePosition");
+
+        /// <summary>A carried unit's anchors move with it: where it holds or returns to (the game's home, a Builder hold or
+        /// wander point), so it doesn't walk back to where it stood.</summary>
+        private static void Anchors(Transform r, Vector3 delta)
+        {
+            var pm = r.GetComponent<PathfindMovement>();
+            if (pm == null) return;
+            if (pm is PathfindMovementEnemy en) Steering.SteerMovement.E_home(en) += delta;
+            else if (pm is PathfindMovementPlayerunit pu) { P_home(pu) += delta; Steering.SteerMovement.P_homeOriginal(pu) += delta; }
+            if (LogicSteeringManager.Get(r.gameObject) is { } st)
+            {
+                if (st.HoldPoint is Vector3 h) st.HoldPoint = h + delta;
+                if (st.WanderPoint is Vector3 w) st.WanderPoint = w + delta;
             }
         }
 

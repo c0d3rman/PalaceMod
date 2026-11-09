@@ -320,7 +320,8 @@ same move: translation, turn about its pivot, and height (a deck that rises lift
 a spinning platform, a teleported raft or a walkable part linked to a walking colossus carries its riders. Walkable
 movers with `pose`s still snap (their poses are pre-scanned); path and spin movers glide. The graphs don't move with
 a gliding deck: a pathing unit on it is carried but snaps back to the ground graphs when it walks off its path, so
-riders that must stay put should `hold`.
+riders that must stay put should `hold`. A carried unit's anchors move with it (the game's home and hold position,
+a Builder hold or wander point), so a holding unit stays on the deck instead of walking back.
 
 **Placing a deck.** A deck whose top is under the ground somewhere in its footprint (a bridge placed at the river
 bed's height, a raft whose ends lie on the banks) is raised so its top rests on the highest ground under it
