@@ -116,6 +116,23 @@ namespace PalaceMod.Tests
             Assert.Equal(3.0, Num(w2, "n"), "every 1 s at 5 fps");
         }
 
+        public static void EveryJitterIsAShareOfTheInterval()
+        {
+            // jitter 0.5 on every 10 s: each interval is 5..15 s, so 100 s gives 7..20 ticks (absolute ±0.5 s gave ~10).
+            var w = NewWorld("""{ "vars": { "n": 0 }, "rules": [ { "when": { "on": "every", "seconds": 10, "jitter": 0.5 }, "do": [ { "do": "addVar", "name": "$n", "value": 1 } ] } ] }""");
+            w.BeginLevel();
+            var gaps = new List<double>();
+            double last = 0, n = 0;
+            for (int i = 0; i < 60 * 300; i++)
+            {
+                w.Tick(1.0 / 60);
+                if (Num(w, "n") > n) { n = Num(w, "n"); gaps.Add(w.Time - last); last = w.Time; }
+            }
+            Assert.True(gaps.Count >= 20, $"ticks {gaps.Count}");
+            Assert.True(gaps.Skip(1).All(g => g >= 4.9 && g <= 15.1), $"every gap within 5..15 s: {string.Join(", ", gaps.Select(g => g.ToString("0.0")))}");
+            Assert.True(gaps.Skip(1).Max() - gaps.Skip(1).Min() > 3, "the gaps vary by more than ±0.5 s");
+        }
+
         public static void AfterFiresOnceAndWaitResumes()
         {
             var w = NewWorld("""{ "vars": { "a": 0, "b": 0 }, "rules": [ { "when": { "on": "after", "seconds": 0.5 }, "do": [ { "do": "setVar", "name": "$a", "value": 1 }, { "do": "wait", "seconds": 1 }, { "do": "setVar", "name": "$b", "value": 1 } ] } ] }""");

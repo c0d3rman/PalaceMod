@@ -22,6 +22,10 @@ namespace PalaceMod.Builder.Agent
 {
     internal static class AgentCommands
     {
+        /// <summary>What the slot pays at dawn: through its interactor, so logic `income` modifiers (setStat, statuses,
+        /// noIncome) count, as they do in the payout.</summary>
+        private static int Income(BuildSlot s) => s.Interactor != null ? s.Interactor.GoldIncome : s.GoldIncome;
+
         /// <summary>Loads <paramref name="scene"/> once the scene transition under way has finished.</summary>
         private static System.Collections.IEnumerator LoadWhenFree(SceneTransitionManager transitions, string scene)
         {
@@ -297,12 +301,12 @@ namespace PalaceMod.Builder.Agent
             if (king != null) o["king"] = new JObject { ["hp"] = R(king.HpValue), ["maxHp"] = R(king.maxHp), ["knockedOut"] = king.KnockedOut, ["pos"] = V(king.transform.position) };
             var buildings = BuiltSlots().ToList();
             // Knocked out during the last night: no harvest the next dawn (the flag clears at dusk).
-            int blocked = buildings.Where(KnockedOutTonight).Sum(s => s.GoldIncome);
+            int blocked = buildings.Where(KnockedOutTonight).Sum(Income);
             o["buildings"] = new JObject
             {
                 ["built"] = buildings.Count,
                 ["knockedOut"] = buildings.Count(s => BuildingHp(s)?.KnockedOut == true),
-                ["income"] = buildings.Sum(s => s.GoldIncome),
+                ["income"] = buildings.Sum(Income),
                 ["incomeBlocked"] = blocked,
             };
             // Gold still on its way to the treasury: dawn income being spawned, coins flying or lying on the ground.
@@ -349,7 +353,7 @@ namespace PalaceMod.Builder.Agent
                 {
                     ["name"] = s.name, ["kind"] = s.buildingName, ["pos"] = V(s.transform.position),
                     ["available"] = s.gameObject.activeInHierarchy, ["level"] = s.Level, ["maxLevel"] = s.Upgrades.Count,
-                    ["state"] = s.State.ToString(), ["income"] = s.GoldIncome,
+                    ["state"] = s.State.ToString(), ["income"] = Income(s),
                 };
                 if (s.ActivatorUpgradesThis) o["followsActivator"] = s.ActivatorBuilding != null ? s.ActivatorBuilding.name : null;
                 if (s.gameObject.activeInHierarchy && s.Level < s.Upgrades.Count) o["nextCost"] = s.Upgrades[s.Level].cost;
