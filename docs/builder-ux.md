@@ -248,6 +248,15 @@ here.
 
 Empty ground: Paste, Place last kind here, Play from here, Frame all.
 
+### Behaviour (the logic engine)
+
+What things do (rules, wires, placed logic, level variables) is edited in the Studio's Behaviour tab, the rule editor
+beside it, the Logic palette tab and the Wire tool (J); the Enemy Studio has Behaviour and Moves tabs. See
+docs/builder-engine.md, "Creators (the Studios)", for the as-built design. Shell extension points it added (additive):
+`Studio.AddItemSource` (objects another workstream keeps in the level, shown and edited as map items),
+`Studio.AddCancelHandler` (Esc closes one layer of a workstream's own UI first) and `Studio.AddPaletteTab`; and
+`EnemyDock.AddTab`.
+
 ### Studio menu (≡ or Esc with nothing to cancel)
 
 Save / Save a copy, Share… (`SharingUI.OpenPack`), Pack editor (opens the pack screen over the Studio; closing it

@@ -262,6 +262,7 @@ namespace PalaceMod.Builder.Logic
                 case "id": return Value.Text(e.Id);
                 case "name": return Value.Text(e.Name ?? e.Id);
                 case "enabled": return Value.Bool(e.Enabled);
+                case "elite": return Value.Bool(LogicServices.IsElite?.Invoke(e) ?? false);
             }
             var stats = LogicServices.Stats;
             if (stats != null)
@@ -621,6 +622,7 @@ namespace PalaceMod.Builder.Logic
                 case "melee": return (_, c) => c.Body?.HasTag("MeeleFighter") ?? false;
                 case "ranged": return (_, c) => c.Body?.HasTag("RangedFighter") ?? false;
                 case "alive": return (_, c) => c.Alive;
+                case "elite": return (_, c) => LogicServices.IsElite?.Invoke(c) ?? false;
                 case "dead": return (_, c) => !c.Alive;
                 case "label": return (_, c) => c.Labels.Contains(arg);
                 case "is": return (_, c) => c.Template == arg || c.Template == "vanilla:" + arg;
@@ -664,8 +666,13 @@ namespace PalaceMod.Builder.Logic
     {
         public static bool Contains(LogicEntity area, LogicEntity e)
         {
-            var r = LogicServices.Areas?.Contains(area, e);
-            if (r.HasValue) return r.Value;
+            // A dead or removed entity (a `death` dispatched after the unit is gone) is no longer in the area's
+            // live membership: judge it by where it was, from the shape.
+            if (e.Alive)
+            {
+                var r = LogicServices.Areas?.Contains(area, e);
+                if (r.HasValue) return r.Value;
+            }
             var shape = area.Def?["area"]?["shape"] ?? area.Def?["shape"];
             if (shape == null) return false;
             var p = e.Position - area.Position;
