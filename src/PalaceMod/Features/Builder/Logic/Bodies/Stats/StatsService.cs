@@ -324,7 +324,7 @@ namespace PalaceMod.Builder.Logic.Bodies
         private static Func<LogicContext, Value> Compile(JToken t, string path)
         {
             if (t == null || t.Type == JTokenType.Null) return null;
-            if (t.Type == JTokenType.String) return ExprCompiler.Compile((string)t, path);
+            if (t.Type == JTokenType.String) return LogicExpr.Compile((string)t, path);
             if (t is JArray a && a.Count >= 2)
             {
                 var v = a.Count == 2 ? new Vec((float)a[0], 0, (float)a[1]) : new Vec((float)a[0], (float)a[1], (float)a[2]);
@@ -342,8 +342,8 @@ namespace PalaceMod.Builder.Logic.Bodies
             if (extra["types"] is JArray types) mod.Types = types.Select(t => (string)t).Where(t => t != null).ToArray();
             else if (extra["types"]?.Type == JTokenType.String) mod.Types = [(string)extra["types"]];
             if (Num(extra["chance"]) is double c) mod.Chance = Math.Max(0, Math.Min(1, c));
-            if (extra["from"]?.Type == JTokenType.String) { cond.FromSrc = (string)extra["from"]; cond.From = ExprCompiler.CompileFilter(cond.FromSrc, path + ".from"); }
-            if (extra["when"]?.Type == JTokenType.String) { cond.WhenSrc = (string)extra["when"]; cond.When = ExprCompiler.Compile(cond.WhenSrc, path + ".when"); }
+            if (extra["from"]?.Type == JTokenType.String) { cond.FromSrc = (string)extra["from"]; cond.From = LogicExpr.Filter(cond.FromSrc, path + ".from"); }
+            if (extra["when"]?.Type == JTokenType.String) { cond.WhenSrc = (string)extra["when"]; cond.When = LogicExpr.Compile(cond.WhenSrc, path + ".when"); }
             mod.Conditional = mod.Types != null || mod.Chance < 1 || cond.From != null || cond.When != null;
             if (cond.From != null || cond.When != null) mod.Condition = cond;
         }
