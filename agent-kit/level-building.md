@@ -816,15 +816,21 @@ runs once per member and the other params are evaluated per member with `it` bou
 | `team` | any | `player`, `enemy`, `neutral` (vanilla AI ignores it), `owner` (the spawner's). `countsAsEnemy: true` keeps a hittable enemy-team entity holding the night open |
 | `lifetime`, `maxAlive` | any | seconds before `expire` + destroy; cap on live copies |
 | `projectile` | flying things | `speed`, `homing` 0..1, `arc`, `gravity`, `spin`, `face`, `hits` (filter), `hitRadius`, `pierce`, `onGround`, `range`; events `impact`, `expire` |
-| `mover` | moving props | `path` (`@path` or points), `mode` loop/pingpong/once, `speed`, `wait`, `spin`, `swing`, `running`, `pose` {name: {offset, rotY}}; inputs `start stop reverse goto` and each pose's name; events `arrive`, `end` |
-| `area` | zones | `shape` (`circle {radius}` / `rect {size: [w, d]}` / `polygon {points}`), `watch` (filter), `show`, `color`, `tick`; events `enter exit inside empty occupied`; filters `in:@area` |
+| `mover` | moving props | `path` (`@path` or points), `mode` loop/pingpong/once, `speed`, `wait`, `spin`, `swing`, `running`, `pose` (or `poses`) {name: {`offset` [x,y,z] or world `pos`, `rotY`}}, `turnSpeed` (deg/s, 90); inputs `start stop reverse goto` and each pose's name; events `arrive`, `end`. A walkable mover snaps between poses |
+| `area` | zones | `shape` (`circle {radius}` / `rect {size: [w, d]}` / `polygon {points}`), `watch` (filter), `show`, `color`, `tick`, `surface` (below); events `enter exit inside empty occupied`; filters `in:@area` |
 | `pickup` | collectibles | `by` (filter, e.g. `king`), `radius`, `magnet`, `consume`; event `pickup` |
-| `interact` | king-usable | `prompt` (`{cost}` shows the cost), `cost`, `when` day/night/always, `radius`, `repeat`, `choices` (up to 4 `{id, label, cost}`; `event.choice`); event `interact` |
+| `interact` | king-usable | `prompt` (`{cost}` shows the cost), `cost`, `when` day/night/always, `radius`, `repeat`; event `interact`. (`choices`, the upgrade-style popup, isn't supported yet) |
 | `attacks` | turrets, units | `[{ "cooldown", "range", "targeting", "launch": {"entity", "from"} \| "weapon", "do", "replace", "when" }]`; the unit's base attacks stay unless `replace` |
 | `targeting` | attackers | ordered list of filters or `{filter, range, prefer, score}`; works on vanilla towers too (`setTargeting`) |
-| `movement` | units | `mode` pathfind/direct/hold/path, `path`, `then`, `speed`, `keepDistance`, `kite`, `flee`, `wander`, `home` |
+| `movement` | units | `mode` pathfind/direct/hold/path, `path`, `then`, `speed`, `keepDistance`, `kite`, `flee`, `wander`, `home`, `surfaces` |
 
 A number field may be an expression evaluated when the entity appears: `"hp": "=100 * night"`.
+
+**Surfaces (who may walk where).** An area with `"surface": "mud"` or `{"name": "ladder", "allow": "melee", "cost": 1}`
+becomes a named pathfinding surface: only units matching `allow` path through it, and `cost` multiplies its path cost
+(2 = units avoid it unless it's much shorter). A unit's `movement.surfaces` overrides per unit: `{"ladder": true,
+"mud": 3, "ice": false}`. At most 31 surface names per level. A `body.walkable` object (a bridge, a raft) should be
+placed in `logic.places`: spawned at runtime it costs a pathfinding rescan of about a second.
 
 ### 12.8 Statuses
 
@@ -906,8 +912,9 @@ with `{"op": "rule", "on": "unit:<id>", ...}`.
 ### 12.13 Limits (what the engine can't do)
 
 - Vanilla arrows in flight aren't affected by `drift` or `timeScale` (Builder projectiles are).
-- No per-unit walkability: "only melee can climb this wall" is a teleport, not a path. Walkable movers snap between
-  poses; they don't carry units while gliding. Terrain height doesn't change at runtime.
+- Per-unit walkability is by surfaces (above), not by terrain: a "ladder" is an area surface only some units may
+  path through. Walkable movers snap between poses; they don't carry units while gliding. Terrain height doesn't
+  change at runtime.
 - Three teams; vanilla units never attack `neutral` things (Builder targeting can).
 - Game tags are a fixed set; your own labels work through Builder targeting and filters.
 - No new scenes, lighting or arbitrary code. Pending `wait`s and Builder projectiles in flight aren't kept by
