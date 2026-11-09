@@ -1,0 +1,6 @@
+{"steps": [
+ {"cmd": "agent build castle"},
+ {"cmd": "night"},
+ {"do": [{"do": "spawn", "entity": "new-racer", "at": "vec(-4, -60)"}, {"do": "spawn", "entity": "vanilla:E Melee", "count": 3, "at": "vec(-4, -60)", "spread": 2}]},
+ {"expect": "count('has:warded') >= 3", "within": 4}
+]}

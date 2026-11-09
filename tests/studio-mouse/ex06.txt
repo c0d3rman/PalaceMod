@@ -1,0 +1,61 @@
+# Example 6: a pressure-plate trap, built by mouse from an empty level.
+builder-studio new mouse06 Nordfels
+sleep 2
+builder-studio open mouse06 nordfels-studio
+sleep 20
+builder-studio cam 12 -4 2
+# A rectangle area drawn on the map (drag corner to corner): 4 x 4 m around (12, -4).
+builder-studio press Logic
+builder-studio press Rectangle area
+sleep 1
+builder-studio dragw 10 -6 14 -2
+sleep 2
+builder-logic tab
+sleep 1
+builder-logic press Name
+uikit type plate1
+uikit type enter
+# Every second, if an enemy stands on it: wait 0.5 s, then 30 damage to every unit on it.
+builder-logic press + rule
+builder-logic press Every seconds s
+builder-logic press + condition
+builder-logic press Formula
+uikit type count('enemy_and_in:self')_>_0
+uikit type enter
+builder-logic press + action
+builder-logic press Wait
+builder-logic press Seconds#2
+uikit type 0.5
+uikit type enter
+builder-logic press + action
+builder-logic press Damage
+builder-logic press Target
+builder-logic press Formula
+uikit type all('unit_and_in:@plate1')
+uikit type enter
+builder-logic press Amount
+uikit type 30
+uikit type enter
+builder-logic close
+# Level script (nothing selected): a counter of hurt enemies on the plate, for the test.
+builder-studio clear
+sleep 1
+builder-logic press + variable
+uikit type hurt
+uikit type enter
+builder-logic press + rule
+builder-logic press Search
+uikit type damaged
+uikit type enter
+builder-logic press Is damaged
+builder-logic press Of what
+builder-logic press Filter
+uikit type enemy_and_in:@plate1
+uikit type enter
+builder-logic press + action
+builder-logic press Add to a variable
+builder-logic press Name
+builder-logic press $hurt
+builder-logic close
+builder-studio select place:area1
+shot mouse-06-pressure-plate-studio

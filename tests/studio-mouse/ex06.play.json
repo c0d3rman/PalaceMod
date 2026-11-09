@@ -1,0 +1,6 @@
+{"steps": [
+ {"cmd": "agent build castle"},
+ {"cmd": "night"},
+ {"do": [{"do": "spawn", "entity": "vanilla:E Ogre", "at": "vec(12, -4)"}]},
+ {"expect": "$hurt >= 1", "within": 5}
+]}

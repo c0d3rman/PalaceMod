@@ -1,0 +1,7 @@
+{"steps": [
+ {"cmd": "agent build castle"},
+ {"cmd": "night"},
+ {"expect": "$fires >= 1", "within": 30},
+ {"do": [{"do": "spawn", "entity": "vanilla:E Ogre", "at": "vec(-4, -40)"}, {"do": "spawn", "entity": "new-area", "at": "vec(-4, -40)"}]},
+ {"expect": "count('has:burning') >= 1", "within": 5}
+]}

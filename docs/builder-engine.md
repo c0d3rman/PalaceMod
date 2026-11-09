@@ -1022,8 +1022,10 @@ limits), and `reference.md` gets the generated schema.
   into the field it opened with `uikit type <text with _ for spaces>` then `uikit type enter`. `builder-studio dragw`
   and `cursor`/`click` draw shapes and drag handles through the Studio's own pointer path; `builder-studio json pack`
   prints the whole draft.
-- **Built by mouse alone** (examples 21, 6, 8, 12 and 1): each was built from an empty level with only those
-  commands (no JSON), then its pack ran headless through `palace.py logic fixture` with the example's play steps.
+- **Built by mouse alone** (examples 21, 6, 8, 12 and 1, `tests/studio-mouse/`): each is built from an empty level
+  with only those commands (no JSON), then its pack runs headless through `palace.py logic fixture` with the
+  example's play steps: `scripts/studio_mouse.py tests/studio-mouse/ex21.txt --fixture-game <instance game dir>`.
+  Start each on a freshly launched instance (opening a second level in the Studio in one game can crash it natively).
 
 The original sketch:
 
