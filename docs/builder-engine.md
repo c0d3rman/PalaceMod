@@ -1053,18 +1053,31 @@ only additively and noted in the PR.
     the component defs, `StatusDef`, `PresetDef`, `KingActionDef`, `HudDef`;
   - `Expr.cs`: the AST, parser and type checker;
   - `LogicSchema.cs`: the registry API, `LogicSchema.Events/Actions/Stats/Functions/Filters`, each with `ParamSpec`.
-- **L1 commit 1, `Logic/Runtime/LogicApi.cs`:**
+- **L1 commit 1, `Logic/Runtime/LogicApi.cs`** (as built; the file's comments are the reference). The core is pure
+  C# with no UnityEngine types, so `tests/` can drive it with a fake world: positions are `Vec`, and an entity is a
+  `LogicEntity` class (one per object per session; `null` = none) instead of a struct with Unity fields.
 
 ```csharp
-internal static class LogicActions { public static void Register(string name, ActionHandler h); }
-internal delegate void ActionHandler(LogicContext ctx, CompiledParams p);     // p.Entity("target"), p.Number("amount")...
-internal sealed class LogicContext { public EntityHandle Self, Subject, Other, Spawned; public LogicEvent Event; public int Depth; ... }
-internal readonly struct EntityHandle { public string Id; public GameObject Go; public BuilderEntity Builder; public TaggedObject Tagged; public Hp Hp; ... }
-internal static class LogicEvents { public static void Raise(string name, EntityHandle subject, EntityHandle other = default, float value = 0, Vector3? pos = null); }
-internal interface IEntityFactory { EntityHandle Spawn(string template, Vector3 pos, Quaternion rot, string team, EntityHandle owner, out string error); }
-internal interface IStatModifiers { void Add(EntityHandle e, string stat, Modifier m, float seconds); float Get(EntityHandle e, string stat); }
-internal interface ITargeting { void Set(EntityHandle e, TargetingDef t, float seconds); }
-internal static class LogicServices { public static IEntityFactory Factory; public static IStatModifiers Stats; public static ITargeting Targeting; }
+public sealed class LogicEntity { string Id, Name, Template, Kind, Team; HashSet<string> Labels; Dictionary<string, Value> Vars;
+                                  bool Enabled, Spawned, Destroyed; LogicEntity Owner; IEntityBody Body; object Game; JObject Def; object Ext; ... }
+public interface IEntityBody { bool Exists, Alive; Vec Position; float Facing, Hp, MaxHp; bool HasTag(string etag); ... }
+public static class LogicActions { public static void Register(string name, ActionHandler h, ActionFlags flags = None); }  // PerTarget: core fans out `target`
+public delegate void ActionHandler(LogicContext ctx, ActionParams p);   // p.Number("amount"), p.Entities("target"), p.Actions("then"), p.Target
+public sealed class LogicContext { LogicWorld World; LogicEntity Self, Subject, Other, Spawned, It; LogicEvent Event; int Depth;
+                                   LogicContext With(spawned, it, other); void Run(ActionList); void Raise(...); }
+public static class LogicEvents { static void Raise(string name, LogicEntity subject, LogicEntity other = null, double value = 0, Vec? pos = null, string text = null);
+                                  static void Signal(string name, IReadOnlyList<LogicEntity> to, double value = 0, LogicEntity sender = null);
+                                  static event Action<TraceEntry> Traced; }
+public interface IEntityFactory { LogicEntity Spawn(string template, Vec pos, float rotY, string team, LogicEntity owner, out string error); void Despawn(...); ... }
+public interface IStatModifiers { void Add(LogicEntity e, StatModifier m); double Get(LogicEntity e, string stat); int Stacks(...); ApplyStatus/RemoveStatus; Capture/Restore }
+public interface ITargeting { void Set(LogicEntity e, JToken targeting, double seconds); }
+public interface IAreas { bool? Contains(LogicEntity area, LogicEntity e); }     // null: use the area's `shape`
+public interface ISpatial { void Query(Vec center, float radius, List<LogicEntity> into); }
+public interface IGameState { int Night; bool IsNight; double NightProgress; int Gold; LogicEntity King, Castle; ... }
+public static class LogicServices { IEntityFactory Factory; IStatModifiers Stats; ITargeting Targeting; IAreas Areas; ISpatial Spatial; IGameState Game; }
+public static class LogicSaveState { static void Register(string id, Func<LogicWorld, JToken> capture, Action<LogicWorld, JToken> restore); }
+// Unity side (LogicGame.cs): e.Go(), e.Hp(), e.Tagged(), LogicGame.EntityOf(GameObject), LogicGame.Register(entity, go), Vec <-> Vector3
+// Studio (L3): LogicWorld.Current, TraceEntry / LogicEvents.Traced, BudgetSnapshot, LogicCaps (+ level override `logic.caps`)
 ```
 
 ### L1: Runtime core and events
