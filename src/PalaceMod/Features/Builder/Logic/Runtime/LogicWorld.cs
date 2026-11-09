@@ -403,21 +403,25 @@ namespace PalaceMod.Builder.Logic
         public void Raise(string name, LogicEntity subject, LogicEntity other, double value, Vec? pos, string text, int depth = 0)
         {
             if (depth > Caps.ChainDepth) { Drop(name, subject); return; }
+            if (queue.Count >= Caps.Queue) { Drop(name, subject, full: true); return; }
             queue.Enqueue(new LogicEvent { Name = name, Subject = subject, Other = other, Value = value, Pos = pos, Text = text, Depth = depth, Seq = ++seq });
         }
 
         public void Signal(string name, IReadOnlyList<LogicEntity> to, double value, LogicEntity sender, int depth = 0)
         {
             if (depth > Caps.ChainDepth) { Drop("signal " + name, sender); return; }
+            if (queue.Count >= Caps.Queue) { Drop("signal " + name, sender, full: true); return; }
             queue.Enqueue(new LogicEvent { Name = "signal", Text = name, Other = sender, Subject = sender, Value = value, Depth = depth, Seq = ++seq, Target = to ?? (object)Broadcast });
         }
 
         private static readonly object Broadcast = new();
 
-        private void Drop(string what, LogicEntity e)
+        private void Drop(string what, LogicEntity e, bool full = false)
         {
             dropped++;
-            if (droppedThisFrame++ == 0) TraceAdd(e?.Id ?? "?", null, null, what, TraceOutcome.Dropped, $"chain deeper than {Caps.ChainDepth} (a loop of events?); dropped", 0, null);
+            if (droppedThisFrame++ == 0)
+                TraceAdd(e?.Id ?? "?", null, null, what, TraceOutcome.Dropped,
+                    full ? $"over {Caps.Queue} events waiting (a fan-out loop?); dropped" : $"chain deeper than {Caps.ChainDepth} (a loop of events?); dropped", 0, null);
         }
 
         /// <summary>Deliver one event to every rule that hears it.</summary>

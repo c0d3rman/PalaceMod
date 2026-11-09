@@ -216,6 +216,32 @@ namespace PalaceMod.Tests
             Assert.True(sw.ElapsedMilliseconds < 5000, $"bounded time ({sw.ElapsedMilliseconds} ms)");
         }
 
+        public static void FanOutBombIsBoundedByTheQueue()
+        {
+            // Each firing raises 50 more: chain depth alone would allow 50^12 events.
+            var w = NewWorld("""{ "vars": { "n": 0 } }""");
+            // 20 owners, so the 30-per-second-per-owner cap doesn't hold it alone.
+            for (int i = 0; i < 20; i++)
+                Place(w, $$"""{ "id": "bomb{{i}}", "rules": [ { "when": { "on": "signal", "name": "flood" }, "do": [ { "do": "addVar", "name": "$n" }, { "do": "repeat", "times": 50, "actions": [ { "do": "signal", "name": "flood", "to": "all" } ] } ] } ] }""", Vec.Zero);
+            w.Signal("flood", null, 0, null);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var drops = new List<TraceEntry>();
+            w.TraceListener = t => { if (t.Outcome == TraceOutcome.Dropped) drops.Add(t); };
+            int maxQueue = 0;
+            for (int f = 0; f < 120; f++)
+            {
+                w.Tick(1.0 / 60);
+                maxQueue = Math.Max(maxQueue, w.Budget().QueuedEvents);
+                Assert.True(w.Budget().QueuedEvents <= w.Caps.Queue + w.Caps.FiringsPerFrame, $"queue bounded ({w.Budget().QueuedEvents})");
+            }
+            Assert.True(drops.Count > 0, $"drops traced (max queue {maxQueue})");
+            // The queue cap itself: fill it directly.
+            for (int i = 0; i < w.Caps.Queue + 10; i++) w.Raise("ping", w.Level, null, 0, null, null);
+            Assert.True(w.Budget().QueuedEvents <= w.Caps.Queue, "raise past the queue cap is dropped");
+            Assert.True(drops.Any(t => t.Message.Contains("waiting")), "and traced");
+            Assert.True(sw.ElapsedMilliseconds < 10000, $"bounded time ({sw.ElapsedMilliseconds} ms)");
+        }
+
         public static void SpawnBombIsCapped()
         {
             var w = NewWorld("""{ "rules": [ { "when": "levelStart", "do": [ { "do": "repeat", "times": 100, "actions": [ { "do": "forEach", "in": "all('logic or self')", "actions": [] }, { "do": "spawnMany" } ] } ] } ] }""",

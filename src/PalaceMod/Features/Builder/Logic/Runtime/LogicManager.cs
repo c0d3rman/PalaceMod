@@ -59,6 +59,16 @@ namespace PalaceMod.Builder.Logic
                 startFailed = false;
             };
             SaveStates.RegisterState("logic", CaptureState, RestoreState);
+            // King action uses and cooldowns travel with the logic state (savestates and retry day).
+            LogicSaveState.Register("kingActions",
+                _ => new JObject(kingActionState.Select(kv => new JProperty(kv.Key, new JArray(kv.Value.lastUse, kv.Value.uses, kv.Value.period)))),
+                (_, tok) =>
+                {
+                    kingActionState.Clear();
+                    if (tok is JObject o)
+                        foreach (var p in o.Properties())
+                            if (p.Value is JArray a && a.Count == 3) kingActionState[p.Name] = ((double)a[0], (int)a[1], (int)a[2]);
+                });
             RegisterDevCommands();
             for (int i = 0; i < 3; i++)
                 actionKeys[i] = Keybinds.Register("Builder", $"level-action-{i + 1}", $"Level action {i + 1}",
@@ -108,7 +118,14 @@ namespace PalaceMod.Builder.Logic
             if (w == null) return;
             try { w.Tick(Time.deltaTime); }
             catch (Exception e) { Log.Error("Behaviour engine tick failed", e); }
+            if (snapshotAfterTick)
+            {
+                snapshotAfterTick = false;
+                OnDawnSnapshot();
+            }
         }
+
+        private bool snapshotAfterTick;
 
         private void StartWorld(BuilderSessionInfo session)
         {
@@ -444,7 +461,7 @@ namespace PalaceMod.Builder.Logic
                 // Dawn order: income is paid (buildings' own dawn callbacks run before ours), then `dawn` rules.
                 w.Raise("dawn", w.Level, null, ended, null, null);
                 w.Raise("day", w.Level, null, instance.game.Night, null, null);
-                w.Defer(() => instance.OnDawnSnapshot());
+                instance.snapshotAfterTick = true;   // after the `dawn` rules have run
             }
         }
 

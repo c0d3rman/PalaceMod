@@ -479,6 +479,9 @@ namespace PalaceMod.Builder.Logic
         public int FiringsPerFrame = 400, ActionsPerFrame = 4000;
         public int ChainDepth = 12, SameRulePerSecond = 30;
         public int Loop = 100, Set = 256;
+        /// <summary>Events waiting in the queue: past this, new events are dropped (a fan-out loop grows the queue
+        /// faster than the per-frame budget drains it; chain depth alone doesn't bound breadth).</summary>
+        public int Queue = 10000;
         /// <summary>The hard ceiling a level's override is clamped to (the "may lag" range ends here).</summary>
         public static readonly LogicCaps Max = new() { Entities = 2000, Units = 1000, Projectiles = 2000, PerTemplate = 1000, FiringsPerFrame = 4000, ActionsPerFrame = 40000 };
         /// <summary>The `logic.caps` key names: entities, units, projectiles, perTemplate, firingsPerFrame, actionsPerFrame.</summary>
