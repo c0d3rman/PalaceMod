@@ -33,6 +33,7 @@ namespace PalaceMod
         {
             base.Awake(plugin);
             LogicServices.Targeting = TargetingService;
+            LogicServices.TargetOf = TargetOf;
             BodyEvents.UnitSpawned += OnUnitSpawned;
             SteerActions.Register();
             LogicSaveState.Register("steering", SteerSave.Capture, SteerSave.Restore);
@@ -51,6 +52,7 @@ namespace PalaceMod
                 owner = w;
                 states.Clear();
                 suppressed.Clear();
+                lastSeek.Clear();
                 Deaths.Clear();
                 SteerLog.Reset();
             }
@@ -101,6 +103,36 @@ namespace PalaceMod
         internal static IEnumerable<SteerState> States => states.Values;
 
         internal static void Suppress(AutoAttack a) { if (a != null) suppressed.Add(a.GetInstanceID()); }
+
+        // ------------------------------------------------------------------ `.target` and targetChanged
+
+        /// <summary>`.target`: what the entity is attacking (a Builder attack's last target) or walking to.</summary>
+        internal static LogicEntity TargetOf(LogicEntity e)
+        {
+            var go = e?.Go();
+            if (go == null) return null;
+            foreach (var a in go.GetComponents<BuilderAttack>())
+                if (a.LastTarget != null && a.LastTarget.Alive) return a.LastTarget;
+            TaggedObject t = go.GetComponent<PathfindMovementEnemy>() is { } en ? SteerMovement.E_seekObj(en)
+                : go.GetComponent<PathfindMovementPlayerunit>() is { } pu ? SteerMovement.P_seekObj(pu) : null;
+            return t != null ? LogicGame.EntityOf(t.gameObject) : null;
+        }
+
+        private static readonly Dictionary<int, TaggedObject> lastSeek = [];
+
+        /// <summary>Raise `targetChanged` when a unit's move target changes (only while some rule listens).</summary>
+        internal static void SeekChanged(Component mover, TaggedObject now)
+        {
+            var w = LogicWorld.Current;
+            if (w == null || !(w.HasListeners("targetChanged") || w.HasOfListeners("targetChanged"))) return;
+            int key = mover.gameObject.GetInstanceID();
+            lastSeek.TryGetValue(key, out var before);
+            if (before == now) return;
+            lastSeek[key] = now;
+            if (now == null) return;
+            var e = LogicGame.EntityOf(mover.gameObject);
+            if (e != null) LogicEvents.Raise("targetChanged", e, LogicGame.EntityOf(now.gameObject));
+        }
 
         // ------------------------------------------------------------------ templates
 
@@ -316,6 +348,7 @@ namespace PalaceMod
 
             private static void Postfix(PathfindMovementEnemy __instance, ref Vector3 __result)
             {
+                if (LogicWorld.Current != null) SeekChanged(__instance, SteerMovement.E_seekObj(__instance));
                 if (states.Count == 0) return;
                 var st = Get(__instance);
                 if (st == null || st.Overriding || !SteerMovement.E_walkingHome(__instance)) return;
@@ -344,6 +377,7 @@ namespace PalaceMod
 
             private static void Postfix(PathfindMovementPlayerunit __instance, ref Vector3 __result)
             {
+                if (LogicWorld.Current != null) SeekChanged(__instance, SteerMovement.P_seekObj(__instance));
                 if (states.Count == 0) return;
                 var st = Get(__instance);
                 if (st == null || st.Overriding || __instance.FollowingPlayer || !__instance.HasReachedHomePositionAlready || !SteerMovement.P_walkingHome(__instance)) return;

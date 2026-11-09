@@ -233,11 +233,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
         {
             if (template != null && template.StartsWith("@@")) template = template.Substring(2);
             if (LogicServices.Factory != null && LogicServices.Factory.HasTemplate(template))
-            {
-                var e = LogicServices.Factory.Spawn(template, pos.ToVec(), rotY, team, owner, out string error);
-                if (e == null) throw new LogicError($"can't make \"{template}\": {error}");
-                return e;
-            }
+                return LogicWorld.Current.Spawn(template, pos.ToVec(), rotY, team, owner, ctx);   // null when capped (traced)
             var r = ContentRef.Parse(template ?? "");
             var cu = r.Kind == RefKind.Vanilla ? BuilderServices.Catalog?.FindUnit(r.Id) : null;
             if (cu?.Prefab == null) throw new LogicError($"no template \"{template}\" (Builder templates need the entity factory)");

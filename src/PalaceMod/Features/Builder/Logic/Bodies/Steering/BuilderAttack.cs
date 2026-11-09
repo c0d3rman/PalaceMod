@@ -33,6 +33,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
         internal Weapon Weapon;
         internal ActionList Do;
         internal string Source;
+        internal LogicEntity LastTarget;
         private float cooldown = -1;
         private AutoAttack baseAttack;
         private TaggedObject tagged;
@@ -136,6 +137,8 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
         private void Fire(TaggedObject target)
         {
             var targetEntity = LogicGame.EntityOf(target.gameObject);
+            if (targetEntity != LastTarget && targetEntity != null) LogicEvents.Raise("targetChanged", Entity, targetEntity);
+            LastTarget = targetEntity;
             var origin = transform.position + transform.rotation * LaunchFrom;
             if (LaunchEntity != null)
             {
