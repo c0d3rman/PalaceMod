@@ -4484,7 +4484,7 @@ class ResumePoints:
         """Saves the resume point for night n (now: the dawn before it). Returns a warning if it couldn't."""
         name = self.state_name(n)
         try:
-            g.raw(f"savestate delete {name}")
+            g.raw(f"savestate forget {name}")
         except Fail:
             pass
         try:
