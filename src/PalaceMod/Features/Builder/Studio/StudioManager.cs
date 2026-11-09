@@ -32,7 +32,7 @@ namespace PalaceMod
         internal const string Usage =
             "builder-studio open <pack> <level> | new <pack> <scene> [cleared] | state | dock | select <key...> | add <key...> | clear | tool <id> | arm slot <type>|prop <name>|lib <id> " +
             "| cursor <x> <z>|off | click | drag <sx> <sy> <ex> <ey> [left|right|middle] [shift|ctrl|alt] | dragw <x1> <z1> <x2> <z2> [button] [mods] | rclick <x> <z> | press <tile|row> " +
-            "| cam <x> <z> [zoom] [yaw] | delete | dup | copy | paste <x> <z> | group | ungroup | frame | snap <m> | axis turn|tilt|roll | pose <key> | cost <level> <gold|base> | labels | issues | check | audit (place every palette kind, compare with its ghost) | play [start] | leave | json   the level Studio";
+            "| cam <x> <z> [zoom] [yaw] | delete | dup | copy | paste <x> <z> | group | ungroup | frame | snap <m> | axis turn|tilt|roll | pose <key> | cost <level> <gold|base> | labels | issues | check | audit (place every palette kind, compare with its ghost) | play [start] | leave | json [pack]   the level Studio";
     }
 }
 
@@ -177,7 +177,9 @@ namespace PalaceMod.Builder.Studio
                 case "json":
                 {
                     var lv = Studio.Level ?? throw new InvalidOperationException("not in the Studio");
-                    return "\n" + Newtonsoft.Json.JsonConvert.SerializeObject(lv, Newtonsoft.Json.Formatting.Indented,
+                    // "json pack": the whole draft (units, things, statuses, levels), as saved.
+                    object what = Arg(args, 1, "") == "pack" ? Studio.Draft.Pack : lv;
+                    return "\n" + Newtonsoft.Json.JsonConvert.SerializeObject(what, Newtonsoft.Json.Formatting.Indented,
                         new Newtonsoft.Json.JsonSerializerSettings { NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore });
                 }
                 default:

@@ -211,19 +211,7 @@ namespace PalaceMod.Builder.Studio.Logic
             page.TextInput("New signal", () => "", v => { if (!string.IsNullOrWhiteSpace(v)) { set(new JValue(v.Trim())); RuleEditor.ClosePicker(); } }, () => "Any name; a wire or a \"gets signal\" rule listens for it.");
         }
 
-        public static void Status(ModPage page, Action<JToken> set)
-        {
-            var pack = Studio.Draft?.Pack ?? Enemies.EnemyStudio.Draft?.Pack;
-            var statuses = (LogicDoc.Get(pack, "statuses") as JArray)?.OfType<JObject>().ToList() ?? [];
-            if (statuses.Count == 0) page.Text(LogicFields.Dim("This pack has no statuses yet; type an id."));
-            foreach (var s in statuses)
-            {
-                string id = (string)s["id"];
-                if (id == null) continue;
-                Pick(page, (string)s["name"] ?? id, id, () => set(new JValue(id)));
-            }
-            page.TextInput("Id", () => "", v => { if (!string.IsNullOrWhiteSpace(v)) { set(new JValue(v.Trim())); RuleEditor.ClosePicker(); } });
-        }
+        public static void Status(ModPage page, Action<JToken> set) => StatusPanel.Picker(page, id => set(new JValue(id)));
 
         public static void Stat(ModPage page, Action<JToken> set)
         {

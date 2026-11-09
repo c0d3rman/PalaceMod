@@ -26,6 +26,9 @@ namespace PalaceMod.Builder.Studio.Logic
                 "Wire tool: drag from one thing to another to make one set off the other.", context: StudioContexts.Edit, flags: KeybindFlags.AllowInMenus);
             Studio.AddTool(new WireTool(wireKey));
             Studio.AddOverlay(WireOverlay.Instance);
+            Studio.AddOverlay(PlaceHandles.Instance);
+            Studio.AddPointerHandler(PlaceHandles.HandlePointer);
+            Studio.AddCancelHandler(PlaceHandles.Cancel);
             Studio.AddItemSource(PlaceItems.Instance);
             Studio.AddPanel(LogicStudio.Tab, StudioMode.Edit, () => true, page => BehaviourPanel.Build(page, LogicStudio.SelectedOwner()));
             Studio.AddInspectorSection("behaviour", 150, keys => keys.Count == 1 && LogicOwner.ForItem(keys[0]) != null, LogicStudio.InspectorSummary);
@@ -89,8 +92,63 @@ namespace PalaceMod.Builder.Studio.Logic
             return keys.Count == 1 ? LogicOwner.ForItem(keys[0]) ?? LogicOwner.Level() : LogicOwner.Level();
         }
 
+        /// <summary>A template or status shown in the Behaviour tab in place of the selection (null: the selection).</summary>
+        public static LogicOwner Focus { get; private set; }
+
+        public static void FocusOn(LogicOwner owner)
+        {
+            Focus = owner;
+            RuleEditor.Close();
+            if (EnemyStudio.Active) { EnemyDock.PanelTab = "behaviour"; EnemyDock.RefreshInspector(); return; }
+            if (StudioDock.PanelTab != "panel:" + Tab) StudioDock.ShowPanel("panel:" + Tab);
+            Studio.RefreshPanels();
+        }
+
+        /// <summary>The Entity Studio's entry (set by the Entity Studio): opens a thing of the draft; false if it can't.</summary>
+        public static Func<string, bool> OpenEntityStudio;
+
+        /// <summary>Edits a thing: in the Entity Studio when there is one, else here in the Behaviour tab.</summary>
+        public static void EditThing(string id)
+        {
+            try { if (OpenEntityStudio?.Invoke(id) == true) return; }
+            catch (Exception e) { Log.For<BuilderManager>().Caught("Opening the Entity Studio failed", e); }
+            FocusOn(LogicOwner.Entity(id));
+        }
+
+        /// <summary>Adds a thing to the draft (one undo step) and opens it.</summary>
+        public static string NewThing(string kind)
+        {
+            var draft = LogicOwner.Draft;
+            if (draft == null) return null;
+            string id = null;
+            draft.Edit("New thing", p =>
+            {
+                p.Entities ??= [];
+                var taken = new HashSet<string>(p.Entities.Select(e => e.Id).Concat(p.Units.Select(u => u.Id)).Where(x => x != null));
+                id = LogicDoc.NameFor(kind ?? "thing", taken);
+                p.Entities.Add(new PalaceMod.Builder.Model.Logic.EntityDef { Id = id, Kind = kind ?? "prop", Name = "New " + (kind ?? "thing") });
+            }, structural: true);
+            Changed();
+            if (id != null) EditThing(id);
+            return id;
+        }
+
+        /// <summary>A picker beside the panel that's up (the rule editor's place): the Level or the Enemy Studio.</summary>
+        public static void OpenSide(string title, Action<ModPage> build)
+        {
+            if (EnemyStudio.Active)
+            {
+                var (min, max) = EnemyDock.BesideInspector(RuleEditor.Width);
+                RuleEditor.OpenStandalone(EnemyDock.Dock, min, max, title, build);
+                return;
+            }
+            var (a, b) = EditorOffsets();
+            RuleEditor.OpenStandalone(StudioDock.Dock, a, b, title, build);
+        }
+
         public static void OnSelection()
         {
+            Focus = null;
             // The open card follows the selection: another thing selected closes it.
             if (RuleEditor.IsOpen && !RuleEditor.Owner.IsUnit && RuleEditor.Owner.Kind != OwnerKind.Level && !Studio.Selection.Contains(RuleEditor.Owner.StudioKey))
                 RuleEditor.Close();
@@ -99,7 +157,7 @@ namespace PalaceMod.Builder.Studio.Logic
         public static void OpenRule(LogicOwner owner, int index)
         {
             if (owner == null) return;
-            if (owner.IsUnit)
+            if (owner.IsUnit || (owner.IsTemplate && EnemyStudio.Active))
             {
                 var (min, max) = EnemyDock.BesideInspector(RuleEditor.Width);
                 RuleEditor.Open(owner, index, EnemyDock.Dock, min, max);
@@ -148,7 +206,7 @@ namespace PalaceMod.Builder.Studio.Logic
                     });
                 }
             }
-            if (owner.IsUnit)
+            if (EnemyStudio.Active)
             {
                 var (min, max) = EnemyDock.BesideInspector(RuleEditor.Width);
                 RuleEditor.OpenStandalone(EnemyDock.Dock, min, max, "Add a preset", Build);
@@ -221,24 +279,52 @@ namespace PalaceMod.Builder.Studio.Logic
         {
             public string Id, Name, Desc, IdPrefix;
             public JObject Place;
-            public string Kind => (string)Place["kind"];
+            public string ThingKind;
+            /// <summary>Drawn on the map (a drag or clicks) instead of one click.</summary>
+            public ShapeDrawer.Shape? Draw;
+            public string Kind => ThingKind ?? (string)Place["kind"];
+            public bool IsThing => ThingKind != null;
         }
 
         private static readonly PaletteObject[] Shapes =
         [
-            new() { Id = "area", Name = "Area", IdPrefix = "area", Desc = "A zone that notices what's inside: enter, exit, inside, empty.",
+            new() { Id = "area", Name = "Circle area", IdPrefix = "area", Draw = ShapeDrawer.Shape.Circle, Desc = "A zone that notices what's inside: enter, exit, inside, empty. Drag from its centre out to its edge.",
                 Place = JObject.Parse("{ 'kind': 'area', 'area': { 'shape': { 'circle': { 'radius': 4 } }, 'watch': 'unit', 'show': 'outline' } }") },
+            new() { Id = "area-rect", Name = "Rectangle area", IdPrefix = "area", Draw = ShapeDrawer.Shape.Rect, Desc = "A rectangular zone. Drag from one corner to the opposite one.",
+                Place = JObject.Parse("{ 'kind': 'area', 'area': { 'shape': { 'rect': { 'size': [6, 4] } }, 'watch': 'unit', 'show': 'outline' } }") },
+            new() { Id = "area-polygon", Name = "Polygon area", IdPrefix = "area", Draw = ShapeDrawer.Shape.Polygon, Desc = "A zone of any shape. Click its corners; click the first again to close it.",
+                Place = JObject.Parse("{ 'kind': 'area', 'area': { 'shape': { 'polygon': { 'points': [[-3, -3], [3, -3], [3, 3], [-3, 3]] } }, 'watch': 'unit', 'show': 'outline' } }") },
             new() { Id = "point", Name = "Point", IdPrefix = "point", Desc = "A named spot to teleport, spawn or walk to (@name).", Place = JObject.Parse("{ 'kind': 'point' }") },
-            new() { Id = "path", Name = "Path", IdPrefix = "path", Desc = "A route for movers and walkers (@name). Move it whole; add points in its Behaviour tab.",
+            new() { Id = "path", Name = "Path", IdPrefix = "path", Draw = ShapeDrawer.Shape.Path, Desc = "A route for movers and walkers (@name). Click its points; click the last again to end it.",
                 Place = JObject.Parse("{ 'kind': 'path', 'points': [[0, 0, 0], [6, 0, 0], [6, 0, 6]] }") },
         ];
 
         public static List<PaletteObject> PaletteObjects() => Shapes.Concat(PresetUi.LogicObjects().Select(d => new PaletteObject
         {
             Id = d.Id, Name = d.Name ?? d.Id, Desc = d.Description ?? "", IdPrefix = d.Id, Place = PresetUi.AsPlace(d),
-        })).ToList();
+        })).Concat(Things()).ToList();
 
-        public static StudioPlaceable Placeable(PaletteObject obj) => new()
+        /// <summary>The pack's own things (entities[]), placed by reference ({"entity": id}).</summary>
+        public static IEnumerable<PaletteObject> Things() =>
+            (LogicOwner.DraftPack?.Entities ?? []).Where(e => e?.Id != null).Select(e => new PaletteObject
+            {
+                Id = "thing:" + e.Id, Name = e.Name ?? e.Id, Desc = $"This pack's {e.Kind ?? "prop"} \"{e.Id}\".", IdPrefix = e.Id,
+                Place = new JObject { ["entity"] = e.Id }, ThingKind = e.Kind ?? "prop",
+            });
+
+        public static StudioPlaceable Placeable(PaletteObject obj)
+        {
+            var p = PlainPlaceable(obj);
+            if (obj.Draw is ShapeDrawer.Shape shape)
+            {
+                var drawer = new ShapeDrawer(shape);
+                p.Draw = drawer.Update;
+                p.CancelDraw = drawer.Cancel;
+            }
+            return p;
+        }
+
+        private static StudioPlaceable PlainPlaceable(PaletteObject obj) => new()
         {
             Id = "logic:" + obj.Id,
             Name = obj.Name,
@@ -257,12 +343,30 @@ namespace PalaceMod.Builder.Studio.Logic
 
         public static void Palette(ModPage page)
         {
+            Tiles(page, "Logic objects", PaletteObjects().Where(o => !o.IsThing).ToList());
+            StudioDock.SmallHeader(page, "This pack's things");
+            var things = Things().ToList();
+            if (things.Count == 0) page.Text(LogicFields.Dim("None yet: projectiles, props and pickups you design."));
+            else Tiles(page, "Things", things);
+            LogicFields.Buttons(page, ("+ New thing", () => NewThing(null), "Design a projectile, prop or pickup (Entity Studio)."),
+                ("Edit…", things.Count == 0 ? null : () => OpenSide("Edit a thing…", p =>
+                {
+                    foreach (var t in Things().ToList())
+                    {
+                        string id = t.IdPrefix;
+                        StudioDock.DetailRow(p, LogicFields.Esc(t.Name), LogicFields.Esc(t.Kind), false, null, () => { RuleEditor.Close(); EditThing(id); });
+                    }
+                }), "Open one of this pack's things to change it."));
+            page.Text(LogicFields.Dim("Then select it and open Behaviour, or wire it (J)."));
+        }
+
+        private static void Tiles(ModPage page, string name, List<PaletteObject> all)
+        {
             string armed = StudioShell.Tool == StudioShell.Place ? StudioShell.Place.Armed?.Id : null;
             const int perRow = 2;
-            var all = PaletteObjects();
             int rows = (all.Count + perRow - 1) / perRow;
             const float h = 64f, gap = 6f;
-            var area = page.Custom("Logic objects", rows * (h + gap));
+            var area = page.Custom(name, rows * (h + gap));
             UnityEngine.UI.LayoutRebuilder.ForceRebuildLayoutImmediate(page.Content);
             float w = (page.Size.x - (perRow - 1) * gap) / perRow;
             for (int i = 0; i < all.Count; i++)
@@ -277,7 +381,6 @@ namespace PalaceMod.Builder.Studio.Logic
                 tile.Applied += () => Studio.Arm(Placeable(obj));
                 ModTooltip.Attach(tile, obj.Name, () => obj.Desc + "\nClick, then click the map.");
             }
-            page.Text(LogicFields.Dim("Then select it and open Behaviour, or wire it (J)."));
         }
 
         // ---- Enemy Studio --------------------------------------------------------------------------------------------
