@@ -64,8 +64,14 @@ namespace PalaceMod
                 valueText.enableWordWrapping = false;
                 valueText.overflowMode = TextOverflowModes.Ellipsis;
                 valueText.margin = new Vector4(indent, 0f, 0f, 0f);
+                // A label wider than the room kept for it (a narrow panel) would run under the value: let Fit move the
+                // value past the label, or under it when both don't fit on one line.
+                var labelText = row.Button.GetComponent<TextMeshProUGUI>();
+                if (labelText != null && labelText.GetPreferredValues(label ?? "", 100000f, 0f).x > indent - LabelGap) EnableWrap();
             }
         }
+
+        private const float LabelGap = 16f;
 
         /// <summary>Space kept for the label at the left of a field's row.</summary>
         public const float ValueIndent = 340f;
@@ -84,10 +90,13 @@ namespace PalaceMod
         /// <summary>Lets a long value wrap onto more lines (the row grows) instead of being cut with an ellipsis.</summary>
         internal void EnableWrap()
         {
+            if (!wrap && valueText != null) valueText.gameObject.AddComponent<RefitOnResize>().Field = this;
             wrap = true;
-            if (valueText != null) valueText.gameObject.AddComponent<RefitOnResize>().Field = this;
             Fit();
         }
+
+        /// <summary>Whether this value text is a wrapping field's, which lays out its label and value itself.</summary>
+        internal static bool LaysOut(TextMeshProUGUI value) => value != null && value.GetComponent<RefitOnResize>() != null;
 
         // The row's real width is only known after layout: fit again whenever it changes.
         private sealed class RefitOnResize : MonoBehaviour
@@ -113,11 +122,18 @@ namespace PalaceMod
             float width = valueText.rectTransform.rect.width;
             if (width <= 1f) width = FallbackWidth;
             string shown = valueText.text ?? "";
-            // TMP's preferred values include the text's margins (the label's indent on the left).
-            bool multi = stacked || shown.IndexOf('\n') >= 0 || valueText.GetPreferredValues(shown, 100000f, 0f).x > width;
+            // TMP's preferred values include the text's margins: take them off to get the text's own width.
+            float textWidth = valueText.GetPreferredValues(shown, 100000f, 0f).x - valueText.margin.x - valueText.margin.z;
+            // Where the value may start: past the label's room, or past the label itself when it's wider than that.
+            float labelWidth = label != null ? label.GetPreferredValues(label.text ?? "", 100000f, 0f).x : 0f;
+            bool wideLabel = labelWidth > indent - LabelGap;
+            float lead = wideLabel ? labelWidth + LabelGap : indent;
+            bool newline = shown.IndexOf('\n') >= 0, tooWide = textWidth > width - lead;
+            bool stack = stacked || (wideLabel && (newline || tooWide));
+            bool multi = stack || newline || tooWide;
             float height = RowHeight;
-            float left = stacked ? (label != null ? label.margin.x : 0f) : indent;
-            float top = stacked ? WrapPad + (label != null ? label.fontSize * 1.15f : 30f) : WrapPad;
+            float left = stack ? (label != null ? label.margin.x + LeadingSpace(label) : 0f) : lead;
+            float top = stack ? WrapPad + (label != null ? label.fontSize * 1.15f : 30f) : WrapPad;
             if (multi)
             {
                 valueText.enableWordWrapping = true;
@@ -140,10 +156,12 @@ namespace PalaceMod
                 valueText.enableWordWrapping = false;
                 valueText.overflowMode = TextOverflowModes.Ellipsis;
                 valueText.alignment = TextAlignmentOptions.MidlineRight;
-                valueText.margin = new Vector4(indent, 0f, 0f, 0f);
+                valueText.margin = new Vector4(lead, 0f, 0f, 0f);
             }
             if (label != null)
             {
+                // A label wider than its room stays on one line: the value is past it or under it.
+                if (wideLabel) { label.enableWordWrapping = false; label.overflowMode = TextOverflowModes.Overflow; }
                 label.alignment = multi ? TextAlignmentOptions.TopLeft : TextAlignmentOptions.MidlineLeft;
                 label.margin = new Vector4(label.margin.x, multi ? WrapPad : 0f, label.margin.z, 0f);
             }
@@ -152,6 +170,15 @@ namespace PalaceMod
                 element.preferredHeight = height;
                 if (Button.transform.parent is RectTransform parent) LayoutRebuilder.MarkLayoutForRebuild(parent);
             }
+        }
+
+        // A label indented with leading spaces ("   Offset"): its value, put under it, starts where its text does.
+        private float LeadingSpace(TextMeshProUGUI label)
+        {
+            string text = Label ?? "";
+            int n = text.Length - text.TrimStart(' ').Length;
+            if (n == 0) return 0f;
+            return label.GetPreferredValues(new string(' ', n) + "x", 100000f, 0f).x - label.GetPreferredValues("x", 100000f, 0f).x;
         }
 
         public bool Selected => Button != null && Button.CurrentState is ThronefallUIElement.SelectionState.Selected or ThronefallUIElement.SelectionState.FocussedAndSelected;
@@ -245,6 +272,8 @@ namespace PalaceMod
                 int i = index();
                 return i >= 0 && i < options.Count ? options[i] : "-";
             }, Step, onApply ?? (() => { Step(1); field.Refresh(); }), tooltip);
+            // A long option wraps onto another line rather than being cut into something unreadable.
+            field.EnableWrap();
             return field;
         }
 
