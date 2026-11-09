@@ -313,6 +313,7 @@ namespace PalaceMod.Builder.Logic
         public void Forget(LogicEntity e)
         {
             if (e.Destroyed) return;
+            if (e.Body != null) e.StaticPos = e.Body.Position;   // GameBody keeps its last position once gone
             e.Destroyed = true;
             if (byId.TryGetValue(e.Id, out var cur) && cur == e) byId.Remove(e.Id);
             if (e.Name != null && byName.TryGetValue(e.Name, out cur) && cur == e) byName.Remove(e.Name);
