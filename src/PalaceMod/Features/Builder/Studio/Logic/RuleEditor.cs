@@ -281,7 +281,7 @@ namespace PalaceMod.Builder.Studio.Logic
             else
             {
                 var scope = Owner.Scope(ev, spawned);
-                foreach (var p in ui.Params.Where(p => p.Kind != ParamKind.Actions))
+                foreach (var p in ui.Params.Where(p => p.Kind != ParamKind.Actions && !(ui.Name == "choose" && p.Name == "options")))
                 {
                     var param = p;
                     LogicFields.Param(page, indent + p.Label, p, () => CurrentAction(path, index)?[param.Name],
@@ -374,7 +374,7 @@ namespace PalaceMod.Builder.Studio.Logic
             LogicFields.Buttons(page,
                 ("Duplicate", () => { Owner.Edit("Duplicate rule", n => { var rules = LogicDoc.EnsureRules(n); rules.Insert(Rule + 1, rules[Rule].DeepClone()); }); Open(Owner, Rule + 1, dock, panel.OffsetMin, panel.OffsetMax); }, null),
                 ("Copy", () => { GUIUtility.systemCopyBuffer = CurrentRule()?.ToString(Newtonsoft.Json.Formatting.Indented) ?? ""; Notify.Show("Rule copied as JSON", NotifyKind.Info, 2f, "logic"); }, "The same JSON agents write"),
-                ("Save as preset", () => Presets.SaveRule(Owner, Rule), "Reuse it on other things"),
+                ("Save as preset", () => PresetUi.SaveRule(Owner, Rule), "Reuse it on other things"),
                 ("Delete", () => { int r = Rule; Owner.Edit("Delete rule", n => LogicDoc.EnsureRules(n).RemoveAt(r)); Close(); }, null));
         }
 
@@ -383,7 +383,7 @@ namespace PalaceMod.Builder.Studio.Logic
         private static void PresetCard(ModPage page, JObject rule)
         {
             string id = (string)rule["preset"];
-            var preset = Presets.Find(id);
+            var preset = PresetUi.Find(id);
             LogicFields.Section(page, "Preset", LogicFields.ThenColor);
             StudioDock.DetailRow(page, LogicFields.Esc(preset?.Name ?? id), LogicFields.Esc(preset?.Describe(rule["with"] as JObject) ?? $"preset \"{id}\" not found"), false, null, null);
             foreach (var p in preset?.Params ?? [])
@@ -397,7 +397,7 @@ namespace PalaceMod.Builder.Studio.Logic
                     }, "with:" + param.Name), Owner.Scope(null));
             }
             LogicFields.Buttons(page,
-                ("Unpack", preset == null ? null : () => Presets.Unpack(Owner, Rule), "Turn it into plain rules you can edit"),
+                ("Unpack", preset == null ? null : () => PresetUi.Unpack(Owner, Rule), "Turn it into plain rules you can edit"),
                 ("Delete", () => { int r = Rule; Owner.Edit("Delete rule", n => LogicDoc.EnsureRules(n).RemoveAt(r)); Close(); }, null));
         }
 

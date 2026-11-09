@@ -64,10 +64,11 @@ namespace PalaceMod.Builder.Studio.Logic
                 case "press": return Press(rest);
                 case "place":
                 {
-                    var obj = LogicObjects.Find(args[1]) ?? throw new ArgumentException("objects: " + string.Join(", ", LogicObjects.All.Select(o => o.Id)));
+                    var all = LogicStudio.PaletteObjects();
+                    var obj = all.FirstOrDefault(o => o.Id == args[1]) ?? throw new ArgumentException("objects: " + string.Join(", ", all.Select(o => o.Id)));
                     Vector3 at = args.Length >= 4 ? new Vector3(F(args[2]), 0f, F(args[3])) : Studio.CursorGround ?? Vector3.zero;
                     at.y = Studio.Ground(at);
-                    string key = PlaceItems.Add(obj, at, 0f);
+                    string key = PlaceItems.Add(obj.Name, obj.IdPrefix, obj.Place, at, 0f);
                     Studio.Select([key], SelectOp.Replace);
                     owner = LogicOwner.ForItem(key);
                     return "placed " + key;

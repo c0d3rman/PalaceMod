@@ -21,6 +21,7 @@ namespace PalaceMod.Builder.Studio.Logic
         public override void Awake(Plugin plugin)
         {
             base.Awake(plugin);
+            LogicSchemaBridge.Merge();
             var wireKey = Keybinds.Register("Builder", "studio-wire", "Studio: wire", new KeyboardShortcut(KeyCode.J),
                 "Wire tool: drag from one thing to another to make one set off the other.", context: StudioContexts.Edit, flags: KeybindFlags.AllowInMenus);
             Studio.AddTool(new WireTool(wireKey));
@@ -128,7 +129,7 @@ namespace PalaceMod.Builder.Studio.Logic
 
         public static void PickPreset(LogicOwner owner)
         {
-            var list = Presets.All().ToList();
+            var list = PresetUi.ForRules().ToList();
             void Build(ModPage page)
             {
                 if (list.Count == 0) { page.Text(LogicFields.Dim("No presets yet. \"Save as preset\" on a rule makes one; the Logic palette has ready-made objects.")); return; }
@@ -137,7 +138,7 @@ namespace PalaceMod.Builder.Studio.Logic
                     var preset = p;
                     StudioDock.DetailRow(page, LogicFields.Esc(p.Name), LogicFields.Esc((p.BuiltIn ? "built in · " : "this pack · ") + (p.Describe(null) ?? "")), false, null, () =>
                     {
-                        Presets.Use(owner, preset);
+                        PresetUi.Use(owner, preset);
                         RuleEditor.Close();
                         var count = owner.Rules()?.Count ?? 0;
                         if (count > 0) OpenRule(owner, count - 1);
@@ -212,28 +213,50 @@ namespace PalaceMod.Builder.Studio.Logic
 
         // ---- Logic palette -------------------------------------------------------------------------------------------
 
-        public static StudioPlaceable Placeable(LogicObject obj) => new()
+        /// <summary>A Logic palette entry: a shape (area, point, path) or a built-in logic object (a "Logic" preset).</summary>
+        internal sealed class PaletteObject
+        {
+            public string Id, Name, Desc, IdPrefix;
+            public JObject Place;
+            public string Kind => (string)Place["kind"];
+        }
+
+        private static readonly PaletteObject[] Shapes =
+        [
+            new() { Id = "area", Name = "Area", IdPrefix = "area", Desc = "A zone that notices what's inside: enter, exit, inside, empty.",
+                Place = JObject.Parse("{ 'kind': 'area', 'area': { 'shape': { 'circle': { 'radius': 4 } }, 'watch': 'unit', 'show': 'outline' } }") },
+            new() { Id = "point", Name = "Point", IdPrefix = "point", Desc = "A named spot to teleport, spawn or walk to (@name).", Place = JObject.Parse("{ 'kind': 'point' }") },
+            new() { Id = "path", Name = "Path", IdPrefix = "path", Desc = "A route for movers and walkers (@name). Move it whole; add points in its Behaviour tab.",
+                Place = JObject.Parse("{ 'kind': 'path', 'points': [[0, 0, 0], [6, 0, 0], [6, 0, 6]] }") },
+        ];
+
+        public static List<PaletteObject> PaletteObjects() => Shapes.Concat(PresetUi.LogicObjects().Select(d => new PaletteObject
+        {
+            Id = d.Id, Name = d.Name ?? d.Id, Desc = d.Description ?? "", IdPrefix = d.Id.Split('-')[0], Place = PresetUi.AsPlace(d),
+        })).ToList();
+
+        public static StudioPlaceable Placeable(PaletteObject obj) => new()
         {
             Id = "logic:" + obj.Id,
             Name = obj.Name,
             MakeGhost = parent =>
             {
-                var g = GameObject.CreatePrimitive(obj.Place["kind"]?.ToString() == "area" ? PrimitiveType.Cylinder : PrimitiveType.Sphere);
+                var g = GameObject.CreatePrimitive(obj.Kind == "area" ? PrimitiveType.Cylinder : PrimitiveType.Sphere);
                 UnityEngine.Object.Destroy(g.GetComponent<Collider>());
                 g.transform.SetParent(parent, false);
-                g.transform.localScale = obj.Place["kind"]?.ToString() == "area" ? new Vector3(8f, 0.05f, 8f) : Vector3.one * 1.2f;
+                g.transform.localScale = obj.Kind == "area" ? new Vector3(8f, 0.05f, 8f) : Vector3.one * 1.2f;
                 var r = g.GetComponent<Renderer>();
-                if (r != null) { r.material = new Material(Shader.Find("Sprites/Default")) { color = PlaceItems.ColorOf((string)obj.Place["kind"]) * new Color(1, 1, 1, 0.6f) }; }
+                if (r != null) { r.material = new Material(Shader.Find("Sprites/Default")) { color = PlaceItems.ColorOf(obj.Kind) * new Color(1, 1, 1, 0.6f) }; }
                 return g;
             },
-            Place = (pos, yaw) => PlaceItems.Add(obj, pos, yaw),
+            Place = (pos, yaw) => PlaceItems.Add(obj.Name, obj.IdPrefix, obj.Place, pos, yaw),
         };
 
         public static void Palette(ModPage page)
         {
             string armed = StudioShell.Tool == StudioShell.Place ? StudioShell.Place.Armed?.Id : null;
             const int perRow = 2;
-            var all = LogicObjects.All;
+            var all = PaletteObjects();
             int rows = (all.Count + perRow - 1) / perRow;
             const float h = 64f, gap = 6f;
             var area = page.Custom("Logic objects", rows * (h + gap));
@@ -247,7 +270,7 @@ namespace PalaceMod.Builder.Studio.Logic
                 tile.Label.alignment = TextAlignmentOptions.Center;
                 tile.Place(new Vector2((i % perRow) * (w + gap), -(i / perRow) * (h + gap)));
                 tile.SetOn(armed == "logic:" + obj.Id);
-                tile.SetMarker(true, PlaceItems.ColorOf((string)obj.Place["kind"]));
+                tile.SetMarker(true, PlaceItems.ColorOf(obj.Kind));
                 tile.Applied += () => Studio.Arm(Placeable(obj));
                 ModTooltip.Attach(tile, obj.Name, () => obj.Desc + "\nClick, then click the map.");
             }
@@ -262,12 +285,6 @@ namespace PalaceMod.Builder.Studio.Logic
             if (unit == null) return;
             var owner = LogicOwner.Unit(unit.Id, string.IsNullOrWhiteSpace(unit.Name) ? unit.Id : unit.Name);
             BehaviourPanel.Build(page, owner);
-            // The pack editor's legacy behaviours, until the pack is migrated to rules.
-            if (unit.Behaviours?.Count > 0)
-            {
-                StudioDock.SmallHeader(page, "Older abilities");
-                EnemyStudio.Page.BuildSection(page, "behaviours");
-            }
         }
     }
 }

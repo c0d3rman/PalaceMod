@@ -176,13 +176,13 @@ namespace PalaceMod.Builder.Studio.Logic
         }
 
         /// <summary>Adds a place from a palette object at a pose (one undo step); returns its Studio key.</summary>
-        public static string Add(LogicObject obj, Vector3 pos, float yaw)
+        public static string Add(string name, string idPrefix, JObject template, Vector3 pos, float yaw)
         {
             string key = null;
-            Studio.Edit($"Place {obj.Name}", lv => LogicDoc.EditLogic(lv, logic =>
+            Studio.Edit($"Place {name}", lv => LogicDoc.EditLogic(lv, logic =>
             {
-                var place = (JObject)obj.Place.DeepClone();
-                string id = LogicDoc.NewPlaceId(logic, obj.IdPrefix);
+                var place = (JObject)template.DeepClone();
+                string id = LogicDoc.NewPlaceId(logic, idPrefix);
                 place.AddFirst(new JProperty("id", id));
                 place["pos"] = new JArray(LayoutScene.Round(pos.x), LayoutScene.Round(pos.y), LayoutScene.Round(pos.z));
                 if (Mathf.Abs(Mathf.DeltaAngle(yaw, 0f)) > 0.05f) place["rotY"] = LayoutScene.Round(Mathf.Repeat(yaw, 360f));

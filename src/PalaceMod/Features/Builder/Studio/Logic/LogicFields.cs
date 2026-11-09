@@ -25,7 +25,7 @@ namespace PalaceMod.Builder.Studio.Logic
         public static string Tint(string s, Color c) => $"<color=#{ModStyle.Hex(c)}>{s}</color>";
 
         /// <summary>The error lines under a value ("col 9: unknown variable …").</summary>
-        public static string IssueText(IReadOnlyList<ExprIssue> issues)
+        public static string IssueText(IReadOnlyList<FieldIssue> issues)
         {
             if (issues == null || issues.Count == 0) return "";
             return "\n<size=78%>" + string.Join("\n", issues.Take(2).Select(i => Tint("! " + Esc(i.ToString()), i.Warning ? WarnColor : ErrorColor))) + "</size>";
@@ -53,9 +53,9 @@ namespace PalaceMod.Builder.Studio.Logic
         }
 
         /// <summary>Checks a typed value for its kind (an empty list when fine).</summary>
-        public static List<ExprIssue> Check(string typed, ParamUi p, ExprScope scope)
+        public static List<FieldIssue> Check(string typed, ParamUi p, ExprScope scope)
         {
-            if (string.IsNullOrWhiteSpace(typed)) return p.Required ? [new ExprIssue { Col = 1, Message = "needed" }] : [];
+            if (string.IsNullOrWhiteSpace(typed)) return p.Required ? [new FieldIssue { Col = 1, Message = "needed" }] : [];
             switch (p.Kind)
             {
                 case ParamKind.Filter: return ExprLint.CheckFilter(typed, scope);
@@ -73,7 +73,7 @@ namespace PalaceMod.Builder.Studio.Logic
                 case ParamKind.Text:
                     return typed.StartsWith("=") ? ExprLint.Check(typed.Substring(1), scope) : [];
                 case ParamKind.Json:
-                    try { JToken.Parse(typed); return []; } catch (Exception e) { return [new ExprIssue { Col = 1, Message = e.Message.Split('.')[0] }]; }
+                    try { JToken.Parse(typed); return []; } catch (Exception e) { return [new FieldIssue { Col = 1, Message = e.Message.Split('.')[0] }]; }
                 default: return [];
             }
         }
@@ -176,7 +176,7 @@ namespace PalaceMod.Builder.Studio.Logic
         private sealed class LiveCheck : MonoBehaviour
         {
             public ModField Field;
-            public Func<string, List<ExprIssue>> Check;
+            public Func<string, List<FieldIssue>> Check;
             private string lastText, lastSuffix = "";
             private TextMeshProUGUI value;
 
@@ -189,7 +189,7 @@ namespace PalaceMod.Builder.Studio.Logic
                 if (typed != lastText)
                 {
                     lastText = typed;
-                    List<ExprIssue> issues;
+                    List<FieldIssue> issues;
                     try { issues = Check(typed); } catch { issues = []; }
                     lastSuffix = issues.Count == 0 ? (typed.Length > 0 ? "\n<size=78%>" + Tint("ok", new Color(0.55f, 0.88f, 0.6f)) + "</size>" : "") : IssueText(issues);
                 }

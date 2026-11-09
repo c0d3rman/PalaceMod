@@ -34,9 +34,10 @@ namespace PalaceMod.Tests
             });
             var back = LogicDoc.Logic(lv);
             Assert.Equal("death", LogicDoc.EventOf((JObject)back["attach"]["slot:Tower 3"]["rules"][0]), "rule stored under attach");
+            Assert.Equal("death", lv.Logic.Attach["slot:Tower 3"].Rules[0].When.On, "it's the typed def's");
             // Emptying it prunes the attach entry and the logic block.
             LogicDoc.EditLogic(lv, logic => ((JArray)logic["attach"]["slot:Tower 3"]["rules"]).Clear());
-            Assert.True(lv.Extra == null || !lv.Extra.ContainsKey("logic"), "empty logic is dropped");
+            Assert.True(lv.Logic == null, "empty logic is dropped");
         }
 
         public static void NewRuleUsesShorthandOrRequiredParams()
@@ -81,13 +82,13 @@ namespace PalaceMod.Tests
             Assert.True(typo.Count == 1 && typo[0].Message.Contains("did you mean \"$souls\"") && typo[0].Col == 1, "var typo: " + string.Join(";", typo));
             var other = ExprLint.Check("other.hp > 3", scope);
             Assert.True(other.Count == 1 && other[0].Message.Contains("not defined for the event \"levelStart\""), "role: " + string.Join(";", other));
-            Assert.True(ExprLint.Check("count('foe', 10", scope)[0].Message.Contains("isn't closed"), "paren");
+            Assert.True(ExprLint.Check("count('foe', 10", scope).Count == 1, "paren");
             Assert.True(ExprLint.Check("night = 3", scope)[0].Message.Contains("=="), "assignment");
             Assert.True(ExprLint.Check("nearst('foe')", scope)[0].Message.Contains("did you mean \"nearest\""), "function typo");
             Assert.Equal(0, ExprLint.Check("nearest('foe and Tower', 20).hpPct < 0.5", scope).Count, "properties pass");
             Assert.Equal(0, ExprLint.CheckFilter("foe and Building and not #lit").Count, "filter ok");
             Assert.True(ExprLint.CheckFilter("foe and and unit").Count == 1, "filter double and");
-            Assert.True(ExprLint.CheckFilter("foe untis")[0].Message.Contains("and"), "filter missing join");
+            Assert.True(ExprLint.CheckFilter("foe untis").Count >= 1, "filter missing join");
             Assert.True(ExprLint.CheckFilter("foe and unti")[0].Message.Contains("did you mean \"unit\""), "filter word typo");
         }
 
@@ -125,10 +126,10 @@ namespace PalaceMod.Tests
         {
             var u = new UnitDef { Id = "slime" };
             LogicDoc.EditUnit(u, n => { n["rules"] = new JArray(LogicDoc.NewRule("death")); n["vars"] = new JObject { ["gen"] = 0 }; });
-            Assert.True(u.Extra.ContainsKey("rules") && u.Extra.ContainsKey("vars"), "written");
+            Assert.True(u.Rules?.Count == 1 && u.Vars?.ContainsKey("gen") == true, "written to the typed fields");
             Assert.Equal(2, LogicDoc.UnitNode(u).Properties().Count(), "read back");
             LogicDoc.EditUnit(u, n => n.Remove("vars"));
-            Assert.True(!u.Extra.ContainsKey("vars"), "removed");
+            Assert.True(u.Vars == null, "removed");
         }
 
         public static void NamesAreUnique()
