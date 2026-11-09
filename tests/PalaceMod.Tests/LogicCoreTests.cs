@@ -167,6 +167,12 @@ namespace PalaceMod.Tests
             Assert.Equal(90.0, Math.Round(E("angle(self, @b)").Num), "angle east");
             Assert.Equal("b", E("best('foe', 20, -it.x)").AsEntity?.Id, "best by score");
             Assert.Equal("Souls 0/10", ExprCompiler.CompileText("Souls {$r}/10", "t")(ctx), "interpolation");
+            Assert.Equal(true, Values.ToBool(E("nearest('#nosuch') == none")), "none literal");
+            Assert.Equal(true, Values.ToBool(E("other == none")), "an absent role is none");
+            LogicServices.IsElite = e => e.Labels.Contains("boss");
+            Assert.Equal(1.0, E("count('elite')").Num, "elite filter term");
+            Assert.Equal(true, Values.ToBool(E("@c.elite")), ".elite");
+            LogicServices.IsElite = null;
         }
 
         public static void OfListenerWithRange()

@@ -262,6 +262,7 @@ namespace PalaceMod.Builder.Logic
                 case "id": return Value.Text(e.Id);
                 case "name": return Value.Text(e.Name ?? e.Id);
                 case "enabled": return Value.Bool(e.Enabled);
+                case "elite": return Value.Bool(LogicServices.IsElite?.Invoke(e) ?? false);
             }
             var stats = LogicServices.Stats;
             if (stats != null)
@@ -621,6 +622,7 @@ namespace PalaceMod.Builder.Logic
                 case "melee": return (_, c) => c.Body?.HasTag("MeeleFighter") ?? false;
                 case "ranged": return (_, c) => c.Body?.HasTag("RangedFighter") ?? false;
                 case "alive": return (_, c) => c.Alive;
+                case "elite": return (_, c) => LogicServices.IsElite?.Invoke(c) ?? false;
                 case "dead": return (_, c) => !c.Alive;
                 case "label": return (_, c) => c.Labels.Contains(arg);
                 case "is": return (_, c) => c.Template == arg || c.Template == "vanilla:" + arg;
