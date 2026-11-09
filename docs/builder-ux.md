@@ -516,7 +516,10 @@ base's activator, which is removed on an empty map, so it would never appear: `L
 
 ### Sandbox panel (play mode, right side, collapsible with Tab)
 
-Non-modal dock like the Studio's. Keys in brackets (context `BuilderPlay`).
+Non-modal dock like the Studio's. Keys in brackets (context `BuilderPlay`). The context is claimed with
+`blockGame: false`: a sandbox key wins over another mod key on the same input (Place teleporter on T, Quicksave on F5)
+but never takes a game action's input, since test play is the real game (plain R is the game's Command Units: tap to
+call units, hold to hold position).
 
 | Row | Control | Backed by |
 |---|---|---|
@@ -528,7 +531,7 @@ Non-modal dock like the Studio's. Keys in brackets (context `BuilderPlay`).
 | Enemies | Kill all [K] | `KillAllEnemies` |
 | Spawn | unit picker (catalog + pack units, icons) × count [1-50] · elite · at: cursor click / a spawn line | new (W2): instantiate like `Spawn.Update` (decompiled `Spawn.cs:140-180`), with `IUnitFactory.Resolve` for pack units, the night's difficulty scaling and elite material, so enemies path to targets as in a wave |
 | Teleport | T then click the ground (Shift-click keeps it armed, right click cancels) · Bring followers toggle | `PlayerMovement.TeleportTo` + followers via `GetNearestGroundPosition` (as `TeleporterManager.cs:201-226`) |
-| Restart | Restart play from the same spot (R) | the same fast swap, Play → Play |
+| Restart | Restart play from the same spot [Cmd+R on macOS, Ctrl+R elsewhere] | the same fast swap, Play → Play, always a fresh day 1 (every Studio load drops the play run's in-memory match save); once per press: the key must be let go before it acts again |
 | Back | Back to the Studio [F5] | swap to Edit |
 
 - Play mode starts in day 1 planning time. "Start night N" jumps straight to that night.
@@ -1506,6 +1509,10 @@ the Place tool), `PickOnMap`, `AddViewToggle`, `AddDeleteGuard` (W3's "this slot
   `GroundGraphs.Scan`; `LayoutScene.Ground` reads the terrain first; `LevelDef.terrain`; the Start popup's Flat field
   is switched on by `StartPopup.FlatFieldAvailable`.
 - Anything that rescans the graphs must use `GroundGraphs.Scan`, never `AstarPath.Scan` (see "T0 results").
+- Route checks judge the layout only. Standing buildings cut the navmesh (the game's `NavmeshCut`s, on while the
+  building is alive), so a built wall across a road closes it as the game means it to; while any non-castle building
+  stands (`PathCheck.BuiltCutters`: a resumed run, a retried day, a loaded savestate) no route is reported blocked and
+  the level-start check logs "closed by the N buildings standing" instead of warning the player.
 
 ### W6: agent integration (as built)
 
