@@ -21,10 +21,10 @@ namespace PalaceMod.Builder.Studio.Enemies
         private static ModDock dock;
         private static ModDockPanel top, palette, right, arena, readout;
         private static TextMeshProUGUI title;
-        private static ModTile undoTile, redoTile, turnTile, walkTile, problemsTile, saveTile, fightTile;
+        private static ModTile backTile, undoTile, redoTile, turnTile, walkTile, problemsTile, saveTile, fightTile;
         private static bool dirtyTop, dirtyPalette, dirtyRight, dirtyArena, dirtyReadout;
         private static float readoutAt;
-        private static int arenaVersion;
+        private static int arenaVersion, testVersion;
 
         public static string PaletteTab = "enemies", PanelTab = "stats", LookSource = "scenery", LookFilter = "";
         public static bool PointerOverPanel => dock?.Over(StudioInput.Mouse) == true;
@@ -108,6 +108,7 @@ namespace PalaceMod.Builder.Studio.Enemies
             if (fresh || title == null) BuildAll();
             if (ModTextInput.Active) return;
             if ((EnemyArena.Running && Time.unscaledTime >= readoutAt) || EnemyArena.Version != arenaVersion) { arenaVersion = EnemyArena.Version; dirtyReadout = dirtyTop = true; }
+            if ((Entities.EntityTest.Running && Time.unscaledTime >= readoutAt) || Entities.EntityTest.Version != testVersion) { testVersion = Entities.EntityTest.Version; dirtyReadout = dirtyTop = true; }
             if (dirtyTop) { dirtyTop = false; UpdateTop(); }
             if (dirtyPalette) { dirtyPalette = false; BuildPalette(); }
             if (dirtyRight) { dirtyRight = false; BuildRight(); }
@@ -136,10 +137,11 @@ namespace PalaceMod.Builder.Studio.Enemies
             var body = top.Body;
             float h = body.rect.height > 1f ? body.rect.height : TopH - 2 * ModDockPanel.Padding;
             float x = 0f;
-            var back = Button(body, "Back", new Vector2(EnemyStudio.FromLevel ? 150f : 120f, h), null, EnemyStudio.FromLevel ? "← Level" : "← Leave", EnemyStudio.Back,
-                EnemyStudio.FromLevel ? "Back to the level" : "Leave", () => EnemyStudio.FromLevel ? "Returns to the Level Studio as you left it (Esc)." : "Leaves the arena (Esc). Unsaved changes stay until you leave the Builder.");
-            back.Place(new Vector2(x, 0f));
-            x += back.Rect.sizeDelta.x + 14f;
+            backTile = Button(body, "Back", new Vector2(150f, h), null, BackLabel(), EnemyStudio.Back, "Back", () =>
+                Entities.EntityStudio.ReturnUnit != null ? "Back to the enemy whose attack you came from (Esc)."
+                : EnemyStudio.FromLevel ? "Returns to the Level Studio as you left it (Esc)." : "Leaves the arena (Esc). Unsaved changes stay until you leave the Builder.");
+            backTile.Place(new Vector2(x, 0f));
+            x += backTile.Rect.sizeDelta.x + 14f;
             title = GameWidgets.Text(body, "Title", "", ModStyle.BoldFont, 26f, ModStyle.Gold, TextAlignmentOptions.MidlineLeft);
             title.enableWordWrapping = false;
             title.overflowMode = TextOverflowModes.Ellipsis;
@@ -178,8 +180,11 @@ namespace PalaceMod.Builder.Studio.Enemies
             UpdateTop();
         }
 
+        private static string BackLabel() => Entities.EntityStudio.ReturnUnit != null ? "← Enemy" : EnemyStudio.FromLevel ? "← Level" : "← Leave";
+
         public static void Fight()
         {
+            if (Entities.EntityStudio.Active) { Entities.EntityPanels.Test(); dirtyReadout = dirtyTop = true; return; }
             if (EnemyArena.Running) { EnemyArena.Clear(); dirtyReadout = dirtyTop = true; return; }
             try
             {
@@ -193,8 +198,9 @@ namespace PalaceMod.Builder.Studio.Enemies
         private static List<ValidationIssue> Issues()
         {
             var d = EnemyStudio.Draft;
-            if (d == null || EnemyStudio.UnitIndex < 0) return [];
-            string prefix = $"units[{EnemyStudio.UnitIndex}]";
+            int at = Entities.EntityStudio.Active ? Entities.EntityStudio.Index : EnemyStudio.UnitIndex;
+            if (d == null || at < 0) return [];
+            string prefix = Entities.EntityStudio.Active ? $"entities[{at}]" : $"units[{at}]";
             return d.Issues.Where(i => i.Path != null && (i.Path == prefix || i.Path.StartsWith(prefix + "."))).ToList();
         }
 
@@ -207,12 +213,30 @@ namespace PalaceMod.Builder.Studio.Enemies
             var d = EnemyStudio.Draft;
             var u = EnemyStudio.Unit;
             string dot = d?.Dirty == true ? $"  <color=#{ModStyle.Hex(ModStyle.Accent)}>●</color> <size=70%>unsaved</size>" : "";
-            title.text = $"{Esc(u?.Name ?? u?.Id ?? "")} {Dim("· " + Esc(d?.Pack.Name ?? d?.Pack.Id ?? ""))}{dot}";
+            if (Entities.EntityStudio.Active)
+            {
+                var e = Entities.EntityStudio.Entity;
+                title.text = e == null ? $"New thing {Dim("· " + Esc(d?.Pack.Name ?? d?.Pack.Id ?? ""))}{dot}"
+                    : $"{Esc(e.Name ?? e.Id)} {Dim("· " + Entities.ThingKinds.Label(Entities.EntityStudio.Kind) + " · " + Esc(d?.Pack.Name ?? d?.Pack.Id ?? ""))}{dot}";
+            }
+            else title.text = $"{Esc(u?.Name ?? u?.Id ?? "")} {Dim("· " + Esc(d?.Pack.Name ?? d?.Pack.Id ?? ""))}{dot}";
+            backTile?.SetText(BackLabel());
             undoTile?.SetDim(d?.History.CanUndo != true);
             redoTile?.SetDim(d?.History.CanRedo != true);
             turnTile?.SetOn(EnemyStage.Turning);
             walkTile?.SetOn(EnemyStudio.PreviewWalk);
-            fightTile?.SetText(EnemyArena.Running ? "Stop" : "Fight");
+            if (Entities.EntityStudio.Active)
+            {
+                fightTile?.gameObject.SetActive(Entities.EntityStudio.Entity != null);
+                fightTile?.SetText(Entities.EntityTest.Running ? "Stop" : Entities.EntityStudio.IsProjectile ? "Launch" : "Try");
+                walkTile?.gameObject.SetActive(false);
+            }
+            else
+            {
+                fightTile?.gameObject.SetActive(true);
+                walkTile?.gameObject.SetActive(true);
+                fightTile?.SetText(EnemyArena.Running ? "Stop" : "Fight");
+            }
             var issues = Issues();
             if (problemsTile != null)
             {
@@ -228,7 +252,7 @@ namespace PalaceMod.Builder.Studio.Enemies
             StudioDock.Tabs(page, tabs, current, pick, perRow, 20f);
 
         /// <summary>A grid of tiles filling the page's width.</summary>
-        private static void Grid<T>(ModPage page, string name, IReadOnlyList<T> items, float size, Func<T, (string key, Sprite icon, string text, string badge, bool on, string tip, string body)> look,
+        internal static void Grid<T>(ModPage page, string name, IReadOnlyList<T> items, float size, Func<T, (string key, Sprite icon, string text, string badge, bool on, string tip, string body)> look,
             Action<T> click)
         {
             const float gap = 8f;
@@ -251,24 +275,29 @@ namespace PalaceMod.Builder.Studio.Enemies
             }
         }
 
-        private static string Short(string name) => string.IsNullOrEmpty(name) ? "?" : name.Length <= 12 ? name : name.Substring(0, 11) + "…";
+        internal static string Short(string name) => string.IsNullOrEmpty(name) ? "?" : name.Length <= 12 ? name : name.Substring(0, 11) + "…";
 
         // ---- Palette --------------------------------------------------------------------------------------------------
 
-        private static readonly (string id, string label)[] PaletteTabs = [("enemies", "Enemies"), ("base", "Base"), ("look", "Look")];
+        private static (string id, string label)[] PaletteTabs => Entities.EntityStudio.Active
+            ? [("enemies", "Enemies"), ("things", "Things"), ("look", "Look")]
+            : [("enemies", "Enemies"), ("things", "Things"), ("base", "Base"), ("look", "Look")];
 
         private static void BuildPalette()
         {
             if (palette?.Body == null) return;
             palette.Fill(page =>
             {
-                Tabs(page, PaletteTabs, () => PaletteTab, id => { PaletteTab = id; dirtyPalette = true; }, 3);
+                var tabs = PaletteTabs;
+                if (tabs.All(t => t.id != PaletteTab)) PaletteTab = tabs[0].id;
+                Tabs(page, tabs, () => PaletteTab, id => { PaletteTab = id; dirtyPalette = true; }, tabs.Length);
                 try
                 {
                     switch (PaletteTab)
                     {
                         case "base": BasePalette(page); break;
                         case "look": LookPalette(page); break;
+                        case "things": Entities.EntityPanels.Palette(page); break;
                         default: EnemiesPalette(page); break;
                     }
                 }
@@ -285,7 +314,7 @@ namespace PalaceMod.Builder.Studio.Enemies
         private static void EnemiesPalette(ModPage page)
         {
             var list = EnemyStudio.Enemies.ToList();
-            var cur = EnemyStudio.Unit;
+            var cur = Entities.EntityStudio.Active ? null : EnemyStudio.Unit;
             Grid(page, "Enemy", list.Cast<object>().Append("+").ToList(), 82f, o =>
             {
                 if (o is UnitDef u)
@@ -342,7 +371,9 @@ namespace PalaceMod.Builder.Studio.Enemies
             page.TextInput("Filter", () => LookFilter, v => { LookFilter = v ?? ""; dirtyPalette = true; });
             string f = LookFilter?.Trim() ?? "";
             bool Match(params string[] s) => f.Length == 0 || s.Any(x => x != null && x.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0);
-            var items = new List<LookItem> { new() { Ref = null, Name = "Base", Body = "The base unit's own model." } };
+            bool thing = Entities.EntityStudio.Active;
+            if (thing && Entities.EntityStudio.Entity == null) { page.Text(Dim("Pick the kind of the new thing first.")); return; }
+            var items = new List<LookItem> { thing ? new() { Ref = null, Name = "None", Body = "No model: an invisible thing (its outlines still show on the stage)." } : new() { Ref = null, Name = "Base", Body = "The base unit's own model." } };
             switch (LookSource)
             {
                 case "units":
@@ -365,13 +396,17 @@ namespace PalaceMod.Builder.Studio.Enemies
                             items.Add(new LookItem { Ref = e.Ref, Name = e.Name.Replace('_', ' '), Icon = LibraryThumbs.Get(e), Badge = SceneryCatalog.DisplayMap(e.Home)?.Substring(0, Math.Min(3, SceneryCatalog.DisplayMap(e.Home)?.Length ?? 0)), Body = $"{e.Category} · {SceneryCatalog.DisplayMap(e.Home)}" });
                     break;
             }
-            string current = EnemyStudio.Unit?.Visuals?.Mesh;
+            string current = thing ? Entities.EntityStudio.Entity?.Visual?.Mesh : EnemyStudio.Unit?.Visuals?.Mesh;
+            void Pick(VisualsDef v, string mesh)
+            {
+                v.Mesh = mesh;
+                if (mesh == null) { v.MeshScale = v.MeshRotX = v.MeshRotY = v.MeshRotZ = null; v.MeshOffset = null; v.MeshLook = null; }
+            }
             Grid(page, "Look", items, 82f, it => (it.Ref ?? "base", it.Icon, Short(it.Name), it.Badge, it.Ref == current, it.Name, it.Body), it =>
-                EnemyStudio.EditVisuals(it.Ref == null ? "Use the base model" : $"Model: {it.Name}", v =>
-                {
-                    v.Mesh = it.Ref;
-                    if (it.Ref == null) { v.MeshScale = v.MeshRotX = v.MeshRotY = v.MeshRotZ = null; v.MeshOffset = null; v.MeshLook = null; }
-                }, structural: true));
+            {
+                if (thing) Entities.EntityStudio.EditVisual(it.Ref == null ? "No model" : $"Model: {it.Name}", v => Pick(v, it.Ref), structural: true);
+                else EnemyStudio.EditVisuals(it.Ref == null ? "Use the base model" : $"Model: {it.Name}", v => Pick(v, it.Ref), structural: true);
+            });
             LibraryThumbs.Rendered -= OnThumbs;
             LibraryThumbs.Rendered += OnThumbs;
         }
@@ -418,6 +453,13 @@ namespace PalaceMod.Builder.Studio.Enemies
             if (right?.Body == null) return;
             right.Fill(page =>
             {
+                if (Entities.EntityStudio.Active)
+                {
+                    page.FieldIndent = 200f;
+                    try { Entities.EntityPanels.Inspector(page, (list, current, pick) => Tabs(page, list, current, pick, list.Count)); }
+                    catch (Exception e) { Log.For<BuilderManager>().Caught("Entity Studio inspector failed", e); }
+                    return;
+                }
                 var tabs = Tabs();
                 if (tabs.All(t => t.id != PanelTab)) PanelTab = "stats";
                 Tabs(page, tabs, () => PanelTab, id => { PanelTab = id; dirtyRight = true; }, 3);
@@ -499,6 +541,7 @@ namespace PalaceMod.Builder.Studio.Enemies
             arena.Fill(page =>
             {
                 page.FieldIndent = 170f;
+                if (Entities.EntityStudio.Active) { Entities.EntityPanels.Arena(page); return; }
                 StudioDock.SmallHeader(page, "Arena");
                 page.Number("Enemies", () => EnemyArena.Count, x => { EnemyArena.Count = x; dirtyReadout = true; }, 1, 50, 1, tooltip: () => "How many copies fight.");
                 page.Toggle("Elite", () => EnemyArena.Elite, x => { EnemyArena.Elite = x; dirtyReadout = true; }, () => Descriptions.For(DescKind.Flag, "Elite") ?? "Elite enemies: ×4 hit points, ×3 damage, the elite look.");
@@ -578,6 +621,7 @@ namespace PalaceMod.Builder.Studio.Enemies
             if (readout?.Body == null) return;
             readout.Fill(page =>
             {
+                if (Entities.EntityStudio.Active) { Entities.EntityPanels.Readout(page); return; }
                 var u = EnemyStudio.Unit;
                 if (u == null) return;
                 var e = EnemyStudio.Effective();

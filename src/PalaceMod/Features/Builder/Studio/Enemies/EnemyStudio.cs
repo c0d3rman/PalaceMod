@@ -124,7 +124,11 @@ namespace PalaceMod.Builder.Studio.Enemies
         }
 
         /// <summary>Back: to the Level Studio (exactly as it was) or out of the arena.</summary>
-        public static void Back() => Close(returnToLevel: true);
+        public static void Back()
+        {
+            if (Entities.EntityStudio.Back()) return;
+            Close(returnToLevel: true);
+        }
 
         public static void Close(bool returnToLevel)
         {

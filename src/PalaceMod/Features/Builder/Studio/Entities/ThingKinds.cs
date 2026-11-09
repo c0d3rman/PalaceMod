@@ -11,7 +11,7 @@ using PalaceMod.Builder.Model.Logic;
 */
 namespace PalaceMod.Builder.Studio.Entities
 {
-    internal static class EntityKinds
+    internal static class ThingKinds
     {
         public sealed class Kind
         {

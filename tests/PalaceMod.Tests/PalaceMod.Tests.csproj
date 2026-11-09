@@ -61,6 +61,7 @@
     <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Terrain/TerrainBrushes.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Level/UnitSpread.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Enemies/EnemyMath.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Entities/ThingKinds.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Logic/LogicCatalog.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Logic/LogicDoc.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Logic/RuleText.cs" />
