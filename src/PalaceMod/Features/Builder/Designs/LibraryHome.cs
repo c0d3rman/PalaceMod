@@ -33,7 +33,8 @@ namespace PalaceMod.Builder
             {
                 frame = new ModFrame("Builder")
                     .AddTab("My Levels", page => Build(page, DesignKind.Level), wide: true)
-                    .AddTab("My Enemies", page => Build(page, DesignKind.Enemy), wide: true);
+                    .AddTab("My Enemies", page => Build(page, DesignKind.Enemy), wide: true)
+                    .AddTab("My Things", BuildThings, wide: true);
                 DesignLibrary.Changed += () => { if (frame.IsOpen && ModPopup.Current == null) frame.Refresh(); };
             }
             frame.Open();
@@ -99,6 +100,44 @@ namespace PalaceMod.Builder
                 page.Header(levels ? "From installed packs" : "Enemies in installed packs");
                 Grid(page, width, installed.Count, (parent, i, at, size) => InstalledTile(parent, installed[i], kind, at, size));
             }
+        }
+
+        /// <summary>My Things: the library's non-unit templates (projectiles, props, pickups, areas, logic objects),
+        /// opened in the Entity Studio (Studio/Entities).</summary>
+        private static void BuildThings(ModPage page)
+        {
+            var lib = DesignLibrary.Store;
+            if (EditorCatalog.Catalog == null || lib == null) { page.Text("The Builder is still loading. Try again in a moment."); return; }
+            float width = page.Size.x - 24f;
+            var bar = page.Custom("toolbar", BarH + Gap);
+            var tool = ModTile.Create(bar, "tool New thing", new Vector2(170f, BarH), null, "New thing", 20f);
+            tool.Label.alignment = TMPro.TextAlignmentOptions.Center;
+            tool.Place(Vector2.zero);
+            tool.Applied += () => OpenThing(null);
+            ModTooltip.Attach(tool, "New thing", () => "A projectile, prop, pickup, area or logic object for your enemies and levels");
+            page.AddElementRow([tool]);
+            var things = lib.LogicIds(LibraryStore.LogicKind.Entity).Select(lib.Entity).Where(e => e != null)
+                .OrderBy(e => e.Name ?? e.Id, StringComparer.OrdinalIgnoreCase).ToList();
+            if (things.Count == 0) page.Text("No things yet. Design a projectile for an enemy to throw, a pickup or a prop with rules.");
+            Grid(page, width, things.Count, (parent, i, at, size) =>
+            {
+                var e = things[i];
+                string kind = Studio.Entities.ThingKinds.Label(Studio.Entities.ThingKinds.Of(e));
+                var tile = Card(parent, "thing " + e.Id, at, size, e.Name ?? e.Id, kind + (e.Visual?.Mesh != null ? " · " + e.Visual.Mesh : ""),
+                    Studio.Entities.EntityStudio.PortraitFor(DesignLibrary.PackId, e.Id));
+                tile.Key = e.Id;
+                tile.Applied += () => OpenThing(e.Id);
+                ModTooltip.Attach(tile, e.Name ?? e.Id, () => $"{kind}. Id: {e.Id}.\nClick to open in the Entity Studio.");
+                return tile;
+            });
+        }
+
+        internal static void OpenThing(string id)
+        {
+            var draft = DesignLibrary.OpenEnemies();
+            if (draft == null || Studio.StudioServices.Entities == null) return;
+            if (!Studio.StudioServices.Entities.Open(draft, id, null, _ => Refresh(), out string error))
+                Notify.Show("Can't open the Entity Studio: " + error, NotifyKind.Error, 5f, "builder-library");
         }
 
         private delegate ModTile TileMaker(RectTransform parent, int index, Vector2 at, Vector2 size);

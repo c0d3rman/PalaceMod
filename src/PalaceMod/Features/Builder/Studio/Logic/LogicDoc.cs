@@ -19,10 +19,12 @@ using PalaceMod.Builder.Model;
       attach:<key>     levels[i].logic.attach[<Studio key>]   (slot:…, add:…, prop:…, line:…, castle)
       place:<id>       levels[i].logic.places[id == <id>]
       unit             units[i] (rules, vars, labels, targeting, movement, attacks, statuses)
+      entity           entities[i] (a non-unit template: the whole EntityDef)
+      status           statuses[i] (a status: its mods, flags, look and rules)
 */
 namespace PalaceMod.Builder.Studio.Logic
 {
-    internal enum OwnerKind { Level, Attach, Place, Unit }
+    internal enum OwnerKind { Level, Attach, Place, Unit, Entity, Status }
 
     internal static class LogicDoc
     {
@@ -154,6 +156,49 @@ namespace PalaceMod.Builder.Studio.Logic
             var node = UnitNode(u);
             change(node);
             foreach (var f in UnitFields) Set(u, f, node[f]);
+        }
+
+        /// <summary>A non-unit template as JSON (a copy; null when the pack has none by that id).</summary>
+        public static JObject EntityNode(DesignPack pack, string id)
+        {
+            var e = pack?.FindEntity(id);
+            return e == null ? null : JObject.FromObject(e, Json);
+        }
+
+        public static JObject StatusNode(DesignPack pack, string id)
+        {
+            var e = pack?.FindStatus(id);
+            return e == null ? null : JObject.FromObject(e, Json);
+        }
+
+        /// <summary>Edits a non-unit template in place (inside a draft edit): the JSON round-trips into the typed def.</summary>
+        public static void EditEntity(DesignPack pack, string id, Action<JObject> change) => EditDef(pack?.Entities, id, e => e.Id, change, "thing");
+
+        public static void EditStatus(DesignPack pack, string id, Action<JObject> change) => EditDef(pack?.Statuses, id, e => e.Id, change, "status");
+
+        private static void EditDef<T>(List<T> list, string id, Func<T, string> idOf, Action<JObject> change, string what)
+        {
+            int i = list?.FindIndex(e => e != null && idOf(e) == id) ?? -1;
+            if (i < 0) throw new InvalidOperationException($"no {what} \"{id}\"");
+            var node = JObject.FromObject(list[i], Json);
+            change(node);
+            foreach (var p in node.Properties().ToList()) if (IsEmpty(p.Value) && p.Name is not ("id" or "kind")) p.Remove();
+            node["id"] = id;
+            list[i] = node.ToObject<T>(Json);
+        }
+
+        /// <summary>The template a place names, as JSON (pack entities), or null.</summary>
+        public static JObject TemplateOf(DesignPack pack, JObject place) =>
+            place?["entity"] is JValue v && v.Type == JTokenType.String ? EntityNode(pack, (string)v) : null;
+
+        /// <summary>What a place really is: its template's fields with the place's own on top (component by component,
+        /// as the engine merges them).</summary>
+        public static JObject Effective(DesignPack pack, JObject place)
+        {
+            if (place == null) return null;
+            var def = TemplateOf(pack, place) ?? new JObject();
+            foreach (var p in place.Properties()) def[p.Name] = p.Value.DeepClone();
+            return def;
         }
 
         public static JArray Rules(JObject node) => node?["rules"] as JArray;

@@ -92,8 +92,7 @@ namespace PalaceMod.Builder.Studio.Logic
                     () => RuleEditor.OpenPicker($"Wire: {source.Title} → {target.Title}", p => TargetPage(p, source, target, ev, Params(prms))));
             }
             StudioDock.SmallHeader(page, "Events");
-            string kind = source.Kind == OwnerKind.Place ? PlaceItems.KindOf(source.Id) : null;
-            var events = LogicCatalog.Events.Where(e => e.CanOf && (e.Owners == null || (kind != null && e.Owners.Contains(kind))) || e.Owners?.Contains(kind) == true)
+            var events = LogicCatalog.Events.Where(e => e.CanOf && e.Owners == null || e.Owners != null && source.Has(e.Owners))
                 .OrderByDescending(e => e.Common).ThenBy(e => Array.IndexOf(LogicCatalog.EventCategories, e.Category)).ToList();
             foreach (var e in events)
             {

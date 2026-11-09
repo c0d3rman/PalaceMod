@@ -291,7 +291,7 @@ namespace PalaceMod.Builder.Studio.Logic
                 bool spawns = ui.Name is "spawn" or "launch";
                 foreach (var nested in ui.Nested)
                 {
-                    page.Text(LogicFields.Dim($"{indent}{LogicCatalog.Humanize(nested)}{(spawns && nested == "then" ? " (spawned: the new one)" : nested == "onImpact" ? " (other: what it hit)" : "")}"));
+                    page.Text(LogicFields.Dim($"{indent}{LogicCatalog.Humanize(nested)}{(spawns && nested == "then" ? " (spawned: the new one)" : nested == "onImpact" ? " (other: the thing it hit)" : "")}"));
                     var child = path.ToList();
                     child.Add((index, nested));
                     ActionList(page, rule, child, ev, depth + 1, spawned || (spawns && nested == "then"));
@@ -418,7 +418,7 @@ namespace PalaceMod.Builder.Studio.Logic
 
         private static void EventPicker(ModPage page)
         {
-            var events = LogicCatalog.Events.Where(e => e.Owners == null || Owner.Kind == OwnerKind.Place && PlaceItems.KindOf(Owner.Id) is string k && e.Owners.Contains(k)).ToList();
+            var events = LogicCatalog.Events.Where(e => e.Owners == null || Owner.Has(e.Owners)).ToList();
             Pickers.Catalog(page, events, e => e.Category, e => e.Common, e => (e.Owners == null && e.CanOf && Owner.Kind != OwnerKind.Level ? "this " : "") + e.Phrase.Replace("{", "").Replace("}", ""), e => e.Desc, e => e.Name,
                 LogicCatalog.EventCategories, e => Owner.EditRule(Rule, "Set event", r =>
                 {

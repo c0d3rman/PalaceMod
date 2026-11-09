@@ -155,6 +155,7 @@ namespace PalaceMod.Builder.Studio.Logic
                 var lp = new ParamUi { Name = "entity", Label = "Launches", Kind = ParamKind.Template, Desc = "A projectile (or anything) it throws." };
                 LogicFields.Param(page, "   Launches", lp, () => A()?["launch"]?["entity"], (v, l) => Set("launch", v == null ? null : new JObject { ["entity"] = v }, l), scope,
                     () => OpenTemplatePicker(t => Set("launch", t == null ? null : new JObject { ["entity"] = t }, "Set launch")));
+                ThingButtons(page, owner, index, (string)A()?["launch"]?["entity"]);
                 page.Toggle("   Replaces the base's", () => A()?["replace"]?.Type == JTokenType.Boolean && (bool)A()["replace"],
                     v => Set("replace", v ? new JValue(true) : null, "Set replace"), () => "On: the base's own attack goes.");
                 LogicFields.Action(page, "   Remove", () => owner.Edit("Remove attack", n => ((JArray)n["attacks"]).RemoveAt(index)));
@@ -164,6 +165,43 @@ namespace PalaceMod.Builder.Studio.Logic
                 if (n["attacks"] is not JArray arr) n["attacks"] = arr = new JArray();
                 arr.Add(new JObject { ["cooldown"] = 3, ["range"] = 12, ["targeting"] = new JArray("foe") });
             }), "Throws something every few seconds (a projectile from the pack's things).");
+        }
+
+        /// <summary>Under "Launches": pick one of the draft's things, edit the one it launches, or design a new
+        /// projectile, in the Entity Studio (Back returns here).</summary>
+        private static void ThingButtons(ModPage page, LogicOwner owner, int index, string launched)
+        {
+            var draft = EnemyStudio.Draft;
+            if (draft == null) return;
+            string unit = EnemyStudio.UnitId;
+            bool isThing = launched != null && draft.Pack.FindEntity(launched) != null;
+            void SetLaunch(string id) => owner.Edit("Launch " + id, n =>
+            {
+                if ((n["attacks"] as JArray)?[index] is not JObject a) return;
+                if (a["launch"] is not JObject l) a["launch"] = l = new JObject();
+                l["entity"] = id;
+            });
+            LogicFields.Buttons(page,
+                ("Pick a thing", () => LogicStudio.OpenSide("Launches…", p =>
+                {
+                    var things = Entities.ThingKinds.Launchable(draft.Pack);
+                    if (things.Count == 0) p.Text(LogicFields.Dim("No things yet: New projectile designs one."));
+                    foreach (var t in things)
+                    {
+                        string id = t.Id;
+                        StudioDock.DetailRow(p, LogicFields.Esc(t.Name ?? t.Id), LogicFields.Esc(Entities.ThingKinds.Label(Entities.ThingKinds.Of(t)) + " · " + t.Id), id == launched, null,
+                            () => { RuleEditor.Close(); SetLaunch(id); });
+                    }
+                }), "One of this pack's things (projectiles first)."),
+                ("Edit…", isThing ? () => { RuleEditor.Close(); Entities.EntityStudio.Enter(launched, unit); } : null, "Opens it in the Entity Studio; Back returns here."),
+                ("New projectile…", () =>
+                {
+                    RuleEditor.Close();
+                    string id = Entities.EntityStudio.Create(draft, "projectile");
+                    if (id == null) return;
+                    SetLaunch(id);
+                    Entities.EntityStudio.Enter(id, unit);
+                }, "Designs a new projectile in the Entity Studio and launches it from this attack."));
         }
 
         private static void OpenTemplatePicker(Action<JToken> set)

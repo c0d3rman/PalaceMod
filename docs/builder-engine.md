@@ -1031,6 +1031,18 @@ limits), and `reference.md` gets the generated schema.
   change nights, end the level, set level variables or signal everyone.
 - **Enemy Studio**: Behaviour replaces Abilities; a Moves tab edits targeting (ordered filters with range and
   preference), movement (mode, speed, keep away, kite, wander, flee) and extra attacks (`EnemyDock.AddTab`).
+- **Entity Studio** (`Studio/Entities/`, docs/builder-ux.md "Entity Studio"): non-unit templates are a "things" mode
+  of the Enemy Studio (same stage, dock, undo history and Back), not a second tool. A kind picker (projectile, prop,
+  pickup, area, logic object) makes a thing with its kind's parts; tabs Look (model fit and tint), Parts
+  (`PartsPanel`) and Behaviour (variables and rules). The turntable shows the look built by the runtime's own
+  `BodyVisual` plus line gizmos (body footprint, area shape, pickup reach, hit radius). **Launch** runs the thing
+  through the real engine in a throwaway world (`LogicManager.StartStudioWorld`, the arena fight's kind): a projectile
+  is launched with `Launcher.Launch` at a 1000 hp dummy (optionally strolling across the line of fire) and its impact
+  rules run; other kinds are spawned on the stage for 6 s. A moving target exposes a real property of `homing`: below
+  about 0.9 at 9-10 m/s a missile that misses circles its target (a turn rate, not a guarantee) until its lifetime
+  ends. Entry points: an attack's Launches (Pick a thing / Edit… / New projectile…, Back returns to the enemy),
+  `StudioServices.Entities.Open(draft, templateId, newKind, onReturn, out error)`, `LogicStudio.OpenEntityStudio`, the
+  palette's Things tab, the library's My Things tab. `BodyVisual` now applies `meshRotZ` and `meshOffset`.
 - **Play mode**: a "Logic" play panel with live level variables (editable), Send a signal, the trace in words (the
   rule's sentence, its value and other, throttles and errors in red) and the count of spawned things; rule cards show
   "fired N×"; a pip rises over a thing when its rule fires (View ▾ Rule pips).

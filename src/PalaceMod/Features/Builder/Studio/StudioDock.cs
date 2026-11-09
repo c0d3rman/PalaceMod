@@ -173,7 +173,7 @@ namespace PalaceMod.Builder.Studio
             if (dirtyPalette) { dirtyPalette = false; BuildPalette(); }
             if (dirtyInspector || dirtyLevel)
             {
-                bool rebuild = PanelTab switch { "inspector" => dirtyInspector || dirtyLevel, "outliner" => dirtyLevel || dirtyInspector, _ => dirtyLevel };
+                bool rebuild = PanelTab switch { "inspector" => dirtyInspector || dirtyLevel, "outliner" => dirtyLevel || dirtyInspector, _ => dirtyLevel || (dirtyInspector && PanelTab.StartsWith("panel:")) };
                 dirtyInspector = dirtyLevel = false;
                 if (rebuild) BuildRight();
             }
