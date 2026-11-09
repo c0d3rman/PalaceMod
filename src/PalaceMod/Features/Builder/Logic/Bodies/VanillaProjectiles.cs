@@ -24,7 +24,11 @@ namespace PalaceMod.Builder.Logic.Bodies
         {
             public LogicEntity Entity;
             public float SavedSpeed;
+            public bool Slowed, Drifted;
         }
+
+        /// <summary>Dev counters: projectiles whose flight a stat scaled / a drift moved, and redirects.</summary>
+        public static int SlowedTotal, DriftedTotal, RedirectedTotal;
 
         private static readonly HashSet<AimbotProjectile> live = [];
         private static readonly ConditionalWeakTable<AimbotProjectile, State> states = new();
@@ -106,11 +110,13 @@ namespace PalaceMod.Builder.Logic.Bodies
             float scale = BodyTime.Scale(s.Entity) * Stat(s.Entity, "projectileSpeed");
             s.SavedSpeed = speedRef(p);
             speedRef(p) = s.SavedSpeed * scale;
+            if (!s.Slowed && Mathf.Abs(scale - 1f) > 0.01f) { s.Slowed = true; SlowedTotal++; }
             if (Drifts.Any)
             {
                 var d = Drifts.Velocity(s.Entity) * Time.deltaTime * BodyTime.Scale(s.Entity);
                 if (d != Vector3.zero)
                 {
+                    if (!s.Drifted) { s.Drifted = true; DriftedTotal++; }
                     linearRef(p) += d;
                     // Without a target it flies at a remembered point: the wind carries that too.
                     if (targetRef(p) == null) p.rememberTarget += d;
@@ -157,6 +163,7 @@ namespace PalaceMod.Builder.Logic.Bodies
                 p.rememberTarget = point ?? target?.Position.ToVector3() ?? p.rememberTarget;
             }
             rangeRef(p) = Mathf.Max(rangeRef(p), Vector3.Distance(start, p.rememberTarget) + 0.5f);
+            RedirectedTotal++;
             return true;
         }
 
