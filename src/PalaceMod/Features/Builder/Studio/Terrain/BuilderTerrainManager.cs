@@ -19,7 +19,7 @@ namespace PalaceMod
             Builder.Studio.Terrain.TerrainTool.Register();
             Builder.Studio.Start.StartPopup.FlatFieldAvailable = true;
             DevCommands.Register("builder-terrain",
-                "builder-terrain spike graphs|helper|king|ground|mats|paints|water|update|scan | flat [cell] | grid | raise <x> <z> <r> <m> [soft] | flatten <x> <z> <r> <h> [soft] | " +
+                "builder-terrain spike graphs|clippers|helper|king|ground|mats|paints|water|update|scan | flat [cell] | grid | raise <x> <z> <r> <m> [soft] | flatten <x> <z> <r> <h> [soft] | " +
                 "smooth <x> <z> <r> | ramp <ax> <az> <ah> <bx> <bz> <bh> <width> | paint <x> <z> <r> <material> | block|unblock|water|dry <x> <z> <r> | " +
                 "waterlevel <m> | scan | encode | clear   terrain dev tools", args =>
                 {

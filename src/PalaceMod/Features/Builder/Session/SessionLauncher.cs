@@ -222,9 +222,14 @@ namespace PalaceMod.Builder
             var pack = request?.Pack;
             if (pack == null) { error = "no pack"; return false; }
 
-            // A level is checked with only what it plays (its nights and their units): a broken level elsewhere in the
-            // pack (the library holds every level the player has) mustn't block it.
-            var checkedPack = request.LevelId != null ? Studio.Play.TestPacks.Play(pack, request.LevelId, out _) ?? pack : pack;
+            // The library is one pack of unrelated levels: only this level, its nights and their enemies must be valid
+            // (a broken level elsewhere in the library must not block it). A shared pack is checked whole.
+            var checkedPack = pack;
+            if (pack.Id == DesignLibrary.PackId && request.LevelId != null)
+            {
+                checkedPack = Studio.Play.TestPacks.Play(pack, request.LevelId, out string playError);
+                if (checkedPack == null) { error = playError; return false; }
+            }
             var errors = BuilderServices.Packs.Validate(checkedPack).Where(i => i.Severity == Severity.Error).ToList();
             if (errors.Count > 0) { error = $"{pack.Name ?? pack.Id} has {errors.Count} error(s): {string.Join("; ", errors.Take(3).Select(e => e.Message))}"; return false; }
 
