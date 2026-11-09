@@ -49,7 +49,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             if (go.GetComponent<PlayerMovement>() is { } king) { king.TeleportTo(at); return; }
             var pm = go.GetComponent<PathfindMovement>();
             // Onto a riding deck (off the graphs): stand on it as given, and ride it (DeckCarrier).
-            if (Walkables.OnRidingDeck(at)) { go.transform.position = at; pm?.ClearCurrentPath(); return; }
+            if (Walkables.OnRidingDeck(at)) { go.transform.position = at; if (pm != null) DeckCarrier.Board(pm); return; }
             if (pm is PathfindMovementEnemy en) at = Flyer(go) ? new Vector3(en.GetNearestGroundPosition(at).x, at.y, en.GetNearestGroundPosition(at).z) : en.GetNearestGroundPosition(at);
             else if (pm is PathfindMovementPlayerunit pu) at = Flyer(go) ? at : pu.GetNearestGroundPosition(at);
             go.transform.position = at;

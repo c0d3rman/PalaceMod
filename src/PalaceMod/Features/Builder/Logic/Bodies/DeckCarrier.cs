@@ -90,6 +90,21 @@ namespace PalaceMod.Builder.Logic.Bodies
                 }
                 stillAboard[id] = m;
             }
+            // Riders found by where they stand, not only by their colliders (a unit's hit collider may be missing or off).
+            foreach (var kv in aboard)
+                if (kv.Value != null && !stillAboard.ContainsKey(kv.Key) && OnTop(inv, kv.Value.transform.position)) stillAboard[kv.Key] = kv.Value;
+        }
+
+        /// <summary>A unit put on a riding deck's top (teleport) rides from this frame on: its movement must not run
+        /// before the carrier's next pass, or the game's navmesh snap drops it back to the ground.</summary>
+        public static void Board(PathfindMovement m)
+        {
+            if (m == null) return;
+            int id = m.gameObject.GetInstanceID();
+            m.ClearCurrentPath();
+            if (m.GetComponent<Pathfinding.RVO.RVOController>() is { } rvo) rvo.enabled = false;
+            aboard[id] = m;
+            Riding.Add(id);
         }
 
         private static void Land(PathfindMovement m)
@@ -145,6 +160,8 @@ namespace PalaceMod.Builder.Logic.Bodies
                 var m = overlap[i].GetComponentInParent<PathfindMovement>();
                 if (m != null && OnTop(inv, m.transform.position)) riders.Add(m.transform);
             }
+            foreach (var kv in aboard)
+                if (kv.Value != null && OnTop(inv, kv.Value.transform.position)) riders.Add(kv.Value.transform);
             var turn = Quaternion.LookRotation(now.GetColumn(2), now.GetColumn(1)) * Quaternion.Inverse(rot);
             foreach (var r in riders)
             {
