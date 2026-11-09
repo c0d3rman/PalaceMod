@@ -43,7 +43,12 @@ namespace PalaceMod
         // Metadata (also shown in the browser).
         public string name;
         public string kind;
+        /// <summary>What the state is filed under: the scene name, or "Builder/&lt;pack&gt;/&lt;level&gt;" (LevelPin.Key).</summary>
         public string level;
+        /// <summary>The scene it was captured in (null in states from before Builder levels had states: level is the scene).</summary>
+        public string scene;
+        /// <summary>The Builder level and its version, for states captured in a custom session; null otherwise.</summary>
+        public Builder.Model.LevelPin builder;
         public string createdUtc;
         /// <summary>EnemySpawner.Wavenumber at capture: -1 on the first day, n during night n+1 and the day after it.</summary>
         public int wave;

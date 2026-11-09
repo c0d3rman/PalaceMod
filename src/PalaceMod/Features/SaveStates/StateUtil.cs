@@ -85,14 +85,55 @@ namespace PalaceMod
     {
         public const string TutorialScene = "Neuland(Tutorial)";
 
-        /// <summary>A Builder custom design is running: same scene and mode as vanilla, but different waves and units.</summary>
-        public static bool CustomSession
+        /// <summary>The running Builder session, while its host is the active scene; null otherwise.</summary>
+        public static Builder.BuilderSessionInfo BuilderSession
         {
             get
             {
-                try { return Builder.BuilderServices.InSession; }
+                try
+                {
+                    var s = Builder.BuilderServices.Sessions.Current;
+                    return s != null && SceneManager.GetActiveScene().name == s.HostScene ? s : null;
+                }
+                catch (Exception) { return null; }
+            }
+        }
+
+        /// <summary>The Studio is editing the level (not test-playing it): no savestates there.</summary>
+        public static bool StudioEditing
+        {
+            get
+            {
+                try { return BuilderManager.Launcher?.Current != null && BuilderManager.Launcher.StudioKind == Builder.StudioSessionKind.Edit; }
                 catch (Exception) { return false; }
             }
+        }
+
+        private static (object pack, object level, object waveSet) pinFor;
+        private static Builder.Model.LevelPin pin;
+
+        /// <summary>The running custom level and its version (cached per session objects), or null in vanilla play.</summary>
+        public static Builder.Model.LevelPin BuilderPin
+        {
+            get
+            {
+                var s = BuilderSession;
+                if (s == null) return null;
+                var key = ((object)s.Pack, (object)s.Level, (object)s.WaveSet);
+                if (pin == null || !ReferenceEquals(pinFor.pack, key.Item1) || !ReferenceEquals(pinFor.level, key.Item2) || !ReferenceEquals(pinFor.waveSet, key.Item3))
+                {
+                    pin = Builder.Model.LevelPin.Of(s.Pack, s.Level, s.WaveSet);
+                    pinFor = key;
+                }
+                return pin;
+            }
+        }
+
+        /// <summary>Where the current level's states are filed: the Builder level's key in a custom session, else the scene.</summary>
+        public static string LevelKey(string scene)
+        {
+            var s = BuilderSession;
+            return s == null ? scene : Builder.Model.LevelPin.KeyOf(s.Pack?.Id, s.Level?.Id, s.WaveSet?.Id);
         }
 
         public static string StripClone(string name)

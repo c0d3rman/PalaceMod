@@ -47,6 +47,7 @@ namespace PalaceMod
         private static string LevelName()
         {
             string scene = SaveStates.CurrentLevel;
+            if (StateUtil.BuilderSession is { } session) return Builder.SessionLauncher.SessionName(session);
             var info = LevelProgressManager.instance?.GetLevelInfoFromCurrentSceneName();
             return info != null && !string.IsNullOrEmpty(info.displayName) ? info.displayName : scene;
         }

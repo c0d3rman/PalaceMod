@@ -30,6 +30,7 @@
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/UnitDef.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/WaveSetDef.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/LevelDef.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Model/LevelPin.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/ContentRef.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/Validation.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/Logic/*.cs" />

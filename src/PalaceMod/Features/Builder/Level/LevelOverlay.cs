@@ -114,6 +114,8 @@ namespace PalaceMod.Builder.Level
                 added++;
             }
             UnityEngine.Object.Destroy(holder);
+            // The game loaded its match save before these existed: let it save and load them too (retry day, savestates).
+            int loadedSlots = AddedSlotSaves.Join(scene, pack.Id, level.Id, clones.Select(c => (c.def.Id, c.slot.gameObject)));
 
             // Removals: deactivated before Start so the slot never registers; slots it unlocks never appear.
             var removals = new List<BuildSlot>();
@@ -164,7 +166,7 @@ namespace PalaceMod.Builder.Level
                 // The host's own scenery first, then the cross-map library (Library/SceneryLibrary).
                 if (prop.Base == null || !bases.TryGetValue(prop.Base, out var b)) b = Library.SceneryLibrary.Resolve(scene, prop.Base);
                 if (b == null) { issues.Add(Warn($"prop \"{prop.Id}\": no scenery \"{prop.Base}\" on {level.Host} or in the library")); continue; }
-                var go = LayoutScene.MakeProp(scene, b, prop.Id, LayoutScene.ToVector(prop.Pos), prop.RotY, Mathf.Clamp(prop.Scale, 0.1f, 10f), prop.Solid);
+                var go = LayoutScene.MakeProp(scene, b, prop.Id, LayoutScene.ToVector(prop.Pos), prop.RotY, Mathf.Clamp(prop.Scale, 0.1f, 10f), prop.Solid, prop.RotX, prop.RotZ);
                 if (prop.Colors != null) Library.MapColors.Paint(go, b, prop.Colors);
                 props++;
             }
@@ -175,7 +177,7 @@ namespace PalaceMod.Builder.Level
             ScanAfterFrame = Time.frameCount + 2;
             ScanHost = level.Host;
             Log.For<BuilderManager>().Info($"level {pack.Id}/{level.Id} on {level.Host}{(level.Base != null ? $" ({level.Base})" : "")}: {moved} slots moved, {added} added, {removed} removed, " +
-                $"{wired} requirements set, {lines} spawn lines moved, {newLines} added, {gone} removed, {props} props{(units > 0 ? $", {units} slots' units placed" : "")}{(hidden > 0 ? $", {hidden} scenery renderers hidden" : "")}");
+                $"{wired} requirements set, {lines} spawn lines moved, {newLines} added, {gone} removed, {props} props{(units > 0 ? $", {units} slots' units placed" : "")}{(loadedSlots > 0 ? $", {loadedSlots} added-slot save entities loaded" : "")}{(hidden > 0 ? $", {hidden} scenery renderers hidden" : "")}");
         }
 
         /// <summary>The empty base's look: the scenery hidden (and, for a flat field, the ground replaced).</summary>
