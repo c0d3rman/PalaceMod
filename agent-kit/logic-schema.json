@@ -18,9 +18,13 @@
     {
       "name": "death",
       "group": "Combat",
-      "description": "It dies (a unit) or is knocked out (a building or the king). `other` is the killer (may be none).",
+      "description": "It dies (a unit) or is knocked out (a building or the king). `other` is the killer (may be none). event.types / event.weapon: the killing hit's (see damaged).",
       "params": [],
       "other": "killer",
+      "fields": {
+        "types": "list",
+        "weapon": "text"
+      },
       "aliases": {
         "killer": "other",
         "victim": "subject"
@@ -34,7 +38,7 @@
     {
       "name": "damaged",
       "group": "Combat",
-      "description": "It takes damage (not when modifiers reduce it to 0).",
+      "description": "It takes damage (not when modifiers reduce it to 0). event.types is the hit's damage types (a list: melee, ranged, tower, king, splash, magic, fire, the damage action's own types, and the weapon's id); event.weapon is the weapon that dealt it (\"vanilla:<weapon>\"), or none.",
       "params": [
         {
           "name": "min",
@@ -45,12 +49,17 @@
       "other": "attacker",
       "value": "number",
       "valueMeaning": "the damage taken",
+      "fields": {
+        "types": "list",
+        "weapon": "text"
+      },
       "aliases": {
         "attacker": "other"
       },
       "owners": [
         "any"
       ],
+      "example": "{ \"when\": \"damaged\", \"if\": \"event.types.has('fire')\", \"do\": [{ \"do\": \"removeStatus\", \"status\": \"frozen\" }] }",
       "since": "1.0.0"
     },
     {
@@ -114,11 +123,15 @@
     {
       "name": "hit",
       "group": "Combat",
-      "description": "Its attack, projectile or damage action damaged something.",
+      "description": "Its attack, projectile or damage action damaged something. event.types / event.weapon as for damaged.",
       "params": [],
       "other": "victim",
       "value": "number",
       "valueMeaning": "the damage dealt",
+      "fields": {
+        "types": "list",
+        "weapon": "text"
+      },
       "aliases": {
         "victim": "other"
       },
@@ -130,9 +143,13 @@
     {
       "name": "kill",
       "group": "Combat",
-      "description": "Something it damaged died from that damage.",
+      "description": "Something it damaged died from that damage. event.types / event.weapon as for damaged.",
       "params": [],
       "other": "victim",
+      "fields": {
+        "types": "list",
+        "weapon": "text"
+      },
       "aliases": {
         "victim": "other"
       },
@@ -330,6 +347,24 @@
       "owners": [
         "any"
       ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "bump",
+      "group": "Movement",
+      "description": "A push (the push action or the game's knockback) was stopped short by something solid: a wall or building, a solid body, a cliff or the map's edge. `other` is what it hit when that's an entity (a building, a wall, a solid body), else none; event.pos is where it stopped.",
+      "params": [],
+      "other": "obstacle",
+      "value": "number",
+      "valueMeaning": "the push distance left (metres)",
+      "pos": true,
+      "aliases": {
+        "obstacle": "other"
+      },
+      "owners": [
+        "unit"
+      ],
+      "example": "{ \"when\": \"bump\", \"if\": \"event.value > 1\", \"do\": [{ \"do\": \"applyStatus\", \"status\": \"flipped\" }] }",
       "since": "1.0.0"
     },
     {
@@ -1252,6 +1287,38 @@
           "description": "Stacks to remove (default all)."
         }
       ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "setWeapon",
+      "group": "Stats",
+      "description": "Gives it another weapon (units, towers, the king): a weapon id, a copy of another entity's weapon, none, or its own back. A ranged weapon makes it shoot: its range follows the weapon.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "weapon",
+          "type": "text",
+          "required": true,
+          "description": "\"vanilla:<weapon>\" (e.g. \"=other.weapon\"), an entity to copy (\"=other\": its weapon, range and keep distance), \"none\" (its attacks do nothing) or \"base\" (the weapon it started with)."
+        },
+        {
+          "name": "range",
+          "type": "number",
+          "min": 0.0,
+          "description": "Attack range in metres (default: the copied entity's, else the weapon's usual range)."
+        },
+        {
+          "name": "for",
+          "type": "for",
+          "description": "Seconds, or \"night\"/\"day\"; then it gets back the weapon it had before. Omit to keep it."
+        }
+      ],
+      "example": "{ \"do\": \"setWeapon\", \"weapon\": \"=other\" }",
       "since": "1.0.0"
     },
     {
@@ -2871,6 +2938,12 @@
     },
     {
       "on": "entity",
+      "name": "weapon",
+      "returns": "text",
+      "description": "Its current weapon's id (\"vanilla:<weapon>\"; the king's is his equipped weapon's auto attack), \"none\" when disarmed by setWeapon, or none."
+    },
+    {
+      "on": "entity",
       "name": "moveSpeed",
       "returns": "number",
       "description": "Movement speed, m/s. (with modifiers)"
@@ -3030,6 +3103,18 @@
       "name": "result",
       "returns": "text",
       "description": "levelEnd: 'win' or 'lose'."
+    },
+    {
+      "on": "event",
+      "name": "types",
+      "returns": "list",
+      "description": "damaged/hit/kill/death: the hit's damage types, e.g. event.types.has('fire')."
+    },
+    {
+      "on": "event",
+      "name": "weapon",
+      "returns": "text",
+      "description": "damaged/hit/kill/death: the weapon that dealt the hit (\"vanilla:<weapon>\"), or none."
     }
   ],
   "globals": [

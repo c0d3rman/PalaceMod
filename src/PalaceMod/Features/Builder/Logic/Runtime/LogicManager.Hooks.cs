@@ -118,13 +118,15 @@ namespace PalaceMod.Builder.Logic
                     // Credit a Builder projectile's hit to its owner as well (doc: hit/kill go to a projectile's owner).
                     var credited = source?.Kind == "projectile" && source.Owner != null ? source.Owner : source;
                     var pos = victim?.Position ?? __instance.transform.position.ToVec();
-                    if (victim != null && dealt > 0) w.Raise("damaged", victim, credited, dealt, pos, null);
-                    if (credited != null && dealt > 0) w.Raise("hit", credited, victim ?? LogicGame.EntityOf(__instance), dealt, pos, null);
+                    // The hit's damage types and weapon (event.types / event.weapon), from the game's attacker.
+                    var (types, weapon) = LogicServices.CurrentHit?.Invoke(_damageComingFrom != null ? _damageComingFrom : from != null ? from.GetComponentInParent<TaggedObject>() : null) ?? default;
+                    if (victim != null && dealt > 0) w.Raise("damaged", victim, credited, dealt, pos, null, types: types, weapon: weapon);
+                    if (credited != null && dealt > 0) w.Raise("hit", credited, victim ?? LogicGame.EntityOf(__instance), dealt, pos, null, types: types, weapon: weapon);
                     if (__result)
                     {
                         var v = victim ?? LogicGame.EntityOf(__instance);
-                        w.Raise("death", v, credited, 0, pos, null);
-                        if (credited != null) w.Raise("kill", credited, v, 0, pos, null);
+                        w.Raise("death", v, credited, 0, pos, null, types: types, weapon: weapon);
+                        if (credited != null) w.Raise("kill", credited, v, 0, pos, null, types: types, weapon: weapon);
                     }
                 }
                 catch (Exception e) { Log.For<LogicManager>().Error("damage hook", e); }

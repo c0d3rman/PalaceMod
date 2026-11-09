@@ -443,7 +443,7 @@ keep rules readable.
 |---|---|---|---|
 | `spawn` | | the entity appears (placed: at level start; spawned: on creation) | the spawner or launcher, if any |
 | `death` | | it dies (a unit) or is knocked out (a building, or the king) | killer / — |
-| `damaged` | `min` | it takes damage | attacker (may be none) / amount |
+| `damaged` | `min` | it takes damage (`event.types`, `event.weapon`: see "Damage types") | attacker (may be none) / amount |
 | `healed` | | it is healed | healer / amount |
 | `hpBelow` | `pct` | its hp crosses below pct (edge-triggered; re-arms when healed above) | — / hpPct |
 | `attack` | `attack` (id) | it attacks (any attack, including vanilla) | target |
@@ -455,6 +455,7 @@ keep rules readable.
 | `enter` / `exit` / `inside` / `empty` / `occupied` | | (areas) see "area" | entity |
 | `impact` / `expire` | | (projectiles, or anything with a lifetime) | hit entity / — |
 | `arrive` / `end` | | (movers, path followers, `moveTo`) | — / point index |
+| `bump` | | (units) a knockback (`push`, or the game's own) was stopped short by something solid: a wall, a building, a solid body, a cliff, the map's edge | the building or body it hit (none for terrain) / metres of push left; `event.pos` where it stopped |
 | `pickup` / `interact` | | (pickups, interactables) | collector / king |
 | `signal` | `name` | it receives the signal | sender / the signal's number (`event.name` is the signal's name) |
 | `varChanged` | `name` | one of its variables changes (or a level var, on the level script) | — / new value |
@@ -543,6 +544,7 @@ which accepts an entity or a position.
 | | `setHp` | `value`: sets hit points without a `damaged`/`healed` event (shared pools) |
 | **Stats** | `setStat` | `stat`, `value` \| `add` \| `mult`, `for` (a timed modifier: seconds, or `"night"`/`"day"` = until the next dawn/dusk) |
 | | `applyStatus` / `removeStatus` | `status`, `for`, `stacks`, `source` |
+| | `setWeapon` | `weapon`: `"vanilla:<weapon>"` (`"=other.weapon"`), an entity to copy (`"=other"`: its weapon, range and keep distance), `"none"` (its attacks do nothing) or `"base"` (its own back); `range`; `for` (seconds, `"night"`/`"day"`; then it gets back what it had). Units, towers, Builder `attacks` with a `weapon`, the king's auto attack; the attack range (and a unit's keep distance) follows the weapon |
 | **Team** | `convert` | `team`, `keepLook` (true), `hpPct`. A dead target is raised as a new entity of the new team. |
 | **Move** | `teleport` | `at` |
 | | `push` | `from` (or `toward` for a pull; entity or position), `force` (metres of travel), `up` (arc), `stun`: a one-off shove on units (flyers included, not buildings), through the game's knockback |
@@ -638,8 +640,23 @@ move speed, attack and rule timers, and its own projectiles). `damageTaken` and 
 `victim` and `dist`; `self` is the carrier).
 That covers armour, dodges, "immune to arrows", "misses at long range" and "vulnerable to fire".
 
-- **Damage types.** Builder damage carries the `types` its action or projectile gives. Vanilla damage gets derived
-  types: `melee` or `ranged` (the attacker's fighter tag), `tower`, `king`, `splash` and `magic` (`MagicProjectile`).
+- **Damage types.** Builder damage carries the `types` its action or projectile gives (plus the `weapon`'s id when
+  the action names one). Vanilla damage gets derived types: `melee` or `ranged` (the attacker's fighter tag), `tower`,
+  `king`, `splash`, `magic` (`MagicProjectile`), the weapon's id (`vanilla:<weapon>`, so any weapon can be told
+  apart), and `fire` when the weapon leaves burning ground (`FireArcherBurn`/`HotOilTower` on its impact objects:
+  fire archers, the Fire Spire, Firewing, potion vials) or its modifiers single out `FireAndExplosionResistant`
+  targets (the game's fire and explosion damage: exploders, the fire snail's blast). The burn ticks of that ground
+  carry `fire` and the weapon that left it, credited to its shooter when known. `damaged`/`hit`/`kill`/`death`
+  carry the hit's types as `event.types` (a sorted list: `event.types.has('fire')`) and its weapon as
+  `event.weapon`. `palace.py game cmd logic-weapons` lists every game weapon with its types.
+- **Weapons** (`Logic/Bodies/Combat/`). `.weapon` is an entity's weapon id: a unit's or tower's first attack, a
+  Builder attack's `weapon`, the king's auto attack (his equipped weapon's passive half; the active ability isn't
+  touched). `setWeapon` swaps the Weapon asset on every holder and writes the new attack range (the copied entity's,
+  else the range of a catalog unit that uses the weapon, else a live holder's; `range` overrides) as the base, with
+  `attackRange` modifiers re-applied on top. A unit's keep distance follows (the copied unit's, else the weapon's
+  usual unit's, else 60 % of the range; always under 90 % of it). `"none"` is an empty weapon whose `Weapon.Attack`
+  is skipped (the swing still plays). The first swap remembers the entity's own weapon for `"base"`; `for` restores
+  what it had before the first timed swap still running. Not kept by savestates.
 - **Status rules** run with `self` = the carrier and `other` = whoever applied it. `statusEnd` fires on expiry and
   on removal.
 - **Timed `setStat`s** stack independently; give `key` to make a new one replace an earlier one with the same key.
@@ -784,7 +801,8 @@ for agents), `reference.md` and a test that every entry has a runtime handler al
 | Event | Hook |
 |---|---|
 | `spawn` | `BuilderEntity.Start`; vanilla units for `of` listeners: a `TagManager.AddTaggedObject` postfix |
-| `damaged`, `death`, `kill`, `hit` | a `Hp.TakeDamage` prefix/postfix pair (hp before and after, source, `__result` = killed). `hit` and `kill` go to the source's entity, or to a projectile's owner. |
+| `damaged`, `death`, `kill`, `hit` | a `Hp.TakeDamage` prefix/postfix pair (hp before and after, source, `__result` = killed). `hit` and `kill` go to the source's entity, or to a projectile's owner. Types and weapon: `LogicServices.CurrentHit` (the `Weapon.DealDamage` in progress, a `damage` action's or a burn tick's scope) |
+| `bump` | `KnockbackBehavior.ApplyKnockback` postfix (start, aim), measured when the flight leaves its arc phase; `other` from a sphere cast ahead |
 | `healed` | `Hp.Heal` postfix |
 | `attack` | `AutoAttack.OnAttack` postfix and the overrides (`AutoAttackTower`, `...WithKnockback`, `...WithWarning`), `ManualAttack` (the king), and `BuilderAttack` |
 | `dusk`/`dawn`/`day` | one `DayNightCycle.IDaytimeSensitive` registered by the world |

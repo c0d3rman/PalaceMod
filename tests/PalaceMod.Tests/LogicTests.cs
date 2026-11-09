@@ -355,6 +355,19 @@ namespace PalaceMod.Tests
             Has(issues, "levels[0].logic.attach[\"tower\"]: attach keys are");
         }
 
+        public static void CombatFieldsAndActionsValidate()
+        {
+            var issues = ValidateLevel(@"{ ""vars"": { ""w"": ""''"" }, ""rules"": [
+                { ""when"": { ""on"": ""damaged"", ""of"": ""enemy"" }, ""if"": ""event.types.has('fire') and event.weapon != none"", ""do"": [
+                    { ""do"": ""setWeapon"", ""target"": ""subject"", ""weapon"": ""=other"", ""for"": 5 },
+                    { ""do"": ""setWeapon"", ""target"": ""king"", ""weapon"": ""none"", ""for"": ""night"" },
+                    { ""do"": ""setVar"", ""name"": ""w"", ""value"": ""king.weapon"" } ] },
+                { ""when"": { ""on"": ""bump"", ""of"": ""enemy"" }, ""if"": ""event.value > 1 and other != none"", ""do"": [] },
+                { ""when"": ""levelStart"", ""if"": ""event.types.len > 0"", ""do"": [] }] }");
+            Assert.Equal(1, issues.Count(i => i.Severity == Severity.Error), "one error: " + string.Join("; ", issues));
+            Has(issues, "levels[0].logic.rules[2].if: col 7: the event \"levelStart\" has no types");
+        }
+
         public static void ValidatorChecksComponentsAndCaps()
         {
             var issues = ValidateLevel(@"{ ""caps"": { ""entities"": 900, ""units"": 5000 },

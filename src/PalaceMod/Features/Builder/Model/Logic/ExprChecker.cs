@@ -237,11 +237,11 @@ namespace PalaceMod.Builder.Model.Logic
                         if (ev != null && ev.Value == LType.Void && !(ev.Name == "signal")) { Err(n, $"the event \"{ev.Name}\" has no value"); return LType.Any; }
                         return ev?.Value ?? LType.Any;
                     case "pos": return LType.Position;
-                    case "name": case "choice": case "result":
+                    case "name": case "choice": case "result": case "types": case "weapon":
                         if (ev != null && !ev.Fields.ContainsKey(n.Name)) Err(n, $"the event \"{ev.Name}\" has no {n.Name}");
-                        return LType.Text;
+                        return ev != null && ev.Fields.TryGetValue(n.Name, out var ft) ? ft : n.Name == "types" ? LType.List : LType.Text;
                 }
-                Err(n, $"events have value, pos, name, choice and result, not \"{n.Name}\"");
+                Err(n, $"events have value, pos, name, choice, result, types and weapon, not \"{n.Name}\"");
                 return LType.Any;
             }
             var on = tt == LType.Level ? LType.Level : tt;

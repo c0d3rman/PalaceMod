@@ -187,6 +187,8 @@ namespace PalaceMod.Builder.Model.Logic
         private static void Named(Dictionary<string, NamedSpec> into, string name, string desc, LType type = LType.Void) =>
             into[name] = new NamedSpec { Name = name, Description = desc, Type = type };
 
+        private static Dictionary<string, LType> HitFields() => new() { ["types"] = LType.List, ["weapon"] = LType.Text };
+
         private static Dictionary<string, string> A(params string[] pairs)
         {
             var d = new Dictionary<string, string>();
@@ -210,18 +212,19 @@ namespace PalaceMod.Builder.Model.Logic
             // ---- Events ----------------------------------------------------------------------------------------
             var unitish = new[] { "unit", "building", "prop", "projectile", "area", "pickup", "logic", "king" };
             Ev("spawn", "This unit", "It appears: placed ones at level start, spawned ones on creation. `other` is the spawner or launcher, if any.", other: "spawner", aliases: A("spawner", "other"));
-            Ev("death", "Combat", "It dies (a unit) or is knocked out (a building or the king). `other` is the killer (may be none).", other: "killer", aliases: A("killer", "other", "victim", "subject"),
-                example: "{ \"when\": \"death\", \"do\": [{ \"do\": \"spawn\", \"entity\": \"goblin\", \"count\": 2, \"at\": \"self\" }] }");
-            Ev("damaged", "Combat", "It takes damage (not when modifiers reduce it to 0).", other: "attacker", value: LType.Number, valueMeaning: "the damage taken",
-                ps: [P("min", "number", "Only damage of at least this much.")], aliases: A("attacker", "other"));
+            Ev("death", "Combat", "It dies (a unit) or is knocked out (a building or the king). `other` is the killer (may be none). event.types / event.weapon: the killing hit's (see damaged).", other: "killer", aliases: A("killer", "other", "victim", "subject"),
+                fields: HitFields(), example: "{ \"when\": \"death\", \"do\": [{ \"do\": \"spawn\", \"entity\": \"goblin\", \"count\": 2, \"at\": \"self\" }] }");
+            Ev("damaged", "Combat", "It takes damage (not when modifiers reduce it to 0). event.types is the hit's damage types (a list: melee, ranged, tower, king, splash, magic, fire, the damage action's own types, and the weapon's id); event.weapon is the weapon that dealt it (\"vanilla:<weapon>\"), or none.", other: "attacker", value: LType.Number, valueMeaning: "the damage taken",
+                ps: [P("min", "number", "Only damage of at least this much.")], aliases: A("attacker", "other"), fields: HitFields(),
+                example: "{ \"when\": \"damaged\", \"if\": \"event.types.has('fire')\", \"do\": [{ \"do\": \"removeStatus\", \"status\": \"frozen\" }] }");
             Ev("healed", "Combat", "It is healed.", other: "healer", value: LType.Number, valueMeaning: "the amount healed", aliases: A("healer", "other"));
             Ev("hpBelow", "Combat", "Its hp crosses below a fraction (edge-triggered; re-arms when healed above).", value: LType.Number, valueMeaning: "hpPct",
                 ps: [P("pct", "number", "Fraction of max hp, 0..1.", req: true, min: 0, max: 1)]);
             Events["hpBelow"].OwnOnly = true;
             Events["hpBelow"].Description += " Only its own hp: no `of`.";
             Ev("attack", "Combat", "It attacks (any attack, vanilla ones included).", other: "target", ps: [P("attack", "text", "Only this attack id.")], aliases: A("target", "other"));
-            Ev("hit", "Combat", "Its attack, projectile or damage action damaged something.", other: "victim", value: LType.Number, valueMeaning: "the damage dealt", aliases: A("victim", "other"));
-            Ev("kill", "Combat", "Something it damaged died from that damage.", other: "victim", aliases: A("victim", "other"));
+            Ev("hit", "Combat", "Its attack, projectile or damage action damaged something. event.types / event.weapon as for damaged.", other: "victim", value: LType.Number, valueMeaning: "the damage dealt", aliases: A("victim", "other"), fields: HitFields());
+            Ev("kill", "Combat", "Something it damaged died from that damage. event.types / event.weapon as for damaged.", other: "victim", aliases: A("victim", "other"), fields: HitFields());
             Ev("every", "Time", "Periodically, from spawn (or level start).", value: LType.Number, valueMeaning: "the tick count (1, 2, ...)",
                 ps: [P("seconds", "number", "Seconds between firings (min 0.1).", req: true, min: 0.1),
                      P("jitter", "number", "Random extra delay each time, 0..1 of seconds.", min: 0, max: 1),
@@ -240,6 +243,9 @@ namespace PalaceMod.Builder.Model.Logic
             Ev("impact", "Projectiles", "(projectiles) It hit something or the ground. `other` is what it hit (none for ground).", other: "hit entity", pos: true, owners: ["projectile"]);
             Ev("expire", "Time", "Its lifetime (or projectile range) ran out; it's destroyed after its rules run.");
             Ev("arrive", "Movement", "(movers, path followers, moveTo) It reached a point.", value: LType.Number, valueMeaning: "the point index");
+            Ev("bump", "Movement", "A push (the push action or the game's knockback) was stopped short by something solid: a wall or building, a solid body, a cliff or the map's edge. `other` is what it hit when that's an entity (a building, a wall, a solid body), else none; event.pos is where it stopped.",
+                other: "obstacle", value: LType.Number, valueMeaning: "the push distance left (metres)", pos: true, owners: ["unit"], aliases: A("obstacle", "other"),
+                example: "{ \"when\": \"bump\", \"if\": \"event.value > 1\", \"do\": [{ \"do\": \"applyStatus\", \"status\": \"flipped\" }] }");
             Ev("end", "Movement", "(movers, path followers) It reached the end of its path (before then: destroy acts).");
             Ev("pickup", "Pickups", "(pickups) Collected. `other` is the collector.", other: "collector", owners: ["pickup"], aliases: A("collector", "other"));
             Ev("interact", "King", "(interactables) The king used it, after paying its cost. event.choice is the chosen id with choices.", other: "king", owners: unitish,
@@ -344,6 +350,12 @@ namespace PalaceMod.Builder.Model.Logic
             ], targeted: true);
             Act("removeStatus", "Stats", "Removes a status (all stacks, or some).",
                 [P("status", "status", "The status id.", req: true), P("stacks", "int", "Stacks to remove (default all).", min: 1)], targeted: true);
+            Act("setWeapon", "Stats", "Gives it another weapon (units, towers, the king): a weapon id, a copy of another entity's weapon, none, or its own back. A ranged weapon makes it shoot: its range follows the weapon.",
+            [
+                P("weapon", "text", "\"vanilla:<weapon>\" (e.g. \"=other.weapon\"), an entity to copy (\"=other\": its weapon, range and keep distance), \"none\" (its attacks do nothing) or \"base\" (the weapon it started with).", req: true),
+                P("range", "number", "Attack range in metres (default: the copied entity's, else the weapon's usual range).", min: 0),
+                P("for", "for", "Seconds, or \"night\"/\"day\"; then it gets back the weapon it had before. Omit to keep it."),
+            ], targeted: true, example: "{ \"do\": \"setWeapon\", \"weapon\": \"=other\" }");
 
             // ---- Team / Move ----------------------------------------------------------------------------------
             Act("convert", "Team", "Switches team (a dead target is raised as a new entity of that team).",
@@ -509,6 +521,7 @@ namespace PalaceMod.Builder.Model.Logic
             Prop(LType.Entity, "target", LType.Entity, "Its current attack/move target.");
             Prop(LType.Entity, "owner", LType.Entity, "Who spawned or launched it.");
             Prop(LType.Entity, "id", LType.Text, "Its entity id.");
+            Prop(LType.Entity, "weapon", LType.Text, "Its current weapon's id (\"vanilla:<weapon>\"; the king's is his equipped weapon's auto attack), \"none\" when disarmed by setWeapon, or none.");
             foreach (var s in Stats.Values)
                 if (Property(LType.Entity, s.Name) == null) Prop(LType.Entity, s.Name, LType.Number, s.Description + " (with modifiers)");
             Prop(LType.Position, "x", LType.Number, "x."); Prop(LType.Position, "y", LType.Number, "y."); Prop(LType.Position, "z", LType.Number, "z.");
@@ -521,6 +534,8 @@ namespace PalaceMod.Builder.Model.Logic
             Prop(LType.Event, "name", LType.Text, "signal: the name; varChanged: the var; status events: the status.");
             Prop(LType.Event, "choice", LType.Text, "interact with choices: the chosen id.");
             Prop(LType.Event, "result", LType.Text, "levelEnd: 'win' or 'lose'.");
+            Prop(LType.Event, "types", LType.List, "damaged/hit/kill/death: the hit's damage types, e.g. event.types.has('fire').");
+            Prop(LType.Event, "weapon", LType.Text, "damaged/hit/kill/death: the weapon that dealt the hit (\"vanilla:<weapon>\"), or none.");
 
             // ---- Functions ------------------------------------------------------------------------------------
             Fn("vec", LType.Position, "A position: vec(x, z) on the ground, or vec(x, y, z).", ["number", "number", "number?"]);

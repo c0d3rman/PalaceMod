@@ -59,6 +59,9 @@ namespace PalaceMod.Builder.Logic.Bodies
         /// <summary>The base (unmodified) value: remembered, or the live field when nothing has touched it yet.</summary>
         private static float Peek(object owner, string field, float current) => HasBase(owner, field, out var v) ? v : current;
 
+        /// <summary>A game field's base (unmodified) value, for parts that swap what the field belongs to (setWeapon).</summary>
+        public static float BaseValue(object owner, string field, float current) => Peek(owner, field, current);
+
         // ------------------------------------------------------------------ what an object has
 
         internal sealed class Parts

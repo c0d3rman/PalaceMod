@@ -1203,11 +1203,13 @@ class _Checker:
                 return ev.value if ev is not None else ANY
             if n.name == "pos":
                 return POSITION
-            if n.name in ("name", "choice", "result"):
+            if n.name in ("name", "choice", "result", "types", "weapon"):
                 if ev is not None and n.name not in ev.fields:
                     self.err(n, f'the event "{ev.name}" has no {n.name}')
-                return TEXT
-            self.err(n, f'events have value, pos, name, choice and result, not "{n.name}"')
+                if ev is not None and n.name in ev.fields:
+                    return ev.fields[n.name]
+                return LIST if n.name == "types" else TEXT
+            self.err(n, f'events have value, pos, name, choice, result, types and weapon, not "{n.name}"')
             return ANY
         on = tt
         p = sc.property(on, n.name)
