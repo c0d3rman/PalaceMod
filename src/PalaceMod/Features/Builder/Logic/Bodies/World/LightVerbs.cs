@@ -260,10 +260,14 @@ namespace PalaceMod.Builder.Logic.Bodies
 
         public static EntityLight Ensure(LogicEntity e, GameObject go)
         {
-            var existing = go.GetComponentInChildren<EntityLight>(true);
-            if (existing != null && existing.Owner == go.transform) return existing;
+            var existing = Of(go);
+            if (existing != null) return existing;
+            // Not a child of the object: game code walks some objects' children (a barracks spawns its squad from
+            // them), so the light follows from outside and goes when its owner does.
             var holder = new GameObject("PalaceBuilder Light");
-            holder.transform.SetParent(go.transform, false);
+            if (UnityEngine.SceneManagement.SceneManager.GetActiveScene().IsValid())
+                UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(holder, go.scene.IsValid() ? go.scene : UnityEngine.SceneManagement.SceneManager.GetActiveScene());
+            holder.transform.position = go.transform.position;
             var l = holder.AddComponent<EntityLight>();
             l.Entity = e;
             l.Owner = go.transform;
@@ -299,6 +303,14 @@ namespace PalaceMod.Builder.Logic.Bodies
         private void OnEnable() { if (!All.Contains(this)) All.Add(this); }
         private void OnDisable() => All.Remove(this);
 
+        /// <summary>The light that follows this object, or null.</summary>
+        public static EntityLight Of(GameObject go)
+        {
+            if (go == null) return null;
+            foreach (var l in All) if (l != null && l.Owner == go.transform) return l;
+            return null;
+        }
+
         /// <summary>Lighting the ground: on, its entity alive and switched on.</summary>
         public bool Shining => On && Owner != null && Owner.gameObject.activeInHierarchy && (Entity == null || Entity.Exists && Entity.Enabled);
 
@@ -307,7 +319,11 @@ namespace PalaceMod.Builder.Logic.Bodies
 
         public Vector3 Ground => Owner != null ? Owner.position : transform.position;
 
-        private void LateUpdate() => Sync();
+        private void LateUpdate()
+        {
+            if (Owner == null) { Destroy(gameObject); return; }
+            Sync();
+        }
 
         public void Sync()
         {
@@ -501,8 +517,7 @@ namespace PalaceMod.Builder.Logic.Bodies
 
         private static EntityLight Find(GameObject go)
         {
-            foreach (var l in go.GetComponentsInChildren<EntityLight>(true)) if (l.Owner == go.transform) return l;
-            return null;
+            return EntityLight.Of(go);
         }
 
         /// <summary>`for`: keep how the light was, to put it back.</summary>
