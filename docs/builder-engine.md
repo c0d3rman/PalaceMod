@@ -89,15 +89,16 @@ Everything is additive to the pack JSON; the pack version goes to 3 (see "Migrat
       "vars": { "souls": 0, "season": "'summer'" },  // level variables and their start values
       "rules": [...],                                // the level script
       "places": [...],                               // placed entities: templates, areas, paths, points, logic objects
-      "attach": { "slot:Tower 3": { "name": "northTower", "labels": ["lit"], "rules": [...] },
+      "attach": { "slot:Tower 3": { "name": "northTower", "labels": ["lit"], "vars": { "hits": 0 }, "rules": [...] },
                   "prop:p12":     { "name": "bigRock", "rules": [...] },
                   "line:Spawn 1": { "name": "westLine" } },
-      "hud": [{ "id": "souls", "text": "Souls {$souls}/10", "icon": "asset:skull", "visible": "$souls > 0" }]
+      "hud": [{ "id": "souls", "text": "Souls {$souls}/10", "icon": "asset:skull", "visible": "$souls > 0" }],
+      "kingActions": [...]                           // see "King actions"
     } }]
 }
 ```
 
-`attach` gives rules, a name and labels to objects the level already has, by their Studio item key (`slot:<name>`,
+`attach` gives rules, a name, labels and vars to objects the level already has, by their Studio item key (`slot:<name>`,
 `add:<id>`, `prop:<id>`, `line:<name>`, `castle`). That keeps the existing classes untouched: the Studio's `Edit`
 writes there, and deleting the object prunes its entry (`PackDraft.Prune`).
 
@@ -115,8 +116,10 @@ A **non-unit template** (`EntityDef`):
   "name": "Hurled tree",
   "visual": { "mesh": "mesh:Tree_02", "meshScale": 0.4, "tint": null, "motion": "none" },   // VisualsDef: any mesh,
                                     // any unit's model, or an imported asset; null for an invisible entity
-  "body": { "radius": 0.8, "height": 2,
-            "solid": false,         // blocks movement (a NavmeshCut; moving ones update it, see "Movers")
+  "body": { "radius": 0.8, "height": 2,     // footprint: a circle, or "box": [w, d] (turns with the entity)
+            "solid": false,         // blocks ground movement (a NavmeshCut on the ground graphs; flyers pass;
+                                    // moving ones update it, see "Movers")
+            "walkable": false,      // its top is ground units can walk on (see "Walkable surfaces")
             "hittable": false,      // has hit points and can be targeted and damaged
             "hp": 100,
             "flying": false },      // targeting treats it as air (the Flying tag) when hittable
@@ -136,7 +139,12 @@ A **non-unit template** (`EntityDef`):
 A placed entity (`logic.places[]`) is `{ "id", "entity": "<template>" | inline template fields, "pos": [x,y,z],
 "rotY", "scale", "name", "active": true, "vars": {...overrides}, "rules": [...extra rules] }`. An area, path, point or
 logic object is placed inline (`"kind": "area", "shape": {...}`), since it rarely needs a template. `active: false`
-places it switched off until something sends it `enable` (Architect's "Active").
+places it switched off until something sends it `enable` (Architect's "Active"). A place may name a template and
+also give inline component fields; those override the template's for that copy (`{ "entity": "door", "interact":
+{...} }`).
+
+Component fields are literals by default. A string field starting with `=` is an expression, evaluated at spawn
+(`"hp": "=100 * night"`); `interact.cost` and `interact.prompt` are re-evaluated whenever the king focuses it.
 
 ### Components
 
@@ -174,9 +182,17 @@ Events: `impact` (`other` is what it hit, or none for ground; `event.pos`), `exp
 }
 ```
 
-Events: `arrive` (at each point; `event.value` is the index), `end` (once/pingpong end). A solid mover drags its
+Events: `arrive` (at each point; `event.value` is the index), `end` (once/pingpong end, and the end of a
+`movement.path`; it fires before `then: "destroy"` acts). A solid mover drags its
 NavmeshCut; the graph updates at most 4 times a second per mover. Units it would trap are pushed to the nearest
 walkable point, the same fix as the terrain stuck bug.
+
+**Walkable surfaces** (`body.walkable`): a prop whose top ground units walk on, such as a bridge, a raft or a frozen
+lake's ice. Ground graphs can't gain triangles locally, so a walkable surface appearing, disappearing or reaching a
+pose re-runs `GroundGraphs.Scan()`. A static one is scanned once at level start. A mover with `walkable` only snaps
+between poses (no gliding), and carries nothing while moving: units on it are moved with it at the snap.
+**L2 measures the rescan first.** If a scan of an edited map takes over about 150 ms, runtime walkable changes are
+limited to one per 5 s, with a validator warning.
 
 **`area`**: a zone that detects what's inside it.
 
@@ -192,10 +208,13 @@ spent inside), `empty`, `occupied`.
 In filters, `in:@moat` tests membership.
 
 **`pickup`**: `{ "by": "king", "radius": 1.5, "magnet": 4 }` (`by` is a filter: `"king"`, `"player and unit"`).
-It fires `pickup` (`other` is the collector) and then destroys itself, unless a rule cancels that with `keep`.
+It fires `pickup` (`other` is the collector), then destroys itself unless `"consume": false` (then a rule decides,
+e.g. with `destroy`).
 
 **`interact`**: the king's interact key, the same as the game's buildings. `{ "prompt": "Pay {cost} to open",
-"cost": 5, "when": "day", "radius": 3, "repeat": true }`. It fires `interact` (`other` is the king) after the cost is
+"cost": 5, "when": "day", "radius": 3, "repeat": true, "choices": null }`. `choices` (up to 4 `{ "id", "label",
+"cost" }`) shows the game's upgrade-choice popup instead, and `event.name` is the chosen id: a loan of 100, 250 or
+500, or "rebuild as tower / house". It fires `interact` (`other` is the king) after the cost is
 paid; with `cost` it uses the game's own pay-hold interaction.
 
 **`attacks`**: an automatic attack, like the game's `AutoAttack` but generic. A unit's base attacks stay unless
@@ -226,7 +245,8 @@ weapon can keep the game's arrows with a new look: `weapon.projectileLook: "mesh
 ]
 ```
 
-On a template, `targeting` replaces both the movement and the attack priorities. Rules can change it at runtime
+On a template, `targeting` replaces both the movement and the attack priorities. It works on anything with an
+attack, vanilla towers and troops included (`setTargeting` on `all('player and Tower')`). Rules can change it at runtime
 (`setTargeting`), including `prepend` and `remove` forms, for "enemies prefer the decoy for 8 s".
 
 **`movement`**: how a unit moves.
@@ -269,8 +289,9 @@ working. A ranged enemy that kites and prefers towers is just `targeting` plus `
 
 `when` with `of` listens to events of **other** entities. This is WC3's generic unit event:
 `{ "on": "death", "of": "foe", "range": 10 }` on a necromancer fires when any foe within 10 m dies. In it, `self` is the
-necromancer, `subject` the dead foe, and `other` its killer. Without `of`, a rule hears only its owner's events. The
-level script must give `of` for entity events.
+necromancer, `subject` the dead foe, and `other` its killer. `range` is optional (no range = anywhere on the map).
+Without `of`, a rule hears only its owner's events. The level script must give `of` for entity events (filters there
+treat `foe`/`ally` as relative to the player).
 
 ### Events
 
@@ -297,9 +318,11 @@ keep rules readable.
 | `pickup` / `interact` | | (pickups, interactables) | collector / king |
 | `signal` | `name` | it receives the signal | sender / the signal's number |
 | `varChanged` | `name` | one of its variables changes (or a level var, on the level script) | — / new value |
-| `statusStart` / `statusEnd` / `statusTick` | `status` | (in a status's own rules, or watching one) | the applier |
+| `statusStart` / `statusEnd` / `statusTick` | `status` (when watching one from outside) | a status starts, ends, or every `tick` seconds of the status | the applier / stacks |
 | `targetChanged` | | its attack or move target changes | the new target |
 | `built` / `upgraded` / `repaired` | `level` | (build slots) the player builds or upgrades it, or it's revived at dawn | — / level |
+| `coinDrop` / `coinPickup` | | (the game's coins, which are entities of kind `coin`) a coin drops from a death / the king or a unit collects it | the dead unit / collector |
+| `lineSpawn` | `line` | a spawn line spawns an enemy (wave or `spawnGroup`) | the new enemy |
 | `levelStart` | | the level has loaded (after the overlay, before day 1) | |
 | `dusk` / `nightStart` / `dawn` / `day` | `night` | the game's day-night hooks (`OnDusk`, the first spawn, `OnDawn_AfterSunrise`) | — / night number |
 | `waveCleared` | | spawning is done and no enemies are left | — / night |
@@ -321,14 +344,22 @@ variables   $souls (level)   self.$gen  other.$charges  spawned.$x   (an unknown
 roles       self subject other spawned it (the candidate inside a filter or forEach) king castle level
             event.value event.pos event.name   + the per-event aliases (killer, victim, ...)
 named       @gate1 (a place or attach "name")  @@goblin (a template, for spawn/compare)
-properties  .hp .maxHp .hpPct .alive .pos .x .y .z .team .kind .template .labels .speed .damageMult
-            .level (slot) .age (s since spawn) .target .owner .count (a set) .stacks('burning') .$var
-            .is('filter') .dist(e) .inside(@area)
-globals     night isNight isDay time nightTime gold income enemiesAlive nights (total) difficulty
-selectors   nearest(f, range?) farthest(f, r?) weakest(f, r?) strongest(f, r?) random(f, r?) all(f, r?)
-            best(f, r, scoreExpr) count(f, r?)         anchored at self; e.nearest(...) anchors at e
-positions   pointNear(p, r) (random walkable) ahead(e, d) toward(a, b, d) lerp(a, b, t) spawnLine('West') + -
-maths       + - * / % min max abs floor ceil round clamp sqrt pow lerp rand() rand(a, b) randInt(a, b) chance(p)
+properties  .hp .maxHp .hpPct .alive .pos .x .y .z .facing (deg) .team .kind .template .labels
+            every stat by name (.moveSpeed .attackCooldown .damageMult .income ...), the value with modifiers
+            .level .cost .buildingType (slots: e.g. 'Mill') .age (s since spawn) .target .owner .stacks('burning')
+            .$var .is('filter') .dist(e) .inside(@area)
+lists       .len .at(i) .has(x) .first .last   (sets and list vars)
+globals     night (1-based: the current night, or the coming one by day) isNight isDay nights (total)
+            time (s since level start) nightTime (s since this night began) nightProgress (0..1: the night's spawn
+            schedule elapsed, from the spawner's delays and intervals; 1 once everything has spawned)
+            gold income (the last dawn's payout) enemiesAlive difficulty
+waves       waveCount(n, f?) (enemies night n will spawn, optionally of a template filter) waveUnits(n) (its
+            templates, as a list) strongestUnit(n) (by hp x damage, from the catalog)
+selectors   nearest(f, r?) farthest(f, r?) weakest(f, r?) strongest(f, r?) random(f, r?) all(f, r?)
+            best(f, r, scoreExpr) count(f, r?)    anchored at self; e.nearest(...), e.count(...) etc. anchor at e
+positions   pointNear(p, r) (random walkable) ahead(e, d) toward(a, b, d) lerp(a, b, t) spawnLine('West')
+            dir(deg) (a unit vector; 0 = north) angle(a, b) + - and * by a number
+maths       + - * / % min max abs floor ceil round clamp sqrt pow sin cos lerp rand() rand(a, b) randInt(a, b) chance(p)
 logic       == != < <= > >= and or not  c ? a : b
 ```
 
@@ -337,7 +368,9 @@ A filter is a string in a smaller grammar, used by selectors, `of`, `hits`, `tar
 ```text
 filter := term | filter and filter | filter or filter | not filter | ( filter )
 term   := foe | ally | player | enemy | neutral       teams (foe/ally are relative to self)
-        | unit | building | prop | projectile | area | pickup | king | castle | self
+        | unit | building | prop | projectile | area | pickup | coin | king | castle | self
+        | melee | ranged                              the game's MeeleFighter / RangedFighter
+        | type:Mill                                   a building of that kind (the `building:<kind>` names)
         | alive | dead | Flying | Tower | ...         game tags (TagManager.ETag names, case-sensitive)
         | #label                                      labels
         | is:goblin                                   template
@@ -346,8 +379,9 @@ term   := foe | ally | player | enemy | neutral       teams (foe/ally are relati
         | where(expr)                                 any expression over `it`
 ```
 
-Selectors never return `self` unless the filter says `self`. Types are number, bool, text, position, entity, set and
-template. An entity coerces to its position, and a set coerces to its count in numeric contexts. The validator
+Selectors never return `self` unless the filter says `self`. Inside `where(...)`, `self` is still the rule's owner and
+`it` the candidate; `in:self` means "inside this area" (for presets). Area membership uses an entity's position, or a
+building's footprint collider. Types are number, bool, text, position, entity, set, list and template. An entity coerces to its position, and a set coerces to its count in numeric contexts. The validator
 type-checks every expression against the event's roles: `other` in a `levelStart` rule is an error, and `event.value`
 has the event's type. Evaluation is pure: functions read state and never change it. `rand` draws from the logic
 random source.
@@ -355,7 +389,8 @@ random source.
 ### Actions
 
 Every action takes `target` (a selector; default `self`) where it acts on entities. A set applies to each member,
-capped at 256. Positions take `at`.
+capped at 256; the other params are evaluated once per member, with `it` bound to that member. Positions take `at`,
+which accepts an entity or a position.
 
 | Group | Action | Key params |
 |---|---|---|
@@ -365,19 +400,23 @@ capped at 256. Positions take `at`.
 | | `replace` | `with` (template), `keep` (`hp`, `vars`, `statuses`, `labels`): swaps the entity for another in place (morph, shapeshift) |
 | **Health** | `damage` | `amount`, `source` (credited attacker; default self), `types` (labels such as `fire`, which status modifiers test), `splash` (bool), `weapon` (apply a weapon's tag modifiers) |
 | | `heal` / `kill` / `revive` | `amount` / — / `hpPct` |
+| | `setHp` | `value`: sets hit points without a `damaged`/`healed` event (shared pools) |
 | **Stats** | `setStat` | `stat`, `value` \| `add` \| `mult`, `for` (a timed modifier: seconds, or `"night"`/`"day"` = until the next dawn/dusk) |
 | | `applyStatus` / `removeStatus` | `status`, `for`, `stacks`, `source` |
 | **Team** | `convert` | `team`, `keepLook` (true), `hpPct`. A dead target is raised as a new entity of the new team. |
 | **Move** | `teleport` | `at` |
-| | `push` | `from` (or `toward` for a pull), `force`, `up` (arc), `stun`: uses the game's knockback |
+| | `push` | `from` (or `toward` for a pull; entity or position), `force` (metres of travel), `up` (arc), `stun`: a one-off shove on units (flyers included, not buildings), through the game's knockback |
+| | `drift` | `dir` (a vector) or `toward`/`from`, `speed` (m/s), `for`: a continuous velocity added to movement (units and Builder projectiles): a pull, a current, wind |
 | | `moveTo` | `at`, `speed`, `then` (`resume`/`hold`): fires `arrive` when there |
 | | `setMovement` / `setTargeting` | a movement block / a targeting list, or `prepend`, `remove`, `for` (seconds; reverts after) |
 | | `taunt` | `toward` (an entity), `for`: forces the targets' aggro onto it (the game's agro mechanism) |
 | | `command` | `order` (`follow`/`hold`/`home`): player units, as the king's own commands |
 | **Logic** | `signal` | `name`, `to` (selector, or `"all"`), `value`, `delay` |
-| | `setVar` / `addVar` | `name`, `value` (on `target` for entity vars; level vars when `target` is `level` or the name has `$`) |
+| | `setVar` / `addVar` | `name` (a literal, so it's checked), `value` (on `target` for entity vars; level vars when `target` is `level` or the name has `$`) |
+| | `listAdd` / `listRemove` / `listClear` | `name`, `value`, `index`: list vars (max 256 items) |
+| | `addLabel` / `removeLabel` | `label` |
 | | `enableRule` / `disableRule` | `rule` (id), `target` |
-| | `enable` / `disable` / `toggle` | the entity's rules, components and visibility (it stays where it is) |
+| | `enable` / `disable` / `toggle` | the entity's rules, components (its solid cut and hittability too) and visibility; on a spawn line, pauses or resumes its spawning (the night's schedule waits for it) |
 | | `wait` | `seconds`: the rest of the list resumes later (min 0.05 s) |
 | | `if` | `cond`, `then`, `else` |
 | | `repeat` | `times` (≤ 100), `every` (seconds, 0 = now), `do` (with `event.value` = the iteration) |
@@ -387,7 +426,7 @@ capped at 256. Positions take `at`.
 | **World** | `gold` | `amount` (negative takes, floored at 0), `at` (shows the coin effect there) |
 | | `dropCoins` | `count`, `at` (real coins the king collects) |
 | | `building` | `slot` (an attach name, a selector or a Studio key), `op`: `build` \| `upgrade` \| `knockOut` \| `repair` \| `lock` \| `unlock` \| `setCost` \| `setIncome`, `value`, `branch` |
-| | `waves` | `op`: `addSpawn` \| `removeUnit` \| `scaleCount` \| `scaleHp` \| `skipNight` \| `startNight` \| `endNight`, `night` (default the next), and the fields |
+| | `waves` | `op` with its fields: `addSpawn` (`unit`, `count`, `interval`, `delay`, `line`, `gold`, `elite`), `removeUnit` (`unit`), `scaleCount` / `scaleHp` (`value`, optional `unit`), `clearRemaining` (optional `line`: drops what the running night hasn't spawned yet), `startNight`, `endNight`, `skipNight`. `night`: default the next night; `"current"` edits the running night's remaining schedule |
 | | `endLevel` | `result` (`win`/`lose`), `message` |
 | **Show** | `effect` | `fx` (a game effect from the catalog), `at`, `scale` |
 | | `sound` | `sound` (`asset:` or a game sound), `at` |
@@ -408,15 +447,16 @@ whether they unlock many behaviours rather than one.
 "statuses": [{
   "id": "burning", "name": "Burning", "icon": "asset:fire",
   "duration": 4, "stacking": "refresh",        // "refresh" | "add" (stacks, each its own timer) | "extend" | "ignore"
-  "maxStacks": 5,
-  "mods": {                                    // applied while active, multiplied by stacks where numeric
+  "maxStacks": 5, "tick": 1,                   // seconds between statusTick events
+  "mods": {                                    // applied while active; per stack, "mult" compounds (0.8^n) and
+                                               //   "add" sums (n x add)
     "moveSpeed":   { "mult": 0.8 },
     "damageTaken": { "mult": 1.25, "types": ["fire"] }        // only from damage with those types
   },
   "flags": [],                                 // "stunned" | "disarmed" | "rooted" | "untargetable" |
                                                //   "invulnerable" | "silenced" (its rules don't fire) | "noIncome"
   "visual": { "tint": "#ff7020", "fx": "fire_small" },
-  "rules": [ { "when": { "on": "statusTick", "every": 1 }, "do": [
+  "rules": [ { "when": "statusTick", "do": [
       { "do": "damage", "amount": "3 * self.stacks('burning')", "types": ["fire"], "source": "other" } ] } ]
 }]
 ```
@@ -424,8 +464,16 @@ whether they unlock many behaviours rather than one.
 Stats a status (or `setStat`) can change: `maxHp`, `hp`, `moveSpeed`, `attackCooldown`, `attackRange`, `damageMult`,
 `damageTaken`, `projectileSpeed`, `scale`, `keepDistance`, `aggroTime`, `income` (buildings), `timeScale` (multiplies
 move speed, attack and rule timers, and its own projectiles). `damageTaken` and `damageMult` modifiers may carry
-`from` (a filter on the attacker), `types` and `chance`. That covers armour, dodges, "immune to arrows" and
-"vulnerable to fire".
+`from` (a filter on the attacker), `types`, `chance` and `when` (an expression over `attacker`, `victim` and `dist`).
+That covers armour, dodges, "immune to arrows", "misses at long range" and "vulnerable to fire".
+
+- **Damage types.** Builder damage carries the `types` its action or projectile gives. Vanilla damage gets derived
+  types: `melee` or `ranged` (the attacker's fighter tag), `tower`, `king`, `splash` and `magic` (`MagicProjectile`).
+- **Status rules** run with `self` = the carrier and `other` = whoever applied it. `statusEnd` fires on expiry and
+  on removal.
+- **Timed `setStat`s** stack independently; give `key` to make a new one replace an earlier one with the same key.
+- `damaged` doesn't fire when modifiers reduce the damage to 0, so an invulnerable door doesn't spam rules.
+- `drift` is a status mod as well (`"drift": { "toward": "@well", "speed": 3 }`).
 
 ### Signals, wires and built-in inputs
 
@@ -440,15 +488,16 @@ move speed, attack and rule timers, and its own projectiles). `damageTaken` and 
 
 ### Variables
 
-- Level vars are declared in `logic.vars` with a start value (number, bool, `'text'`, `vec(...)`, or `null` for an
-  entity var). Entity vars are declared in the template's `vars`, and a placed entity can override them.
+- Level vars are declared in `logic.vars` with a start value: number, bool, `'text'`, `vec(...)`, `[]` (a list), or
+  `{ "type": "entity" | "list" | ..., "value": ... }` when the start value doesn't say the type (an entity var
+  starts empty). Entity vars are declared in the template's `vars`, and a placed entity can override them.
 - `setVar` on an undeclared name is a validation error, which catches typos. Changing a var fires `varChanged`.
 - HUD lines and messages interpolate vars, so counters and objectives need no extra primitive.
 
 ### King actions
 
 `logic.kingActions: [{ "id": "horn", "name": "Blow the horn", "icon": "asset:horn", "when": "day", "cooldown": 0,
-"uses": "1 per day" }]` (at most 3). They map to three rebindable keys, "Level action 1-3" (context `BuilderLevel`,
+"uses": { "count": 1, "per": "day" } }]` (at most 3; `per`: `day` | `night` | `run`). They map to three rebindable keys, "Level action 1-3" (context `BuilderLevel`,
 registered in `Awake` so they get Controls-screen rows). The key fires `kingAction` with that id, and the HUD shows
 the action with its cooldown.
 
@@ -757,7 +806,7 @@ Each behaviour below is pure data in the format above. Unit bases and meshes are
 
 ```jsonc
 { "kind": "area", "id": "plate1", "pos": [12, 0, -4], "area": { "shape": { "rect": { "size": [4, 4] } }, "watch": "enemy", "show": "fill" },
-  "rules": [{ "when": "occupied", "cooldown": 1, "do": [
+  "rules": [{ "when": { "on": "every", "seconds": 1 }, "if": "count('enemy and in:self') > 0", "do": [
     { "do": "wait", "seconds": 0.5 },
     { "do": "damage", "target": "all('unit and in:@plate1')", "amount": 30 },
     { "do": "effect", "fx": "spikes", "at": "self" } ] }] }
@@ -896,7 +945,7 @@ night.
 **23. A war horn** (a king action): all troops within 20 m follow the king, 20 % faster, for the night.
 
 ```jsonc
-"kingActions": [{ "id": "horn", "name": "War horn", "when": "day", "uses": "1 per day" }],
+"kingActions": [{ "id": "horn", "name": "War horn", "when": "day", "uses": { "count": 1, "per": "day" } }],
 "rules": [{ "when": { "on": "kingAction", "action": "horn" }, "do": [
   { "do": "command", "target": "all('player and unit', 20)", "order": "follow" },
   { "do": "setStat", "target": "all('player and unit', 20)", "stat": "moveSpeed", "mult": 1.2, "for": "night" } ] }]
@@ -954,18 +1003,20 @@ that mechanic.
 
 ## Known limits
 
-- **No new movement physics.** Units aren't carried by movers. There is no per-unit walkability (one navmesh per size
-  class, as in the game), and terrain height doesn't change at runtime: solid movers and blockers cut the navmesh, but
-  the ground stays where it is.
-- **Vanilla projectiles in flight** (the game's `AimbotProjectile`) aren't affected by `timeScale`, wind or
+- **Movement physics is limited.**
+  - Units ride a walkable mover only when it snaps between poses, not while it glides.
+  - There is no per-unit walkability (one navmesh per size class, as in the game), so "only melee can climb this wall"
+    is a teleport, not a path.
+  - Terrain height doesn't change at runtime; walkable props and blockers change where units can go.
+- **Vanilla projectiles in flight** (the game's `AimbotProjectile`) aren't affected by `timeScale`, `drift` or
   redirection. Builder projectiles are.
-- **Team model.** There are three teams. There's no "hostile to all", because the game's AI sees only
-  `PlayerOwned`/`EnemyOwned`. A converted unit uses the other side's nearest equivalent brain.
+- **Team model.** There are three teams. There's no "hostile to all": Builder targeting can make a thing attack
+  both sides, but vanilla AI sees only `PlayerOwned`/`EnemyOwned`, so vanilla units never attack a neutral. A converted unit uses the other side's nearest equivalent brain.
 - **Game tags are a closed set** (51 `ETag`s, kept in a 64-bit field). Vanilla AI only targets by them, so labels
   work only through Builder targeting rules, which do override vanilla priorities on Builder units and on units a rule
   retargets.
-- **No recording or replay, no new scenes, no fog or lighting changes** beyond the level's colour scheme and tints.
-- **No wave introspection functions** ("the strongest unit of night 5"). Rules can edit waves but not query them.
+- **No new scenes, no fog or lighting changes** beyond the level's colour scheme and tints. Recording is only what
+  list vars can hold: up to 256 sampled values, such as positions.
 - **King actions:** 3 keys. The day phase has no timer in Thronefall, so "shorter day" has no meaning.
 - **No arbitrary code**, by design. A missing verb needs a mod update; the registry's `since` makes that explicit.
 - **Savestates** don't keep pending `wait`s or Builder projectiles in flight.
@@ -1018,9 +1069,13 @@ internal static class LogicServices { public static IEntityFactory Factory; publ
   `Update` prefixes, Steering with the targeting and movement overrides on `FindAutoAttackTarget` / `FindMoveToTarget`,
   convert and replace), the effects and sounds catalog in `Runtime/Catalog.cs` (additive), and the `UnitFactory`
   hooks that put `BuilderEntity` and the compiled components on unit templates (additive).
-- **Starts with a spike:** a moving solid mover with a NavmeshCut on the host's graphs. It measures the update cost
-  and confirms the stuck-unit push-out. If cuts can't move, solid movers fall back to snap-moving between poses with
-  one graph update per move.
+- **Starts with two spikes:**
+  - a moving solid mover with a NavmeshCut on the host's graphs. It measures the update cost and confirms the
+    stuck-unit push-out. If cuts can't move, solid movers fall back to snap-moving between poses with one graph
+    update per move;
+  - the cost of `GroundGraphs.Scan()` on an edited map, which sets the walkable-surface rate limit.
+- **Reads** `docs/enemy-behaviour-research.md` (being written by the Enemy Studio round) for how each vanilla
+  attack, projectile and movement component behaves, before patching them.
 - **Done when:** examples 1, 2, 7, 8, 9, 10, 12, 16, 17, 19, 20 and 21 run, and the user's three are recorded as
   screenshots.
 
