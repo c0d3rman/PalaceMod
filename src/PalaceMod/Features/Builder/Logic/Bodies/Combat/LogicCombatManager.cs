@@ -43,7 +43,9 @@ namespace PalaceMod
             var e = p.Target;
             if (e == null) throw new LogicError("setWeapon: no target");
             if (!p.Has("weapon")) throw new LogicError("setWeapon: `weapon` is missing");
-            var v = p.Get("weapon");
+            // a text param: literal ("vanilla:...", "none", "base") unless it starts with "=" (an expression: an entity or an id)
+            var raw0 = p.Raw("weapon");
+            var v = raw0?.Type == JTokenType.String && !((string)raw0).StartsWith("=") ? Value.Text(((string)raw0).Trim()) : p.Get("weapon");
             LogicWeapons.Spec spec;
             if (v.Kind == ValueKind.Entity || v.Kind == ValueKind.Set)
             {

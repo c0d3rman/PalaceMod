@@ -93,9 +93,55 @@ namespace PalaceMod.Builder.Logic.Bodies
             string name = id.StartsWith(Prefix) ? id.Substring(Prefix.Length) : id;
             if (byName.TryGetValue(name, out var w) && w != null) return w;
             w = BuilderServices.Catalog?.FindWeapon(name)?.Asset;
-            if (w == null) w = Resources.FindObjectsOfTypeAll<Weapon>().FirstOrDefault(x => x.name == name && x != unarmed);
+            if (w == null) w = Resources.FindObjectsOfTypeAll<Weapon>().FirstOrDefault(x => x.name == name && !Made(x));
             if (w != null) byName[name] = w;
             return w;
+        }
+
+        // ------------------------------------------------------------------ sides
+
+        /// <summary>A game weapon only damages one side: its damage modifiers require EnemyOwned (player weapons) or
+        /// PlayerOwned (enemy weapons). Given to the other side, it gets a copy with those two tags swapped (same name,
+        /// so the same id), so an enemy with the king's sword hurts the king.</summary>
+        private static readonly Dictionary<Weapon, Weapon> mirrors = [];
+        private static readonly HashSet<Weapon> made = [];
+
+        /// <summary>A weapon this file made (the empty one, side copies): never found by name.</summary>
+        private static bool Made(Weapon w) => w == unarmed || made.Contains(w);
+
+        private static bool Hurts(Weapon w, TagManager.ETag side)
+        {
+            bool Has(List<DamageModifyer> mods) => mods != null && mods.Any(m => m?.requiredTags != null && m.requiredTags.Contains(side));
+            return Has(w.directDamage) || Has(w.splashDamage);
+        }
+
+        private static Weapon ForSide(Weapon w, Component holder)
+        {
+            if (w == null || w == unarmed || holder == null) return w;
+            var tagged = holder.GetComponentInParent<TaggedObject>();
+            if (tagged == null && holder.transform.parent != null) tagged = holder.transform.parent.GetComponentInChildren<TaggedObject>();
+            if (tagged == null) return w;
+            bool enemy = tagged.Tags.Contains(TagManager.ETag.EnemyOwned), player = tagged.Tags.Contains(TagManager.ETag.PlayerOwned);
+            var own = enemy ? TagManager.ETag.EnemyOwned : player ? TagManager.ETag.PlayerOwned : TagManager.ETag.NONE;
+            var foe = enemy ? TagManager.ETag.PlayerOwned : player ? TagManager.ETag.EnemyOwned : TagManager.ETag.NONE;
+            if (own == TagManager.ETag.NONE || !Hurts(w, own) || Hurts(w, foe)) return w;
+            if (mirrors.TryGetValue(w, out var m) && m != null) return m;
+            m = UnityEngine.Object.Instantiate(w);
+            m.name = w.name;
+            m.hideFlags = HideFlags.HideAndDontSave;
+            List<DamageModifyer> Swap(List<DamageModifyer> mods) => mods?.Select(d => new DamageModifyer
+            {
+                requiredTags = d.requiredTags.Select(t => t == TagManager.ETag.EnemyOwned ? TagManager.ETag.PlayerOwned : t == TagManager.ETag.PlayerOwned ? TagManager.ETag.EnemyOwned : t).ToList(),
+                damageAdded = d.damageAdded,
+                damageMultiplyer = d.damageMultiplyer,
+            }).ToList();
+            m.directDamage = Swap(w.directDamage);
+            m.splashDamage = Swap(w.splashDamage);
+            m.isPlayerWeapon = !w.isPlayerWeapon;
+            made.Add(m);
+            mirrors[w] = m;
+            mirrors[m] = w;
+            return m;
         }
 
         // ------------------------------------------------------------------ holders
@@ -302,7 +348,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             }
             foreach (var h in holders)
             {
-                h.Weapon = w;
+                h.Weapon = ForSide(w, h.C);
                 if (range is not float r || r <= 0) continue;
                 if (h.Builder != null) { h.Builder.Range = r; continue; }
                 // Written as base values (the old base ranges scaled to the new one); Rebase re-applies modifiers.
@@ -355,7 +401,7 @@ namespace PalaceMod.Builder.Logic.Bodies
                 if (u.Weapon != null) { if (!users.TryGetValue(u.Weapon, out var l)) users[u.Weapon] = l = []; l.Add($"{u.Id}({u.AttackRange:0.#}m)"); }
             string Mods(List<DamageModifyer> m) => m == null ? "-" : string.Join(" ", m.Select(d => $"[{string.Join("+", d.requiredTags)}]+{d.damageAdded}x{d.damageMultiplyer}"));
             string Comps(GameObject go) => go == null ? "-" : go.name + "{" + string.Join(",", go.GetComponentsInChildren<MonoBehaviour>(true).Select(c => c.GetType().Name).Distinct()) + "}";
-            foreach (var w in Resources.FindObjectsOfTypeAll<Weapon>().Where(x => x != unarmed).GroupBy(x => x.name).Select(g => g.First()).OrderBy(x => x.name))
+            foreach (var w in Resources.FindObjectsOfTypeAll<Weapon>().Where(x => !Made(x)).GroupBy(x => x.name).Select(g => g.First()).OrderBy(x => x.name))
             {
                 if (!string.IsNullOrEmpty(filter) && w.name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) continue;
                 sb.Append($"{IdOf(w)} types=[{string.Join(",", TypesOf(w))}] proj={(w.projectileSpeed > 0 && w.projectileVisuals != null ? w.projectileSpeed.ToString("0.#") : "-")} ");
