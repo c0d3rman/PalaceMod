@@ -56,7 +56,9 @@ namespace PalaceMod
             var slot = bi.targetBuilding;
             BodyDev.Raise("interactRefused", slot.GetComponent<BuilderEntity>()?.Entity ?? LogicGame.EntityOf(slot.gameObject),
                 LogicGame.EntityOf(player.gameObject), slot.NextUpgradeOrBuildCost, slot.transform.position.ToVec(), string.Join(", ", shortOf));
-            if (bi.costDisplay != null) bi.costDisplay.Deny();
+            // The coin display's shake. Deny indexes the next empty coin slot: none when the slot costs no gold or the
+            // display is full.
+            if (bi.costDisplay != null && slot.NextUpgradeOrBuildCost > 0 && !bi.costDisplay.CompletelyFilled) bi.costDisplay.Deny();
             return true;
         }
 
@@ -82,10 +84,13 @@ namespace PalaceMod
                 var slot = __instance.targetBuilding;
                 var pays = Next(slot);
                 if (pays.Count == 0) return true;
-                if (Refuse(__instance, BuilderInteractor.Short(pays), player))
+                var shortOf = BuilderInteractor.Short(pays);
+                if (shortOf.Count > 0)
                 {
+                    // Refund the coins first (the display is full, and its deny shake indexes the next empty coin).
                     __instance.costDisplay.CancelFill(player);
                     Started(__instance) = false;
+                    Refuse(__instance, shortOf, player);
                     return false;
                 }
                 var target = slot.ActivatorUpgradesThis && slot.ActivatorBuilding != null ? slot.ActivatorBuilding : slot;
