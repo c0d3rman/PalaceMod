@@ -4,7 +4,7 @@
     python3 scripts/partest.py <level> --plans a.json b.json c.json [--from N] [--out DIR] [-- <palace.py test args>]
 
 Each plan gets a pool lease of its own (`dev.py --slot partest-<i>`), launched with `--headless` (no window) and the
-Agent bridge on, with this checkout's installed build. The level (and the library enemies it uses) is copied from
+Agent bridge on, with this checkout's installed build. The level (and every library item it uses) is copied from
 the library of instance N (`--from`, default: the instance this checkout holds) into each test instance's library;
 a different file of the same name there is moved to library/trash first. Tests run with `--fast` unless the extra
 arguments say `--no-fast`. Results go to DIR/<plan>.json (+ .err with the per-night lines); a summary is printed and
@@ -49,15 +49,23 @@ def copy_item(source, target):
 
 
 def level_files(lib, level):
-    """The level's file plus the library enemies its waves use."""
+    """The level's file plus every shared item it uses (enemies, entities, statuses, presets; transitively, as the
+    game and palace.py decide it: palace.level_uses)."""
     f = lib / "levels" / f"{level}.json"
     if not f.exists():
         raise SystemExit(f"No library level {level!r} in {lib}")
-    data = json.loads(f.read_text())
-    units = {str(sp.get("unit", "")).split(":")[-1] for ws in data.get("waveSets") or []
-             for night in ws.get("nights") or [] for sp in night.get("spawns") or []}
-    enemies = [lib / "enemies" / f"{u}.json" for u in sorted(units) if (lib / "enemies" / f"{u}.json").exists()]
-    return [f] + enemies
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("palace", ROOT / "agent-kit" / "palace.py")
+    palace = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(palace)
+    data = palace.load_library(palace.LibraryRef(lib))
+    lv = palace.find_level(data, level)
+    used = palace.level_uses(data, lv)
+    files = [f]
+    for field, ids in used.items():
+        folder = palace.SHARED_FOLDER[field]
+        files += [lib / folder / f"{i}.json" for i in sorted(ids) if (lib / folder / f"{i}.json").exists()]
+    return files
 
 
 def summary_line(path):

@@ -126,6 +126,33 @@ namespace PalaceMod.Tests
             Assert.True(!all.Any(i => i.Severity == Severity.Error && i.File == "levels/plain.json"), "nothing reported against plain");
         }
 
+        // E2's report (bt-world 20 "grassfire"): a library entity reading $wind and $fires, declared by its own level only
+        // or by none. Every way a level is loaded validates LevelScope.For(library, level) (play, the launcher, Studio
+        // edit through TestPacks.Edit, test play through TestPacks.Play's level): none may see grassfire for a plain level.
+        public static void EntityWithUndeclaredVarsNeverBlocksAnotherLevel()
+        {
+            var lib = Library();
+            lib.Entities.Add(new EntityDef
+            {
+                Id = "grassfire", Kind = "prop",
+                Rules = [Rule(@"{""when"":{""on"":""every"",""seconds"":1.5},""if"":""$fires < 70"",""do"":[{""do"":""spawn"",""entity"":""grassfire"",""at"":""self.pos + dir($wind) * 4""}]}")],
+            });
+            foreach (bool usedNowhere in new[] { false, true })
+            {
+                if (!usedNowhere)
+                    lib.Levels.Add(new LevelDef { Id = "fire", Name = "Fire", Host = "Nordfels",
+                        Logic = JObject.Parse(@"{""vars"":{""wind"":0,""fires"":0},""places"":[{""id"":""f"",""entity"":""grassfire"",""pos"":[0,0,0]}]}").ToObject<LogicDef>() });
+                else lib.Levels.RemoveAll(l => l.Id == "fire");
+                string when = usedNowhere ? "used by no level" : "used by its own level";
+                Assert.True(Errors(Validator.Validate(lib)).Contains("$wind") == usedNowhere, $"{when}: the whole library seen at once does (or doesn't) complain");
+                Assert.Equal("", Errors(Validator.Validate(LevelScope.For(lib, "plain"))), $"{when}: plain plays");
+                Assert.Equal("", Errors(Validator.Validate(LevelScope.For(Builder.Studio.Play.TestPacks.Edit(lib, "plain"), "plain"))), $"{when}: plain opens in the Studio");
+                Assert.Equal("", Errors(Validator.Validate(LevelScope.For(Builder.Studio.Play.TestPacks.Play(lib, "plain", out _), "plain"))), $"{when}: plain test-plays");
+                var all = LevelScope.LibraryIssues(lib, p => Validator.Validate(p));
+                Assert.True(!all.Any(i => i.Severity == Severity.Error && i.Message.Contains("$wind")), $"{when}: the library's own check doesn't flag it either: " + Errors(all));
+            }
+        }
+
         private static void CopyDir(string from, string to)
         {
             System.IO.Directory.CreateDirectory(to);
