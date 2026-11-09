@@ -493,6 +493,31 @@ That covers armour, dodges, "immune to arrows", "misses at long range" and "vuln
 - **Timed `setStat`s** stack independently; give `key` to make a new one replace an earlier one with the same key.
 - `damaged` doesn't fire when modifiers reduce the damage to 0, so an invulnerable door doesn't spam rules.
 - `drift` is a status mod as well (`"drift": { "toward": "@well", "speed": 3 }`).
+- **As built** (`Logic/Bodies/Stats/`):
+  - A stat's value is `(set ?? base) + Σ add, × Π mult`; the latest `set` wins; per stack, `add` sums and `mult`
+    compounds. A status mod takes `value` (= `set`), `add` or `mult`.
+  - `damageMult`, `damageTaken`, `projectileSpeed`, `scale` and `timeScale` are multipliers (base 1, on anything
+    with a body). `scale` multiplies the spawn scale. The other stats exist only where the object has the game field
+    (`.moveSpeed` on a tower is none).
+  - `hp` isn't a modifier: `setStat hp` changes hit points now, like `setHp`. A `maxHp` change keeps the hp fraction.
+  - `damageTaken` (victim) and `damageMult` (attacker) both apply inside the game's own damage call, so they cover
+    vanilla and Builder damage alike. On `damageMult`, test the victim with `when` (`victim.is('Building')`).
+    Conditional modifiers (`from`/`types`/`chance`/`when`) apply only to hits; `.damageTaken` reads the
+    unconditional value.
+  - `stunned` stops attacks and movement, `rooted` movement (speed 0), `disarmed` attacks. `untargetable` drops the
+    object from every game target search. `invulnerable` refuses all damage except `kill`.
+  - `maxStacks` defaults to 1. `refresh`: stacks add up to the cap and the timer restarts. `extend`: stacks add
+    up and the duration is added to the time left. `add`: each stack has its own timer, and past the cap the
+    soonest-ending stack is dropped. `ignore`: re-applying does nothing while it lasts. `removeStatus` takes `stacks`
+    (default: all). `applyStatus`'s `for` overrides `duration`, and takes `"night"`/`"day"` too. `source` defaults to
+    `self`.
+  - A status's own rules hear only its own `statusStart`/`statusTick`/`statusEnd`. Every status event has
+    `event.name` set to the status id. On `statusEnd`, `value` is the stack count it had.
+  - `damage.weapon` (`"vanilla:<weapon>"`) multiplies the amount by that weapon's damage multipliers for the
+    victim's tags (its `damageAdded` is ignored). The damage hooks can read the action's `source` and `types` from
+    `LogicStatsManager.CurrentDamage` (for a source without a body, such as a logic object).
+  - `visual.tint` swaps the carrier's materials for tinted copies while the status lasts. `visual.fx` needs the
+    effects catalog (`StatusVisuals.SpawnFx`).
 
 ### Signals, wires and built-in inputs
 
