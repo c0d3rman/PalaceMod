@@ -94,8 +94,8 @@ namespace PalaceMod.Builder.Level
                     graph.minRegionSize = SmallRegion;
                     restore.Add(() => graph.minRegionSize = before);
                 }
-                // Blocked cells and solid props are walls for ground units only: fliers cross them. Their blockers sit on
-                // the Obstacle layer, which the fliers' graph rasterizes too, so it is scanned without them (otherwise
+                // Blocked cells, solid props and cliff walls are walls for ground units only: fliers cross them. They sit
+                // on the Obstacle layer, which the fliers' graph rasterizes too, so it is scanned without them (otherwise
                 // a forest of solid trees or a blocked area cuts the fliers' surface into scraps and recast drops them).
                 var air = astar.data.graphs.Where(g => g != null && g.name == AirGraph).ToArray();
                 if (air.Length == 0) astar.Scan();
@@ -104,7 +104,7 @@ namespace PalaceMod.Builder.Level
                     astar.Scan(astar.data.graphs.Where(g => g != null && g.name != AirGraph).ToArray());
                     var hidden = new List<MeshRenderer>();
                     foreach (var r in Object.FindObjectsOfType<MeshRenderer>())
-                        if (r.enabled && r.gameObject.name == LayoutScene.BlockerName) { r.enabled = false; hidden.Add(r); }
+                        if (r.enabled && LayoutScene.GroundOnlyWall(r.gameObject)) { r.enabled = false; hidden.Add(r); }
                     try { astar.Scan(air); }
                     finally { foreach (var r in hidden) if (r != null) r.enabled = true; }
                 }
@@ -115,7 +115,31 @@ namespace PalaceMod.Builder.Level
             }
             PruneIslands();
             MinimapRefresh.Rebuild();
-            return sw.ElapsedMilliseconds;
+            long ms = sw.ElapsedMilliseconds;
+            ReportProblems();
+            return ms;
+        }
+
+        /// <summary>What was wrong with the graphs after the last rescan ("" when nothing): an empty ground graph, a
+        /// ground spawn line with no route to the castle, a flier line off the fliers' graph.</summary>
+        public static string LastProblem { get; private set; } = "";
+
+        /// <summary>A rescan can leave the ground graphs empty or cut a line off without any error from the pathfinding
+        /// (a layout that walls everything in, or a recast limit): say so in the log, once per distinct problem.</summary>
+        private static void ReportProblems()
+        {
+            try
+            {
+                var scene = Builder.Studio.StudioShell.Editing ? Builder.Studio.StudioScene.Scene : UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+                var problems = PathCheck.Problems(scene);
+                string text = string.Join("; ", problems);
+                if (text != LastProblem && problems.Count > 0) Log.For<BuilderManager>().Warn($"after the rescan: {text}");
+                LastProblem = text;
+            }
+            catch (System.Exception e)
+            {
+                Log.For<BuilderManager>().Warn($"checking the graphs after the rescan failed: {e.Message}");
+            }
         }
 
         // The baked graphs' walkable node centres per graph, taken before the first rescan in a scene.

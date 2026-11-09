@@ -201,6 +201,79 @@ namespace PalaceMod.Builder.Level
                 .Any(h => h.collider != null && h.collider.name == LayoutScene.BlockerName);
         }
 
+        public const string AirGraph = "Enemy Units Air";
+
+        /// <summary>A flier line further than this from the fliers' graph is worth a warning.</summary>
+        public const float AirOffGraphSnap = 30f;
+
+        public sealed class AirLine
+        {
+            public string Line;
+            /// <summary>The line's point furthest from the fliers' graph and its flat distance to it, m (-1: no graph).</summary>
+            public Vector3 Worst;
+            public float Snap;
+            /// <summary>Where a flier from Worst starts (the nearest point of the fliers' graph).</summary>
+            public Vector3? Start;
+            /// <summary>Further than the pathfinding's nearest-node limit: the game alone would put its fliers at an
+            /// infinite position (BuilderLevelManager.SnapToNavmesh_Patch moves them onto the graph instead).</summary>
+            public bool Lost;
+            /// <summary>Further than AirOffGraphSnap: worth a warning (the maps' own flier lines sit up to ~15 m off a flat
+            /// field's surface, which only shifts where their fliers appear).</summary>
+            public bool OffGraph => Snap < 0f || Snap > AirOffGraphSnap;
+        }
+
+        /// <summary>Each flier spawn line's distance from the fliers' graph, measured at its points (a 40 m line
+        /// can reach the graph at one end and miss it at the other).</summary>
+        public static List<AirLine> CheckAir(Scene scene)
+        {
+            var list = new List<AirLine>();
+            var astar = AstarPath.active;
+            if (astar == null || !astar.data.graphs.Any(g => g != null && g.name == AirGraph)) return list;
+            var nn = new NNConstraint { constrainDistance = false, graphMask = GraphMask.FromGraphName(AirGraph) };
+            float limit = astar.maxNearestNodeDistance;
+            foreach (var line in LayoutScene.Lines(scene).Where(l => l.canSpawnFlying))
+            {
+                var points = new List<Vector3>();
+                for (int i = 0; i < line.transform.childCount; i++) points.Add(line.transform.GetChild(i).position);
+                if (points.Count == 0) points.Add(line.transform.position);
+                points.Add(LayoutScene.LineCenter(line.transform));
+                var result = new AirLine { Line = line.name, Snap = 0f };
+                foreach (var p in points)
+                {
+                    var hit = astar.GetNearest(p, nn);
+                    if (hit.node == null) { result.Snap = -1f; result.Worst = p; result.Start = null; break; }
+                    float d = Flat(hit.position, p);
+                    if (d >= result.Snap) { result.Snap = d; result.Worst = p; result.Start = hit.position; }
+                    if ((hit.position - p).magnitude > limit) result.Lost = true;
+                }
+                list.Add(result);
+            }
+            return list;
+        }
+
+        private static float Flat(Vector3 a, Vector3 b) { var d = a - b; d.y = 0f; return d.magnitude; }
+
+        /// <summary>What's wrong with the graphs for this level, in a few words each: an empty ground or flier graph,
+        /// a ground line with no route to the castle, a flier line off the fliers' graph.</summary>
+        public static List<string> Problems(Scene scene)
+        {
+            var problems = new List<string>();
+            var astar = AstarPath.active;
+            if (astar == null || !scene.IsValid()) return problems;
+            foreach (var g in astar.data.graphs)
+            {
+                if (g == null) continue;
+                int walkable = 0;
+                g.GetNodes(n => { if (n.Walkable) walkable++; });
+                if (walkable == 0) problems.Add($"graph {g.name} is empty");
+            }
+            foreach (var r in Check(scene).Where(r => !r.Reachable))
+                problems.Add($"{r.Line}: no route to the castle on {r.Graph}");
+            foreach (var a in CheckAir(scene).Where(a => a.OffGraph))
+                problems.Add(a.Snap < 0f ? $"{a.Line}: no fliers' graph" : $"{a.Line}: {a.Snap:0} m from the fliers' graph, fliers start at its edge");
+            return problems;
+        }
+
         /// <summary>What each recast graph rasterizes (dev).</summary>
         public static string DescribeGraphs() => AstarPath.active == null ? "no pathfinding" : string.Join("\n", AstarPath.active.data.graphs.OfType<RecastGraph>().Select(g =>
             $"{g.name}: mode={g.collectionSettings.collectionMode} tags=[{string.Join(",", g.collectionSettings.tagMask)}] " +
