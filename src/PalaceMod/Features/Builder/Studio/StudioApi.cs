@@ -80,6 +80,8 @@ namespace PalaceMod.Builder.Studio
         public string TypeName;
         public Vector3 Pos;
         public float Yaw;
+        /// <summary>Props: tilt about their own sideways (x) and forward (z) axes, degrees (PropDef rotX/rotZ).</summary>
+        public float TiltX, TiltZ;
         /// <summary>A host slot that the level removes (shown crossed out).</summary>
         public bool Removed;
         /// <summary>Can't be moved or removed (the castle, ActivatorUpgradesThis add-ons).</summary>

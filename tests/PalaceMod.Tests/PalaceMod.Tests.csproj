@@ -30,8 +30,10 @@
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/UnitDef.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/WaveSetDef.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/LevelDef.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Model/LevelPin.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/ContentRef.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/Validation.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Model/Logic/*.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/PackSerializer.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/LibraryStore.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/Requirements.cs" />
@@ -50,6 +52,7 @@
     <Compile Include="../../src/PalaceMod/Features/Economy/PlannerStore.cs" />
     <Compile Include="../../src/PalaceMod/Features/Economy/PlannerReach.cs" />
     <Compile Include="../../src/PalaceMod/Core/UI/NumberMath.cs" />
+    <Compile Include="../../src/PalaceMod/Core/UI/ColorMath.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/TerrainDef.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Level/GroundCodec.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Level/PaintOutline.cs" />
@@ -63,6 +66,7 @@
     <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Logic/ExprLint.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Logic/Wires.cs" />
     <EmbeddedResource Include="../../src/PalaceMod/Assets/builder-sample.json" LogicalName="builder-sample.json" />
+    <EmbeddedResource Include="../../src/PalaceMod/Assets/builder-presets.json" LogicalName="builder-presets.json" />
   </ItemGroup>
 
   <ItemGroup>

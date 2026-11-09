@@ -358,6 +358,7 @@ namespace PalaceMod.Builder.Studio
             statusMid.text = n == 0 ? "" : $"{n} selected";
             string hint = StudioShell.PickPrompt ?? StudioShell.Tool?.Hint ?? "";
             if (StudioShell.Tool == StudioShell.Move && StudioShell.Move.AxisLabel is string ax) hint = $"Locked to {ax} · " + hint;
+            if (StudioShell.Tool == StudioShell.Rotate && StudioShell.Rotate.AxisLabel is string rx) hint = $"{rx} scenery: drag sideways · , . step · Alt free · {(StudioShell.Rotate.Axis == 1 ? "X" : "Z")} or Esc: back to turn";
             if (StudioShell.Tool == StudioShell.Place && StudioShell.Place.Armed is { } armed) hint = $"{ModFields.TMPEscape(armed.Name)}: " + hint;
             statusRight.text = hint;
         }

@@ -1,0 +1,156 @@
+{
+ "example": 7,
+ "title": "A drawbridge raised by a lever, lowered at dusk",
+ "doc": "Expressiveness check 7",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex07",
+  "name": "Example 7: Drawbridge",
+  "entities": [
+   {
+    "id": "drawbridge",
+    "kind": "prop",
+    "visual": {
+     "mesh": "mesh:Bridge"
+    },
+    "body": {
+     "box": [
+      4,
+      10
+     ],
+     "height": 1,
+     "solid": true
+    },
+    "mover": {
+     "pose": {
+      "up": {
+       "rotY": 0,
+       "offset": [
+        0,
+        4,
+        0
+       ]
+      },
+      "down": {
+       "rotY": 0,
+       "offset": [
+        0,
+        0,
+        0
+       ]
+      }
+     }
+    }
+   }
+  ],
+  "levels": [
+   {
+    "id": "ex07",
+    "name": "Example 7: Drawbridge",
+    "host": "Nordfels",
+    "logic": {
+     "vars": {
+      "raised": false
+     },
+     "places": [
+      {
+       "id": "bridge",
+       "entity": "drawbridge",
+       "pos": [
+        20,
+        0,
+        -10
+       ],
+       "rules": [
+        {
+         "when": "dusk",
+         "do": [
+          {
+           "do": "signal",
+           "name": "down",
+           "to": "self"
+          }
+         ]
+        },
+        {
+         "note": "fixture observer",
+         "when": {
+          "on": "signal",
+          "name": "up"
+         },
+         "do": [
+          {
+           "do": "setVar",
+           "name": "$raised",
+           "value": "true"
+          }
+         ]
+        },
+        {
+         "note": "fixture observer",
+         "when": {
+          "on": "signal",
+          "name": "down"
+         },
+         "do": [
+          {
+           "do": "setVar",
+           "name": "$raised",
+           "value": "false"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "id": "lever",
+       "kind": "logic",
+       "pos": [
+        14,
+        0,
+        -6
+       ],
+       "interact": {
+        "prompt": "Raise the bridge",
+        "when": "day"
+       },
+       "rules": [
+        {
+         "when": "interact",
+         "do": [
+          {
+           "do": "signal",
+           "name": "up",
+           "to": "@bridge"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "raise": "interact",
+    "on": "@lever",
+    "other": "king"
+   },
+   {
+    "expect": "$raised",
+    "within": 3
+   },
+   {
+    "cmd": "night"
+   },
+   {
+    "expect": "not $raised",
+    "within": 10
+   }
+  ]
+ }
+}

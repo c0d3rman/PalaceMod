@@ -39,7 +39,7 @@ from pathlib import Path
 
 VERSION = "1.0"
 HERE = Path(__file__).resolve().parent
-PACK_VERSION = 2
+PACK_VERSION = 3
 
 
 class Fail(Exception):
@@ -463,12 +463,45 @@ def library_origins(root):
     return found
 
 
+def migrate_pack(obj):
+    """Upgrades pack JSON in place to PACK_VERSION, as the mod's Migrations do (Model/PackSerializer.cs)."""
+    v = obj.get("version") if isinstance(obj.get("version"), int) else 0
+    if v < 2:
+        for lv in obj.get("levels") or []:
+            adds = ((lv.get("buildSlots") or {}).get("add")) or []
+            ids = {a.get("id") for a in adds if isinstance(a, dict)}
+            for a in adds:
+                act, lvl = a.pop("activator", None), a.pop("activatorLevel", None)
+                if isinstance(act, str) and "requires" not in a:
+                    a["requires"] = {"slot": "add:" + act if act in ids else act, "level": lvl if isinstance(lvl, int) else 0}
+    if v < 3:
+        # behaviours [{"type": "SpawnOnDeath", "unit": U}] -> a rule at the front of rules (the unit factory runs it
+        # on the game's own enemyToSpawnOnDeath, so it plays as before).
+        for u in obj.get("units") or []:
+            bs = u.pop("behaviours", None)
+            if not isinstance(bs, list):
+                continue
+            rules, unknown = [], []
+            for b in bs:
+                if isinstance(b, dict) and b.get("type") == "SpawnOnDeath" and isinstance(b.get("unit"), str):
+                    rules.append({"when": "death", "do": [{"do": "spawn", "entity": b["unit"], "at": "self", "elite": "inherit"}]})
+                else:
+                    unknown.append(b)
+            if unknown:
+                u["behaviours"] = unknown
+            if rules:
+                u["rules"] = rules + (u.get("rules") or [])
+    if v and v < PACK_VERSION:
+        obj["version"] = PACK_VERSION
+    return obj
+
+
 def load_library(ref):
     data = {"format": "palace-builder", "version": PACK_VERSION, "id": LIBRARY_ID, "name": "My library", "assets": {},
             "units": [], "waveSets": [], "levels": []}
     for kind in ("levels", "enemies"):
         for f in _item_files(ref.root, kind):
-            item = json.loads(f.read_text(encoding="utf-8"))
+            item = migrate_pack(json.loads(f.read_text(encoding="utf-8")))
             meta = item.get("library") or {}
             if kind == "levels":
                 if ref.origin and meta.get("origin") != ref.origin:
@@ -570,7 +603,7 @@ def load_pack(env, pack):
         return path, load_library(path)
     if not path.exists():
         raise Fail(f"No pack at {path}. Make a library level with `palace.py new <level> --host <map>`.")
-    return path, json.loads(path.read_text(encoding="utf-8"))
+    return path, migrate_pack(json.loads(path.read_text(encoding="utf-8")))
 
 
 def save_pack(path, data):
@@ -1321,16 +1354,41 @@ class Ops:
         entry = next((m for m in self.ref.scenery.get("meshes", []) if m["name"] == name), None)
         return (entry["home"] if entry else lv["host"]).split("(")[0]
 
+    @staticmethod
+    def tilt(v, field):
+        """A tilt angle (rotX/rotZ) as stored: degrees in -180..180."""
+        a = Ops.numbers([v], 1, field)[0]
+        return round(((a + 180) % 360) - 180, 2)
+
+    @staticmethod
+    def with_tilt(prop, op):
+        """Puts op's rotX/rotZ into the prop, right after rotY (left out at 0, as the game writes them)."""
+        out_ = {}
+        for k, v in prop.items():
+            if k in ("rotX", "rotZ"):
+                continue
+            out_[k] = v
+            if k == "rotY":
+                for t in ("rotX", "rotZ"):
+                    a = Ops.tilt(op[t], t) if t in op else prop.get(t, 0)
+                    if a:
+                        out_[t] = a
+        prop.clear()
+        prop.update(out_)
+        return prop
+
     def op_add_prop(self, op):
-        """{"op":"add_prop","id":"rock1","mesh":"Rock A","at":[x,z],"rotY":0,"scale":1,"solid":true,"colors":"original"}"""
+        """{"op":"add_prop","id":"rock1","mesh":"Rock A","at":[x,z],"rotY":0,"rotX":0,"rotZ":0,"scale":1,"solid":true,"colors":"original"}
+        rotY turns it (its heading); rotX tips it about its own sideways axis (+ front down; 90 lays an upright piece on
+        its back), rotZ rolls it onto its side. The tilts apply before rotY."""
         lv = self.level(op)
         props = ensure(lv, "props", [])
         pid = op.get("id") or self.new_prop_id(props, op["mesh"])
         if pid in self.prop_ids(props)[2]:
             raise Fail(f"prop {pid!r} exists (to re-apply a whole ops file, `apply --fresh`)")
         base = self.prop_base(lv, op["mesh"])
-        prop = {"id": pid, "base": base, "pos": self.pos(lv, op, strict=False), "rotY": float(op.get("rotY", 0)),
-                "scale": float(op.get("scale", 1)), "solid": bool(op.get("solid", True))}
+        prop = self.with_tilt({"id": pid, "base": base, "pos": self.pos(lv, op, strict=False), "rotY": float(op.get("rotY", 0)),
+                               "scale": float(op.get("scale", 1)), "solid": bool(op.get("solid", True))}, op)
         if (colors := self.prop_colors(lv, base, op.get("colors"))) is not None:
             prop["colors"] = colors
         props.append(prop)
@@ -1362,6 +1420,32 @@ class Ops:
             n += 1
         free[stem] = n
         return f"{stem}-{n}"
+
+    def op_set_prop(self, op):
+        """{"op":"set_prop","id":"rock1","at":[x,z],"rotY":90,"rotX":90,"rotZ":0,"scale":1.2,"solid":false,"colors":"original"}:
+        changes a placed prop, only the fields given ("ids": [...] for several; "pos": [x,y,z] instead of "at")."""
+        lv = self.level(op)
+        ids = op["ids"] if "ids" in op else [op["id"]]
+        found = {p.get("id"): p for p in lv.get("props") or [] if p.get("id") in ids}
+        if missing := [i for i in ids if i not in found]:
+            raise Fail(f"no prop {', '.join(map(repr, missing))} on this level")
+        for p in found.values():
+            if "at" in op or "pos" in op:
+                p["pos"] = self.pos(lv, op, strict=False)
+            if "rotY" in op:
+                p["rotY"] = float(op["rotY"])
+            if "scale" in op:
+                p["scale"] = float(op["scale"])
+            if "solid" in op:
+                p["solid"] = bool(op["solid"])
+            if "colors" in op:
+                c = self.prop_colors(lv, p["base"], op["colors"])
+                if c is None:
+                    p.pop("colors", None)
+                else:
+                    p["colors"] = c
+            self.with_tilt(p, op)
+        return f"set {len(found)} prop{'s' if len(found) != 1 else ''}"
 
     def op_remove_prop(self, op):
         lv = self.level(op)
@@ -2080,19 +2164,55 @@ SMALL_CLEARANCE = 0.5
 LARGE_CLEARANCE = 4.0
 
 
+def quat_matrix(q):
+    """Rows of the rotation matrix of a Unity quaternion [x, y, z, w]."""
+    x, y, z, w = q
+    return [[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]]
+
+
+def euler_matrix(ex, ey, ez):
+    """Unity's Quaternion.Euler(ex, ey, ez) as a matrix: z first, then x, then y (degrees)."""
+    def m(a, axis):
+        c, s = math.cos(math.radians(a)), math.sin(math.radians(a))
+        return {"x": [[1, 0, 0], [0, c, -s], [0, s, c]], "y": [[c, 0, s], [0, 1, 0], [-s, 0, c]], "z": [[c, -s, 0], [s, c, 0], [0, 0, 1]]}[axis]
+
+    def mul(a, b):
+        return [[sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
+    return mul(m(ey, "y"), mul(m(ex, "x"), m(ez, "z")))
+
+
+def box_extents(rot, half):
+    """Half extents (world axes) of a box with these half extents turned by rot."""
+    return [sum(abs(rot[i][j]) * half[j] for j in range(3)) for i in range(3)]
+
+
 def prop_radius(ref, level, p):
     """Half the footprint of a placed prop, metres: the host map's own use of the mesh if it has one (map dump,
-    footprint x/z), else the scenery library's (mesh size x/y before it's stood upright), else 1.5."""
+    footprint x/z), else the scenery library's (mesh size x/y before it's stood upright), else 1.5. A tilted prop
+    (rotX/rotZ) gets its tilted bounding box's footprint, centred on its position (an approximation: the mesh's pivot
+    isn't known here)."""
     name = p["base"][5:].split("@")[0]
-    size = None
+    size = upright = None
     for s in ref.map(level["host"]).get("scenery", []):
         if s["base"] == "mesh:" + name and s.get("size"):
-            size = (s["size"][0], s["size"][2])
+            size = s["size"]   # already stood upright: x, height, z
     if size is None:
         for m_ in ref.scenery.get("meshes", []):
             if m_["name"] == name and m_.get("size"):
-                size = (m_["size"][0], m_["size"][1])
-    return (max(size) / 2 if size else 1.5) * float(p.get("scale", 1))
+                size, upright = m_["size"], m_.get("upright") or [-0.70711, 0, 0, 0.70711]   # mesh space, z up
+    scale = float(p.get("scale", 1))
+    tx, tz = float(p.get("rotX", 0) or 0), float(p.get("rotZ", 0) or 0)
+    if size is None:
+        return 1.5 * scale
+    if not tx and not tz:
+        return (max(size[0], size[1]) if upright else max(size[0], size[2])) / 2 * scale
+    half = [v / 2 for v in size]
+    if upright:
+        half = box_extents(quat_matrix(upright), half)
+    e = box_extents(euler_matrix(tx, 0, tz), half)
+    return max(e[0], e[2]) * scale
 
 
 class LevelGround:
@@ -2566,6 +2686,7 @@ def unit_world(slot):
 
 
 MODEL_LOOKS = ("own", "unit")
+HEX_COLOR = re.compile(r"^#?[0-9a-fA-F]{6}$")
 MODEL_MOTIONS = ("auto", "bob", "none")
 
 
@@ -2600,6 +2721,19 @@ def check_unit(ref, u):
         errs.append((".visuals.meshLook", f"one of {MODEL_LOOKS}"))
     if v.get("motion") is not None and v["motion"] not in MODEL_MOTIONS:
         errs.append((".visuals.motion", f"one of {MODEL_MOTIONS}"))
+    for key in ("tint",):
+        if v.get(key) is not None and not HEX_COLOR.match(str(v[key])):
+            errs.append((f".visuals.{key}", '"#rrggbb"'))
+    colors = v.get("colors")
+    if colors is not None:
+        if not isinstance(colors, dict):
+            errs.append((".visuals.colors", '{"body": "#rrggbb", "<material>": "#rrggbb"}'))
+        else:
+            for part, hexc in colors.items():
+                if not str(part).strip():
+                    errs.append((".visuals.colors", "a part name can't be empty"))
+                elif not HEX_COLOR.match(str(hexc)):
+                    errs.append((f".visuals.colors.{part}", '"#rrggbb"'))
     return errs
 
 

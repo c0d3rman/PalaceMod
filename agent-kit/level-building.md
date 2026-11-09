@@ -92,6 +92,12 @@ All commands print JSON. Errors go to stderr as `{"error": "..."}` with exit cod
   grid, or your terrain). Use `"pos": [x, y, z]` only to force a height.
 - `rotY`: yaw in degrees around the vertical axis (copies keep their base's tilt). Turn buildings to face the
   lane they guard; for most buildings it is cosmetic.
+- Props can also tilt: `rotX` tips one about its own sideways axis (+ leans its front down; 90 lays an upright piece
+  on its back, e.g. a banner or insignia as a floor emblem), `rotZ` rolls it onto its side. Both are degrees
+  (-180..180), applied before `rotY` (so `rotY` stays its heading), and left out at 0. A solid prop's blocker tilts
+  with it; offline checks use the tilted bounding box's footprint, centred on the prop's position (a mesh whose pivot
+  is at its base sticks out further on one side; check a large tilted solid prop with `paths`). Lower a half-sunk
+  piece with `"pos": [x, y, z]`.
 - **Which way lines and walls run**: at `rotY` 0 a spawn line's segment, and a wall or gate copied from a host's
   "Gate Variant", runs **east-west** (along x), so it faces, or blocks, traffic moving north or south; at `rotY` 90 it
   runs north-south. To close an east-west pass, use `rotY` 90. A gate's length varies by host piece; check it with
@@ -157,6 +163,7 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
     "remove": ["Forest", "Right Bridge"]   // host lines taken off the map: no enemies, routes or markers
   },
   "props": [{ "id": "rock-1", "base": "mesh:Rock A", "pos": [x,y,z], "rotY": 0, "scale": 1.0, "solid": true,
+              "rotX": 90, "rotZ": 0,   // optional tilt (absent = 0): rotX tips it forward, rotZ rolls it
               "colors": "Totend" }],   // optional: keep that map's colours (absent = the level's)
   "terrain": { ... }                                  // section 7
 }
@@ -248,13 +255,35 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
 
 ```jsonc
 { "id": "brute", "side": "enemy", "base": "vanilla:E Ogre", "name": "Brute", "description": "...",
-  "visuals": { "tint": "#c9a227", "scale": 1.3 },
+  "visuals": { "colors": { "body": "#c9a227" }, "scale": 1.3 },
   "stats": { "maxHp": 300, "moveSpeed": 4, "attackCooldown": 1.6, "attackRange": 3, "keepDistance": 0, "aggroTime": 5 },
   "weapon": { "base": "inherit", "damageMult": 1.5,
               "damage": [{ "tags": [], "add": 6 }, { "tags": ["Building"], "mult": 3 }] },   // replaces the list
   "tags": { "add": ["ArmoredAgainstRanged"], "remove": [] },     // not Flying/LargeUnit: pick a base that has them
-  "behaviours": [{ "type": "SpawnOnDeath", "unit": "vanilla:E Slime" }] }
+  "rules": [{ "when": "death", "do": [{ "do": "spawn", "entity": "vanilla:E Slime", "at": "self", "elite": "inherit" }] }] }
 ```
+
+`rules` is the behaviour engine (see "Behaviour"): that one rule is "spawns a slime where it dies". Packs of version 2
+had `"behaviours": [{ "type": "SpawnOnDeath", "unit": ... }]`; reading them turns it into exactly that rule.
+
+**Colours.** `visuals.colors` replaces colours outright, per part: `"body"` is the unit's body (the enemy colour, all
+of it), any other key is one piece of the model (`"Bow"`, `"Helmet"`: its renderer's name) or one of its materials
+by name; the most specific wins. `builder-enemy parts` through the bridge lists the pieces, their materials and colours
+while the Enemy Studio is open. The lit side becomes the colour and the shaded side follows it the way the
+level's colour scheme pairs them; elites keep it with the elite outline. `visuals.tint` only multiplies the body's lit
+colour (a subtle shift): use `colors` for a new colour.
+
+```jsonc
+"visuals": { "colors": { "body": "#3a6ee8", "Bow": "#e8c23a" } }   // an archer base: blue, with a gold bow
+```
+
+**Ranged attacks.** A unit attacks with its weapon: a ranged one fires a projectile that homes on its target, a melee
+one hits at once. To make a ranged enemy, start from a ranged base (`ref enemies`: archers, mages) or set
+`weapon.base` to a ranged unit's weapon (`ref enemies` lists each base's weapon). Then `stats.attackRange` is how far
+it picks targets (metres), `weapon.projectileSpeed` how fast its shots fly, `stats.attackCooldown` the seconds between
+shots, `weapon.damage` the damage by target, and `stats.keepDistance` how close it walks before it stops (keep it
+below the range, or it stops out of reach). What it targets and how it moves come from the base unit (each vanilla
+enemy has its own target lists); they aren't editable yet.
 
 Stats are absolute (difficulty, elite and perks still multiply them). Ranges: maxHp 1-100000, moveSpeed 0-100,
 attackCooldown 0.05-120. Gold is set per spawn group, not per unit. `palace.py ref enemies` gives every base's stats
@@ -316,6 +345,7 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 | `paths [--rescan] [--points]` | the game's own route from every ground line to the castle, on the graph its enemies use (`Enemy Units L` if the line spawns large ones): `length` m from the line itself, `at` (the line's middle), `start` (where that lands on walkable ground), `snap` (m between them) and a `warning` when the line is over 10 m off walkable ground; `--points` adds the waypoints `[[x, z], ...]` |
 | `paths --between X1 Z1 X2 Z2` | whether each ground graph (small enemies, large enemies, the king's `Player Units S`) connects two points, and how far each point is from walkable ground |
 | `report` | the current or last night's report |
+| `game cmd "savestate save <name>"` / `"savestate load <name\|last\|quick>"` / `"savestate list"` / `"savestate dump"` / `"retrynight load"` | savestates of the level being played (`play`, `test`, `sandbox`): capture a moment (e.g. the dawn before the finale) and load it back to retest from there without replaying the run. Filed per level, not per host map. A load reloads the level (about a second; `dump` says `restoring=False` when done) with its terrain, layout, custom enemies and night progress. It refuses if the level's night count or build slots changed since the save; other edits (later nights' enemies, props, terrain) load |
 | `shot -o f.png` | screenshot of the game window |
 | `game status` / `game slots` / `game log` / `game menu` / `game cmd "<raw>"` | raw game access |
 | `share <pack> [--clipboard]` / `share <pack> --export [-o f.tfpack] [--force]` | share code (JSON; the clipboard only with `--clipboard`) / .tfpack file (`written`: its exact path; without `-o` a new numbered file in the game's `exports/` folder) |
@@ -331,7 +361,8 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 | `set_units` | `slot`, `units` [[x,z] in the slot's frame, null keeps that one] or `at` [[x,z] world points]; `units: null` = back to the map's |
 | `remove_slot` | `slot` |
 | `chain` | `slots` [ids/names], `mode` `tree`\|`nearest`\|`order`, `first` (requirement of the root(s), default `"castle"`), `every` N (order/nearest: every N-th link needs one more castle level instead) |
-| `add_prop` | `mesh`, `at`/`pos`, `rotY`, `scale`, `solid`, `colors` (a map or `original`), `id` (auto) |
+| `add_prop` | `mesh`, `at`/`pos`, `rotY`, `rotX`/`rotZ` (tilt), `scale`, `solid`, `colors` (a map or `original`), `id` (auto) |
+| `set_prop` | `id` or `ids`, then any of `at`/`pos`, `rotY`, `rotX`, `rotZ`, `scale`, `solid`, `colors` (null: the level's) |
 | `scatter` | `mesh` (name or list), `count`, shape (`circle`/`rect`/`line`/`polygon`), `spacing` (3), `avoid` (6 m from slots and lines), `scale` [min,max], `solid` (default true: solid scatter can close a lane; `false` for decoration), `colors`, `seed` |
 | `remove_prop` | `id` or `ids` |
 | `add_spawn_line` | `id`, `at`/`pos`, `rotY`, `width`, `ground`, `large`, `flying` |

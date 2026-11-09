@@ -44,6 +44,21 @@ namespace PalaceMod.Builder.Studio.Enemies
             float left = G + PaletteW + G;
             arena = dock.AddPanel("Arena", new Vector2(0, 0), new Vector2(0, 0), new Vector2(left, G), new Vector2(left + ArenaW, G + BottomH));
             readout = dock.AddPanel("Readout", new Vector2(0, 0), new Vector2(1, 0), new Vector2(left + ArenaW + G, G), new Vector2(-G - RightW - G, G + BottomH));
+            ModTooltip.Zone = TooltipZone;
+        }
+
+        /// <summary>Tooltips never cover the stage: the inspector's and the readout's go over the palette, the
+        /// palette's and the arena's over the inspector.</summary>
+        private static Rect? TooltipZone(RectTransform near)
+        {
+            if (dock?.Root == null || near == null) return null;
+            ModDockPanel Owner() => new[] { palette, right, arena, readout }.FirstOrDefault(p => p?.Rect != null && near.IsChildOf(p.Rect));
+            var owner = Owner();
+            var target = owner == right || owner == readout ? palette : owner == palette || owner == arena ? right : null;
+            if (target?.Rect == null) return null;
+            var c = new Vector3[4];
+            target.Rect.GetWorldCorners(c);
+            return Rect.MinMaxRect(c[0].x, c[0].y, c[2].x, c[2].y);
         }
 
         public static void Build()
@@ -62,6 +77,7 @@ namespace PalaceMod.Builder.Studio.Enemies
         public static void Destroy()
         {
             ModTooltip.Hide();
+            if (ModTooltip.Zone == (Func<RectTransform, Rect?>)TooltipZone) ModTooltip.Zone = null;
             dock?.Destroy();
             dock = null;
             title = null;
@@ -414,24 +430,15 @@ namespace PalaceMod.Builder.Studio.Enemies
                     if (extra.Build != null) { extra.Build(page); return; }
                     switch (PanelTab)
                     {
-                        case "attack": unitPage.BuildSection(page, "weapon"); break;
-                        case "tags": unitPage.BuildSection(page, "tags"); TagSummary(page); break;
-                        case "look": unitPage.BuildSection(page, "visuals"); ModelFields(page); break;
+                        case "attack": EnemyPanels.Attack(page); break;
+                        case "tags": EnemyPanels.Tags(page); break;
+                        case "look": EnemyPanels.Colours(page); EnemyPanels.Size(page); ModelFields(page); break;
                         case "abilities": unitPage.BuildSection(page, "behaviours"); break;
                         default: unitPage.BuildSection(page, "identity", "stats"); break;
                     }
                 }
                 catch (Exception e) { Log.For<BuilderManager>().Caught("Enemy Studio inspector failed", e); }
             });
-        }
-
-        private static void TagSummary(ModPage page)
-        {
-            var e = EnemyStudio.Effective();
-            StudioDock.SmallHeader(page, "As it spawns");
-            foreach (var t in e.Tags.OrderBy(t => t))
-                page.Row(Schema(t), null, Descriptions.Tag(t) ?? "");
-            if (e.Tags.Count == 0) page.Text(Dim("No tags"));
         }
 
         private static string Schema(string tag) => Editor.Schema.Words(tag);

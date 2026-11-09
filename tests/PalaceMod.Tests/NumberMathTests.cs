@@ -96,6 +96,11 @@ namespace PalaceMod.Tests
             Equal(1.4, NumberMath.Step(1.5, 0.1, -1, 0.5, 5, false), "float step down");
             Equal(12, NumberMath.Step(2, 1, 10, 1, 100, true), "x10");
             Equal(3, NumberMath.Step(1, 2, 1, 1, 100, true), "grid from min");
+            // A float step far from min (the Enemy Studio's Move X: -50..50 by 0.05f) used to stick between -0.05 and 0.
+            Assert.True(NumberMath.Step(0, 0.05f, 1, -50, 50, false) > 0.04, "float step from a far min, up");
+            Assert.True(NumberMath.Step(0.05f, 0.05f, 1, -50, 50, false) > 0.09, "float step from a far min, up again");
+            Equal(-0.05, NumberMath.Step(0, NumberMath.Decimal(0.05f), -1, -50, 50, false), "float step from a far min, down");
+            Equal(0.05, NumberMath.Step(NumberMath.Decimal(0f), NumberMath.Decimal(0.05f), 1, -50, 50, false), "decimal step");
         }
 
         public static void AcceleratesWithinTheRange()

@@ -490,12 +490,14 @@ namespace PalaceMod.Builder.Studio
             if (StudioKeys.Down(StudioKeys.Hide) && !p.Alt) { StudioScene.Hide(StudioSelection.Keys); StudioSelection.Clear(); return; }
             if (StudioKeys.Down(StudioKeys.Frame)) { FrameSelection(); return; }
             if (StudioKeys.Down(StudioKeys.FrameAll)) { FrameAll(); return; }
-            if (StudioKeys.Down(StudioKeys.XRay) && !Move.Grabbing) { StudioViewOptions.XRay = !StudioViewOptions.XRay; StudioViewOptions.RaiseChanged(); StudioScene.RefreshMarkers(); return; }
+            // X locks a grab to x, and switches the Rotate tool to tilting.
+            if (StudioKeys.Down(StudioKeys.XRay) && !Move.Grabbing && Tool != Rotate) { StudioViewOptions.XRay = !StudioViewOptions.XRay; StudioViewOptions.RaiseChanged(); StudioScene.RefreshMarkers(); return; }
             if (StudioKeys.Down(StudioKeys.Palette)) { StudioDock.TogglePalette(); return; }
             float turn = StudioKeys.Down(StudioKeys.RotateBack) ? -TurnStep : StudioKeys.Down(StudioKeys.Rotate) ? TurnStep : 0f;
             if (turn != 0f)
             {
                 if (Tool == Place && Place.Armed != null) Place.Turn(turn);
+                else if (Tool == Rotate && Rotate.Axis != 0 && StudioSelection.Count > 0) Rotate.Step(turn);
                 else if (StudioSelection.Count > 0) StudioEdits.Rotate(StudioSelection.Items.ToList(), turn);
                 return;
             }

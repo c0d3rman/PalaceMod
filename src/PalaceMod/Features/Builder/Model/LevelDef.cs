@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using PalaceMod.Builder.Model.Logic;
 
 /*
     Level overlays (stage 2, WP4b/c). Features/Builder/Level/LevelOverlay applies them when a session loads the host
@@ -34,6 +35,9 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("colors")] public string Colors { get; set; }
         /// <summary>Editor groups (Studio metadata, ignored when playing).</summary>
         [JsonProperty("groups")] public List<GroupDef> Groups { get; set; }
+        /// <summary>The behaviour engine: level script, variables, placed entities, attached rules, HUD, king actions
+        /// (Model/Logic/LogicDefs.cs, docs/builder-engine.md).</summary>
+        [JsonProperty("logic")] public LogicDef Logic { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
@@ -176,6 +180,11 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("base")] public string Base { get; set; }
         [JsonProperty("pos")] public float[] Pos { get; set; }
         [JsonProperty("rotY")] public float RotY { get; set; }
+        /// <summary>Tilt in degrees about the prop's own sideways axis (+ tips its front down; 90 lays an upright
+        /// thing on its back) and about its own forward axis (roll). Applied before rotY, so rotY stays the heading:
+        /// the rotation is Euler(rotX, rotY, rotZ). Left out when 0 (files from before tilting have neither).</summary>
+        [JsonProperty("rotX", DefaultValueHandling = DefaultValueHandling.Ignore)] public float RotX { get; set; }
+        [JsonProperty("rotZ", DefaultValueHandling = DefaultValueHandling.Ignore)] public float RotZ { get; set; }
         [JsonProperty("scale")] public float Scale { get; set; } = 1f;
         /// <summary>Whether units walk around it (it's added to the pathfinding graphs at level start).</summary>
         [JsonProperty("solid")] public bool Solid { get; set; } = true;

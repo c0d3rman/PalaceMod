@@ -183,16 +183,32 @@ Events: `impact` (`other` is what it hit, or none for ground; `event.pos`), `exp
 ```
 
 Events: `arrive` (at each point; `event.value` is the index), `end` (once/pingpong end, and the end of a
-`movement.path`; it fires before `then: "destroy"` acts). A solid mover drags its
-NavmeshCut; the graph updates at most 4 times a second per mover. Units it would trap are pushed to the nearest
-walkable point, the same fix as the terrain stuck bug.
+`movement.path`; it fires before `then: "destroy"` acts). A solid mover drags a NavmeshCut on the ground graphs
+(the fliers' graph excluded); the navmesh follows it at most 4 times a second. Units it would trap are pushed to the
+nearest walkable point, the same fix as the terrain stuck bug.
 
 **Walkable surfaces** (`body.walkable`): a prop whose top ground units walk on, such as a bridge, a raft or a frozen
-lake's ice. Ground graphs can't gain triangles locally, so a walkable surface appearing, disappearing or reaching a
-pose re-runs `GroundGraphs.Scan()`. A static one is scanned once at level start. A mover with `walkable` only snaps
-between poses (no gliding), and carries nothing while moving: units on it are moved with it at the snap.
-**L2 measures the rescan first.** If a scan of an edited map takes over about 150 ms, runtime walkable changes are
-limited to one per 5 s, with a validator warning.
+lake's ice. Ground graphs can't gain triangles locally, so the level-start scan rasterizes every walkable surface in
+every pose it can take, and a non-dual NavmeshCut, limited to the surface's height band, hides each one that is
+switched off or not in its current pose. Appearing, disappearing and reaching a pose are then cut updates (about
+10 ms), not rescans. A mover with `walkable` only snaps between poses (no gliding), and carries nothing while moving:
+units on it are moved with it at the snap. A surface over walkable ground hides that ground while it is present in
+the scan; switched off, its footprint is a hole unless its deck is higher than a unit is tall.
+
+**L2 spike results** (`logic-l2 nav`, headless pool instance, 6 instances running; A* Pathfinding Project 5.4.4):
+
+- The four baked graphs are one tile each and already have `enableNavmeshCutting` on. A box NavmeshCut added or
+  moved costs 4-35 ms for the first update and about 3 ms per graph per later update (Nordfels: 580 triangles on
+  the small graphs). Gliding a cut through 30 enemies at 4 m/s with `navmeshUpdates.updateInterval = 0.25` cost
+  5 ms per graph update and left no unit off the navmesh: the game's movement snaps a unit to the nearest node every
+  frame when it is within 2 m, so only a cut wider than about 4 m can trap one, and the push-out covers that case.
+- `GroundGraphs.Scan()` takes 630-680 ms on vanilla Nordfels and 0.9-1.8 s on edited maps (Caldera, Kingsclimb),
+  far over the 150 ms budget. Runtime rescans are therefore never used for logic: walkable surfaces use the
+  pre-scanned cuts above, and anything that would need a rescan is a validator error, not a rate-limited call.
+- Node tags work as per-unit walkability: a dual NavmeshCut splits the navmesh along an area's outline, a
+  `GraphUpdateObject` (no physics) tags the triangles inside (under 35 ms), and a unit whose `Seeker.traversableTags`
+  and snap constraint exclude that tag stops at the edge (within about 1 m: RVO avoidance pushes the front row in),
+  while units without the limit walk through. See `body.walkTag` and `movement.walk`.
 
 **`area`**: a zone that detects what's inside it.
 
@@ -420,8 +436,8 @@ which accepts an entity or a position.
 | | `enable` / `disable` / `toggle` | the entity's rules, components (its solid cut and hittability too) and visibility; on a spawn line, pauses or resumes its spawning (the night's schedule waits for it) |
 | | `wait` | `seconds`: the rest of the list resumes later (min 0.05 s) |
 | | `if` | `cond`, `then`, `else` |
-| | `repeat` | `times` (≤ 100), `every` (seconds, 0 = now), `do` (with `event.value` = the iteration) |
-| | `forEach` | `in` (a set), `do` (with `it`), `limit` |
+| | `repeat` | `times` (≤ 100), `every` (seconds, 0 = now), `actions` (with `event.value` = the iteration; not `do`, which names the action) |
+| | `forEach` | `in` (a set), `actions` (with `it`), `limit` |
 | | `choose` | `options: [{ "weight": 2, "do": [...] }, ...]` |
 | | `stop` | ends this action list |
 | **World** | `gold` | `amount` (negative takes, floored at 0), `at` (shows the coin effect there) |

@@ -252,10 +252,12 @@ namespace PalaceMod.Builder.Studio
                 item.TypeName = prop.Solid ? "Scenery" : "Scenery (walk-through)";
                 item.Pos = LayoutScene.ToVector(prop.Pos);
                 item.Yaw = prop.RotY;
+                item.TiltX = prop.RotX;
+                item.TiltZ = prop.RotZ;
                 EnsureProxy(item, () => LayoutScene.MakeProp(Scene, b, "edit " + prop.Id, item.Pos, item.Yaw, 1f, false));
                 StudioServices.Colors?.Paint(item.Proxy, b, prop.Colors);
                 item.Proxy.transform.SetParent(Root, true);
-                item.Proxy.transform.SetPositionAndRotation(item.Pos, Quaternion.Euler(0f, item.Yaw, 0f) * b.Upright);
+                item.Proxy.transform.SetPositionAndRotation(item.Pos, LayoutScene.PropRotation(b, item.Yaw, item.TiltX, item.TiltZ));
                 item.Proxy.transform.localScale = b.Scale * Mathf.Clamp(prop.Scale, 0.1f, 10f);
                 item.Proxy.SetActive(!hidden.Contains(item.Key));
                 seen.Add(item.Key);
@@ -442,12 +444,14 @@ namespace PalaceMod.Builder.Studio
             markers.Set(item.Key, pos, yaw, size, color, item.Removed, poly, selected, StudioViewOptions.XRay);
         }
 
-        /// <summary>Shows an object at a pose without committing it (while dragging).</summary>
-        public static void Preview(StudioItem item, Vector3 pos, float yaw)
+        /// <summary>Shows an object at a pose without committing it (while dragging). A prop keeps its tilt unless
+        /// tiltX/tiltZ are given.</summary>
+        public static void Preview(StudioItem item, Vector3 pos, float yaw, float? tiltX = null, float? tiltZ = null)
         {
             if (item.Proxy != null)
             {
-                if (item.Kind == StudioItemKind.Prop && propOf.TryGetValue(item.Key, out var b)) item.Proxy.transform.SetPositionAndRotation(pos, Quaternion.Euler(0f, yaw, 0f) * b.Upright);
+                if (item.Kind == StudioItemKind.Prop && propOf.TryGetValue(item.Key, out var b))
+                    item.Proxy.transform.SetPositionAndRotation(pos, LayoutScene.PropRotation(b, yaw, tiltX ?? item.TiltX, tiltZ ?? item.TiltZ));
                 else if (nativeOf.TryGetValue(item.Key, out var n)) item.Proxy.transform.SetPositionAndRotation(pos, LayoutScene.WithYaw(n.Rot, yaw));
                 else if (item.Kind == StudioItemKind.Place) item.Proxy.transform.SetPositionAndRotation(pos, Quaternion.Euler(0f, yaw, 0f));
             }

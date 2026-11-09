@@ -1,0 +1,113 @@
+{
+ "example": 22,
+ "title": "A soul counter objective",
+ "doc": "Expressiveness check 22",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex22",
+  "name": "Example 22: Soul counter",
+  "levels": [
+   {
+    "id": "ex22",
+    "name": "Example 22: Soul counter",
+    "host": "Nordfels",
+    "logic": {
+     "vars": {
+      "souls": 0
+     },
+     "hud": [
+      {
+       "id": "souls",
+       "text": "Souls {$souls}/10"
+      }
+     ],
+     "places": [
+      {
+       "kind": "area",
+       "id": "ritual",
+       "pos": [
+        -4,
+        0,
+        -20
+       ],
+       "area": {
+        "shape": {
+         "circle": {
+          "radius": 6
+         }
+        },
+        "show": "outline",
+        "color": "#8040c0"
+       }
+      }
+     ],
+     "rules": [
+      {
+       "when": {
+        "on": "death",
+        "of": "enemy and in:@ritual"
+       },
+       "do": [
+        {
+         "do": "addVar",
+         "name": "souls",
+         "value": 1
+        }
+       ]
+      },
+      {
+       "when": "varChanged",
+       "if": "$souls >= 10",
+       "once": true,
+       "do": [
+        {
+         "do": "endLevel",
+         "result": "win",
+         "message": "The ritual is complete"
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "cmd": "night"
+   },
+   {
+    "do": [
+     {
+      "do": "spawn",
+      "entity": "vanilla:E Weakling",
+      "count": 10,
+      "at": "vec(-4, -20)",
+      "spread": 2
+     }
+    ]
+   },
+   {
+    "wait": 1
+   },
+   {
+    "do": [
+     {
+      "do": "kill",
+      "target": "all('enemy and in:@ritual')"
+     }
+    ]
+   },
+   {
+    "expect": "$souls >= 10",
+    "within": 5
+   },
+   {
+    "expectLog": "The ritual is complete",
+    "within": 10
+   }
+  ]
+ }
+}
