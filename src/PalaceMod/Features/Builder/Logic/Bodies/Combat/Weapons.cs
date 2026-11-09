@@ -362,7 +362,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             foreach (var w in Resources.FindObjectsOfTypeAll<Weapon>().Where(x => !Made(x)).GroupBy(x => x.name).Select(g => g.First()).OrderBy(x => x.name))
             {
                 if (!string.IsNullOrEmpty(filter) && w.name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0) continue;
-                sb.Append($"{IdOf(w)} types=[{string.Join(",", TypesOf(w))}] proj={(w.projectileSpeed > 0 && w.projectileVisuals != null ? w.projectileSpeed.ToString("0.#") : "-")} ");
+                sb.Append($"{IdOf(w)} types=[{string.Join(",", TypesOf(w))}] player={w.isPlayerWeapon} proj={(w.projectileSpeed > 0 && w.projectileVisuals != null ? w.projectileSpeed.ToString("0.#") : "-")} ");
                 sb.Append($"direct={Mods(w.directDamage)} splash={Mods(w.splashDamage)} ground={Comps(w.spawnOnGroundWhenTargetingGround)} air={Comps(w.spawnInAirWhenTargetingAir)} ");
                 sb.Append($"effects={string.Join(",", Traverse(w))} users={(users.TryGetValue(w.name, out var us) ? string.Join(",", us) : "-")}\n");
             }

@@ -759,7 +759,8 @@ lists what still draws near the castle.
 
 Weapons follow their wielder's side (same file, always on in a logic session): a vanilla weapon's damage rows name
 the side they hurt by team tag, so a neutral unit (or a weapon copied onto the other side) would deal 0. While
-`Weapon.DealDamage` runs for a wielder whose side isn't the weapon's own (`isPlayerWeapon`), a `PlayerOwned` /
+`Weapon.DealDamage` runs for a wielder whose side isn't the weapon's own (rows naming `EnemyOwned`: a player
+weapon; `PlayerOwned`: an enemy one; else `isPlayerWeapon`, which towers' weapons don't set), a `PlayerOwned` /
 `EnemyOwned` row means "the wielder's foe" (anything, for a neutral wielder).
 
 ### Presets
