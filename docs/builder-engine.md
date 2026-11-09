@@ -213,7 +213,8 @@ e.g. with `destroy`).
 
 **`interact`**: the king's interact key, the same as the game's buildings. `{ "prompt": "Pay {cost} to open",
 "cost": 5, "when": "day", "radius": 3, "repeat": true, "choices": null }`. `choices` (up to 4 `{ "id", "label",
-"cost" }`) shows the game's upgrade-choice popup instead, and `event.name` is the chosen id: a loan of 100, 250 or
+"cost" }`; each `cost` replaces the top-level one and may be an `=` expression) shows the game's upgrade-choice popup
+instead, and `event.choice` is the chosen id: a loan of 100, 250 or
 500, or "rebuild as tower / house". It fires `interact` (`other` is the king) after the cost is
 paid; with `cost` it uses the game's own pay-hold interaction.
 
@@ -316,12 +317,12 @@ keep rules readable.
 | `impact` / `expire` | | (projectiles, or anything with a lifetime) | hit entity / — |
 | `arrive` / `end` | | (movers, path followers, `moveTo`) | — / point index |
 | `pickup` / `interact` | | (pickups, interactables) | collector / king |
-| `signal` | `name` | it receives the signal | sender / the signal's number |
+| `signal` | `name` | it receives the signal | sender / the signal's number (`event.name` is the signal's name) |
 | `varChanged` | `name` | one of its variables changes (or a level var, on the level script) | — / new value |
 | `statusStart` / `statusEnd` / `statusTick` | `status` (when watching one from outside) | a status starts, ends, or every `tick` seconds of the status | the applier / stacks |
 | `targetChanged` | | its attack or move target changes | the new target |
 | `built` / `upgraded` / `repaired` | `level` | (build slots) the player builds or upgrades it, or it's revived at dawn | — / level |
-| `coinDrop` / `coinPickup` | | (the game's coins, which are entities of kind `coin`) a coin drops from a death / the king or a unit collects it | the dead unit / collector |
+| `coinDrop` / `coinPickup` | | (the game's coins: entities of the built-in kind `coin`, so `subject` is the coin) a coin drops from a death / the king collects it, as in the game | the dead unit / the king |
 | `lineSpawn` | `line` | a spawn line spawns an enemy (wave or `spawnGroup`) | the new enemy |
 | `levelStart` | | the level has loaded (after the overlay, before day 1) | |
 | `dusk` / `nightStart` / `dawn` / `day` | `night` | the game's day-night hooks (`OnDusk`, the first spawn, `OnDawn_AfterSunrise`) | — / night number |
@@ -406,14 +407,14 @@ which accepts an entity or a position.
 | **Team** | `convert` | `team`, `keepLook` (true), `hpPct`. A dead target is raised as a new entity of the new team. |
 | **Move** | `teleport` | `at` |
 | | `push` | `from` (or `toward` for a pull; entity or position), `force` (metres of travel), `up` (arc), `stun`: a one-off shove on units (flyers included, not buildings), through the game's knockback |
-| | `drift` | `dir` (a vector) or `toward`/`from`, `speed` (m/s), `for`: a continuous velocity added to movement (units and Builder projectiles): a pull, a current, wind |
+| | `drift` | `dir` (a vector) or `toward`/`from` (an expression; `other`/`self` work in a status), `speed` (m/s), `for`, `key`: a continuous velocity added to movement (units and Builder projectiles): a pull, a current, wind. Drifts with different keys add up; the same key replaces |
 | | `moveTo` | `at`, `speed`, `then` (`resume`/`hold`): fires `arrive` when there |
 | | `setMovement` / `setTargeting` | a movement block / a targeting list, or `prepend`, `remove`, `for` (seconds; reverts after) |
 | | `taunt` | `toward` (an entity), `for`: forces the targets' aggro onto it (the game's agro mechanism) |
 | | `command` | `order` (`follow`/`hold`/`home`): player units, as the king's own commands |
 | **Logic** | `signal` | `name`, `to` (selector, or `"all"`), `value`, `delay` |
 | | `setVar` / `addVar` | `name` (a literal, so it's checked), `value` (on `target` for entity vars; level vars when `target` is `level` or the name has `$`) |
-| | `listAdd` / `listRemove` / `listClear` | `name`, `value`, `index`: list vars (max 256 items) |
+| | `listAdd` / `listRemove` / `listClear` | `name`, `value` (add; or remove the first equal item), `index` (remove at): list vars of one element type (max 256 items, oldest dropped past that). Lists keep insertion order; sets from selectors are ordered by distance from the anchor, then entity id |
 | | `addLabel` / `removeLabel` | `label` |
 | | `enableRule` / `disableRule` | `rule` (id), `target` |
 | | `enable` / `disable` / `toggle` | the entity's rules, components (its solid cut and hittability too) and visibility; on a spawn line, pauses or resumes its spawning (the night's schedule waits for it) |
@@ -425,7 +426,7 @@ which accepts an entity or a position.
 | | `stop` | ends this action list |
 | **World** | `gold` | `amount` (negative takes, floored at 0), `at` (shows the coin effect there) |
 | | `dropCoins` | `count`, `at` (real coins the king collects) |
-| | `building` | `slot` (an attach name, a selector or a Studio key), `op`: `build` \| `upgrade` \| `knockOut` \| `repair` \| `lock` \| `unlock` \| `setCost` \| `setIncome`, `value`, `branch` |
+| | `building` | `slot` (an attach name, a selector or a Studio key), `op`: `build` \| `upgrade` \| `knockOut` \| `repair` \| `demolish` (back to an empty slot, gold not refunded unless `value`) \| `lock` (hides an unbuilt slot; a built one keeps standing but can't be upgraded) \| `unlock` \| `setCost` \| `setIncome`, `value`, `branch` |
 | | `waves` | `op` with its fields: `addSpawn` (`unit`, `count`, `interval`, `delay`, `line`, `gold`, `elite`), `removeUnit` (`unit`), `scaleCount` / `scaleHp` (`value`, optional `unit`), `clearRemaining` (optional `line`: drops what the running night hasn't spawned yet), `startNight`, `endNight`, `skipNight`. `night`: default the next night; `"current"` edits the running night's remaining schedule |
 | | `endLevel` | `result` (`win`/`lose`), `message` |
 | **Show** | `effect` | `fx` (a game effect from the catalog), `at`, `scale` |
@@ -464,7 +465,8 @@ whether they unlock many behaviours rather than one.
 Stats a status (or `setStat`) can change: `maxHp`, `hp`, `moveSpeed`, `attackCooldown`, `attackRange`, `damageMult`,
 `damageTaken`, `projectileSpeed`, `scale`, `keepDistance`, `aggroTime`, `income` (buildings), `timeScale` (multiplies
 move speed, attack and rule timers, and its own projectiles). `damageTaken` and `damageMult` modifiers may carry
-`from` (a filter on the attacker), `types`, `chance` and `when` (an expression over `attacker`, `victim` and `dist`).
+`from` (a filter on the attacker), `types`, `chance` and `when` (an expression with the extra roles `attacker`,
+`victim` and `dist`; `self` is the carrier).
 That covers armour, dodges, "immune to arrows", "misses at long range" and "vulnerable to fire".
 
 - **Damage types.** Builder damage carries the `types` its action or projectile gives. Vanilla damage gets derived
@@ -601,6 +603,11 @@ Synchronous modifiers (not rules) run inside the game's own calls:
   - a converted player unit has no building, so it holds where it was converted, or follows the king if `order` says
     so;
   - converting a dead target is the same operation, without the original.
+- **Time words.** By day, `night` is the coming night, and an action's `night` param defaults to it (the "next" night
+  is the same one). Pausing a spawn line (`disable`) freezes `nightProgress` while every line with remaining spawns is
+  paused; `clearRemaining` drops those spawns, so a night with everything cleared and no enemies left ends normally.
+- **Dawn order.** At dawn: modifiers `for: "night"` expire, the game pays income (`income` stats and `noIncome`
+  apply), then `dawn` rules run. `income` in a `dawn` rule is today's payout.
 - **Spawning enemies.** `spawn` and `spawnGroup` of enemy units go through `Spawn.AdjustEnemyParametersAfterSpawn`
   (perks, difficulty, elite) and the template-aware path that exists today, so they count toward the night like wave
   enemies.
@@ -953,53 +960,67 @@ night.
 
 ### Blind check
 
-A blind agent, given only a description of Thronefall and of a level editor (not this design), invented 30 mechanics.
-Each was then expressed against this design. That surfaced, and this document now includes:
+The user asked for a check that the design isn't fitted to the three examples. It was run as follows:
 
-- conditional damage modifiers (`from`, `types`, `chance`);
-- building `income` and `noIncome`;
-- `untargetable`, `disarmed` and `stunned`;
-- position variables;
-- king actions;
-- `command`;
-- `waves` edits;
-- pickups.
+1. A blind agent was given only a description of Thronefall and of a level editor, not this design. It invented 30
+   mechanics.
+2. A second agent, given only this document, tried to express each one in its data format and graded it. It was
+   told to grade strictly and not to invent primitives.
 
-| # | Mechanic | Verdict | How, or what's missing |
+The first pass scored **11 yes, 17 partly, 2 no**, and it listed 27 gaps in the specification.
+
+- **New primitives.** The ones that unlocked the most mechanics are now part of the design:
+  - `drift` (continuous velocity), and `dir`/`angle`/`sin`/`cos`;
+  - `nightProgress`, current-night `waves` ops, and pausing spawn lines;
+  - wave queries (`waveCount`, `waveUnits`, `strongestUnit`);
+  - coins as entities;
+  - building-kind and fighter filter terms, and `.income`/`.cost`;
+  - derived vanilla damage types and modifier `when`;
+  - list vars;
+  - labels at runtime;
+  - `setHp`;
+  - interact choices;
+  - box footprints and walkable surfaces.
+- **Ambiguities.** Each one was resolved in the text.
+
+On the revised document, the same agent re-graded the mechanics at **25 yes, 5 partly, 0 no**. It found ten more
+ambiguities, which were also fixed in the text.
+
+| # | Mechanic | Grade | How (or what limits it) |
 |---|---|---|---|
-| 1 | Tidal moat (floods every 2 nights, slows, chests when drained) | Yes | var + `dusk` rule toggling a solid blocker place and two areas with slow statuses; chests are pickups enabled when drained |
-| 2 | Sundial gate (open in a window of the night clock) | Yes | door with `every 1` rule on `nightTime`; hittable body with hp 2000 |
-| 3 | Gravity well (pull, damage at centre, overheats) | Yes | `every 0.2` `push toward self` on `all('foe', 8)`; core area damage; `$heat` var disables the rule for 10 s |
-| 4 | Debt collector (steals gold, flees, refund on kill) | Yes | `near` building → `gold -25`, `$carrying`, `setMovement {direct, to exit}`; `death` → `gold` ×1.5 if carrying; `arrive` → `destroy silent` |
-| 5 | Lantern fog (enemies targetable only near lanterns) | Partly | `untargetable` status off near lanterns works; no fog rendering, only tint |
-| 6 | Rotating bridge carrying units | Partly | rotating solid mover and navmesh updates work; units on it aren't carried (no riding) |
-| 7 | Tribute altar cancels the strongest enemy type next night | Partly | `interact` + `waves removeUnit` works for a named type; "strongest type" needs wave introspection (no function for it) |
-| 8 | Echo barracks replays the king's last 10 s | No | no recording or playback of movement |
-| 9 | Magnetized armour (pulled to towers, can't attack, capacity) | Yes | `#iron` label, `push toward`, `disarmed` status, counter var per tower |
-| 10 | Plague cart (poison trail, no income, immune to arrows) | Yes | `every 1` spawn area with lifetime 30; area applies `noIncome` + damage; `damageTaken {mult 0, from: 'RangedFighter'}` |
-| 11 | Collapse tiles (crumble, block, regrow at dawn) | Yes | area `enter` → `wait 2` → enable a solid blocker + stun status; `dawn` → disable |
-| 12 | Swap totem (swaps an enemy and a troop) | Yes | position var: `setVar p = a.pos; teleport a to b.pos; teleport b to $p` |
-| 13 | Time-dilation field (40 % speed inside) | Partly | `timeScale` status on units and Builder projectiles; vanilla arrows in flight aren't slowed |
-| 14 | Siege ladder (melee walk over a wall near it) | Partly | can disable the wall's blocking for everyone; per-unit walkability needs a graph per unit (no) |
-| 15 | Dawn bell (income bonus streak) | Yes | `dawn` + `income` global + `$streak`; the build-phase timer doesn't exist in Thronefall |
-| 16 | Mimic chests | Yes | `interact` + `choose` (30 % `spawn` mimics with explode-on-`near` / 70 % `gold rand(80,200)`) |
-| 17 | Seasons (ice, income, flammable grass, spreading fire) | Yes | season var every 3 nights; swap visuals, toggle blockers, `income` mods; fire areas spawn neighbours, capped by `maxAlive` |
+| 1 | Tidal moat: floods every 2 nights, slows, chests when drained | Yes | var at dusk; `enable`/`disable` a `box` blocker; areas apply slow statuses; chests are pickups |
+| 2 | Sundial gate: open between 20 % and 60 % of the night | Yes | `every 0.25` → `nightProgress` window → door poses + `invulnerable` status |
+| 3 | Gravity well: pull, damage at the centre, overheats | Yes | `drift toward self` on `all('foe and unit', 8)`; heat var → `disableRule`/`wait`/`enableRule` |
+| 4 | Debt collector: steals gold, flees, refund on kill | Yes | `near` building → `gold` −, `moveTo @exit`; `death` → `gold` ×1.5 |
+| 5 | Lantern fog: towers only target lit enemies | Yes | `setTargeting` on towers with `where(it.count('has:lit', 6) > 0)`; a dim status elsewhere |
+| 6 | Rotating bridge that carries units | Yes (snaps) | walkable mover snapping between poses carries its riders; no smooth turn |
+| 7 | Tribute altar removes the next night's strongest enemy | Yes | `interact cost "=100+50*$uses"` → `waves removeUnit "=strongestUnit(night)"` |
+| 8 | Echo barracks replays the king's last 10 s | Yes (approx.) | list vars sample `king.pos` at 10 Hz; a ghost replays them with `moveTo` |
+| 9 | Magnetized armour | Yes | `drift` + a held status (`disarmed`, `rooted`) + an entity var per tower |
+| 10 | Plague cart | Yes | trail areas with lifetime; `noIncome`; `damageTaken {mult 0, types [ranged, tower]}` |
+| 11 | Collapse tiles | Yes | an area preset using `in:self`, a blocker and a stun status; reset at `dawn` |
+| 12 | Swap totem | Yes | position vars + two `teleport`s |
+| 13 | Time-dilation field | Partly | `timeScale` on units and Builder projectiles; vanilla arrows in flight aren't slowed |
+| 14 | Siege ladder: only melee climb the wall | Partly | no per-unit walkability; a teleport or a ramp for everyone |
+| 15 | Dawn bell income streak | Yes | `dawn` + `income` + a streak var |
+| 16 | Mimic chests | Yes | `interact` + `choose`; mimics with explode-on-`near` |
+| 17 | Seasons: ice, income, spreading fire | Yes | walkable ice enabled in winter; `income` on `type:Mill`; fire spreads by status to `#flammable` |
 | 18 | War horn | Yes | example 23 |
-| 19 | Sacrificial pit (demolish a building for "blood") | Partly | Thronefall has no demolish; an interactable next to a building can `building knockOut` it and add the var |
-| 20 | Hostage convoy | Yes | path follower; `end` → reward var; `death` → `waves scaleCount 1.3` |
-| 21 | Chain pylons (zap inside the triangle while all three live; shared HP) | Yes | polygon area; `count('#pylon and alive') == 3`; shared HP via a var and `setStat hp` on damage; enemies `prepend` targeting |
-| 22 | Decoy banner (enemies target it for 8 s) | Yes | slot `built` → `setTargeting prepend ['#decoy'] for 8` on `all('enemy')` |
-| 23 | Reverse spawn (a betrayal wave inside the walls) | Yes | `nightStart` + `wait` → `spawnGroup at @innerGate`; `waves` drop the outer spawns |
-| 24 | Cursed coins | Partly | every 10th enemy death drops a custom pickup that `taunt`s all enemies onto the king; the game's own coins can't be marked |
-| 25 | Wind gusts push flyers and projectiles | Partly | flyers via `push`; Builder projectiles via a wind var in `toward`; vanilla arrows aren't deflected |
-| 26 | Shapeshifting shrine (cycles shield/curse states) | Yes | `every` cycling a var; area `inside` applies the state's status; `effect`/`sound` warning |
-| 27 | Rain nights | Mostly | random var at dusk; `moveSpeed` status on ground units; destroy `#fire`; `income` up; long-range tower misses only through a `chance` on `damageTaken` from towers |
-| 28 | Reclaimed ruins (rebuild into a random type; haunted ones attack both sides) | Partly | hidden alternative slots unlocked at random; an "attacks both sides" building needs a team hostile to all |
-| 29 | Dream stage (the king fights in a separate arena) | Partly | teleport to a walled-off corner of the same map, then back; no second scene |
-| 30 | Loan banker (borrow, repay or a collector comes) | Yes | `interact` + `$debt` + `nightStart` check → `spawn` collector with income-building targeting |
+| 19 | Sacrificial pit | Partly → Yes | the second pass lacked a demolish op; `building op demolish` was added after it |
+| 20 | Hostage convoy | Yes | path follower; `end` → reward; `death` → `waves scaleCount 1.3` |
+| 21 | Chain lightning pylons | Yes | polygon area; shared pool with `setHp`; enemies `prepend` targeting |
+| 22 | Decoy banner | Yes | `taunt` all enemies toward it for 8 s |
+| 23 | Reverse spawn at 80 % of the night | Yes | `nightProgress` → `waves clearRemaining` (current) + `spawnGroup at @inner` |
+| 24 | Cursed coins | Yes | `coinDrop` counter → `addLabel cursed`; `coinPickup` of `#cursed` → gold + `taunt` |
+| 25 | Wind gusts | Partly | flyers and Builder projectiles `drift`; vanilla arrows don't |
+| 26 | Shapeshifting shrine | Yes | cycling var; area `inside` applies the state's status |
+| 27 | Rain | Yes | slow status; modifier `when: dist > 15` with `chance`; `income` on mills |
+| 28 | Reclaimed ruins | Yes | interact `choices` with costs from `.cost`; locked slots unlocked by `choose`; vanilla AI ignores a neutral "haunted" ruin |
+| 29 | Dream stage | Partly | a walled-off arena on the same map; no second scene |
+| 30 | Loan banker | Yes | `choices` 100/250/500; dusk check → collector targeting `where(it.income > 0)` |
 
-Score: 19 yes, 1 mostly, 9 partly, 1 no. Every "partly" is a limit listed below; none needs a feature hard-coded for
-that mechanic.
+The remaining "partly" items all hit the same three engine limits: vanilla projectiles, per-unit walkability and
+scenes. None of the mechanics needed a feature coded for it.
 
 ## Known limits
 
@@ -1013,8 +1034,7 @@ that mechanic.
 - **Team model.** There are three teams. There's no "hostile to all": Builder targeting can make a thing attack
   both sides, but vanilla AI sees only `PlayerOwned`/`EnemyOwned`, so vanilla units never attack a neutral. A converted unit uses the other side's nearest equivalent brain.
 - **Game tags are a closed set** (51 `ETag`s, kept in a 64-bit field). Vanilla AI only targets by them, so labels
-  work only through Builder targeting rules, which do override vanilla priorities on Builder units and on units a rule
-  retargets.
+  work only through Builder targeting, which can be set on any attacker (Builder units, vanilla units and towers).
 - **No new scenes, no fog or lighting changes** beyond the level's colour scheme and tints. Recording is only what
   list vars can hold: up to 256 sampled values, such as positions.
 - **King actions:** 3 keys. The day phase has no timer in Thronefall, so "shorter day" has no meaning.
