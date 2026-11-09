@@ -74,6 +74,28 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("kingActions")] public List<KingActionDef> KingActions { get; set; }
         /// <summary>Raises (or lowers) the engine's caps for this level; null keeps the defaults.</summary>
         [JsonProperty("caps")] public LogicCapsDef Caps { get; set; }
+        /// <summary>The game's own rules for this level (win, lose, the castle, night flow, when fighting and building
+        /// happen); null keeps vanilla. LogicSchema.GameRules lists them.</summary>
+        [JsonProperty("game")] public GameRulesDef Game { get; set; }
+        [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
+    }
+
+    /// <summary>
+    /// logic.game: each field is a literal or an expression the runtime re-evaluates while the level runs, so a rule
+    /// can switch it through a level variable. Enum fields take the word or "=expr"; bool and number fields a literal
+    /// or an expression string.
+    /// </summary>
+    public sealed class GameRulesDef
+    {
+        [JsonProperty("victory")] public JToken Victory { get; set; }
+        [JsonProperty("defeat")] public JToken Defeat { get; set; }
+        [JsonProperty("castle")] public JToken Castle { get; set; }
+        [JsonProperty("holdNight")] public JToken HoldNight { get; set; }
+        [JsonProperty("endNight")] public JToken EndNight { get; set; }
+        [JsonProperty("survivors")] public JToken Survivors { get; set; }
+        [JsonProperty("combat")] public JToken Combat { get; set; }
+        [JsonProperty("build")] public JToken Build { get; set; }
+        [JsonProperty("dayLength")] public JToken DayLength { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
@@ -502,9 +524,9 @@ namespace PalaceMod.Builder.Model.Logic
     {
         public string Filter;
         public LNum Range;
-        /// <summary>nearest (default) | farthest | weakest | strongest | random | best (+ score).</summary>
+        /// <summary>nearest (default; best when a score is given) | farthest | weakest | strongest | random | best (+ score).</summary>
         public string Prefer;
-        /// <summary>For prefer "best": an expression over `it`; highest wins.</summary>
+        /// <summary>An expression over `it`; highest wins (implies prefer "best").</summary>
         public string Score;
         public JObject Extra;
 

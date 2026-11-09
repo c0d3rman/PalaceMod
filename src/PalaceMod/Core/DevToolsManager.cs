@@ -190,7 +190,7 @@ namespace PalaceMod
                     if (args.Length < 4) throw new ArgumentException("usage: run <h> <v> <seconds>");
                     circling = false;
                     StartInput(float.Parse(args[1]), float.Parse(args[2]), float.Parse(args[3]));
-                    return "";
+                    return KingInputState();
                 case "circle":
                     circling = true;
                     StartInput(1f, 0f, args.Length > 1 ? float.Parse(args[1]) : 5f);
@@ -283,6 +283,17 @@ namespace PalaceMod
 
         private static SceneTransitionManager Require(SceneTransitionManager transitions) =>
             transitions ?? throw new InvalidOperationException("SceneTransitionManager isn't loaded yet");
+
+        /// <summary>Why the king won't follow fake input right now, if anything stops him.</summary>
+        private static string KingInputState()
+        {
+            var king = PlayerMovement.instance;
+            if (king == null) return "no king in this scene";
+            if (LocalGamestate.Instance != null && LocalGamestate.Instance.PlayerFrozen) return "the king is frozen (a menu or cutscene)";
+            var controller = king.GetComponent<CharacterController>();
+            if (controller != null && !controller.enabled) return "the king's controller is off until the next frame (just teleported)";
+            return "";
+        }
 
         private void StartInput(float horizontal, float vertical, float seconds)
         {

@@ -142,6 +142,8 @@ namespace PalaceMod.Builder.Model.Logic
         public static readonly Dictionary<string, string> RoleAliases = new(StringComparer.Ordinal);
         /// <summary>Built-in signal inputs every entity, or an entity with that component, accepts.</summary>
         public static readonly Dictionary<string, string[]> Inputs = new(StringComparer.Ordinal);
+        /// <summary>logic.game's rules (GameRulesDef): name, type (enum/bool/number), default, options.</summary>
+        public static readonly List<ParamSpec> GameRules = [];
 
         /// <summary>The game's tags (TagManager.ETag minus NONE), usable as filter terms; a test keeps it in step.</summary>
         public static readonly HashSet<string> Tags = new(StringComparer.Ordinal) { "PlayerOwned", "EnemyOwned", "Player", "CastleCenter", "MeeleFighter", "RangedFighter", "Flying", "PlayerUnit", "Building", "SiegeWeapon", "AUTO_Alive", "AUTO_KnockedOutAndHealOnDawn", "Wall", "InfrastructureEconomy", "TakesReducedDamageFromPlayerAttacks", "PracticeTargets", "FastMoving", "ArmoredAgainstRanged", "VulnerableVsRanged", "Monster", "House", "WallOrTower", "AUTO_Commanded", "TakesIncreasedDamageFromTowers", "Tower", "AUTO_NoReviveNextMorning", "PlayerOwnedPriorityTarget", "BlockableEnemyProjectile", "Boss", "UselessWallThatDoesNotBlockPath", "Healer", "MagicProjectile", "NaturallyVulnerableToSplash", "NaturallyHighHealthTarget", "UnreachableForBigEnemiesDueToLevelDesign", "PlayerShrine", "VodooCursed", "PlayerHeroUnit", "FireAndExplosionResistant", "Humanoid", "LargeUnit", "Exploding", "TrainingFacility", "Bridge", "Group1", "Group2", "Group3", "OnDeathEnemySpawner", "Undead", "Vampire" };
@@ -204,6 +206,7 @@ namespace PalaceMod.Builder.Model.Logic
             Named(Roles, "other", "The event's counterpart: killer, victim, attacker, entrant, collector, sender...", LType.Entity);
             Named(Roles, "spawned", "Inside spawn/launch/replace `then`: the new entity.", LType.Entity);
             Named(Roles, "it", "The current candidate: inside a filter's where(), best()'s score, forEach, or an action applied to a set.", LType.Entity);
+            Named(Roles, "outer", "The `it` one scope out (the forEach member while a nested target, where() or best() rebinds `it`); none at the top.", LType.Entity);
             Named(Roles, "king", "The player's king.", LType.Entity);
             Named(Roles, "castle", "The castle (its build slot's building).", LType.Entity);
             Named(Roles, "level", "The level itself (owner of level variables).", LType.Level);
@@ -214,7 +217,7 @@ namespace PalaceMod.Builder.Model.Logic
             Ev("spawn", "This unit", "It appears: placed ones at level start, spawned ones on creation. `other` is the spawner or launcher, if any.", other: "spawner", aliases: A("spawner", "other"));
             Ev("death", "Combat", "It dies (a unit) or is knocked out (a building or the king). `other` is the killer (may be none). event.types / event.weapon: the killing hit's (see damaged).", other: "killer", aliases: A("killer", "other", "victim", "subject"),
                 fields: HitFields(), example: "{ \"when\": \"death\", \"do\": [{ \"do\": \"spawn\", \"entity\": \"goblin\", \"count\": 2, \"at\": \"self\" }] }");
-            Ev("damaged", "Combat", "It takes damage (not when modifiers reduce it to 0). event.types is the hit's damage types (a list: melee, ranged, tower, king, splash, magic, fire, the damage action's own types, and the weapon's id); event.weapon is the weapon that dealt it (\"vanilla:<weapon>\"), or none.", other: "attacker", value: LType.Number, valueMeaning: "the damage taken",
+            Ev("damaged", "Combat", "It takes damage (not when modifiers reduce it to 0). `other` is who dealt it: the king, a unit, a tower or building, a projectile's shooter, or whoever left burning ground or hot oil there; none for scenery hazards and plain `damage` actions without a source. event.types is the hit's damage types (a list: melee, ranged, tower, king, splash, magic, fire, the damage action's own types, and the weapon's id); event.weapon is the weapon that dealt it (\"vanilla:<weapon>\"), or none.", other: "attacker", value: LType.Number, valueMeaning: "the damage taken",
                 ps: [P("min", "number", "Only damage of at least this much.")], aliases: A("attacker", "other"), fields: HitFields(),
                 example: "{ \"when\": \"damaged\", \"if\": \"event.types.has('fire')\", \"do\": [{ \"do\": \"removeStatus\", \"status\": \"frozen\" }] }");
             Ev("healed", "Combat", "It is healed.", other: "healer", value: LType.Number, valueMeaning: "the amount healed", aliases: A("healer", "other"));
@@ -227,7 +230,7 @@ namespace PalaceMod.Builder.Model.Logic
             Ev("kill", "Combat", "Something it damaged died from that damage. event.types / event.weapon as for damaged.", other: "victim", aliases: A("victim", "other"), fields: HitFields());
             Ev("every", "Time", "Periodically, from spawn (or level start).", value: LType.Number, valueMeaning: "the tick count (1, 2, ...)",
                 ps: [P("seconds", "number", "Seconds between firings (min 0.1).", req: true, min: 0.1),
-                     P("jitter", "number", "Random extra delay each time, 0..1 of seconds.", min: 0, max: 1),
+                     P("jitter", "number", "Each interval varies randomly by up to this share of seconds (0.2: ±20%).", min: 0, max: 1),
                      P("phase", "number", "Seconds before the first firing (default: seconds)."),
                      P("during", "enum", "Only at night, by day, or always.", def: "always", opts: ["always", "night", "day"])],
                 global: true, example: "{ \"when\": { \"on\": \"every\", \"seconds\": 8, \"during\": \"night\" }, \"do\": [...] }");
@@ -262,8 +265,8 @@ namespace PalaceMod.Builder.Model.Logic
             Ev("statusTick", "Statuses", "Every `tick` seconds of a status (in a status's own rules: of that status).", other: "applier", value: LType.Number, valueMeaning: "stacks",
                 ps: [P("status", "status", "Only this status.")], aliases: A("applier", "other"), fields: new() { ["name"] = LType.Text });
             Ev("targetChanged", "Combat", "Its attack or move target changes.", other: "target", aliases: A("target", "other"));
-            Ev("built", "Buildings", "(build slots) The player builds it.", value: LType.Number, valueMeaning: "the level", owners: ["building"], ps: [P("level", "int", "Only this level.")]);
-            Ev("upgraded", "Buildings", "(build slots) The player upgrades it.", value: LType.Number, valueMeaning: "the new level", owners: ["building"], ps: [P("level", "int", "Only this level.")]);
+            Ev("built", "Buildings", "(build slots, map or added) It's built: by the king, `palace.py build` or the `building` action.", value: LType.Number, valueMeaning: "the level", owners: ["building"], ps: [P("level", "int", "Only this level.")]);
+            Ev("upgraded", "Buildings", "(build slots, map or added) It's upgraded (any way it's built).", value: LType.Number, valueMeaning: "the new level", owners: ["building"], ps: [P("level", "int", "Only this level.")]);
             Ev("repaired", "Buildings", "(build slots) It's revived at dawn.", value: LType.Number, valueMeaning: "the level", owners: ["building"], ps: [P("level", "int", "Only this level.")]);
             Ev("coinDrop", "Gold", "A coin drops from a death (subject is the coin; listen with `of`).", other: "dead unit", owners: ["coin"], global: false);
             Ev("coinPickup", "Gold", "The king collects a coin (subject is the coin; listen with `of`).", other: "king", owners: ["coin"]);
@@ -424,7 +427,8 @@ namespace PalaceMod.Builder.Model.Logic
             Act("repeat", "Logic", "Runs actions several times (event.value = the iteration).",
                 [P("times", "int", "How many times (max 100).", req: true, min: 1, max: 100), P("every", "number", "Seconds between (0 = all now).", def: 0, min: 0), P("actions", "actions", "The actions (\"actions\", since \"do\" names the action itself).", req: true)], owner: "L1");
             Act("forEach", "Logic", "Runs actions for each member of a set, with `it` bound.",
-                [P("in", "entities", "The set.", req: true), P("actions", "actions", "The actions (\"actions\", since \"do\" names the action itself).", req: true), P("limit", "int", "At most this many (max 256).", min: 1, max: 256)], owner: "L1");
+                [P("in", "entities", "The set.", req: true), P("actions", "actions", "The actions (\"actions\", since \"do\" names the action itself).", req: true), P("limit", "int", "At most this many (max 256).", min: 1, max: 256),
+                 P("as", "local", "A name for the member, readable inside (and in nested actions that rebind `it`): \"as\": \"tower\" then `tower.hp`.")], owner: "L1");
             Act("choose", "Logic", "Picks one weighted option at random.", [P("options", "options", "[{ \"weight\": 2, \"do\": [...] }, ...]", req: true)], owner: "L1");
             Act("stop", "Logic", "Ends this action list.", [], owner: "L1");
 
@@ -433,11 +437,11 @@ namespace PalaceMod.Builder.Model.Logic
             Act("dropCoins", "World", "Drops real coins for the king to collect.", [P("count", "int", "How many.", req: true, min: 1, max: 100), P("at", "position", "Where.", def: "self")]);
             Act("building", "World", "Acts on a build slot.",
             [
-                P("slot", "slot", "The slot: @name, a selector, or a Studio key (\"slot:Tower 3\").", req: true),
+                P("slot", "slot", "The slot: any expression giving a building or slot entity (@name, it, $var, nearest('unbuilt and type:House')...), or a Studio key (\"slot:Tower 3\", \"add:<id>\", \"castle\"). Default: the target."),
                 P("op", "enum", "What to do.", req: true, opts: ["build", "upgrade", "knockOut", "repair", "demolish", "lock", "unlock", "setCost", "setIncome"]),
                 P("value", "number", "For setCost/setIncome: the amount; for demolish: gold refunded."),
                 P("branch", "int", "For build/upgrade: the upgrade choice (0-based)."),
-            ]);
+            ], targeted: true);
             Act("waves", "World", "Edits the night's waves.",
             [
                 P("op", "enum", "What to do.", req: true, opts: ["addSpawn", "removeUnit", "scaleCount", "scaleHp", "clearRemaining", "startNight", "endNight", "skipNight"]),
@@ -446,6 +450,7 @@ namespace PalaceMod.Builder.Model.Logic
                 P("interval", "number", "addSpawn: seconds between spawns."), P("delay", "number", "addSpawn: seconds into the night."),
                 P("line", "text", "addSpawn/clearRemaining: the spawn line."), P("gold", "int", "addSpawn: coins each."), P("elite", "bool", "addSpawn: elite."),
                 P("value", "number", "scaleCount/scaleHp: the factor."),
+                P("survivors", "enum", "endNight: the enemies left vanish (remove) or stay on the map (stay).", def: "remove", opts: ["remove", "stay"]),
             ], example: "{ \"do\": \"waves\", \"op\": \"addSpawn\", \"unit\": \"brute\", \"count\": \"night - 2\", \"line\": \"North\" }");
             Act("endLevel", "World", "Ends the run.", [P("result", "enum", "Win or lose.", req: true, opts: ["win", "lose"]), P("message", "text", "Shown on the end screen.")]);
 
@@ -458,7 +463,7 @@ namespace PalaceMod.Builder.Model.Logic
             Act("setVisual", "Show", "Changes its look.",
             [
                 P("tint", "color", "#rrggbb."), P("scale", "number", "Size factor."), P("mesh", "text", "A model (mesh:/vanilla:/asset:)."),
-                P("visible", "bool", "Shown or hidden."), P("glow", "color", "Glow colour."), P("for", "number", "Seconds; reverts after."),
+                P("visible", "bool", "Shown or hidden."), P("glow", "color", "Glow colour; true for the default glow, false for none, or a 0-1 strength."), P("for", "number", "Seconds; reverts after."),
             ], targeted: true);
             Act("hud", "Show", "Changes a level HUD line (logic.hud).",
                 [P("id", "text", "The HUD line's id.", req: true), P("text", "text", "New text."), P("icon", "text", "New icon."), P("visible", "bool", "Shown or hidden.")]);
@@ -496,10 +501,24 @@ namespace PalaceMod.Builder.Model.Logic
             Named(Globals, "nightTime", "Seconds since this night began.", LType.Number);
             Named(Globals, "nightProgress", "0..1: the night's spawn schedule elapsed (1 once everything has spawned).", LType.Number);
             Named(Globals, "gold", "The player's gold.", LType.Number);
-            Named(Globals, "income", "The last dawn's payout.", LType.Number);
+            Named(Globals, "income", "The gold the buildings paid at the last dawn (`income` stats applied), already counted when `dawn` rules run; the coins themselves land over the next seconds.", LType.Number);
             Named(Globals, "enemiesAlive", "Enemies on the map.", LType.Number);
             Named(Globals, "difficulty", "The run's difficulty multiplier.", LType.Number);
             Named(Globals, "none", "No entity (what a selector gives when nothing matches, or a role the event doesn't have): `other != none`.", LType.Any);
+
+            // ---- Game rules (logic.game) ----------------------------------------------------------------------
+            GameRules.AddRange(new[]
+            {
+                P("victory", "enum", "How the level is won. lastNight: surviving the last night (vanilla). rules: only an endLevel action wins.", def: "lastNight", opts: ["lastNight", "rules"]),
+                P("defeat", "enum", "How the level is lost. castle: the castle falls (vanilla). rules: only an endLevel action (or resigning) loses.", def: "castle", opts: ["castle", "rules"]),
+                P("castle", "enum", "shown: the castle as usual. hidden: no castle (invisible, not solid, never targeted or hurt, and it can't lose the level).", def: "shown", opts: ["shown", "hidden"]),
+                P("holdNight", "bool", "While true, the night doesn't end, even with no enemies left (e.g. \"count('#nest') > 0\"). The last night's victory waits too.", def: false),
+                P("endNight", "bool", "When it turns true at night, the night ends at once (spawning stops; survivors decides the enemies left).", def: false),
+                P("survivors", "enum", "Enemies left when endNight ends a night (waves endNight has its own). stay: they stay (and keep the next night open until killed). remove: they vanish.", def: "stay", opts: ["stay", "remove"]),
+                P("combat", "bool", "When vanilla fighting happens: units', towers' and the king's attacks, and hits on the player's side. Vanilla: \"isNight\". \"true\": by day too.", def: "isNight"),
+                P("build", "bool", "When the king can build and upgrade. Vanilla: \"isDay\". \"true\": at night too.", def: "isDay"),
+                P("dayLength", "number", "Seconds of day before night falls by itself (0: the player calls the night).", def: 0, min: 0),
+            });
 
             // ---- Properties -----------------------------------------------------------------------------------
             Prop(LType.Entity, "hp", LType.Number, "Hit points.");
@@ -509,12 +528,12 @@ namespace PalaceMod.Builder.Model.Logic
             Prop(LType.Entity, "elite", LType.Bool, "An elite enemy (the game's elite flag).");
             Prop(LType.Entity, "pos", LType.Position, "Its position.");
             Prop(LType.Entity, "x", LType.Number, "Its x."); Prop(LType.Entity, "y", LType.Number, "Its y (height)."); Prop(LType.Entity, "z", LType.Number, "Its z.");
-            Prop(LType.Entity, "facing", LType.Number, "Its yaw in degrees (0 = north).");
+            Prop(LType.Entity, "facing", LType.Number, "Its yaw in degrees (0 = north, clockwise): where a unit's or the king's model faces (its walking direction, or its target while attacking), else its own rotation.");
             Prop(LType.Entity, "team", LType.Text, "'player', 'enemy' or 'neutral'.");
             Prop(LType.Entity, "kind", LType.Text, "'unit', 'building', 'prop', 'projectile', 'area', 'pickup', 'logic', 'coin', 'king', 'line', 'point', 'path'.");
             Prop(LType.Entity, "template", LType.Template, "The template it was made from.");
             Prop(LType.Entity, "labels", LType.List, "Its labels.");
-            Prop(LType.Entity, "level", LType.Number, "A building's level (0 = built, 1 = first upgrade...).");
+            Prop(LType.Entity, "level", LType.Number, "A build slot's level: 0 = empty (unbuilt), 1 = built, 2 = upgraded once...");
             Prop(LType.Entity, "cost", LType.Number, "A slot's next build/upgrade cost.");
             Prop(LType.Entity, "buildingType", LType.Text, "A building's kind, e.g. 'Mill'.");
             Prop(LType.Entity, "age", LType.Number, "Seconds since it appeared.");
@@ -576,10 +595,16 @@ namespace PalaceMod.Builder.Model.Logic
                 ("player", "The player's side."), ("enemy", "The enemy side."), ("neutral", "Neither side."),
                 ("unit", "Units (not buildings)."), ("building", "Buildings."), ("prop", "Props."), ("projectile", "Projectiles."), ("area", "Areas."),
                 ("pickup", "Pickups."), ("coin", "The game's coins."), ("king", "The king."), ("castle", "The castle."), ("self", "The rule's owner."),
-                ("melee", "Melee fighters."), ("ranged", "Ranged fighters."), ("alive", "Alive."), ("dead", "Dead or knocked out."), ("elite", "Elite enemies."),
+                ("melee", "Melee fighters."), ("ranged", "Ranged fighters."), ("alive", "Alive (not dead, switched off or an unbuilt slot)."),
+                ("dead", "Dead or knocked out. Naming it lets a selector see the dead."), ("elite", "Elite enemies."),
+                ("disabled", "Switched off (`disable`, or placed with active: false). Naming it lets a selector see switched-off things."),
+                ("unbuilt", "An empty build slot (level 0). Naming it lets a selector see empty slots, which it otherwise skips."),
                 ("logic", "Logic objects."), ("line", "Spawn lines."), ("point", "Points."), ("path", "Paths."),
-                ("#label", "Has a label."), ("is:<template>", "Made from a template."), ("in:@area", "Inside an area (in:self inside this area)."),
-                ("has:<status>", "Has a status."), ("type:<Kind>", "A building of that kind (Mill, Tower...)."), ("where(expr)", "An expression over `it`."),
+                ("#label", "Has a label (#\"two words\" for a label with spaces)."), ("is:<template>", "Made from a template (is:goblin, is:vanilla:Ogre, is:'vanilla:E Ogre')."),
+                ("in:@area", "Inside an area (in:self inside this area)."),
+                ("has:<status>", "Has a status."), ("type:<Kind>", "A building of that kind (type:Mill, type:\"Defense Tower\")."),
+                ("include:<what>", "Matches everything, but lets a selector also see what it skips by default: include:dead, include:disabled, include:unbuilt, include:self (repeat it for more)."),
+                ("where(expr)", "An expression over `it`."),
                 ("<Tag>", "Any game tag (TagManager.ETag, case-sensitive): Tower, Flying, Wall, ..."),
             }) Named(FilterTerms, n, d);
 
@@ -593,7 +618,7 @@ namespace PalaceMod.Builder.Model.Logic
         public static readonly string[] ParamTypes =
         [
             "number", "int", "bool", "text", "position", "entity", "entities", "template", "filter", "status", "rule", "var", "signal",
-            "label", "enum", "actions", "options", "targeting", "movement", "any", "for", "night", "slot", "types", "keep", "fx", "sound", "color", "json",
+            "label", "enum", "actions", "options", "targeting", "movement", "any", "for", "night", "slot", "types", "keep", "fx", "sound", "color", "json", "local",
         ];
 
         /// <summary>What each param type accepts (for the reference and the Studio's hovers).</summary>
@@ -616,18 +641,19 @@ namespace PalaceMod.Builder.Model.Logic
             ["enum"] = "one of the listed options",
             ["actions"] = "a nested list of actions",
             ["options"] = "[{ \"weight\": 2, \"do\": [actions] }, ...]",
-            ["targeting"] = "a targeting list: filter strings or { \"filter\", \"range\", \"prefer\", \"score\" }",
+            ["targeting"] = "a targeting list: filter strings or { \"filter\", \"range\", \"prefer\", \"score\" } (a score picks the highest-scoring match)",
             ["movement"] = "a movement block (mode, path, speed, keepDistance, kite, flee, wander, home)",
             ["any"] = "an expression of any type",
             ["for"] = "seconds, or \"night\" / \"day\" (until the next dawn / dusk)",
             ["night"] = "a night number expression, or \"current\"",
-            ["slot"] = "a build slot: @name, a selector, or a Studio key (\"slot:Tower 3\", \"add:<id>\", \"castle\")",
+            ["slot"] = "a build slot: any expression giving a building or slot entity (@name, it, $var, a selector), or a Studio key (\"slot:Tower 3\", \"add:<id>\", \"castle\")",
             ["types"] = "a list of damage-type labels ([\"fire\"])",
             ["keep"] = "a list of the listed options",
             ["fx"] = "a game effect name",
             ["sound"] = "\"asset:<key>\" or a game sound",
-            ["color"] = "\"#rrggbb\"",
+            ["color"] = "\"#rrggbb\" (or \"#rgb\", \"#rrggbbaa\", a colour name like \"red\"); \"=expr\" for an expression",
             ["json"] = "a JSON block",
+            ["local"] = "a plain name (letters, digits, _) for a value bound inside the action's actions",
         };
 
         /// <summary>The whole registry as JSON (logic-schema.json, written by `builder dump`).</summary>
@@ -686,6 +712,7 @@ namespace PalaceMod.Builder.Model.Logic
                 ["children"] = JObject.FromObject(c.Children),
             })));
             o["caps"] = new JObject(LogicCapsDef.Defaults.Fields().Select(f => new JProperty(f.Name, new JObject { ["default"] = f.Default, ["max"] = f.Max })));
+            o["gameRules"] = new JArray(GameRules.Select(g => g.ToJson()));
             return o;
         }
 
@@ -745,12 +772,13 @@ namespace PalaceMod.Builder.Model.Logic
             C("statusVisual", typeof(StatusVisualDef));
             C("preset", typeof(PresetDef), ("params{}", "presetParam"));
             C("presetParam", typeof(PresetParamDef));
-            C("logic", typeof(LogicDef), ("places[]", "place"), ("attach{}", "attach"), ("hud[]", "hud"), ("kingActions[]", "kingAction"), ("caps", "caps"));
+            C("logic", typeof(LogicDef), ("places[]", "place"), ("attach{}", "attach"), ("hud[]", "hud"), ("kingActions[]", "kingAction"), ("caps", "caps"), ("game", "game"));
             C("attach", typeof(AttachDef));
             C("hud", typeof(HudDef));
             C("kingAction", typeof(KingActionDef), ("uses", "uses"));
             C("uses", typeof(UsesDef));
             C("caps", typeof(LogicCapsDef));
+            C("game", typeof(GameRulesDef));
             // A preset's extra fields are its components; a place's preset/with and the expansion marks are known.
             d["preset"].Fields = d["preset"].Fields.Concat(d["entity"].Fields).Distinct().ToArray();
             d["place"].Fields = d["place"].Fields.Concat(["_preset"]).ToArray();

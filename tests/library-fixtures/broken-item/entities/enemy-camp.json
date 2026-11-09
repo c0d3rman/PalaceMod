@@ -1,0 +1,67 @@
+{
+  "format": "palace-builder",
+  "version": 3,
+  "id": "enemy-camp",
+  "name": "Enemy camp",
+  "entities": [
+    {
+      "id": "enemy-camp",
+      "kind": "prop",
+      "name": "Enemy camp",
+      "team": "enemy",
+      "countsAsEnemy": true,
+      "visual": {
+        "mesh": "mesh:Totend Tower",
+        "meshScale": 1.2
+      },
+      "body": {
+        "radius": 2,
+        "height": 4,
+        "solid": true,
+        "hittable": true,
+        "hp": 150,
+        "tags": [
+          "Building"
+        ]
+      },
+      "labels": [
+        "camp"
+      ],
+      "rules": [
+        {
+          "id": "garrison",
+          "when": "spawn",
+          "do": [
+            {
+              "do": "spawn",
+              "entity": "camp-guard",
+              "count": 2,
+              "at": "self",
+              "spread": 4,
+              "team": "enemy"
+            }
+          ]
+        },
+        {
+          "id": "fall",
+          "when": "death",
+          "do": [
+            {
+              "do": "message",
+              "text": "Camp razed",
+              "kind": "good"
+            },
+            {
+              "do": "dropCoins",
+              "count": 5
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "library": {
+    "created": "2026-11-09T03:48:08Z",
+    "kind": "entity"
+  }
+}

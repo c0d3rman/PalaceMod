@@ -46,11 +46,13 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             {
                 Filter = (string)o["filter"] ?? "foe",
                 Range = (float?)o["range"] ?? float.PositiveInfinity,
-                Prefer = (string)o["prefer"] ?? "nearest",
                 Score = (string)o["score"],
             };
+            // a score means "highest score first": prefer defaults to best when one is given
+            r.Prefer = (string)o["prefer"] ?? (r.Score != null ? "best" : "nearest");
             if (!Prefers.Contains(r.Prefer)) throw new LogicError($"targeting prefer \"{r.Prefer}\": expected one of {string.Join(", ", Prefers)}");
             if (r.Prefer == "best" && r.Score == null) throw new LogicError("targeting prefer \"best\" needs a score");
+            if (r.Prefer != "best" && r.Score != null) throw new LogicError($"targeting score is only used with prefer \"best\" (this rule has prefer \"{r.Prefer}\")");
             return Check(r);
         }
 
@@ -66,7 +68,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             if (float.IsPositiveInfinity(Range) && Prefer == "nearest" && Score == null) return Filter;
             var o = new JObject { ["filter"] = Filter };
             if (!float.IsPositiveInfinity(Range)) o["range"] = Range;
-            if (Prefer != "nearest") o["prefer"] = Prefer;
+            if (Prefer != (Score != null ? "best" : "nearest")) o["prefer"] = Prefer;
             if (Score != null) o["score"] = Score;
             return o;
         }

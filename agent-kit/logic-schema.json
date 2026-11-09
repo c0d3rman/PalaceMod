@@ -38,7 +38,7 @@
     {
       "name": "damaged",
       "group": "Combat",
-      "description": "It takes damage (not when modifiers reduce it to 0). event.types is the hit's damage types (a list: melee, ranged, tower, king, splash, magic, fire, the damage action's own types, and the weapon's id); event.weapon is the weapon that dealt it (\"vanilla:<weapon>\"), or none.",
+      "description": "It takes damage (not when modifiers reduce it to 0). `other` is who dealt it: the king, a unit, a tower or building, a projectile's shooter, or whoever left burning ground or hot oil there; none for scenery hazards and plain `damage` actions without a source. event.types is the hit's damage types (a list: melee, ranged, tower, king, splash, magic, fire, the damage action's own types, and the weapon's id); event.weapon is the weapon that dealt it (\"vanilla:<weapon>\"), or none.",
       "params": [
         {
           "name": "min",
@@ -175,7 +175,7 @@
           "type": "number",
           "min": 0.0,
           "max": 1.0,
-          "description": "Random extra delay each time, 0..1 of seconds."
+          "description": "Each interval varies randomly by up to this share of seconds (0.2: ±20%)."
         },
         {
           "name": "phase",
@@ -552,7 +552,7 @@
     {
       "name": "built",
       "group": "Buildings",
-      "description": "(build slots) The player builds it.",
+      "description": "(build slots, map or added) It's built: by the king, `palace.py build` or the `building` action.",
       "params": [
         {
           "name": "level",
@@ -570,7 +570,7 @@
     {
       "name": "upgraded",
       "group": "Buildings",
-      "description": "(build slots) The player upgrades it.",
+      "description": "(build slots, map or added) It's upgraded (any way it's built).",
       "params": [
         {
           "name": "level",
@@ -1986,6 +1986,11 @@
           "min": 1.0,
           "max": 256.0,
           "description": "At most this many (max 256)."
+        },
+        {
+          "name": "as",
+          "type": "local",
+          "description": "A name for the member, readable inside (and in nested actions that rebind `it`): \"as\": \"tower\" then `tower.hp`."
         }
       ],
       "since": "1.0.0"
@@ -2058,10 +2063,15 @@
       "description": "Acts on a build slot.",
       "params": [
         {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
           "name": "slot",
           "type": "slot",
-          "required": true,
-          "description": "The slot: @name, a selector, or a Studio key (\"slot:Tower 3\")."
+          "description": "The slot: any expression giving a building or slot entity (@name, it, $var, nearest('unbuilt and type:House')...), or a Studio key (\"slot:Tower 3\", \"add:<id>\", \"castle\"). Default: the target."
         },
         {
           "name": "op",
@@ -2159,6 +2169,16 @@
           "name": "value",
           "type": "number",
           "description": "scaleCount/scaleHp: the factor."
+        },
+        {
+          "name": "survivors",
+          "type": "enum",
+          "default": "remove",
+          "options": [
+            "remove",
+            "stay"
+          ],
+          "description": "endNight: the enemies left vanish (remove) or stay on the map (stay)."
         }
       ],
       "example": "{ \"do\": \"waves\", \"op\": \"addSpawn\", \"unit\": \"brute\", \"count\": \"night - 2\", \"line\": \"North\" }",
@@ -2323,7 +2343,7 @@
         {
           "name": "glow",
           "type": "color",
-          "description": "Glow colour."
+          "description": "Glow colour; true for the default glow, false for none, or a 0-1 strength."
         },
         {
           "name": "for",
@@ -2868,7 +2888,7 @@
       "on": "entity",
       "name": "facing",
       "returns": "number",
-      "description": "Its yaw in degrees (0 = north)."
+      "description": "Its yaw in degrees (0 = north, clockwise): where a unit's or the king's model faces (its walking direction, or its target while attacking), else its own rotation."
     },
     {
       "on": "entity",
@@ -2898,7 +2918,7 @@
       "on": "entity",
       "name": "level",
       "returns": "number",
-      "description": "A building's level (0 = built, 1 = first upgrade...)."
+      "description": "A build slot's level: 0 = empty (unbuilt), 1 = built, 2 = upgraded once..."
     },
     {
       "on": "entity",
@@ -3160,7 +3180,7 @@
     },
     {
       "name": "income",
-      "description": "The last dawn's payout.",
+      "description": "The gold the buildings paid at the last dawn (`income` stats applied), already counted when `dawn` rules run; the coins themselves land over the next seconds.",
       "type": "number"
     },
     {
@@ -3203,6 +3223,11 @@
     {
       "name": "it",
       "description": "The current candidate: inside a filter's where(), best()'s score, forEach, or an action applied to a set.",
+      "type": "entity"
+    },
+    {
+      "name": "outer",
+      "description": "The `it` one scope out (the forEach member while a nested target, where() or best() rebinds `it`); none at the top.",
       "type": "entity"
     },
     {
@@ -3381,15 +3406,23 @@
     },
     {
       "name": "alive",
-      "description": "Alive."
+      "description": "Alive (not dead, switched off or an unbuilt slot)."
     },
     {
       "name": "dead",
-      "description": "Dead or knocked out."
+      "description": "Dead or knocked out. Naming it lets a selector see the dead."
     },
     {
       "name": "elite",
       "description": "Elite enemies."
+    },
+    {
+      "name": "disabled",
+      "description": "Switched off (`disable`, or placed with active: false). Naming it lets a selector see switched-off things."
+    },
+    {
+      "name": "unbuilt",
+      "description": "An empty build slot (level 0). Naming it lets a selector see empty slots, which it otherwise skips."
     },
     {
       "name": "logic",
@@ -3409,11 +3442,11 @@
     },
     {
       "name": "#label",
-      "description": "Has a label."
+      "description": "Has a label (#\"two words\" for a label with spaces)."
     },
     {
       "name": "is:<template>",
-      "description": "Made from a template."
+      "description": "Made from a template (is:goblin, is:vanilla:Ogre, is:'vanilla:E Ogre')."
     },
     {
       "name": "in:@area",
@@ -3425,7 +3458,11 @@
     },
     {
       "name": "type:<Kind>",
-      "description": "A building of that kind (Mill, Tower...)."
+      "description": "A building of that kind (type:Mill, type:\"Defense Tower\")."
+    },
+    {
+      "name": "include:<what>",
+      "description": "Matches everything, but lets a selector also see what it skips by default: include:dead, include:disabled, include:unbuilt, include:self (repeat it for more)."
     },
     {
       "name": "where(expr)",
@@ -3476,18 +3513,19 @@
     "enum": "one of the listed options",
     "actions": "a nested list of actions",
     "options": "[{ \"weight\": 2, \"do\": [actions] }, ...]",
-    "targeting": "a targeting list: filter strings or { \"filter\", \"range\", \"prefer\", \"score\" }",
+    "targeting": "a targeting list: filter strings or { \"filter\", \"range\", \"prefer\", \"score\" } (a score picks the highest-scoring match)",
     "movement": "a movement block (mode, path, speed, keepDistance, kite, flee, wander, home)",
     "any": "an expression of any type",
     "for": "seconds, or \"night\" / \"day\" (until the next dawn / dusk)",
     "night": "a night number expression, or \"current\"",
-    "slot": "a build slot: @name, a selector, or a Studio key (\"slot:Tower 3\", \"add:<id>\", \"castle\")",
+    "slot": "a build slot: any expression giving a building or slot entity (@name, it, $var, a selector), or a Studio key (\"slot:Tower 3\", \"add:<id>\", \"castle\")",
     "types": "a list of damage-type labels ([\"fire\"])",
     "keep": "a list of the listed options",
     "fx": "a game effect name",
     "sound": "\"asset:<key>\" or a game sound",
-    "color": "\"#rrggbb\"",
-    "json": "a JSON block"
+    "color": "\"#rrggbb\" (or \"#rgb\", \"#rrggbbaa\", a colour name like \"red\"); \"=expr\" for an expression",
+    "json": "a JSON block",
+    "local": "a plain name (letters, digits, _) for a value bound inside the action's actions"
   },
   "tags": [
     "AUTO_Alive",
@@ -4016,14 +4054,16 @@
         "attach",
         "hud",
         "kingActions",
-        "caps"
+        "caps",
+        "game"
       ],
       "children": {
         "places[]": "place",
         "attach{}": "attach",
         "hud[]": "hud",
         "kingActions[]": "kingAction",
-        "caps": "caps"
+        "caps": "caps",
+        "game": "game"
       }
     },
     "attach": {
@@ -4076,6 +4116,20 @@
         "actionsPerFrame"
       ],
       "children": {}
+    },
+    "game": {
+      "fields": [
+        "victory",
+        "defeat",
+        "castle",
+        "holdNight",
+        "endNight",
+        "survivors",
+        "combat",
+        "build",
+        "dayLength"
+      ],
+      "children": {}
     }
   },
   "caps": {
@@ -4104,6 +4158,79 @@
       "max": 40000
     }
   },
+  "gameRules": [
+    {
+      "name": "victory",
+      "type": "enum",
+      "default": "lastNight",
+      "options": [
+        "lastNight",
+        "rules"
+      ],
+      "description": "How the level is won. lastNight: surviving the last night (vanilla). rules: only an endLevel action wins."
+    },
+    {
+      "name": "defeat",
+      "type": "enum",
+      "default": "castle",
+      "options": [
+        "castle",
+        "rules"
+      ],
+      "description": "How the level is lost. castle: the castle falls (vanilla). rules: only an endLevel action (or resigning) loses."
+    },
+    {
+      "name": "castle",
+      "type": "enum",
+      "default": "shown",
+      "options": [
+        "shown",
+        "hidden"
+      ],
+      "description": "shown: the castle as usual. hidden: no castle (invisible, not solid, never targeted or hurt, and it can't lose the level)."
+    },
+    {
+      "name": "holdNight",
+      "type": "bool",
+      "default": false,
+      "description": "While true, the night doesn't end, even with no enemies left (e.g. \"count('#nest') > 0\"). The last night's victory waits too."
+    },
+    {
+      "name": "endNight",
+      "type": "bool",
+      "default": false,
+      "description": "When it turns true at night, the night ends at once (spawning stops; survivors decides the enemies left)."
+    },
+    {
+      "name": "survivors",
+      "type": "enum",
+      "default": "stay",
+      "options": [
+        "stay",
+        "remove"
+      ],
+      "description": "Enemies left when endNight ends a night (waves endNight has its own). stay: they stay (and keep the next night open until killed). remove: they vanish."
+    },
+    {
+      "name": "combat",
+      "type": "bool",
+      "default": "isNight",
+      "description": "When vanilla fighting happens: units', towers' and the king's attacks, and hits on the player's side. Vanilla: \"isNight\". \"true\": by day too."
+    },
+    {
+      "name": "build",
+      "type": "bool",
+      "default": "isDay",
+      "description": "When the king can build and upgrade. Vanilla: \"isDay\". \"true\": at night too."
+    },
+    {
+      "name": "dayLength",
+      "type": "number",
+      "default": 0,
+      "min": 0.0,
+      "description": "Seconds of day before night falls by itself (0: the player calls the night)."
+    }
+  ],
   "presets": [
     {
       "id": "timer",

@@ -223,7 +223,7 @@ namespace PalaceMod.Builder.Studio.Logic
             Act("building", "Change a building", "World", "{op} {slot}", "Builds, upgrades, knocks out, locks or reprices a slot.",
                 ["slot:entity!*", "op:choice(build|upgrade|knockOut|repair|demolish|lock|unlock|setCost|setIncome)=build!*", "value:number", "branch:number"], levelWide: true);
             Act("waves", "Change the nights", "World", "Nights: {op}", "Adds, removes or scales enemies of a night, or starts/ends one.",
-                ["op:choice(addSpawn|removeUnit|scaleCount|scaleHp|clearRemaining|startNight|endNight|skipNight)=addSpawn!*", "night:expr", "unit:template", "count:number", "interval:number", "delay:number", "line:text", "gold:number", "elite:bool", "value:number"], levelWide: true);
+                ["op:choice(addSpawn|removeUnit|scaleCount|scaleHp|clearRemaining|startNight|endNight|skipNight)=addSpawn!*", "night:expr", "unit:template", "count:number", "interval:number", "delay:number", "line:text", "gold:number", "elite:bool", "value:number", "survivors:choice(remove|stay)"], levelWide: true);
             Act("endLevel", "End the level", "World", "End the level: {result}", "Wins or loses the run.", ["result:choice(win|lose)=win!*", "message:text"], levelWide: true);
             Act("effect", "Effect", "Show", "Effect {fx} at {at}", "Plays a game effect.", ["fx:fx!*", "at:position=self*", "scale:number"], common: true);
             Act("sound", "Sound", "Show", "Sound {sound}", "Plays a sound.", ["sound:sound!*", "at:position"]);

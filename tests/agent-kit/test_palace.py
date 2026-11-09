@@ -204,5 +204,93 @@ class LogicPlacesRender(unittest.TestCase):
         self.assertGreater(drawn[2] - drawn[0], bare[2] - bare[0] + 40, (bare, drawn))   # tinted by the pit's blue fill
 
 
+def shared_library():
+    """The blind test's case: level "snail" has $next and the path @snail-route; unit siege-snail follows it and the
+    entity slime-pool names the snail; level "plain" uses neither; level "pillars" uses the entity pillar, which reads
+    $next but the level doesn't declare it."""
+    return {
+        "format": "palace-builder", "version": 3, "id": "library", "name": "My library", "assets": {},
+        "units": [{"id": "siege-snail", "side": "enemy", "base": "vanilla:E Melee", "name": "Snail", "movement": {"path": "@snail-route"}},
+                  {"id": "grunt", "side": "enemy", "base": "vanilla:E Melee", "name": "Grunt"}],
+        "entities": [{"id": "slime-pool", "kind": "prop", "rules": [{"when": {"on": "every", "seconds": 1}, "do": [
+                         {"do": "applyStatus", "status": "mired", "target": "all('enemy and not is:siege-snail', 3)"}]}]},
+                     {"id": "pillar", "kind": "prop", "rules": [{"when": "spawn", "if": "$next == 1", "do": []}]}],
+        "statuses": [{"id": "mired", "duration": 4}],
+        "presets": [],
+        "waveSets": [{"id": "plain-nights", "host": "Nordfels", "nights": [{"spawns": [{"unit": "grunt", "line": "north"}]}]}],
+        "levels": [
+            {"id": "snail", "host": "Nordfels", "logic": {"vars": {"next": 1}, "places": [{"id": "snail-route", "kind": "path", "points": [[0, 0], [9, 0]]}],
+                                                          "rules": [{"when": "dusk", "do": [{"do": "spawn", "entity": "siege-snail"}, {"do": "spawn", "entity": "slime-pool"}]}]}},
+            {"id": "plain", "host": "Nordfels", "waveSet": "plain-nights"},
+            {"id": "pillars", "host": "Nordfels", "logic": {"places": [{"id": "p1", "entity": "pillar", "pos": [0, 0, 0]}]}},
+        ],
+    }
+
+
+class SharedItems(unittest.TestCase):
+    def test_level_uses_is_transitive(self):
+        data = shared_library()
+        used = palace.level_uses(data, data["levels"][0])
+        self.assertEqual(used["units"], {"siege-snail"})
+        self.assertEqual(used["entities"], {"slime-pool"})
+        self.assertEqual(used["statuses"], {"mired"})
+        self.assertEqual(palace.level_uses(data, data["levels"][1])["units"], {"grunt"})
+
+    def test_other_levels_templates_dont_break_a_level(self):
+        data = shared_library()
+        for lid in ("plain", "snail"):
+            errors = [i for i in palace.logic_issues(palace.level_scope(data, lid)) if i["severity"] == "error"]
+            self.assertEqual(errors, [], lid)
+
+    def test_template_checked_in_using_level_and_attributed(self):
+        data = shared_library()
+        scoped = palace.level_scope(data, "pillars")
+        issues = [palace.attribute(scoped, i, level="pillars") for i in palace.logic_issues(scoped) if i["severity"] == "error"]
+        nxt = [i for i in issues if "$next" in i["message"]]
+        self.assertTrue(nxt, issues)
+        self.assertEqual(nxt[0]["file"], "entities/pillar.json")
+        self.assertEqual(nxt[0]["level"], "pillars")
+        self.assertTrue(nxt[0]["path"].startswith("entities[id=pillar]."), nxt[0])
+        # The path is one the set op takes.
+        ops = palace.Ops(None, None, data, "pillars")
+        ops.op_set({"op": "set", "path": nxt[0]["path"].split(".")[0] + ".rules[0].if", "value": "true"})
+        self.assertEqual(data["entities"][1]["rules"][0]["if"], "true")
+
+    def test_remove_refuses_while_used(self):
+        data = shared_library()
+        ops = palace.Ops(None, None, data, None)
+        with self.assertRaises(palace.Fail) as e:
+            ops.run([{"op": "remove_unit", "id": "siege-snail"}])
+        self.assertIn("level snail", str(e.exception))
+        self.assertIn("entity slime-pool", str(e.exception))
+        ops.run([{"op": "remove_entity", "id": "slime-pool", "force": True}, {"op": "remove_unit", "id": "siege-snail", "force": True}])
+        self.assertEqual([u["id"] for u in data["units"]], ["grunt"])
+        self.assertEqual([e["id"] for e in data["entities"]], ["pillar"])
+
+    def test_rename_rewrites_references(self):
+        data = shared_library()
+        ops = palace.Ops(None, None, data, None)
+        ops.run([{"op": "rename_unit", "from": "siege-snail", "to": "snail-king"},
+                 {"op": "rename_status", "from": "mired", "to": "stuck"},
+                 {"op": "rename_unit", "from": "grunt", "to": "brute"}])
+        self.assertEqual(data["units"][0]["id"], "snail-king")
+        self.assertEqual(data["levels"][0]["logic"]["rules"][0]["do"][0]["entity"], "snail-king")
+        act = data["entities"][0]["rules"][0]["do"][0]
+        self.assertEqual(act["target"], "all('enemy and not is:snail-king', 3)")
+        self.assertEqual(act["status"], "stuck")
+        self.assertEqual(data["waveSets"][0]["nights"][0]["spawns"][0]["unit"], "brute")
+        with self.assertRaises(palace.Fail):
+            ops.run([{"op": "rename_entity", "from": "pillar", "to": "slime-pool"}])
+
+    def test_rename_refuses_what_it_cant_rewrite(self):
+        data = shared_library()
+        data["entities"].append({"id": "mired", "kind": "prop"})   # a status and an entity share the id
+        data["levels"][2]["logic"]["rules"] = [{"when": "dusk", "do": [{"do": "spawn", "entity": "mired"}]}]
+        ops = palace.Ops(None, None, data, None)
+        with self.assertRaises(palace.Fail) as e:
+            ops.run([{"op": "rename_status", "from": "mired", "to": "stuck"}])
+        self.assertIn("same id", str(e.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -63,8 +63,15 @@ namespace PalaceMod
             LogicActions.Register("applyStatus", ApplyStatus, ActionFlags.PerTarget);
             LogicActions.Register("removeStatus", (ctx, p) => Stats.Remove(ctx, p.Target, Required(p, "status"), (int)p.Number("stacks", 0)), ActionFlags.PerTarget);
 
-            LogicWorld.Started += _ => { Stats.Reset(); StatusVisuals.Clear(); started.Clear(); };
-            LogicWorld.Ending += _ => { Stats.Reset(); StatusVisuals.Clear(); started.Clear(); };
+            // Places and attaches are built before Started (whose reset would wipe what they started with), so their
+            // template statuses are applied here; later entities get theirs as they spawn.
+            LogicWorld.Started += w =>
+            {
+                Stats.Reset(); StatusVisuals.Clear(); started.Clear();
+                worldReady = true;
+                foreach (var e in w.Entities.ToList()) if (!e.Destroyed) StartingStatuses(e);
+            };
+            LogicWorld.Ending += _ => { Stats.Reset(); StatusVisuals.Clear(); started.Clear(); worldReady = false; };
             LogicWorld.Polled += (w, t) => Stats.Poll(w, t);
             BodyEvents.UnitSpawned += (e, _) => StartingStatuses(e);
             BodyEvents.EntityBuilt += (e, _) => StartingStatuses(e);
@@ -221,11 +228,12 @@ namespace PalaceMod
         }
 
         private static readonly HashSet<LogicEntity> started = [];
+        private static bool worldReady;
 
         /// <summary>A template's `statuses`: statuses it starts with.</summary>
         private static void StartingStatuses(LogicEntity e)
         {
-            if (e?.Def?["statuses"] is not JArray list || list.Count == 0 || !started.Add(e)) return;
+            if (!worldReady || e?.Def?["statuses"] is not JArray list || list.Count == 0 || !started.Add(e)) return;
             foreach (var id in list.Where(t => t.Type == JTokenType.String).Select(t => (string)t))
             {
                 try { Stats.Apply(null, e, id, null, null, 1, null); }

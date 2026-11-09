@@ -23,18 +23,19 @@ Generated from the engine's registry (`palace.py logic doc`; schema version 1.0.
 | `enum` | one of the listed options |
 | `actions` | a nested list of actions |
 | `options` | [{ "weight": 2, "do": [actions] }, ...] |
-| `targeting` | a targeting list: filter strings or { "filter", "range", "prefer", "score" } |
+| `targeting` | a targeting list: filter strings or { "filter", "range", "prefer", "score" } (a score picks the highest-scoring match) |
 | `movement` | a movement block (mode, path, speed, keepDistance, kite, flee, wander, home) |
 | `any` | an expression of any type |
 | `for` | seconds, or "night" / "day" (until the next dawn / dusk) |
 | `night` | a night number expression, or "current" |
-| `slot` | a build slot: @name, a selector, or a Studio key ("slot:Tower 3", "add:<id>", "castle") |
+| `slot` | a build slot: any expression giving a building or slot entity (@name, it, $var, a selector), or a Studio key ("slot:Tower 3", "add:<id>", "castle") |
 | `types` | a list of damage-type labels (["fire"]) |
 | `keep` | a list of the listed options |
 | `fx` | a game effect name |
 | `sound` | "asset:<key>" or a game sound |
-| `color` | "#rrggbb" |
+| `color` | "#rrggbb" (or "#rgb", "#rrggbbaa", a colour name like "red"); "=expr" for an expression |
 | `json` | a JSON block |
+| `local` | a plain name (letters, digits, _) for a value bound inside the action's actions |
 
 ## Roles
 
@@ -47,6 +48,7 @@ Names an expression can use for entities in a rule.
 | `other` | entity | The event's counterpart: killer, victim, attacker, entrant, collector, sender... |
 | `spawned` | entity | Inside spawn/launch/replace `then`: the new entity. |
 | `it` | entity | The current candidate: inside a filter's where(), best()'s score, forEach, or an action applied to a set. |
+| `outer` | entity | The `it` one scope out (the forEach member while a nested target, where() or best() rebinds `it`); none at the top. |
 | `king` | entity | The player's king. |
 | `castle` | entity | The castle (its build slot's building). |
 | `level` | level | The level itself (owner of level variables). |
@@ -64,7 +66,7 @@ Names an expression can use for entities in a rule.
 | `nightTime` | number | Seconds since this night began. |
 | `nightProgress` | number | 0..1: the night's spawn schedule elapsed (1 once everything has spawned). |
 | `gold` | number | The player's gold. |
-| `income` | number | The last dawn's payout. |
+| `income` | number | The gold the buildings paid at the last dawn (`income` stats applied), already counted when `dawn` rules run; the coins themselves land over the next seconds. |
 | `enemiesAlive` | number | Enemies on the map. |
 | `difficulty` | number | The run's difficulty multiplier. |
 | `none` | any | No entity (what a selector gives when nothing matches, or a role the event doesn't have): `other != none`. |
@@ -84,7 +86,7 @@ Names an expression can use for entities in a rule.
 | Event | Params | other | event.value | Fires when |
 |---|---|---|---|---|
 | `death` |  | killer (killer = other, victim = subject) |  | It dies (a unit) or is knocked out (a building or the king). `other` is the killer (may be none). event.types / event.weapon: the killing hit's (see damaged). Fields: event.types, event.weapon. |
-| `damaged` | `min` | attacker (attacker = other) | number: the damage taken | It takes damage (not when modifiers reduce it to 0). event.types is the hit's damage types (a list: melee, ranged, tower, king, splash, magic, fire, the damage action's own types, and the weapon's id); event.weapon is the weapon that dealt it ("vanilla:<weapon>"), or none. Fields: event.types, event.weapon. |
+| `damaged` | `min` | attacker (attacker = other) | number: the damage taken | It takes damage (not when modifiers reduce it to 0). `other` is who dealt it: the king, a unit, a tower or building, a projectile's shooter, or whoever left burning ground or hot oil there; none for scenery hazards and plain `damage` actions without a source. event.types is the hit's damage types (a list: melee, ranged, tower, king, splash, magic, fire, the damage action's own types, and the weapon's id); event.weapon is the weapon that dealt it ("vanilla:<weapon>"), or none. Fields: event.types, event.weapon. |
 | `healed` |  | healer (healer = other) | number: the amount healed | It is healed. |
 | `hpBelow` | `pct`* |  | number: hpPct | Its hp crosses below a fraction (edge-triggered; re-arms when healed above). Only its own hp: no `of`. |
 | `attack` | `attack` | target (target = other) |  | It attacks (any attack, vanilla ones included). |
@@ -162,8 +164,8 @@ Names an expression can use for entities in a rule.
 
 | Event | Params | other | event.value | Fires when |
 |---|---|---|---|---|
-| `built` (building) | `level` |  | number: the level | (build slots) The player builds it. |
-| `upgraded` (building) | `level` |  | number: the new level | (build slots) The player upgrades it. |
+| `built` (building) | `level` |  | number: the level | (build slots, map or added) It's built: by the king, `palace.py build` or the `building` action. |
+| `upgraded` (building) | `level` |  | number: the new level | (build slots, map or added) It's upgraded (any way it's built). |
 | `repaired` (building) | `level` |  | number: the level | (build slots) It's revived at dawn. |
 
 ### Gold
@@ -477,6 +479,7 @@ Each action is `{"do": "<name>", ...params}`. `target` (where listed) is a selec
 - `in` (entities; required): The set.
 - `actions` (actions; required): The actions ("actions", since "do" names the action itself).
 - `limit` (int; 1..256): At most this many (max 256).
+- `as` (local): A name for the member, readable inside (and in nested actions that rebind `it`): "as": "tower" then `tower.hp`.
 
 **`choose`**: Picks one weighted option at random.
 
@@ -499,7 +502,8 @@ Each action is `{"do": "<name>", ...params}`. `target` (where listed) is a selec
 
 **`building`**: Acts on a build slot.
 
-- `slot` (slot; required): The slot: @name, a selector, or a Studio key ("slot:Tower 3").
+- `target` (entities; default "self"): Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self.
+- `slot` (slot): The slot: any expression giving a building or slot entity (@name, it, $var, nearest('unbuilt and type:House')...), or a Studio key ("slot:Tower 3", "add:<id>", "castle"). Default: the target.
 - `op` (enum; required; one of build, upgrade, knockOut, repair, demolish, lock, unlock, setCost, setIncome): What to do.
 - `value` (number): For setCost/setIncome: the amount; for demolish: gold refunded.
 - `branch` (int): For build/upgrade: the upgrade choice (0-based).
@@ -516,6 +520,7 @@ Each action is `{"do": "<name>", ...params}`. `target` (where listed) is a selec
 - `gold` (int): addSpawn: coins each.
 - `elite` (bool): addSpawn: elite.
 - `value` (number): scaleCount/scaleHp: the factor.
+- `survivors` (enum; default "remove"; one of remove, stay): endNight: the enemies left vanish (remove) or stay on the map (stay).
 
   `{ "do": "waves", "op": "addSpawn", "unit": "brute", "count": "night - 2", "line": "North" }`
 
@@ -556,7 +561,7 @@ Each action is `{"do": "<name>", ...params}`. `target` (where listed) is a selec
 - `scale` (number): Size factor.
 - `mesh` (text): A model (mesh:/vanilla:/asset:).
 - `visible` (bool): Shown or hidden.
-- `glow` (color): Glow colour.
+- `glow` (color): Glow colour; true for the default glow, false for none, or a 0-1 strength.
 - `for` (number): Seconds; reverts after.
 
 **`hud`**: Changes a level HUD line (logic.hud).
@@ -647,12 +652,12 @@ Selector functions anchor at `self`; call them as methods (`castle.count('enemy'
 | entity | `.x` | number | Its x. |
 | entity | `.y` | number | Its y (height). |
 | entity | `.z` | number | Its z. |
-| entity | `.facing` | number | Its yaw in degrees (0 = north). |
+| entity | `.facing` | number | Its yaw in degrees (0 = north, clockwise): where a unit's or the king's model faces (its walking direction, or its target while attacking), else its own rotation. |
 | entity | `.team` | text | 'player', 'enemy' or 'neutral'. |
 | entity | `.kind` | text | 'unit', 'building', 'prop', 'projectile', 'area', 'pickup', 'logic', 'coin', 'king', 'line', 'point', 'path'. |
 | entity | `.template` | template | The template it was made from. |
 | entity | `.labels` | list | Its labels. |
-| entity | `.level` | number | A building's level (0 = built, 1 = first upgrade...). |
+| entity | `.level` | number | A build slot's level: 0 = empty (unbuilt), 1 = built, 2 = upgraded once... |
 | entity | `.cost` | number | A slot's next build/upgrade cost. |
 | entity | `.buildingType` | text | A building's kind, e.g. 'Mill'. |
 | entity | `.age` | number | Seconds since it appeared. |
@@ -724,12 +729,13 @@ What each JSON block accepts (a field not listed draws an "unknown field" warnin
 - **statusVisual**: `tint`, `fx`, `glow`
 - **preset**: `id`, `name`, `description`, `category`, `kind`, `params`, `vars`, `labels`, `rules`, `visual`, `body`, `team`, `countsAsEnemy`, `lifetime`, `maxAlive`, `projectile`, `mover`, `area`, `pickup`, `interact`, `attacks`, `targeting`, `movement`, `statuses` (blocks: `params{}` → presetParam)
 - **presetParam**: `type`, `default`, `min`, `max`, `options`, `description`
-- **logic**: `seed`, `vars`, `rules`, `places`, `attach`, `hud`, `kingActions`, `caps` (blocks: `places[]` → place, `attach{}` → attach, `hud[]` → hud, `kingActions[]` → kingAction, `caps` → caps)
+- **logic**: `seed`, `vars`, `rules`, `places`, `attach`, `hud`, `kingActions`, `caps`, `game` (blocks: `places[]` → place, `attach{}` → attach, `hud[]` → hud, `kingActions[]` → kingAction, `caps` → caps, `game` → game)
 - **attach**: `name`, `labels`, `vars`, `statuses`, `targeting`, `rules`
 - **hud**: `id`, `text`, `icon`, `visible`
 - **kingAction**: `id`, `name`, `icon`, `when`, `cooldown`, `uses` (blocks: `uses` → uses)
 - **uses**: `count`, `per`
 - **caps**: `entities`, `units`, `projectiles`, `perTemplate`, `firingsPerFrame`, `actionsPerFrame`
+- **game**: `victory`, `defeat`, `castle`, `holdNight`, `endNight`, `survivors`, `combat`, `build`, `dayLength`
 
 ## Stats
 
@@ -780,18 +786,21 @@ Combine with `and`, `or`, `not` and parentheses.
 - `self`: The rule's owner.
 - `melee`: Melee fighters.
 - `ranged`: Ranged fighters.
-- `alive`: Alive.
-- `dead`: Dead or knocked out.
+- `alive`: Alive (not dead, switched off or an unbuilt slot).
+- `dead`: Dead or knocked out. Naming it lets a selector see the dead.
 - `elite`: Elite enemies.
+- `disabled`: Switched off (`disable`, or placed with active: false). Naming it lets a selector see switched-off things.
+- `unbuilt`: An empty build slot (level 0). Naming it lets a selector see empty slots, which it otherwise skips.
 - `logic`: Logic objects.
 - `line`: Spawn lines.
 - `point`: Points.
 - `path`: Paths.
-- `#label`: Has a label.
-- `is:<template>`: Made from a template.
+- `#label`: Has a label (#"two words" for a label with spaces).
+- `is:<template>`: Made from a template (is:goblin, is:vanilla:Ogre, is:'vanilla:E Ogre').
 - `in:@area`: Inside an area (in:self inside this area).
 - `has:<status>`: Has a status.
-- `type:<Kind>`: A building of that kind (Mill, Tower...).
+- `type:<Kind>`: A building of that kind (type:Mill, type:"Defense Tower").
+- `include:<what>`: Matches everything, but lets a selector also see what it skips by default: include:dead, include:disabled, include:unbuilt, include:self (repeat it for more).
 - `where(expr)`: An expression over `it`.
 - `<Tag>`: Any game tag (TagManager.ETag, case-sensitive): Tower, Flying, Wall, ...
 
@@ -819,6 +828,22 @@ Per level in `logic.caps`; above the default draws a "may lag" warning, above th
 | `perTemplate` | 100 | 1000 |
 | `firingsPerFrame` | 400 | 4000 |
 | `actionsPerFrame` | 4000 | 40000 |
+
+## Game rules
+
+Per level in `logic.game` (op `{"op": "logic", "game": {...}}`): the game's own rules. Each is a literal or an expression the level reads again every frame (an enum takes its word or `"=expr"`), so a rule can switch it through a variable. Leave a rule out for vanilla.
+
+| Rule | Type | Vanilla | Meaning |
+|---|---|---|---|
+| `victory` | enum (lastNight / rules) | `"lastNight"` | How the level is won. lastNight: surviving the last night (vanilla). rules: only an endLevel action wins. |
+| `defeat` | enum (castle / rules) | `"castle"` | How the level is lost. castle: the castle falls (vanilla). rules: only an endLevel action (or resigning) loses. |
+| `castle` | enum (shown / hidden) | `"shown"` | shown: the castle as usual. hidden: no castle (invisible, not solid, never targeted or hurt, and it can't lose the level). |
+| `holdNight` | bool | `false` | While true, the night doesn't end, even with no enemies left (e.g. "count('#nest') > 0"). The last night's victory waits too. |
+| `endNight` | bool | `false` | When it turns true at night, the night ends at once (spawning stops; survivors decides the enemies left). |
+| `survivors` | enum (stay / remove) | `"stay"` | Enemies left when endNight ends a night (waves endNight has its own). stay: they stay (and keep the next night open until killed). remove: they vanish. |
+| `combat` | bool | `"isNight"` | When vanilla fighting happens: units', towers' and the king's attacks, and hits on the player's side. Vanilla: "isNight". "true": by day too. |
+| `build` | bool | `"isDay"` | When the king can build and upgrade. Vanilla: "isDay". "true": at night too. |
+| `dayLength` | number | `0` | Seconds of day before night falls by itself (0: the player calls the night). |
 
 ## Built-in presets
 

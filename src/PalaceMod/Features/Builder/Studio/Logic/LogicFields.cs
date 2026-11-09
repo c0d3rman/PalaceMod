@@ -142,7 +142,7 @@ namespace PalaceMod.Builder.Studio.Logic
                 if (v != null && v.Type == JTokenType.String) { Notify.Show("A formula: click to edit it", NotifyKind.Info, 2f, "logic-field"); return; }
                 double next = Math.Round(cur + delta * step, 4);
                 set(next == Math.Floor(next) ? new JValue((long)next) : new JValue(next), $"Set {p.Label}");
-            }, () => ModTextInput.Begin(field, Raw(get()), typed => Commit(typed, p, set, scope), 512, hint: "A number or a formula (self.hp * 2, $souls + 1); Enter to confirm"),
+            }, () => ModTextInput.Begin(field, Raw(get()), typed => Commit(typed, p, set, scope), Model.Logic.Expr.MaxLength, hint: "A number or a formula (self.hp * 2, $souls + 1); Enter to confirm"),
                 () => tip + "\nArrows step it; click to type a number or a formula.");
             field.EnableWrap();
             Live(field, p, scope);
@@ -152,7 +152,7 @@ namespace PalaceMod.Builder.Studio.Logic
         /// <summary>A formula or text field, checked as it's typed.</summary>
         public static ModField ExprField(ModPage page, string label, ParamUi p, Func<JToken> get, Action<JToken, string> set, ExprScope scope, string tip)
         {
-            var field = page.TextInput(label, () => Raw(get()), typed => Commit(typed, p, set, scope), () => tip, 512, () => Show(get(), p, scope));
+            var field = page.TextInput(label, () => Raw(get()), typed => Commit(typed, p, set, scope), () => tip, Model.Logic.Expr.MaxLength, () => Show(get(), p, scope));
             Live(field, p, scope);
             return field;
         }

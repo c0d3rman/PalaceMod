@@ -256,6 +256,8 @@ namespace PalaceMod.Builder.Logic
         public LogicWorld World;
         public LogicEntity Self;             // the rule's owner (the level entity for the level script)
         public LogicEntity Subject, Other, Spawned, It;
+        /// <summary>`outer`: the `it` one scope out (set whenever <see cref="With"/> rebinds `it`).</summary>
+        public LogicEntity Outer;
         public LogicEvent Event;
         public int Depth;                    // chain depth: events raised from here get Depth + 1
         public string RuleLabel;             // for the trace ("slot:Tower 3 / rules[0]")
@@ -268,7 +270,7 @@ namespace PalaceMod.Builder.Logic
         {
             var c = (LogicContext)MemberwiseClone();
             if (spawned != null) c.Spawned = spawned;
-            if (it != null) c.It = it;
+            if (it != null) { c.Outer = It; c.It = it; }
             if (other != null) c.Other = other;
             if (Locals != null) c.Locals = new Dictionary<string, Value>(Locals);
             c.Cursor = null;
@@ -451,6 +453,12 @@ namespace PalaceMod.Builder.Logic
         public static Func<object, (IReadOnlyList<string> Types, string Weapon)> CurrentHit;
         /// <summary>`.weapon`: the id of the entity's current weapon ("vanilla:&lt;weapon&gt;", "none"), or null (L2).</summary>
         public static Func<LogicEntity, string> WeaponOf;
+        /// <summary>Empty build slots (level 0) as entities, for selectors whose filter opts in (`unbuilt`,
+        /// `include:unbuilt`); L1 installs it (GameSlots). Called with (center, radius, into).</summary>
+        public static Action<Vec, float, List<LogicEntity>> UnbuiltSlots;
+        /// <summary>Entity properties the game answers beyond the core's own (a slot's `.cost`); null when it doesn't
+        /// know the name.</summary>
+        public static Func<LogicEntity, string, Value?> GameProperty;
     }
 
     // ------------------------------------------------------------------ savestates
