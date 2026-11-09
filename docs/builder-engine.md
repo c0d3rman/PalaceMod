@@ -449,7 +449,7 @@ keep rules readable.
 | `attack` | `attack` (id) | it attacks (any attack, including vanilla) | target |
 | `hit` | | its attack, projectile or `damage` action damaged something | victim / amount |
 | `kill` | | something it damaged died from that damage | victim |
-| `every` | `seconds`, `jitter`, `phase`, `during` (`night`/`day`/`always`) | periodically, from spawn | — / tick count |
+| `every` | `seconds`, `jitter` (0..1: each interval varies by up to that share), `phase`, `during` (`night`/`day`/`always`: skips ticks outside it) | periodically, on the owner's clock from spawn (not from dusk) | — / tick count |
 | `after` | `seconds` | once, that long after spawn | |
 | `near` | `filter`, `range`, `edge` (`enter`/`exit`/`both`) | a matching entity comes within or leaves the range | the entity |
 | `enter` / `exit` / `inside` / `empty` / `occupied` | | (areas) see "area" | entity |

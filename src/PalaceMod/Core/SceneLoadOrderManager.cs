@@ -29,11 +29,26 @@ namespace PalaceMod
         private static readonly AccessTools.FieldRef<SceneTransitionManager, Color> CloudsOut =
             AccessTools.FieldRefAccess<SceneTransitionManager, Color>("cloudsOut");
 
+        /// <summary>Off: the game's own order (dev `sceneorder vanilla`, to compare).</summary>
+        private static bool sequential = true;
+
+        public override void Awake(Plugin plugin)
+        {
+            base.Awake(plugin);
+            if (System.Environment.GetEnvironmentVariable("PALACEMOD_DEV") != "1") return;
+            DevCommands.Register("sceneorder", "sceneorder [sequential|vanilla]   scene changes unload before loading (default) or all at once like the game", args =>
+            {
+                if (args.Length > 0) sequential = args[0] != "vanilla";
+                return sequential ? "sequential" : "vanilla";
+            });
+        }
+
         [HarmonyPatch(typeof(SceneTransitionManager), "SceneTransitionAnimation")]
         private static class SceneTransitionAnimation_Patch
         {
             private static bool Prefix(SceneTransitionManager __instance, string _scenename, ref IEnumerator __result)
             {
+                if (!sequential) return true;
                 __result = Transition(__instance, _scenename);
                 return false;
             }
