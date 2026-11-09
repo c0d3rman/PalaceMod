@@ -2438,6 +2438,7 @@ def unit_world(slot):
 
 
 MODEL_LOOKS = ("own", "unit")
+HEX_COLOR = re.compile(r"^#?[0-9a-fA-F]{6}$")
 MODEL_MOTIONS = ("auto", "bob", "none")
 
 
@@ -2472,6 +2473,19 @@ def check_unit(ref, u):
         errs.append((".visuals.meshLook", f"one of {MODEL_LOOKS}"))
     if v.get("motion") is not None and v["motion"] not in MODEL_MOTIONS:
         errs.append((".visuals.motion", f"one of {MODEL_MOTIONS}"))
+    for key in ("tint",):
+        if v.get(key) is not None and not HEX_COLOR.match(str(v[key])):
+            errs.append((f".visuals.{key}", '"#rrggbb"'))
+    colors = v.get("colors")
+    if colors is not None:
+        if not isinstance(colors, dict):
+            errs.append((".visuals.colors", '{"body": "#rrggbb", "<material>": "#rrggbb"}'))
+        else:
+            for part, hexc in colors.items():
+                if not str(part).strip():
+                    errs.append((".visuals.colors", "a part name can't be empty"))
+                elif not HEX_COLOR.match(str(hexc)):
+                    errs.append((f".visuals.colors.{part}", '"#rrggbb"'))
     return errs
 
 
