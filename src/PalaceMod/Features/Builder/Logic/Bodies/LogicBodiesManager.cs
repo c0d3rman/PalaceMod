@@ -63,6 +63,8 @@ namespace PalaceMod
                 SessionChanged();
             }
             if (w == null) return;
+            // Cuts (solid bodies, decks, surfaces) only reach the graphs while the updater runs on an interval.
+            BodyNav.UseMoverRate();
             Walkables.Tick();
             Surfaces.Tick();
             // 10 Hz steps of game time: the core's (LogicWorld.Polled), or our own for a dev world it doesn't drive.

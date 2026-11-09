@@ -92,11 +92,16 @@ namespace PalaceMod.Builder.Logic.Bodies
 
         private static NavmeshCut MakeHide(GameObject deck, Vector3 size)
         {
-            var cut = deck.AddComponent<NavmeshCut>();
+            // On its own object at the deck's top (a 1.2 m band, so ground below a raised deck keeps its navmesh), not a
+            // child of the body: switching the body off deactivates its children, and the cut must stay on then.
+            var holder = new GameObject("PalaceBuilder deck hide");
+            var top = deck.transform.TransformPoint(Vector3.up * 0.5f);
+            holder.transform.SetPositionAndRotation(top, Quaternion.Euler(0f, deck.transform.eulerAngles.y, 0f));
+            var cut = holder.AddComponent<NavmeshCut>();
             cut.type = NavmeshCut.MeshType.Rectangle;
-            cut.rectangleSize = new Vector2(1f, 1f);     // scaled by the deck's own scale
+            cut.rectangleSize = new Vector2(size.x, size.z);
             cut.useRotationAndScale = true;
-            cut.height = 1.2f / Mathf.Max(0.01f, size.y);
+            cut.height = 1.2f;
             cut.radiusExpansionMode = NavmeshCut.RadiusExpansionMode.DontExpand;
             cut.graphMask = BodyNav.GroundMask();
             cut.enabled = false;
@@ -129,11 +134,31 @@ namespace PalaceMod.Builder.Logic.Bodies
             var mask = BodyNav.GroundMask();
             d.Hide.graphMask = mask;
             foreach (var g in d.Ghosts.Values) g.hide.graphMask = mask;
-            if (d.Ghosts.Count == 0) { d.Hide.enabled = !on; return; }
+            if (d.Ghosts.Count == 0) { Switch(d.Hide, !on); return; }
             // A posed mover: the live deck is never cut (it's off the graph while moving, units wait); the ghost of
             // the current pose shows, every other ghost is hidden.
-            d.Hide.enabled = false;
-            foreach (var kv in d.Ghosts) kv.Value.hide.enabled = !(on && kv.Key == d.Pose);
+            Switch(d.Hide, false);
+            foreach (var kv in d.Ghosts) Switch(kv.Value.hide, !(on && kv.Key == d.Pose));
+        }
+
+        /// <summary>A cut switched on only reaches the graphs once it's marked dirty (A* doesn't for a new clipper).</summary>
+        private static void Switch(NavmeshCut cut, bool on)
+        {
+            if (cut == null || cut.enabled == on) return;
+            cut.enabled = on;
+            if (on) cut.ForceUpdate();
+            else AstarPath.active?.navmeshUpdates.ForceUpdate();
+        }
+
+        /// <summary>The body is gone: its cuts and pose ghosts go too.</summary>
+        public static void Remove(BuilderBody body)
+        {
+            foreach (var d in decks.Where(d => d.Body == body).ToList())
+            {
+                if (d.Hide != null) Object.Destroy(d.Hide.gameObject);
+                foreach (var g in d.Ghosts.Values) if (g.ghost != null) Object.Destroy(g.ghost);
+                decks.Remove(d);
+            }
         }
 
         public static void SetEnabled(BuilderBody body)

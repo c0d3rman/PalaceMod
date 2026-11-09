@@ -306,7 +306,9 @@ namespace PalaceMod.Builder.Logic.Bodies
         }
 
         /// <summary>enable/disable: the cut, the collider and hittability follow the object's active state.</summary>
-        private void OnEnable() { if (Cut != null) Cut.enabled = true; if (blocker != null) blocker.enabled = true; if (Walkable) Walkables.SetEnabled(this); }
+        private void OnDestroy() { if (Walkable) Walkables.Remove(this); }
+
+        private void OnEnable() { if (Cut != null) { Cut.enabled = true; Cut.ForceUpdate(); } if (blocker != null) blocker.enabled = true; if (Walkable) Walkables.SetEnabled(this); }
         private void OnDisable() { if (Cut != null) Cut.enabled = false; if (blocker != null) blocker.enabled = false; if (Walkable) Walkables.SetEnabled(this); }
     }
 
