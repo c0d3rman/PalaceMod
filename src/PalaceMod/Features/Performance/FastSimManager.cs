@@ -6,6 +6,7 @@ using System.IO;
 using HarmonyLib;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.SceneManagement;
 
 /*
     Fast simulation, for automated tests (agent-kit `palace.py test --fast`, `agent fast on`, `dev.py cmd fast on`).
@@ -21,6 +22,9 @@ using UnityEngine.Rendering;
     drawn frame (up to SkipInterval frames headless). The game uses one: PlayerMovement.TeleportTo turns the king's
     CharacterController off and back on "at the end of the frame", so after any teleport the king couldn't move for
     seconds (fake input such as `run` then did nothing). TeleportTo_Patch turns it back on the next frame instead.
+    Fast mode is per level load: every scene load turns it off again, unless it was turned on with `keep` (`fast on
+    keep`, palace.py test, PALACEMOD_FAST=1), which lasts until `fast off`. Otherwise one test that turned it on left
+    it on for every later test on the instance, whose real-time waits then ran 10-30x too fast.
 */
 namespace PalaceMod
 {
@@ -35,6 +39,8 @@ namespace PalaceMod
         public static bool On { get; private set; }
         /// <summary>Simulation frames per game second at 1x (the fixed step is 1/Fps, times the game speed).</summary>
         public static float Fps { get; private set; } = 60f;
+        /// <summary>On across scene loads (`fast on keep`); otherwise the next scene load turns fast mode off.</summary>
+        public static bool Keep { get; private set; }
         /// <summary>Started with -batchmode (dev.py --headless): there is no window, nothing is ever drawn.</summary>
         public static bool Headless => Application.isBatchMode;
 
@@ -47,31 +53,53 @@ namespace PalaceMod
         {
             base.Awake(plugin);
             wall.Start();
-            DevCommands.Register("fast", "fast [on|off] [fps]   fast simulation: fixed 1/fps steps (default 60), uncapped frames, no drawing", Command);
+            DevCommands.Register("fast", "fast [on|off] [fps] [keep]   fast simulation: fixed 1/fps steps (default 60), uncapped frames, no drawing; off again at the next scene load unless keep", Command);
+            SceneManager.sceneLoaded += (_, _) =>
+            {
+                if (!On || Keep) return; // any mode: the game (and SceneLoadOrderManager) load levels additively
+                Set(false);
+                Log.Info("Fast simulation turned off by a scene load (`fast on keep` keeps it across loads)");
+            };
             if (Headless)
             {
                 // Nothing to look at: never draw a frame except for an explicit capture.
                 OnDemandRendering.renderFrameInterval = SkipInterval;
                 Log.Info("Headless launch: frames aren't drawn");
             }
-            if (Environment.GetEnvironmentVariable("PALACEMOD_FAST") == "1") Set(true, Fps);
+            if (Environment.GetEnvironmentVariable("PALACEMOD_FAST") == "1") Set(true, Fps, keep: true);
         }
 
         private static string Command(string[] args)
         {
             if (args.Length == 0) return Describe();
-            string mode = args[0].ToLowerInvariant();
-            if (mode is not ("on" or "off")) throw new ArgumentException("usage: fast [on|off] [fps]");
-            float fps = args.Length > 1 ? float.Parse(args[1], CultureInfo.InvariantCulture) : 60f;
-            return Set(mode == "on", fps);
+            Apply(args, "fast");
+            return Describe();
         }
 
-        /// <summary>Turns fast simulation on (with a fixed step of 1/fps game seconds at 1x) or off.</summary>
-        public static string Set(bool on, float fps = 60f)
+        /// <summary>Parses and applies `on|off [fps] [keep]` (the dev command's and the bridge's `agent fast`).</summary>
+        public static void Apply(string[] args, string usage)
+        {
+            string mode = args[0].ToLowerInvariant();
+            if (mode is not ("on" or "off")) throw new ArgumentException($"usage: {usage} [on|off] [fps] [keep]");
+            float fps = 60f;
+            bool keep = false;
+            for (int i = 1; i < args.Length; i++)
+            {
+                if (args[i].Equals("keep", StringComparison.OrdinalIgnoreCase)) keep = true;
+                else if (float.TryParse(args[i], NumberStyles.Float, CultureInfo.InvariantCulture, out float f)) fps = f;
+                else throw new ArgumentException($"usage: {usage} [on|off] [fps] [keep]; not {args[i]}");
+            }
+            Set(mode == "on", fps, keep);
+        }
+
+        /// <summary>Turns fast simulation on (with a fixed step of 1/fps game seconds at 1x) or off. Unless
+        /// <paramref name="keep"/>, the next scene load turns it off again.</summary>
+        public static string Set(bool on, float fps = 60f, bool keep = false)
         {
             if (fps < 10f || fps > 1000f) throw new ArgumentException("fps must be between 10 and 1000");
             On = on;
             Fps = fps;
+            Keep = on && keep;
             Time.captureDeltaTime = on ? 1f / fps : 0f;
             if (on)
             {
@@ -81,7 +109,7 @@ namespace PalaceMod
                 wallAtStart = wall.Elapsed.TotalSeconds;
             }
             else if (!Headless) OnDemandRendering.renderFrameInterval = 1;
-            Log.For<FastSimManager>().Info($"Fast simulation {(on ? $"on, step 1/{fps:0.#} s" : "off")}");
+            Log.For<FastSimManager>().Info($"Fast simulation {(on ? $"on, step 1/{fps:0.#} s{(Keep ? ", kept across loads" : ", until the next scene load")}" : "off")}");
             return Describe();
         }
 
@@ -92,7 +120,7 @@ namespace PalaceMod
             double seconds = wall.Elapsed.TotalSeconds - wallAtStart;
             int frames = Time.frameCount - framesAtStart;
             string rate = seconds > 0.5 ? $", {frames / seconds:0} frames/s = {frames / seconds / Fps:0.0}x real time at 1x speed" : "";
-            return $"fast on, step 1/{Fps:0.#} s{rate}{(Headless ? " (headless)" : "")}";
+            return $"fast on{(Keep ? " (kept across loads)" : " (until the next scene load)")}, step 1/{Fps:0.#} s{rate}{(Headless ? " (headless)" : "")}";
         }
 
         /// <summary>Frames per wall-clock second since fast mode was turned on (0 when off).</summary>
