@@ -34,6 +34,7 @@ namespace PalaceMod
         private static void ScanAfterLevelStart()
         {
             LevelOverlay.ScanAfterFrame = -1;
+            LoopTraceManager.Note("level start rescan");
             var scene = LayoutScene.Host(LevelOverlay.ScanHost);
             if (!scene.IsValid() || !scene.isLoaded || AstarPath.active == null) return;
             try

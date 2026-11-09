@@ -325,7 +325,9 @@ namespace PalaceMod.Builder
             if (Current.Level != null)
             {
                 var issues = new List<ValidationIssue>();
+                LoopTraceManager.Note("overlay start");
                 BuilderServices.Overlay.Apply(Current.Pack, Current.Level, issues);
+                LoopTraceManager.Note("overlay end");
                 foreach (var i in issues) Log.For<BuilderManager>().Warn($"{Current.Pack.Id}/{Current.Level.Id}: {i}");
             }
             if (StudioKind == StudioSessionKind.None)
