@@ -195,8 +195,10 @@ namespace PalaceMod.Builder.Logic.Bodies
 
         public void Despawn(LogicEntity e, bool effects, bool drops)
         {
+            if (VanillaProjectiles.Destroy(e)) { LogicWorld.Current?.Forget(e); return; }
             var go = e.Go();
-            if (go == null) return;
+            if (go == null) { LogicWorld.Current?.Forget(e); return; }
+            Drifts.Forget(e);
             var hp = go.GetComponentInChildren<Hp>();
             if (hp != null && e.Kind == "unit")
             {
@@ -208,7 +210,10 @@ namespace PalaceMod.Builder.Logic.Bodies
                     Object.Instantiate(hp.fxToSpawnOnDeath, go.transform.position + hp.deathFxSpawnOffset, hp.fxToSpawnOnDeath.transform.rotation);
             }
             if (go.GetComponent<BuilderBody>() is { } b) b.Despawning = true;
+            // A knocked-out building or the castle isn't removed: destroy on those knocks it out instead.
+            if (hp != null && hp.getsKnockedOutInsteadOfDying) { if (hp.HpValue > 0f) hp.TakeDamage(hp.HpValue + 1f); return; }
             Object.Destroy(go);
+            LogicWorld.Current?.Forget(e);
         }
     }
 
