@@ -15,7 +15,7 @@ namespace PalaceMod.Builder.Logic.Bodies
         public static string Status() =>
             $"world {(LogicWorld.Current != null ? "on" : "off")}; entities {LogicWorld.Current?.Entities.Count() ?? 0}; " +
             $"projectiles: builder {BuilderProjectile.Live.Count}, vanilla {VanillaProjectiles.Count}; areas {BuilderArea.All.Count}; movers {BuilderMover.All.Count}; " +
-            $"pickups {BuilderPickup.All.Count}; {Surfaces.Describe()}; {Walkables.Describe()}; drifts {(Drifts.Any ? Drifts.Drifting.Count() : 0)}; " +
+            $"pickups {BuilderPickup.All.Count}; {Surfaces.Describe()}; {Walkables.Describe()}; {Spaces.Describe()}; drifts {(Drifts.Any ? Drifts.Drifting.Count() : 0)}; " +
             $"last impacts: {string.Join(" ", BuilderProjectile.LastImpacts)}";
 
         public static string Build(string[] a)

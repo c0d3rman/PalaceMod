@@ -70,6 +70,9 @@ namespace PalaceMod.Builder.Studio
                     if ((pos - l.Center).sqrMagnitude < 0.0004f && e.RotY == null) lv.SpawnLines.Edit.Remove(e);
                     break;
                 }
+                case StudioItemKind.Place:
+                    Studio.SourceFor(item.Key)?.SetPose(lv, item.Id, pos, yaw);
+                    break;
             }
         }
 
@@ -135,7 +138,7 @@ namespace PalaceMod.Builder.Studio
             if (targets.Count == 0) return;
             // The host's own slots and spawn lines are removed from the map (or restored if they all were).
             var hostItems = targets.Where(IsHostItem).ToList();
-            bool restore = hostItems.Count > 0 && hostItems.All(i => i.Removed) && targets.All(i => i.Kind != StudioItemKind.Added && i.Kind != StudioItemKind.Prop);
+            bool restore = hostItems.Count > 0 && hostItems.All(i => i.Removed) && targets.All(i => i.Kind is not StudioItemKind.Added and not StudioItemKind.Prop and not StudioItemKind.Place);
             string label = targets.Count == 1
                 ? (IsHostItem(targets[0]) ? (restore ? "Restore " : "Remove ") : "Delete ") + targets[0].Name
                 : $"{(restore ? "Restore" : "Delete")} {targets.Count} objects";
@@ -157,6 +160,9 @@ namespace PalaceMod.Builder.Studio
                             break;
                         case StudioItemKind.Prop:
                             lv.Props?.RemoveAll(x => x?.Id == item.Id);
+                            break;
+                        case StudioItemKind.Place:
+                            Studio.SourceFor(item.Key)?.Delete(lv, item.Id);
                             break;
                         case StudioItemKind.Line:
                             // Its move (if any) stays, so a restore puts it back where it was.
@@ -329,9 +335,23 @@ namespace PalaceMod.Builder.Studio
         /// <summary>Copies the items in place (offset 2 m) and returns the copies' keys.</summary>
         public static List<string> Duplicate(IEnumerable<StudioItem> items)
         {
-            var clips = Snapshot(items, out var center);
-            if (clips.Count == 0) return [];
-            return PasteClips(clips, center + new Vector3(2f, 0f, -2f), "Duplicate");
+            var list = items.ToList();
+            var clips = Snapshot(list, out var center);
+            var keys = clips.Count == 0 ? [] : PasteClips(clips, center + new Vector3(2f, 0f, -2f), "Duplicate");
+            // Item sources' objects (logic places) copy themselves.
+            var places = list.Where(i => i.Kind == StudioItemKind.Place).ToList();
+            if (places.Count > 0)
+            {
+                var made = new List<string>();
+                Studio.Edit($"Duplicate {Count(places.Count, places[0].Name)}", lv =>
+                {
+                    made.Clear();
+                    foreach (var i in places)
+                        if (Studio.SourceFor(i.Key) is { } source && source.Duplicate(lv, i.Id, new Vector3(2f, 0f, -2f)) is string id) made.Add(source.Prefix + id);
+                });
+                keys.AddRange(made);
+            }
+            return keys;
         }
 
         // ---- Costs and props ------------------------------------------------------------------------------------
