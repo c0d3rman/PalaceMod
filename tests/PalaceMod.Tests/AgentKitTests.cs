@@ -447,6 +447,89 @@ print("ok")
             }
         }
 
+        /// <summary>A raised ramp's drop-offs are walls for clearance, and the clearance is the host's own large-enemy
+        /// radius (measured in game after cliff faces became walls for the graphs): with radius 2 (most maps) a 6 m ramp
+        /// keeps large enemies out and an 8 m one lets them up; with radius 4 (Nordfels, the fallback) it takes 12 m.</summary>
+        public static void PalacePyRampWidthsFollowHostGraphs()
+        {
+            string script = FindScript();
+            if (script == null || !HasPython()) { Console.WriteLine("  (skipped: no python3 or agent-kit/palace.py)"); return; }
+            foreach (var (radius, slope, closed, open) in new[] { (2f, 20f, 6, 8), (4f, 30f, 10, 12) })
+            {
+                string root = Path.Combine(Path.GetTempPath(), "palace-agent-test-" + Guid.NewGuid().ToString("N"));
+                try
+                {
+                    string game = Path.Combine(root, "game");
+                    Directory.CreateDirectory(Path.Combine(game, "BepInEx"));
+                    string refDir = Path.Combine(root, "ref");
+                    WriteReference(refDir, new JObject
+                    {
+                        ["Enemy Units S"] = new JObject { ["radius"] = 0.5, ["slope"] = slope },
+                        ["Enemy Units L"] = new JObject { ["radius"] = radius, ["slope"] = slope },
+                        ["Enemy Units Air"] = new JObject { ["radius"] = 1.5, ["slope"] = 89 },
+                    });
+                    Run(script, game, refDir, "new", "test.pack", "--name", "Test");
+                    int[] widths = [closed, open];
+                    for (int li = 0; li < widths.Length; li++)
+                    {
+                        int width = widths[li];
+                        string level = "r" + width, ops = Path.Combine(root, level + ".json");
+                        // The castle on a 6 m mesa; one raised ramp south from its edge down to the field.
+                        File.WriteAllText(ops, $$$"""
+                        [
+                         {"op": "terrain_init", "origin": [-50, -50], "size": [50, 50], "cell": 2},
+                         {"op": "terrain", "mode": "set", "height": 6, "rect": {"min": [-14, -12], "max": [14, 14]}, "falloff": 0},
+                         {"op": "ramp", "from": [0, -12], "to": [0, -40], "width": {{{width}}}, "fromHeight": 6, "toHeight": 0, "falloff": 0},
+                         {"op": "waves", "nights": [{"spawns": [{"unit": "E Melee", "count": 1, "line": "Gate"}]}]}
+                        ]
+                        """);
+                        Run(script, game, refDir, "level", "test.pack", level, "--host", "Testmap", "--base", "flat");
+                        var applied = JObject.Parse(Run(script, game, refDir, "apply", "test.pack", ops, "--level", level));
+                        Assert.True(applied["errors"]!.Count() == 0, $"radius {radius}, {width} m ramp: small enemies climb it: {applied}");
+                        bool largeWarned = applied["warnings"]!.Any(w => ((string)w["path"]!).StartsWith($"levels[{li}]") && ((string)w["message"]!).Contains("large enemies from Gate"));
+                        Assert.Equal(width == closed, largeWarned, $"radius {radius}: large enemies kept off only the {closed} m ramp: {applied}");
+                    }
+                }
+                finally
+                {
+                    try { Directory.Delete(root, true); } catch (IOException) { }
+                }
+            }
+        }
+
+        /// <summary>A flier line far beyond a flat field is flagged: the fliers' surface covers the field only.</summary>
+        public static void PalacePyFlierLineOffField()
+        {
+            string script = FindScript();
+            if (script == null || !HasPython()) { Console.WriteLine("  (skipped: no python3 or agent-kit/palace.py)"); return; }
+            string root = Path.Combine(Path.GetTempPath(), "palace-agent-test-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                string game = Path.Combine(root, "game");
+                Directory.CreateDirectory(Path.Combine(game, "BepInEx"));
+                string refDir = Path.Combine(root, "ref");
+                WriteReference(refDir);
+                Run(script, game, refDir, "new", "test.pack", "--name", "Test");
+                string ops = Path.Combine(root, "ops.json");
+                File.WriteAllText(ops, """
+                [
+                 {"op": "terrain_init", "origin": [-50, -50], "size": [50, 50], "cell": 2},
+                 {"op": "add_spawn_line", "id": "near", "at": [0, 45], "width": 10, "ground": false, "large": false, "flying": true},
+                 {"op": "add_spawn_line", "id": "far", "at": [0, 120], "width": 10, "ground": false, "large": false, "flying": true},
+                 {"op": "waves", "nights": [{"spawns": [{"unit": "E Melee", "count": 1, "line": "Gate"}]}]}
+                ]
+                """);
+                Run(script, game, refDir, "level", "test.pack", "f", "--host", "Testmap", "--base", "flat");
+                var applied = JObject.Parse(Run(script, game, refDir, "apply", "test.pack", ops, "--level", "f"));
+                var flagged = applied["warnings"]!.Select(w => (string)w["message"]!).Where(m => m.StartsWith("flier line")).ToList();
+                Assert.True(flagged.Count == 1 && flagged[0].Contains("far"), "only the far flier line is flagged: " + applied);
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch (IOException) { }
+            }
+        }
+
         private static string FindScript()
         {
             for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
@@ -487,7 +570,7 @@ print("ok")
         }
 
         // A 100 x 100 m map: the castle at the centre, one copyable house, one spawn line, flat walkable ground.
-        private static void WriteReference(string dir)
+        private static void WriteReference(string dir, JObject graphs = null)
         {
             Directory.CreateDirectory(Path.Combine(dir, "maps"));
             File.WriteAllText(Path.Combine(dir, "catalog.json"), """
@@ -511,6 +594,7 @@ print("ok")
              "scenery": [{"base": "mesh:Rock A", "name": "Rock A", "count": 3, "size": [4, 4, 4]}]}
             """);
             map["grid"] = new JObject { ["origin"] = new JArray(-50, -50), ["cell"] = 2, ["size"] = new JArray(n, n), ["heights"] = heights, ["walk"] = walk };
+            if (graphs != null) map["graphs"] = graphs;   // the map's own graph settings (else palace.py's fallback)
             File.WriteAllText(Path.Combine(dir, "maps", "Testmap.json"), map.ToString());
         }
     }

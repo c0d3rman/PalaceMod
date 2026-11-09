@@ -23,6 +23,34 @@ namespace PalaceMod
             RegisterDevCommand();
         }
 
+        // An enemy starts by snapping to the nearest walkable point of its graph (PathfindMovementEnemy.SnapToNavmesh),
+        // but A* only looks AstarPath.maxNearestNodeDistance (100 m) far and otherwise returns +infinity: an enemy
+        // spawned further than that from its graph (a custom flier line out over the sea, beyond the map's flier
+        // surface) is put at an infinite position, never dies and the night never ends. Snap it to its graph's nearest
+        // point at any distance instead, and make that its home too (Start set home to the spawn point just before:
+        // an idle enemy walks home, and a path to a point off the graph goes nowhere, so it would stand at the edge).
+        // Vanilla spawns are always within reach, so they take the game's own path.
+        [HarmonyLib.HarmonyPatch(typeof(PathfindMovementEnemy), nameof(PathfindMovementEnemy.SnapToNavmesh))]
+        private static class SnapToNavmesh_Patch
+        {
+            private static bool Prefix(PathfindMovementEnemy __instance, Pathfinding.NNConstraint ___nearestConstraint, ref Vector3 ___homePosition)
+            {
+                var astar = AstarPath.active;
+                if (astar == null || ___nearestConstraint == null) return true;
+                var pos = __instance.transform.position;
+                if (astar.GetNearest(pos, ___nearestConstraint).node != null) return true;
+                var any = new Pathfinding.NNConstraint { constrainDistance = false, graphMask = ___nearestConstraint.graphMask };
+                var hit = astar.GetNearest(pos, any);
+                if (hit.node == null) return true;
+                __instance.transform.position = hit.position;
+                if ((___homePosition - pos).sqrMagnitude < 1f) ___homePosition = hit.position;
+                // Rounded, so a wave of them collapses into one line plus a count.
+                float off = Mathf.Round((hit.position - pos).magnitude / 10f) * 10f;
+                Log.For<BuilderManager>().Warn($"{__instance.name.Replace("(Clone)", "").Trim()} spawned ~{off:0} m from its walkable graph: moved onto it (its spawn line is off the graph)");
+                return false;
+            }
+        }
+
         public override void Update()
         {
             if (LevelOverlay.ScanAfterFrame >= 0 && Time.frameCount >= LevelOverlay.ScanAfterFrame) ScanAfterLevelStart();
@@ -57,7 +85,7 @@ namespace PalaceMod
         private void RegisterDevCommand()
         {
             DevCommands.Register("builder-level",
-                "builder-level paths | graphs | spike ... | buildings [kind] | <any builder-studio subcommand>   level tools (editing: see builder-studio)", args =>
+                "builder-level paths | graphs | enemies | spike ... | buildings [kind] | <any builder-studio subcommand>   level tools (editing: see builder-studio)", args =>
             {
                 string sub = args.FirstOrDefault()?.ToLowerInvariant();
                 switch (sub)
@@ -69,6 +97,32 @@ namespace PalaceMod
                     }
                     case "graphs":
                         return "\n" + PathCheck.DescribeGraphs() + "\n" + string.Join("\n", PathCheck.Check(Builder.Studio.StudioShell.Editing ? Builder.Studio.StudioScene.Scene : LayoutScene.Host(BuilderServices.Sessions.Current?.HostScene)).Select(r => $"{r.Line} on {r.Graph}: {r.Detail}"));
+                    case "enemies":
+                        // Where every live enemy is (an infinite or NaN position is one the pathfinding lost).
+                        return "\n" + string.Join("\n", UnityEngine.Object.FindObjectsOfType<PathfindMovementEnemy>().Select(e =>
+                        {
+                            var p = e.transform.position;
+                            return $"{e.name.Replace("(Clone)", "").Trim()} at ({p.x:0.0}, {p.y:0.0}, {p.z:0.0})";
+                        }));
+                    case "navdump":
+                    {
+                        // navdump <graph name part, _ for spaces> <file>: the graph's walkable triangles as JSON [[x,y,z]x3, ...] (dev).
+                        if (args.Length < 3 || AstarPath.active == null) return "navdump <graph> <file>";
+                        var g = AstarPath.active.data.graphs.FirstOrDefault(x => x != null && x.name.IndexOf(args[1].Replace('_', ' '), StringComparison.OrdinalIgnoreCase) >= 0);
+                        if (g == null) return "no such graph";
+                        var sb = new System.Text.StringBuilder("[");
+                        int n = 0;
+                        g.GetNodes(node =>
+                        {
+                            if (!node.Walkable || node is not Pathfinding.TriangleMeshNode t) return;
+                            if (n++ > 0) sb.Append(',');
+                            var a = (Vector3)t.GetVertex(0); var b = (Vector3)t.GetVertex(1); var c = (Vector3)t.GetVertex(2);
+                            sb.Append(FormattableString.Invariant($"[[{a.x:0.00},{a.y:0.00},{a.z:0.00}],[{b.x:0.00},{b.y:0.00},{b.z:0.00}],[{c.x:0.00},{c.y:0.00},{c.z:0.00}],{t.Area}]"));
+                        });
+                        sb.Append(']');
+                        System.IO.File.WriteAllText(args[2], sb.ToString());
+                        return $"{n} triangles of {g.name} -> {args[2]}";
+                    }
                     case "spike":
                         return LevelSpike.Run(args.Length > 1 ? args[1] : "");
                     case "buildings":
