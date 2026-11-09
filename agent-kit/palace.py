@@ -4904,9 +4904,12 @@ def cmd_play(env, args):
         out(v)
         raise Fail("the game's validator found errors (above)")
     mark = g.log_size()
+    g.agent("fast off")  # a kept fast mode (an aborted test) would carry into this load
     g.agent(f"play {data['id']} {args.level}")
     st = g.wait_level_day(timeout=args.timeout)
     time.sleep(2.5)  # the level's rescan and path check run a moment after start
+    # Fast mode is set explicitly for every play: off (real time) unless --fast; either way the next level load ends it.
+    g.agent(f"fast on {args.fps:g}" if args.fast else "fast off")
     notes = g.log_since(mark, features=["Builder"], min_level="warn")
     out({"status": g.status(), "loadWarnings": notes})
 
@@ -5196,9 +5199,11 @@ def cmd_test(env, args):
     before the first requested one are played too (catch-up), unless --catchup says otherwise."""
     g = Game(env)
     if not args.fast:
+        g.agent("fast off")  # set explicitly: real time
         return run_test(env, args, g)
     # Fast simulation: the same fixed 1/60 s steps as a smooth 60 fps run at --speed, as fast as the CPU allows.
-    g.agent(f"fast on {args.fps:g}")
+    # `keep`: it lasts through the test's own loads (the level, resume states) until the `fast off` below.
+    g.agent(f"fast on {args.fps:g} keep")
     try:
         return run_test(env, args, g)
     finally:
@@ -5997,6 +6002,9 @@ def main(argv=None):
     p = sub.add_parser("play", help="load the level in the game (a custom run: real gold)")
     p.add_argument("pack")
     p.add_argument("level")
+    p.add_argument("--fast", action="store_true", help="fast simulation for this load (default off: real time); the "
+                                                     "next level load turns it off again")
+    p.add_argument("--fps", type=float, default=60, help="--fast: simulation frames per game second at 1x (default 60)")
     p.add_argument("--timeout", type=float, default=120)
 
     p = sub.add_parser("night", help="start the next night (or jump to night N) and wait for its report")
