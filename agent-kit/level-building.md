@@ -331,7 +331,7 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 | `remove_slot` | `slot` |
 | `chain` | `slots` [ids/names], `mode` `tree`\|`nearest`\|`order`, `first` (requirement of the root(s), default `"castle"`), `every` N (order/nearest: every N-th link needs one more castle level instead) |
 | `add_prop` | `mesh`, `at`/`pos`, `rotY`, `scale`, `solid`, `colors` (a map or `original`), `id` (auto) |
-| `scatter` | `mesh` (name or list), `count`, shape (`circle`/`rect`/`line`/`polygon`), `spacing` (3), `avoid` (6 m from slots and lines), `scale` [min,max], `solid`, `colors`, `seed` |
+| `scatter` | `mesh` (name or list), `count`, shape (`circle`/`rect`/`line`/`polygon`), `spacing` (3), `avoid` (6 m from slots and lines), `scale` [min,max], `solid` (default true: solid scatter can close a lane; `false` for decoration), `colors`, `seed` |
 | `remove_prop` | `id` or `ids` |
 | `add_spawn_line` | `id`, `at`/`pos`, `rotY`, `width`, `ground`, `large`, `flying` |
 | `move_spawn_line` | `line` (added id or host name), `at`/`pos`, `rotY` (added lines also `width`, flags) |
