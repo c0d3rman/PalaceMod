@@ -604,7 +604,7 @@ with `DesignLibrary.SavePreview(DesignKind.Enemy, id, texture)`. `DesignLibrary.
 cached until the file changes.
 
 **Home** (`Designs/LibraryHome.cs`; `BuilderEditor.Open` opens it, the old pack list is `BuilderEditor.OpenPackList` for
-dev and installed packs). Two wide tabs, My Levels and My Enemies. A toolbar row (New, Import, Export, a search tile that
+dev and installed packs). Three wide tabs, My Levels, My Enemies and My Things (see "Entity Studio"). A toolbar row (New, Import, Export, a search tile that
 types in place, Sort: Recent / Name / Map or Base) over a grid of 268×214 tiles: the saved snapshot (fallback: the map's
 thumbnail, or the base enemy's icon), the name, and one line of facts (map · nights; base · levels that use it).
 Click opens; right-click gives Open, Name, Duplicate, Export… (levels) or Used in (enemies), Delete… (to trash, with
@@ -1233,6 +1233,64 @@ settings-shaped page. Code: `Features/Builder/Studio/Enemies/`. An enemy is stil
   readout | portrait | orbit <yaw> <pitch> <dist> | spin <deg> | undo | redo | save | back`.
 - Not built: a building (a slot's built look) as the body; towers and walls are in the scenery library already. Towers
   as arena defenders (they live inside building prefabs with slots).
+
+## Entity Studio
+
+The editor for things: the non-unit templates of a pack (`entities[]`: projectiles, props, pickups, areas, logic
+objects; docs/builder-engine.md, "Templates"). Code: `Features/Builder/Studio/Entities/`. It is a mode of the Enemy
+Studio rather than a second tool, so everything above holds: opened in place over the Level Studio (shell suspended,
+view restored on Back) or on its own arena, one undo history with the draft, the same top bar, keys and camera.
+
+- **Enemies and things in one place.** The palette's tabs are Enemies, Things, Base, Look (Enemies, Things, Look while
+  editing a thing). A thing tile switches to it; an enemy tile switches back. Things are grouped by kind; "+ New" shows
+  the kind picker in the inspector (each kind with what it's for); Duplicate; Delete (press twice; its tooltip names
+  the attacks and placed copies that use it).
+- **New things** start with their kind's parts: a projectile flies at 12 m/s, homing 1, arc 0.2, hits foes, lives 8 s
+  and takes its launcher's side; a prop has a solid 1 m body; a pickup is collected by the king within 1.5 m (magnet
+  4 m, 30 s); an area is a 4 m circle watching units; a logic object has nothing. Projectiles, props and pickups get a
+  scenery model (a rock, a barrel, a chest), fitted to 1.2 m, 2 m or 0.8 m. A scenery model picked later that is
+  over 6 m is fitted the same way (a 30 m rock as a projectile); smaller ones keep the map's size.
+- **Inspector tabs:**
+  - **Look**: the model (pick it in the palette's Look tab: scenery, unit models, imported files; None = invisible),
+    scale, move X/Y/Z, turn X/Y/Z, tint. Flight spin is a Parts field; Look notes it.
+  - **Parts**: the behaviour editor's `PartsPanel`: kind, name, side, lifetime, most alive, then every part (look,
+    body, flight, mover, area, pickup, interact, starting statuses) with "+ part".
+  - **Behaviour**: variables and rules (the rule editor opens beside the inspector, as for enemies).
+- **The stage.** The turntable shows the thing as a level spawns it (the runtime's `BodyVisual`, so `meshScale`,
+  turns, `meshOffset` and tint are faithful) with outlines for what has no look: the body's footprint at its floor and
+  height (orange when solid), an area's shape, a pickup's reach and magnet, a projectile's hit radius.
+- **Launch / Try (F5, or the top bar).** Runs the thing through the behaviour engine in a throwaway world (as the
+  arena fight does; nothing is saved, the level's own logic doesn't run). A projectile is launched from the turntable
+  (at Height, default 1.5 m) at a dummy Distance away (default 14 m, across the view), as an attack's `launch` does;
+  with "Target moves" the dummy strolls 7 m back and forth across the line of fire, so homing, arc, spin and speed
+  show. Its path is drawn and stays until the next test. The dummy (a knight model, 1000 hp, a foe of the thing's
+  side) shows the damage taken. Other kinds are spawned on the turntable for 6 s with the dummy strolling past. The
+  readout shows flown distance, hits, the dummy's damage and the rules that fired, then "Hit 1× · flew 16.1 m in
+  1.5 s · dummy took 30"; a projectile with no rules gets a hint to add an impact rule. The test ends 1.5 s after the
+  projectile is gone (15 s at most); an edit, Stop or Back ends it and removes what it made.
+- **The readout** lists the thing's numbers (flight, body, area, pickup, side, lifetime, rules) and **Used by**
+  (enemies' attacks, levels' placed copies).
+- **Entry points:**
+  - An enemy's Moves tab, under an extra attack's Launches: **Pick a thing** (the draft's things, projectiles first),
+    **Edit…** (opens it; the Back button reads "← Enemy" and returns to the enemy) and **New projectile…** (makes
+    one, sets the attack to launch it, opens it).
+  - The Level Studio: `StudioServices.Entities.Open(draft, templateId, newKind, onReturn, out error)` (templateId null
+    and newKind null: the kind picker), and `LogicStudio.OpenEntityStudio` (the Logic palette's things and the level
+    Behaviour tab's Things list).
+  - The library home's **My Things** tab: the library's things as tiles; New thing opens the kind picker on the arena.
+- **Saving** saves the draft and the thing's picture (the palette and My Things tiles), a cache file per pack:
+  `PalaceBuilder/cache/portraits/<pack>/thing-<id>.png`.
+- Dev: `builder-entity open [id | new <kind>] | library [id | new <kind>] | new [kind] | select <id> | enemy [unit] |
+  state | json | tab <palette> [panel] [look source] | press <text> | type <text> | rows | look <ref|none> | launch |
+  stop | test | moving on|off | distance <m> | undo | redo | save | back`. `press` clicks the row or tile showing the
+  text (exact, then prefix, then substring; popup and rule editor first, then the dock), `type` types into the field a
+  press started editing and presses Enter, `rows` lists what can be pressed; they work for enemies too.
+- Checked in a pool instance, by presses alone: library → kind picker → Projectile → Look › filter "Cone" → Cone Tree
+  → Scale 0.4, Turn X 90 → Parts › Speed 10, Homing 0.9, Arc 0.3, Spin Z 540, Name "Homing tree" → Behaviour › + rule
+  › "This hits (as a shot)" › + action › Damage › Target "what it hit" › Amount 30 → Launch at a moving dummy: hit once
+  after 16.1 m in 1.5 s, dummy took 30. Then Pup › Moves › + attack › Pick a thing › Homing tree, Edit… (← Enemy back
+  to Pup), and from a Level Studio (ex01): open tree-missile, Scale 0.5, launch, Back to the level with "Set model
+  scale" as the level draft's undo step.
 
 ## Data-model changes (summary)
 
