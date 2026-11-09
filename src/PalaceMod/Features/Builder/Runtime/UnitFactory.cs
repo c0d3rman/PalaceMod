@@ -306,64 +306,145 @@ namespace PalaceMod.Builder
             }
             // Imported mesh, skin texture and sounds (WP5). Before the tint, so the tint colours an imported mesh too.
             PalaceMod.Builder.Assets.AssetVisuals.Apply(go, findPack(pack.Id), v, notes, owned);
-            if (v.Tint != null && Validator.TryParseColor(v.Tint, out var rgb))
-            {
-                var tint = new Color(rgb.r, rgb.g, rgb.b);
-                int tinted = 0;
-                foreach (var renderer in go.GetComponentsInChildren<Renderer>(true))
-                {
-                    if (renderer is not MeshRenderer && renderer is not SkinnedMeshRenderer) continue;
-                    var mats = renderer.sharedMaterials;
-                    bool changed = false;
-                    for (int i = 0; i < mats.Length; i++)
-                    {
-                        var m = mats[i];
-                        if (m == null || !IsBodyMaterial(m)) continue;
-                        Material clone;
-                        if (clones.TryGetValue(m, out var cached)) clone = (Material)cached;
-                        else
-                        {
-                            clone = new Material(m) { name = m.name }; // same name: the game's elite swap looks for "Enemy"
-                            MultiplyColor(clone, tint);
-                            tintedMaterials.Add((m, clone, tint));
-                            owned.Add(clone);
-                            clones[m] = clone;
-                        }
-                        mats[i] = clone;
-                        changed = true;
-                    }
-                    if (changed) { renderer.sharedMaterials = mats; tinted++; }
-                }
-                if (tinted == 0) notes.Add("tint: no body material found");
-            }
+            Recolour(go, v, clones, notes);
         }
+
+        // ---- Colours ----------------------------------------------------------------------------------------------
 
         // Unit bodies use the shared "Enemy" material (enemies) or the player colour materials; weapons/FX use others.
         private static bool IsBodyMaterial(Material m) => m.name == "Enemy" || m.name.StartsWith("Player") || m.name.StartsWith("Ally");
 
-        /// <summary>Tinted clones and their sources. ColorAndLightManager recolours the shared unit materials from the
-        /// level's colour scheme on level start and re-tints their outlines with the daylight, so clones follow.</summary>
-        private static readonly List<(Material source, Material clone, Color tint)> tintedMaterials = [];
+        /// <summary>A material's part name, as visuals.colors keys it ("Enemy", "Metal", ...).</summary>
+        internal static string PartName(Material m) => m == null ? null : m.name.Replace(" (Instance)", "").Trim();
 
-        /// <summary>Recopies every tinted clone from its source and re-applies the tint (BuilderManager.Troops.cs calls
-        /// this after the game changes its unit material colours).</summary>
-        internal static void ResyncTints()
+        /// <summary>What a recoloured material gets: a new lit colour (the shade follows it), and/or a tint.</summary>
+        private sealed class Recipe
         {
-            tintedMaterials.RemoveAll(t => t.source == null || t.clone == null);
-            foreach (var (source, clone, tint) in tintedMaterials)
+            public Color? Color, Tint;
+        }
+
+        /// <summary>
+        /// Recolours a unit (visuals.colors and visuals.tint). FlatKit's toon shader draws the lit side in _BaseColor and
+        /// the shaded side in _ColorDim, which the level's colour scheme sets to a deep enemy red (ColorAndLightManager.
+        /// ApplyColorScheme), so a tint that only multiplies _BaseColor barely shows. A colour replaces both: _BaseColor
+        /// becomes it and _ColorDim the shade the scheme would pair with it (ColorMath.ShadeFor). Clones keep the source's
+        /// name, so the game's elite swap still finds "Enemy"; BuilderEliteLook then puts the recoloured elite twin in.
+        /// </summary>
+        private void Recolour(GameObject go, VisualsDef v, Dictionary<Object, Object> clones, List<string> notes)
+        {
+            Color? tint = v.Tint != null && Validator.TryParseColor(v.Tint, out var t) ? new Color(t.r, t.g, t.b) : null;
+            var colors = new Dictionary<string, Color>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in v.Colors ?? [])
+                if (kv.Key != null && Validator.TryParseColor(kv.Value, out var c)) colors[kv.Key.Trim()] = new Color(c.r, c.g, c.b);
+            if (tint == null && colors.Count == 0) return;
+            var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            bool tinted = false;
+            var eliteRenderers = new List<Renderer>();
+            var eliteSlots = new List<int>();
+            var eliteClones = new List<Material>();
+            foreach (var renderer in go.GetComponentsInChildren<Renderer>(true))
             {
-                clone.CopyPropertiesFromMaterial(source);
-                MultiplyColor(clone, tint);
+                if (renderer is not MeshRenderer && renderer is not SkinnedMeshRenderer) continue;
+                var mats = renderer.sharedMaterials;
+                bool changed = false;
+                for (int i = 0; i < mats.Length; i++)
+                {
+                    var m = mats[i];
+                    if (m == null) continue;
+                    bool body = IsBodyMaterial(m);
+                    string part = PartName(m);
+                    Color? color = null;
+                    if (colors.TryGetValue(part, out var byName)) { color = byName; used.Add(part); }
+                    else if (body && colors.TryGetValue(ModelRef.BodyPart, out var byBody)) { color = byBody; used.Add(ModelRef.BodyPart); }
+                    Color? tintHere = body ? tint : null;
+                    if (color == null && tintHere == null) continue;
+                    Material clone;
+                    if (clones.TryGetValue(m, out var cached)) clone = (Material)cached;
+                    else
+                    {
+                        clone = new Material(m) { name = m.name }; // same name: the game's elite swap looks for "Enemy"
+                        var recipe = new Recipe { Color = color, Tint = tintHere };
+                        Paint(clone, m, recipe);
+                        recoloured.Add((m, clone, recipe));
+                        owned.Add(clone);
+                        clones[m] = clone;
+                    }
+                    if (tintHere != null) tinted = true;
+                    mats[i] = clone;
+                    changed = true;
+                    if (m.name == "Enemy")
+                    {
+                        eliteRenderers.Add(renderer);
+                        eliteSlots.Add(i);
+                        eliteClones.Add(clone);
+                    }
+                }
+                if (changed) renderer.sharedMaterials = mats;
+            }
+            if (tint != null && !tinted) notes.Add("tint: no body material found");
+            foreach (var key in colors.Keys.Where(k => !used.Contains(k))) notes.Add($"colors: no \"{key}\" material on this model");
+            if (eliteRenderers.Count > 0)
+            {
+                var look = go.GetComponent<BuilderEliteLook>() ?? go.AddComponent<BuilderEliteLook>();
+                look.renderers = eliteRenderers.ToArray();
+                look.slots = eliteSlots.ToArray();
+                look.materials = eliteClones.ToArray();
             }
         }
 
-        private static void MultiplyColor(Material m, Color tint)
+        /// <summary>Recoloured clones and their sources. ColorAndLightManager recolours the shared unit materials from the
+        /// level's colour scheme on level start and re-tints their outlines with the daylight, so clones follow.</summary>
+        private static readonly List<(Material source, Material clone, Recipe recipe)> recoloured = [];
+        private static readonly Dictionary<Material, Material> eliteTwins = [];
+
+        private static void Paint(Material clone, Material source, Recipe r)
         {
-            foreach (var prop in new[] { "_BaseColor", "_Color" })
+            string baseProp = clone.HasProperty("_BaseColor") ? "_BaseColor" : clone.HasProperty("_Color") ? "_Color" : null;
+            if (baseProp == null) return;
+            if (r.Color is Color target)
             {
-                if (!m.HasProperty(prop)) continue;
-                m.SetColor(prop, m.GetColor(prop) * tint);
-                return;
+                var light = source.HasProperty(baseProp) ? source.GetColor(baseProp) : Color.white;
+                target.a = light.a;
+                clone.SetColor(baseProp, target);
+                if (clone.HasProperty("_ColorDim") && source.HasProperty("_ColorDim"))
+                    clone.SetColor("_ColorDim", ColorMath.ShadeFor(target, light, source.GetColor("_ColorDim")));
+            }
+            if (r.Tint is Color tint)
+            {
+                clone.SetColor(baseProp, clone.GetColor(baseProp) * tint);
+                // Half of it on the shade too, so a tint reads on the shaded side as well.
+                if (clone.HasProperty("_ColorDim"))
+                {
+                    var dim = clone.GetColor("_ColorDim");
+                    clone.SetColor("_ColorDim", Color.Lerp(dim, dim * tint, 0.5f));
+                }
+            }
+        }
+
+        /// <summary>The elite look of a recoloured body clone: the same colours with the game's yellow elite outline.</summary>
+        internal static Material EliteTwin(Material clone)
+        {
+            if (clone == null) return null;
+            if (eliteTwins.TryGetValue(clone, out var twin) && twin != null) return twin;
+            twin = new Material(clone) { name = clone.name };
+            if (twin.HasProperty("_OutlineColor")) twin.SetColor("_OutlineColor", Color.yellow);
+            return eliteTwins[clone] = twin;
+        }
+
+        /// <summary>Recopies every recoloured clone from its source and paints it again (BuilderManager.Troops.cs calls
+        /// this after the game changes its unit material colours).</summary>
+        internal static void ResyncTints()
+        {
+            recoloured.RemoveAll(t => t.source == null || t.clone == null);
+            foreach (var (source, clone, recipe) in recoloured)
+            {
+                clone.CopyPropertiesFromMaterial(source);
+                Paint(clone, source, recipe);
+                if (eliteTwins.TryGetValue(clone, out var twin) && twin != null)
+                {
+                    twin.CopyPropertiesFromMaterial(clone);
+                    if (twin.HasProperty("_OutlineColor")) twin.SetColor("_OutlineColor", Color.yellow);
+                }
             }
         }
 
@@ -397,6 +478,48 @@ namespace PalaceMod.Builder
             return $"name=\"{icon?.UnitName}\" maxHp={hp?.maxHp} speed={move?.movementSpeed ?? playerMove?.movementSpeed} cooldown={attack?.cooldownDuration} " +
                 $"dmgMult={attack?.DamageMultiplyer} weapon={attack?.weapon?.name}#{attack?.weapon?.GetInstanceID()} damage=[{dmg}] scale={go.transform.localScale.x:0.##} " +
                 $"tags=[{(tagged == null ? "" : string.Join(",", tagged.Tags))}]";
+        }
+    }
+
+    /// <summary>
+    /// On a recoloured enemy template: the game makes an enemy elite by swapping every MeshRenderer whose material is
+    /// named "Enemy" to its shared elite material (Spawn, right after Instantiate), which would drop the custom colour.
+    /// On Start (after that), an elite gets the recoloured clone's elite twin (same colours, yellow outline) instead;
+    /// the hit flash's remembered material follows.
+    /// </summary>
+    public sealed class BuilderEliteLook : MonoBehaviour
+    {
+        public Renderer[] renderers;
+        public int[] slots;
+        public Material[] materials;
+
+        private static readonly HarmonyLib.AccessTools.FieldRef<MaterialFlasherFX, List<MaterialFlasherFX.RendererMaterialPair>> Pairs =
+            HarmonyLib.AccessTools.FieldRefAccess<MaterialFlasherFX, List<MaterialFlasherFX.RendererMaterialPair>>("targetRendererMaterialPairs");
+
+        private void Start()
+        {
+            var hp = GetComponentInChildren<Hp>();
+            if (hp == null || !hp.Elite || renderers == null || slots == null || materials == null) return;
+            var elite = ColorAndLightManager.EliteEnemyMaterial;
+            var swapped = new Dictionary<Renderer, Material>();
+            for (int i = 0; i < renderers.Length && i < slots.Length && i < materials.Length; i++)
+            {
+                var r = renderers[i];
+                if (r == null || materials[i] == null) continue;
+                var mats = r.sharedMaterials;
+                int k = slots[i];
+                if (k < 0 || k >= mats.Length || (mats[k] != elite && mats[k] != materials[i])) continue;
+                mats[k] = UnitFactory.EliteTwin(materials[i]);
+                r.sharedMaterials = mats;
+                if (k == 0) swapped[r] = mats[k];
+            }
+            foreach (var flasher in GetComponentsInChildren<MaterialFlasherFX>(true))
+            {
+                List<MaterialFlasherFX.RendererMaterialPair> pairs;
+                try { pairs = Pairs(flasher); } catch { continue; }
+                foreach (var p in pairs ?? [])
+                    if (p?.renderer != null && swapped.TryGetValue(p.renderer, out var m)) p.originalMaterial = m;
+            }
         }
     }
 }

@@ -386,7 +386,7 @@ namespace PalaceMod.Builder.Editor
 
         /// <summary>Visuals with nothing set (they can be dropped from the unit).</summary>
         internal static bool IsEmpty(VisualsDef v) =>
-            v.Tint == null && v.Scale == null && v.Icon == null && v.Mesh == null && v.MeshScale == null && v.MeshRotY == null && v.MeshRotX == null &&
+            v.Tint == null && (v.Colors == null || v.Colors.Count == 0) && v.Scale == null && v.Icon == null && v.Mesh == null && v.MeshScale == null && v.MeshRotY == null && v.MeshRotX == null &&
             v.MeshRotZ == null && v.MeshOffset == null && v.MeshLook == null && v.Motion == null && v.Texture == null &&
             (v.Sounds == null || (v.Sounds.Attack ?? v.Sounds.Hurt ?? v.Sounds.Death) == null) && (v.Extra == null || v.Extra.Count == 0);
 
