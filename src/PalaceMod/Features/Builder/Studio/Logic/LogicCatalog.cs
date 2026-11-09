@@ -142,7 +142,7 @@ namespace PalaceMod.Builder.Studio.Logic
             Ev("inside", "something stays inside", "Areas", "For each thing inside, after every full tick it spends inside.", other: "the one inside", owners: ["area"], ofless: true);
             Ev("empty", "becomes empty", "Areas", "The last thing inside leaves.", owners: ["area"], ofless: true);
             Ev("occupied", "becomes occupied", "Areas", "The first thing enters.", owners: ["area"], ofless: true);
-            Ev("impact", "hits (as a shot)", "Combat", "A projectile strikes something or the ground.", other: "what it hit", pos: true);
+            Ev("impact", "hits (as a shot)", "Combat", "A projectile strikes something or the ground.", other: "thing it hit", pos: true);
             Ev("expire", "runs out", "This", "Its lifetime or range runs out.");
             Ev("arrive", "reaches a point", "Movement", "A mover or path follower reaches a point.", value: "point index");
             Ev("end", "reaches the end", "Movement", "A mover or path follower reaches its end.", value: "point index");
