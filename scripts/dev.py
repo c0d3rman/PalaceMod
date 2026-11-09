@@ -36,6 +36,7 @@ WINDOWED_PREFS = {"Video_Fullscreen": 0, "Screenmanager Fullscreen mode": 3}
 DISPLAY_KEYS = [*WINDOWED_PREFS, "Video_ResWidth", "Video_ResHeight", "Screenmanager Resolution Width",
                 "Screenmanager Resolution Height", "Screenmanager Resolution Use Native",
                 "Screenmanager Window Position X", "Screenmanager Window Position Y"]
+HEADLESS_ARGS = ["-batchmode"]
 DISPLAY_SAVED = DEV_HOME / "display-prefs.json"
 ROSETTA_MARKER = "# PalaceMod: run under Rosetta"
 ROSETTA_BLOCK = f"""{ROSETTA_MARKER} because libdoorstop.dylib is x86_64-only.
@@ -1094,6 +1095,9 @@ INSTANCES_HOME = Path(os.environ.get("PALACEMOD_INSTANCES",
 POOL_DEFAULT_SIZE = 6  # measured: ~0.35 core and ~1.2 GB per idle-ish instance (background 15 fps cap)
 INSTANCE_PROCESS = "ThronefallDev"
 LAST_INSTANCE = ROOT / ".local/pool-instance"  # so `logs` still finds the log after `stop`
+# Who holds a pool lease: this checkout, or with --slot NAME (PALACEMOD_SLOT) one of several leases it holds at once,
+# e.g. to run tests on several instances in parallel. Set by main().
+HOLDER = str(ROOT)
 # Files whose change means the base install changed (a game update, `setup`, `native on|off`), so instances
 # are recloned.
 BASE_FINGERPRINT_FILES = ["Thronefall.app/Contents/Info.plist", "Thronefall.app/Contents/MacOS/Thronefall",
@@ -1213,7 +1217,7 @@ def my_instance():
         return None
     for number in pool_numbers():
         lease = Instance(number).lease()
-        if lease is not None and lease["root"] == str(ROOT) and not lease_stale(lease):
+        if lease is not None and lease["root"] == HOLDER and not lease_stale(lease):
             return Instance(number)
     return None
 
@@ -1250,7 +1254,7 @@ def clear_solo():
         return
     with pool_lock():
         solo = solo_active()
-        if solo is not None and solo["root"] == str(ROOT):
+        if solo is not None and solo["root"] == HOLDER:
             SOLO_FILE.unlink(missing_ok=True)
 
 
@@ -1276,10 +1280,10 @@ def pool_acquire(command, wait):
                 solo = solo_active()
                 if len(ahead) < len(free) and solo is None:
                     # Prefer the instance this checkout used last: its build and data are already in place.
-                    free.sort(key=lambda i: (i.info().get("last_root") != str(ROOT), i.number))
+                    free.sort(key=lambda i: (i.info().get("last_root") != HOLDER, i.number))
                     instance = free[0]
                     now = time.time()
-                    instance.write_lease({"root": str(ROOT), "branch": current_branch(), "pid": os.getpid(),
+                    instance.write_lease({"root": HOLDER, "branch": current_branch(), "pid": os.getpid(),
                                           "command": command, "acquired": now, "heartbeat": now,
                                           "instance": instance.number, "seeded": False})
                     LAST_INSTANCE.parent.mkdir(exist_ok=True)
@@ -1290,7 +1294,7 @@ def pool_acquire(command, wait):
                 if ticket is None:
                     POOL_QUEUE.mkdir(parents=True, exist_ok=True)
                     ticket = POOL_QUEUE / f"{time.time_ns()}-{os.getpid()}.json"
-                    ticket.write_text(json.dumps({"root": str(ROOT), "branch": current_branch(), "pid": os.getpid(),
+                    ticket.write_text(json.dumps({"root": HOLDER, "branch": current_branch(), "pid": os.getpid(),
                                                   "since": time.time()}) + "\n")
                 status = (f"a --solo session from {solo['root']} has the machine" if solo
                           else f"all {pool_size()} instances are busy" if not free
@@ -1339,7 +1343,7 @@ def pool_session(command, wait=None):
 def pool_release(instance):
     with pool_lock():
         lease = instance.lease()
-        if lease is None or lease["root"] != str(ROOT):
+        if lease is None or lease["root"] != HOLDER:
             return
         if instance.pids():
             stop_instance(instance)
@@ -1475,7 +1479,7 @@ def prepare_instance(instance, base):
             lease["seeded"] = True
             instance.write_lease(lease)
     info = instance.info()
-    info["last_root"] = str(ROOT)
+    info["last_root"] = HOLDER
     write_atomic(instance.meta, json.dumps(info, indent=2) + "\n")
 
 
@@ -1497,20 +1501,22 @@ def keep_crash_logs(instance):
     print(f"The last game on pool {instance} crashed; its logs are kept in {dest}", flush=True)
 
 
-def launch_instance(instance, timeout, keep_focus=True):
+def launch_instance(instance, timeout, keep_focus=True, headless=False):
     if instance.pids():
         raise RuntimeError(f"Thronefall is already running on pool {instance}; `dev.py run` restarts it.")
     keep_crash_logs(instance)
     focus = FocusKeeper(keep_focus)
     started = time.time()
-    out = ROOT / ".local/launch.log"
+    out = ROOT / f".local/launch{'' if HOLDER == str(ROOT) else '-' + HOLDER.partition('#')[2]}.log"
     out.parent.mkdir(exist_ok=True)
     with out.open("w") as handle:
         env = {**os.environ, "PALACEMOD_DEV": "1", "CFFIXED_USER_HOME": str(instance.home)}
-        subprocess.Popen(["/bin/sh", str(instance.game / "run_bepinex.sh")], cwd=instance.game, stdout=handle,
+        # -batchmode: no window and nothing drawn; the mod notices (Application.isBatchMode, FastSimManager).
+        extra = HEADLESS_ARGS if headless else []
+        subprocess.Popen(["/bin/sh", str(instance.game / "run_bepinex.sh"), *extra], cwd=instance.game, stdout=handle,
                          stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True, env=env)
     arch = "natively" if is_native(instance.game) else "under Rosetta"
-    print(f"Launching Thronefall on pool {instance} {arch} (windowed)...", flush=True)
+    print(f"Launching Thronefall on pool {instance} {arch} ({'headless' if headless else 'windowed'})...", flush=True)
     wait_for_load(instance.game, started, timeout, focus, instance.pids, out)
 
 
@@ -1520,13 +1526,13 @@ def reserved(instance, command):
     Yields whether it's held; a lease this checkout already had is kept afterwards."""
     with pool_lock():
         lease = instance.lease()
-        if lease is not None and lease["root"] != str(ROOT) and not lease_stale(lease):
+        if lease is not None and lease["root"] != HOLDER and not lease_stale(lease):
             print(f"Skipping pool {instance}: leased by {describe_holder(lease)}.")
             yield False
             return
-        if lease is None or lease["root"] != str(ROOT):
+        if lease is None or lease["root"] != HOLDER:
             now = time.time()
-            instance.write_lease({"root": str(ROOT), "branch": current_branch(), "pid": os.getpid(),
+            instance.write_lease({"root": HOLDER, "branch": current_branch(), "pid": os.getpid(),
                                   "command": command, "acquired": now, "heartbeat": now,
                                   "instance": instance.number, "seeded": False})
             lease = None
@@ -1884,6 +1890,11 @@ def main():
                         help="Run/stop/lease release: take over a game or lease held by another checkout")
     parser.add_argument("--focus", action="store_true",
                         help="Launch/run: let the game take focus (by default dev launches hand focus back to your app)")
+    parser.add_argument("--slot", default=os.environ.get("PALACEMOD_SLOT"), metavar="NAME",
+                        help="Pool: hold a separate lease under this name (also PALACEMOD_SLOT), so one checkout can "
+                             "run several instances at once; every pool command for it needs the same --slot")
+    parser.add_argument("--headless", action="store_true",
+                        help="Run/launch (pool only): no window (Unity -batchmode); for automated tests")
     parser.add_argument("--sound", action="store_true",
                         help="Launch/run: keep the game's sound on (dev launches start muted)")
     parser.add_argument("--fullscreen", action="store_true",
@@ -1906,6 +1917,11 @@ def main():
     parser.add_argument("--dry-run", action="store_true",
                         help="Land: merge origin/main and build, but don't push, open or merge a PR")
     args = parser.parse_args()
+    global HOLDER
+    if args.slot:
+        if not re.fullmatch(r"[\w.-]+", args.slot):
+            raise RuntimeError("--slot takes a short name (letters, digits, - _ .)")
+        HOLDER = f"{ROOT}#{args.slot}"
     game = game_root(args.game)
     rest = args.args
     mode = rest[0] if rest else None
@@ -1918,6 +1934,8 @@ def main():
     pool_recover()
     heartbeat(args.command)
     pool_heartbeat(args.command)
+    if args.headless and real:
+        raise RuntimeError("--headless is for pool instances; the real install always opens its window.")
     if args.fullscreen and not real and args.command in ("run", "launch"):
         raise RuntimeError("Pool instances are always windowed; add --real to launch the real install fullscreen.")
     # Commands that act on a running game go to this checkout's pool instance if it holds one.
@@ -1967,7 +1985,7 @@ def main():
                 prepare_instance(inst, game)
                 install(inst.game, args.configuration, inst.pids, backup=False)
                 prepare_config(inst.game)
-                launch_instance(inst, args.timeout, not args.focus)
+                launch_instance(inst, args.timeout, not args.focus, args.headless)
     elif args.command == "launch":
         if real:
             with real_lease("launch"):
@@ -1980,7 +1998,7 @@ def main():
                 if not (inst.game / "BepInEx/plugins/PalaceMod/PalaceMod.dll").is_file():
                     install(inst.game, args.configuration, inst.pids, backup=False)  # recloned, or never installed
                 prepare_config(inst.game)
-                launch_instance(inst, args.timeout, not args.focus)
+                launch_instance(inst, args.timeout, not args.focus, args.headless)
     elif args.command == "stop":
         stop_command(args.force, args.real)
     elif args.command == "logs":

@@ -52,6 +52,16 @@ namespace PalaceMod
             }
             ApplyRenderOverrides();
 
+            if (FastSimManager.On && !InMenu)
+            {
+                // Fast simulation: frames back to back, nothing paced or capped (FastSimManager).
+                FrameRateReason = "fast simulation";
+                pacer.TargetFps = 0;
+                if (QualitySettings.vSyncCount != 0) QualitySettings.vSyncCount = 0;
+                if (Application.targetFrameRate != -1) Application.targetFrameRate = -1;
+                return;
+            }
+
             float cap = ComputeCap(out string reason, out bool saveCpu);
             FrameRateReason = reason;
             // Caps (menu, background, battery, ...) always go through the pacer: Unity ignores its own limiter while
@@ -177,7 +187,9 @@ namespace PalaceMod
         // Latency-critical mode keeps macOS from napping the game; release it in the background to save battery.
         private void UpdateLatencyCritical()
         {
-            bool wanted = (latencyCritical.Value == Toggle.On || (latencyCritical.Value == Toggle.Auto && IsMac)) && Application.isFocused;
+            // Fast simulation keeps it in the background too: App Nap would throttle an unfocused test run.
+            bool wanted = (latencyCritical.Value == Toggle.On || (latencyCritical.Value == Toggle.Auto && IsMac)) &&
+                (Application.isFocused || FastSimManager.On);
             if (wanted == MacActivity.Active) return;
             try
             {
