@@ -441,6 +441,7 @@ class LibraryRef:
         self.snapshot = {}
         self.meta = {}
         self.renames = []   # (folder, old id, new id): shared items renamed by ops; save_library moves their pictures
+        self.skipped = []   # warnings for library files that could not be read (skipped)
 
     def exists(self):
         return True
@@ -503,13 +504,29 @@ LOGIC_KINDS = ("entities", "statuses", "presets")
 LOGIC_KIND_NAME = {"entities": "entity", "statuses": "status", "presets": "preset"}
 
 
+def _read_item(ref, f, kind):
+    """One library file as pack JSON, or None (and a note in ref.skipped) when it can't be read: one broken file never
+    stops the rest of the library from loading."""
+    try:
+        item = migrate_pack(json.loads(f.read_text(encoding="utf-8")))
+        if not isinstance(item, dict):
+            raise ValueError("not a JSON object")
+        return item
+    except (OSError, ValueError, AttributeError, TypeError) as e:
+        ref.skipped.append({"severity": "warning", "file": f"{kind}/{f.name}", "path": "",
+                            "message": f"can't be read, so it's skipped (levels that use it will miss it): {e}"})
+        return None
+
+
 def load_library(ref):
     data = {"format": "palace-builder", "version": PACK_VERSION, "id": LIBRARY_ID, "name": "My library", "assets": {},
             "units": [], "waveSets": [], "levels": [], "entities": [], "statuses": [], "presets": []}
     # The behaviour engine's shared definitions: library/<entities|statuses|presets>/<id>.json, one item each.
     for kind in LOGIC_KINDS:
         for f in _item_files(ref.root, kind):
-            item = migrate_pack(json.loads(f.read_text(encoding="utf-8")))
+            item = _read_item(ref, f, kind)
+            if item is None:
+                continue
             d = (item.get(kind) or [None])[0]
             if not isinstance(d, dict):
                 continue
@@ -519,7 +536,9 @@ def load_library(ref):
             ref.meta[(kind, f.stem)] = item.get("library") or {}
     for kind in ("levels", "enemies"):
         for f in _item_files(ref.root, kind):
-            item = migrate_pack(json.loads(f.read_text(encoding="utf-8")))
+            item = _read_item(ref, f, kind)
+            if item is None:
+                continue
             meta = item.get("library") or {}
             if kind == "levels":
                 if ref.origin and meta.get("origin") != ref.origin:
@@ -4600,11 +4619,11 @@ def attribute(scoped, issue, level=None):
             "path": f"{field}[id={iid}]{rest}", "message": issue["message"]}
 
 
-def library_check(ref, data, level_ids=None, only_files=None):
+def library_check(ref, data, level_ids=None, only_files=None, skipped=()):
     """check_pack per library level (with the shared items it uses), then the unused items alone; attributed and
     without duplicates. level_ids limits it to those levels (and skips the unused items); only_files keeps the issues
     of those files (and checks every level, to find where those items are used)."""
-    issues, seen = [], set()
+    issues, seen = list(skipped), set()
 
     def add(i):
         key = (i["severity"], i.get("file"), i.get("path"), i["message"])
@@ -4643,11 +4662,11 @@ def cmd_apply(env, args):
         # in every level that uses them.
         touched = {o.get("level") if isinstance(o.get("level"), str) else args.level for o in ops_list} - {None}
         if touched:
-            issues = library_check(ref, data, level_ids={l for l in touched if any(x.get("id") == l for x in data.get("levels") or [])})
+            issues = library_check(ref, data, level_ids={l for l in touched if any(x.get("id") == l for x in data.get("levels") or [])}, skipped=path.skipped)
         else:
             files = {f"{SHARED_FOLDER[f]}/{x['id']}.json" for f in SHARED for x in data.get(f) or []
                      if isinstance(x, dict) and x.get("id") in ops.edited}
-            issues = library_check(ref, data, only_files=files)
+            issues = library_check(ref, data, only_files=files, skipped=path.skipped)
     else:
         issues = check_pack(ref, data)
     errors = [i for i in issues if i["severity"] == "error"]
@@ -4663,7 +4682,7 @@ def cmd_check(env, args):
     if args.level:
         find_level(data, args.level)
     if isinstance(path, LibraryRef):
-        issues = library_check(ref, data, level_ids={args.level} if args.level else None)
+        issues = library_check(ref, data, level_ids={args.level} if args.level else None, skipped=path.skipped)
     else:
         issues = check_pack(ref, scope_levels(data, {args.level}) if args.level else data)
     result = {"pack": data.get("id"), "offline": issues}

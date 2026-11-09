@@ -68,6 +68,16 @@ namespace PalaceMod.Builder
             if (kind == StudioSessionKind.None) throw new ArgumentException("a Studio session is Edit or Play");
             var transitions = SceneTransitionManager.instance;
             if (transitions == null || transitions.SceneTransitionIsRunning) { error = "can't start a level right now"; return false; }
+            resolvingEdit = kind == StudioSessionKind.Edit;
+            try { return LaunchStudioResolved(request, kind, transitions, out error); }
+            finally { resolvingEdit = false; }
+        }
+
+        /// <summary>Set while a Studio edit load resolves its pack (Resolve then skips broken shared items).</summary>
+        private bool resolvingEdit;
+
+        private bool LaunchStudioResolved(SessionRequest request, StudioSessionKind kind, SceneTransitionManager transitions, out string error)
+        {
             if (!Resolve(request, out var ws, out var lv, out error)) return false;
             string host = lv?.Host ?? ws.Host;
             var loadout = TestLoadout.For(host);
@@ -222,16 +232,26 @@ namespace PalaceMod.Builder
             var pack = request?.Pack;
             if (pack == null) { error = "no pack"; return false; }
 
-            // The library is one pack of unrelated levels: only this level, its nights and their enemies must be valid
-            // (a broken level elsewhere in the library must not block it). A shared pack is checked whole.
+            // The library is one pack of unrelated levels: only this level, its nights and the shared items it uses must
+            // be valid, each template in this level's context (Model/Logic/LevelScope.cs). A broken level or template
+            // elsewhere in the library never blocks it. A shared pack is checked whole.
             var checkedPack = pack;
             if (pack.Id == DesignLibrary.PackId && request.LevelId != null)
             {
-                checkedPack = Studio.Play.TestPacks.Play(pack, request.LevelId, out string playError);
-                if (checkedPack == null) { error = playError; return false; }
+                checkedPack = Model.Logic.LevelScope.For(pack, request.LevelId);
+                if (checkedPack == null) { error = $"no level \"{request.LevelId}\" in the library"; return false; }
             }
-            var errors = BuilderServices.Packs.Validate(checkedPack).Where(i => i.Severity == Severity.Error).ToList();
-            if (errors.Count > 0) { error = $"{pack.Name ?? pack.Id} has {errors.Count} error(s): {string.Join("; ", errors.Take(3).Select(e => e.Message))}"; return false; }
+            var errors = BuilderServices.Packs.Validate(checkedPack).Where(i => i.Severity == Severity.Error)
+                .Select(i => checkedPack == pack ? i : Model.Logic.LevelScope.Attribute(checkedPack, i)).ToList();
+            // Editing a library level: a broken shared item it uses (an enemy, entity, status or preset file) never
+            // stops the layout from opening; it's warned about by file and fixed in its own editor.
+            if (resolvingEdit && checkedPack != pack)
+            {
+                foreach (var i in errors.Where(i => i.File != null && !i.File.StartsWith("levels/")))
+                    Log.For<BuilderManager>().Warn($"Editing {request.LevelId}: {i.File} has a problem ({i.Path}: {i.Message}); it may not work until fixed");
+                errors = errors.Where(i => i.File == null || i.File.StartsWith("levels/")).ToList();
+            }
+            if (errors.Count > 0) { error = $"{(checkedPack == pack ? pack.Name ?? pack.Id : request.LevelId)} has {errors.Count} error(s): {string.Join("; ", errors.Take(3).Select(e => (e.File != null ? e.File + " " : "") + e.Path + ": " + e.Message))}"; return false; }
 
             if (request.LevelId != null)
             {
