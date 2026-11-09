@@ -113,6 +113,7 @@ namespace PalaceMod.Builder.Logic
                     var victim = Of(__instance, __result ? "death" : "damaged");
                     Component from = _damageComingFrom != null ? _damageComingFrom : currentAttacker;
                     var source = from == null ? null : __result ? Of(from, "kill") ?? Of(from, "hit") : Of(from, "hit");
+                    if (source == null && _damageComingFrom == null) source = LogicServices.CurrentDamageSource?.Invoke();
                     if (victim == null && source == null) return;
                     // Credit a Builder projectile's hit to its owner as well (doc: hit/kill go to a projectile's owner).
                     var credited = source?.Kind == "projectile" && source.Owner != null ? source.Owner : source;
@@ -259,7 +260,18 @@ namespace PalaceMod.Builder.Logic
         [HarmonyPatch(typeof(Spawn), nameof(Spawn.Update))]
         private static class SpawnUpdate_Patch
         {
-            private static void Prefix(Spawn __instance) => currentSpawn = World != null ? __instance : null;
+            // A disabled spawn line (an attached `line:` entity switched off by `disable`) pauses its groups: their
+            // spawn timers don't run, so the night's schedule (and nightProgress) waits for it.
+            private static bool Prefix(Spawn __instance)
+            {
+                currentSpawn = null;
+                if (World == null) return true;
+                var line = __instance.spawnLine;
+                if (line != null && line.GetComponentInParent<BuilderEntity>() is { Entity: { Enabled: false } }) return false;
+                currentSpawn = __instance;
+                return true;
+            }
+
             private static void Postfix() => currentSpawn = null;
         }
 
