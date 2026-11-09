@@ -98,7 +98,7 @@ namespace PalaceMod.Builder.Logic
             if (arenaWorld)
             {
                 // The Enemy Studio's fight: a throwaway world while it runs (LogicManager.Arena.cs).
-                if (World != null && (!Studio.Enemies.EnemyArena.Running || SceneManager.GetActiveScene() != startedScene)) EndWorld("arena fight over");
+                if (World != null && (!(arenaAlive?.Invoke() ?? Studio.Enemies.EnemyArena.Running) || SceneManager.GetActiveScene() != startedScene)) EndWorld("arena fight over");
                 if (World != null) return;
             }
             bool run = ShouldRun(out var session);
@@ -222,6 +222,7 @@ namespace PalaceMod.Builder.Logic
             LogicServices.Spatial = null;
             LogicServices.Game = game;
             arenaWorld = false;
+            arenaAlive = null;
             Log.Debug($"Behaviour stopped ({why}): {w.FiringsTotal} firings, {w.ActionsTotal} action steps");
         }
 

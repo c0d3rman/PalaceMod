@@ -28,6 +28,7 @@ namespace PalaceMod
             LogicWorld.Started += _ => SessionChanged();
             LogicWorld.Ending += _ => SessionChanged();
             BodyActions.Register();
+            LogicSaveState.Register("bodies", BodySave.Capture, BodySave.Restore);
             DevCommands.Register("logic-l2", "logic-l2 status | nav ... | act <action> [json] [self=<role>] [other=<role>] | build <template> <x> <z> [rotY] | signal <entity> <input> [value]   bodies (L2): spikes, actions with literal params, entities", args =>
             {
                 string sub = args.FirstOrDefault() ?? "";
@@ -62,6 +63,8 @@ namespace PalaceMod
                 SessionChanged();
             }
             if (w == null) return;
+            // Cuts (solid bodies, decks, surfaces) only reach the graphs while the updater runs on an interval.
+            BodyNav.UseMoverRate();
             Walkables.Tick();
             Surfaces.Tick();
             // 10 Hz steps of game time: the core's (LogicWorld.Polled), or our own for a dev world it doesn't drive.

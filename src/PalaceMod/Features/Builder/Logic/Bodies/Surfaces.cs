@@ -111,6 +111,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             if (!dirty || AstarPath.active == null) return;
             dirty = false;
             var astar = AstarPath.active;
+            foreach (var s in surfaces) if (s.Cut != null) s.Cut.ForceUpdate();
             astar.navmeshUpdates.ForceUpdate();
             astar.FlushWorkItems();
             foreach (var s in surfaces) Tag(s);

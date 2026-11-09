@@ -3438,6 +3438,35 @@ class Canvas:
                         self.rect(x + (k * 6 + col) * scale, y + row * scale, x + (k * 6 + col + 1) * scale, y + (row + 1) * scale, c)
         return w
 
+    def poly(self, pts, c, a=1.0):
+        """Fills a polygon (even-odd scanlines through pixel centres)."""
+        if len(pts) < 3:
+            return
+        ya, yb = max(0, int(min(p[1] for p in pts))), min(self.h - 1, int(max(p[1] for p in pts)) + 1)
+        for y in range(ya, yb + 1):
+            yc = y + 0.5
+            xs = []
+            for i in range(len(pts)):
+                (x0, y0), (x1, y1) = pts[i], pts[(i + 1) % len(pts)]
+                if (y0 <= yc) != (y1 <= yc):
+                    xs.append(x0 + (yc - y0) * (x1 - x0) / (y1 - y0))
+            xs.sort()
+            for k in range(0, len(xs) - 1, 2):
+                xa, xb = max(0, int(math.ceil(xs[k] - 0.5))), min(self.w - 1, int(math.floor(xs[k + 1] - 0.5)))
+                if xb < xa:
+                    continue
+                if a >= 1:
+                    i = (y * self.w + xa) * 3
+                    self.px[i:i + (xb - xa + 1) * 3] = bytes(c) * (xb - xa + 1)
+                else:
+                    for x in range(xa, xb + 1):
+                        self.put(x, y, c, a)
+
+    def outline(self, pts, c, t=2, a=1.0, dash=0):
+        for i in range(len(pts)):
+            (x0, y0), (x1, y1) = pts[i], pts[(i + 1) % len(pts)]
+            self.line(x0, y0, x1, y1, c, t, a, dash)
+
     def save(self, path):
         raw = bytearray()
         stride = self.w * 3
@@ -3525,12 +3554,145 @@ def kind_color(kind, castle=False):
 ROUTE_COLORS = [(255, 140, 30), (60, 220, 255), (255, 90, 220), (160, 255, 60), (255, 240, 80), (140, 150, 255), (255, 255, 255),
                 (60, 255, 170), (255, 170, 170), (200, 120, 60)]
 
+# Placed logic objects (levels[].logic.places).
+PLACE_AREA = (235, 120, 60)
+PLACE_PATH = (90, 235, 235)
+PLACE_BODY = (205, 165, 110)
+PLACE_MARK = (120, 220, 255)
+
+
+def _num(v, default=0.0):
+    """A literal number field; an "=expr" or a preset's leftover "{param}" counts as the default."""
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else default
+
+
+def _hex_color(s):
+    if isinstance(s, str) and re.fullmatch(r"#?[0-9a-fA-F]{6}([0-9a-fA-F]{2})?", s):
+        s = s.lstrip("#")
+        return tuple(int(s[i:i + 2], 16) for i in (0, 2, 4))
+    return None
+
+
+def _merge_under(base, over):
+    """over's fields win; nested objects merge (the place's inline component fields over its template's)."""
+    out = copy.deepcopy(base)
+    for k, v in over.items():
+        out[k] = _merge_under(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else copy.deepcopy(v)
+    return out
+
+
+def _turn(points, cx, cz, rot, scale=1.0):
+    """Local [x, z] points turned by rotY (degrees, clockwise seen from above, as in Unity) about (cx, cz)."""
+    c, s = math.cos(math.radians(rot)), math.sin(math.radians(rot))
+    return [(cx + (x * c + z * s) * scale, cz + (-x * s + z * c) * scale) for x, z in points]
+
+
+def _shape(spec, cx, cz, rot, scale):
+    """A circle {radius}, rect {size: [w, d]} / box [w, d], or polygon {points} -> ("circle", (cx, cz, r)) |
+    ("poly", [(x, z)...]) in world metres; None if it has none."""
+    if not isinstance(spec, dict):
+        return None
+    if isinstance(spec.get("circle"), dict) or "radius" in spec:
+        r = _num((spec.get("circle") or {}).get("radius", spec.get("radius")), 1.0)
+        return ("circle", (cx, cz, r * scale))
+    size = (spec.get("rect") or {}).get("size") if isinstance(spec.get("rect"), dict) else spec.get("box")
+    if isinstance(size, list) and len(size) >= 2:
+        w, d = _num(size[0], 1.0) / 2, _num(size[-1], 1.0) / 2
+        return ("poly", _turn([(-w, -d), (w, -d), (w, d), (-w, d)], cx, cz, rot, scale))
+    pts = (spec.get("polygon") or {}).get("points") if isinstance(spec.get("polygon"), dict) else None
+    if isinstance(pts, list) and len(pts) >= 3:
+        return ("poly", _turn([(_num(p[0]), _num(p[-1])) for p in pts if isinstance(p, list) and len(p) >= 2], cx, cz, rot, scale))
+    return None
+
+
+def logic_places(data, level):
+    """The level's logic.places resolved for drawing: templates (entities[]) under the place's own fields, presets
+    expanded (palace_logic; raw when that fails). Each: id, label, kind, at (x, z), active, plus what it has of
+    area (shape, color, show), body (shape), path [(x, z)...], poses [shape...] (the other mover poses), sweep (a
+    spinning mover's reach)."""
+    places = (level.get("logic") or {}).get("places") or []
+    if not places:
+        return []
+    try:
+        probe = {k: data.get(k) for k in ("format", "version", "id", "entities", "presets", "units") if data.get(k) is not None}
+        probe["levels"] = [{"id": level.get("id"), "host": level.get("host"), "logic": {"places": places}}]
+        places = logic_module().expand_presets(probe, [])["levels"][0]["logic"]["places"] or places
+    except Exception:   # a picture: draw what's there
+        pass
+    templates = {e.get("id"): e for e in data.get("entities") or [] if isinstance(e, dict)}
+    units = {u.get("id") for u in data.get("units") or [] if isinstance(u, dict)}
+    named = {}
+    for p in places:
+        if isinstance(p, dict):
+            for k in ("id", "name"):
+                if isinstance(p.get(k), str):
+                    named.setdefault(p[k], p)
+
+    def path_points(v, depth=0):
+        if isinstance(v, str) and v.startswith("@") and depth < 4:
+            q = named.get(v[1:])
+            return path_points(q.get("points") if q else None, depth + 1)
+        if isinstance(v, list):
+            return [(_num(p[0]), _num(p[-1])) for p in v if isinstance(p, list) and len(p) >= 2]
+        return []
+
+    result = []
+    for p in places:
+        if not isinstance(p, dict):
+            continue
+        t = p.get("entity")
+        q = _merge_under(templates[t], {k: v for k, v in p.items() if k != "entity"}) if isinstance(t, str) and t in templates else p
+        kind = q.get("kind") or ("unit" if t in units or (isinstance(t, str) and t.startswith("vanilla:")) else
+                                 "path" if "points" in q and "pos" not in q else "area" if "area" in q else "entity" if t else "logic")
+        pos = q.get("pos") if isinstance(q.get("pos"), list) and len(q["pos"]) >= 2 else [0, 0, 0]
+        cx, cz = _num(pos[0]), _num(pos[-1])
+        rot, scale = _num(q.get("rotY")), _num(q.get("scale"), 1.0) or 1.0
+        r = {"id": p.get("id"), "label": p.get("name") or p.get("id") or t or q.get("_preset") or kind, "kind": kind,
+             "at": (cx, cz), "active": q.get("active") is not False, "template": t}
+        area = q.get("area") if isinstance(q.get("area"), dict) else {}
+        shape = _shape(area.get("shape") or (q.get("shape") if kind == "area" else None), cx, cz, rot, scale)
+        if shape:
+            r["area"] = {"shape": shape, "color": _hex_color(area.get("color")) or PLACE_AREA, "show": area.get("show") or "outline"}
+        if kind == "path":
+            r["path"] = path_points(q.get("points"))
+            if r["path"]:
+                r["at"] = r["path"][0]
+        mover = q.get("mover") if isinstance(q.get("mover"), dict) else {}
+        movement = q.get("movement") if isinstance(q.get("movement"), dict) else {}
+        if kind != "path":
+            mp = path_points(mover.get("path") if mover.get("path") is not None else movement.get("path"))
+            if mp:
+                r["path"] = mp
+        body = q.get("body") if isinstance(q.get("body"), dict) else {}
+        bshape = _shape(body, cx, cz, rot, scale)
+        if bshape:
+            r["body"] = bshape
+            poses = []
+            for pose in (mover.get("pose") or {}).values() if isinstance(mover.get("pose"), dict) else []:
+                if not isinstance(pose, dict):
+                    continue
+                # As BuilderMover: rotY is absolute, pos absolute, offset from where it was placed.
+                at = pose.get("pos") if isinstance(pose.get("pos"), list) and len(pose["pos"]) >= 3 else None
+                off = pose.get("offset") if isinstance(pose.get("offset"), list) and len(pose["offset"]) >= 3 else [0, 0, 0]
+                px, pz = (_num(at[0]), _num(at[2])) if at else (cx + _num(off[0]), cz + _num(off[2]))
+                ps = _shape(body, px, pz, _num(pose.get("rotY"), rot), scale)
+                if ps and ps != bshape:
+                    poses.append(ps)
+            r["poses"] = poses
+            if _num(mover.get("spin")) or isinstance(mover.get("swing"), dict):
+                pts = bshape[1] if bshape[0] == "poly" else None
+                r["sweep"] = max(math.hypot(x - cx, z - cz) for x, z in pts) if pts else bshape[1][2]
+        result.append(r)
+    return result
+
 
 def render(ref, data, level, path, background=None, world=None, routes=None, labels="names", px=1400, route_source="offline"):
     m = ref.map(level["host"])
     slots, castle, _ = effective_slots(ref, level)
     lines = level_lines(ref, level)
+    places = logic_places(data or {}, level)
     pts = [(s.pos[0], s.pos[2]) for s in slots.values()] + [(l["center"][0], l["center"][2]) for l in lines]
+    pts += [q["at"] for q in places] + [pt for q in places for pt in q.get("path") or []]
     if world:
         x0, x1, z0, z1 = world["minX"], world["maxX"], world["minZ"], world["maxZ"]
     else:
@@ -3617,6 +3779,72 @@ def render(ref, data, level, path, background=None, world=None, routes=None, lab
         cx, cy = P(l["center"][0], l["center"][2])
         tag = "" if l["ground"] and l["large"] and l["flying"] else " (" + "".join(c for c, f in (("G", l["ground"]), ("L", l["large"]), ("F", l["flying"])) if f) + ")"
         cv.text(cx + 8, cy - 8, l["name"] + tag, (255, 200, 200), 2)
+    # Placed logic objects: areas, paths, bodies (with a mover's path, other poses and sweep), markers. Labelled after
+    # the slots, which keep their places.
+    def shape_px(shape):
+        if shape[0] == "circle":
+            x, y = P(shape[1][0], shape[1][1])
+            return "circle", (x, y, max(2.0, shape[1][2] * sx))
+        return "poly", [P(a, b) for a, b in shape[1]]
+
+    def draw_shape(shape, col, fill=None, t=2, dash=0, a=1.0):
+        k, g = shape_px(shape)
+        if k == "circle":
+            if fill:
+                cv.disc(g[0], g[1], g[2], col, fill)
+            if dash:
+                n = max(12, int(g[2] * 2 * math.pi / (dash * 2)))
+                for i in range(0, n, 2):
+                    a0, a1 = 2 * math.pi * i / n, 2 * math.pi * (i + 1) / n
+                    cv.line(g[0] + g[2] * math.cos(a0), g[1] + g[2] * math.sin(a0), g[0] + g[2] * math.cos(a1), g[1] + g[2] * math.sin(a1), col, t, a)
+            else:
+                cv.ring(g[0], g[1], g[2], col, t)
+        else:
+            if fill:
+                cv.poly(g, col, fill)
+            cv.outline(g, col, t, a, dash)
+
+    place_labels = []
+    for q in places:
+        dim = 1.0 if q["active"] else 0.5
+        ax, ay = P(*q["at"])
+        rad = 6
+        if q.get("area"):
+            ar = q["area"]
+            draw_shape(ar["shape"], ar["color"], fill=(0.4 if ar["show"] == "fill" else 0.15) * dim, t=2, dash=0 if ar["show"] != "none" else 6)
+            k, g = shape_px(ar["shape"])
+            rad = g[2] if k == "circle" else max(math.hypot(x - ax, y - ay) for x, y in g)
+        ppts = [P(a, b) for a, b in q.get("path") or []]
+        for i in range(len(ppts) - 1):
+            (x0_, y0_), (x1_, y1_) = ppts[i], ppts[i + 1]
+            cv.line(x0_, y0_, x1_, y1_, PLACE_PATH, 3, a=0.9 * dim)
+            d = math.hypot(x1_ - x0_, y1_ - y0_)
+            if d > 14:
+                # Direction ticks: a chevron every ~40 px pointing along the path.
+                ux, uy = (x1_ - x0_) / d, (y1_ - y0_) / d
+                for k_ in range(max(1, int(d // 40))):
+                    f = (k_ + 0.5) * d / max(1, int(d // 40))
+                    mx, my = x0_ + ux * f + ux * 4, y0_ + uy * f + uy * 4
+                    for sgn in (-1, 1):
+                        cv.line(mx, my, mx - ux * 8 + sgn * uy * 6, my - uy * 8 - sgn * ux * 6, PLACE_PATH, 2)
+        for x_, y_ in ppts:
+            cv.disc(x_, y_, 3, PLACE_PATH)
+        if q.get("body"):
+            for ps in q.get("poses") or []:
+                draw_shape(ps, PLACE_BODY, t=2, dash=4)
+            if q.get("sweep"):
+                draw_shape(("circle", (q["at"][0], q["at"][1], q["sweep"])), PLACE_BODY, t=2, dash=4)
+            draw_shape(q["body"], (40, 30, 20), fill=0.85 * dim, t=2)
+            draw_shape(q["body"], PLACE_BODY, fill=0.85 * dim, t=1)
+            k, g = shape_px(q["body"])
+            rad = max(rad if q.get("area") else 0, g[2] if k == "circle" else max(math.hypot(x - ax, y - ay) for x, y in g))
+        elif q["kind"] != "path" and not q.get("area"):
+            # A point, logic object, unit or unresolved template: a small diamond.
+            dia = [(ax, ay - 6), (ax + 6, ay), (ax, ay + 6), (ax - 6, ay)]
+            cv.poly(dia, (0, 0, 0))
+            cv.poly([(ax, ay - 4), (ax + 4, ay), (ax, ay + 4), (ax - 4, ay)], PLACE_MARK if q["kind"] != "point" else (255, 255, 255), dim)
+        lab = PLACE_PATH if q["kind"] == "path" else (q["area"]["color"] if q.get("area") and not q.get("body") else PLACE_MARK)
+        place_labels.append((ax, ay, min(rad, 40) if q["kind"] != "path" else 4, str(q["label"]) + ("" if q["active"] else " (off)"), lab))
     # Requirement arrows.
     for s in slots.values():
         if s.req and s.req[0] in slots and not s.follows:
@@ -3627,10 +3855,31 @@ def render(ref, data, level, path, background=None, world=None, routes=None, lab
             col = (240, 196, 60) if a.castle else (80, 200, 180)
             cv.arrow(ax + (bx - ax) * 9 / d, ay + (by - ay) * 9 / d, bx - (bx - ax) * 10 / d, by - (by - ay) * 10 / d, col, 2)
     # Slots (labels avoid each other where they can, and the legend).
-    taken = [(W - 175, 0, W, 190), (0, 0, 520, 30)]
+    legend = [("castle", KIND_COLORS[0][1]), ("economy", KIND_COLORS[1][1]), ("military", KIND_COLORS[2][1]), ("walls", KIND_COLORS[3][1]),
+              ("special", (170, 120, 230)), ("spawn line", (200, 40, 60)), ("needs castle", (240, 196, 60)),
+              ("needs slot", (80, 200, 180))]
+    if places:
+        legend += [(n, c) for n, c, on in (("logic area", PLACE_AREA, any(q.get("area") for q in places)),
+                                           ("logic path", PLACE_PATH, any(q.get("path") for q in places)),
+                                           ("logic body", PLACE_BODY, any(q.get("body") for q in places)),
+                                           ("logic object", PLACE_MARK, any(q["kind"] != "path" and not q.get("body") and not q.get("area") for q in places)))
+                   if on]
+    taken = [(W - 175, 0, W, 10 + 20 * len(legend)), (0, 0, 520, 30)]
     for q in slots.values():
         qx, qy = P(q.pos[0], q.pos[2])
         taken.append((qx - 7, qy - 7, qx + 7, qy + 7))
+
+    def label_at(x, y, r, text, col, sc):
+        # Beside the thing, in the first spot clear of other labels, slots and the legend.
+        tw, th = len(text) * 6 * sc, 7 * sc
+        for lx, ly in ((x + r + 3, y - th / 2), (x + r + 3, y + r), (x + r + 3, y - r - th), (x - r - 3 - tw, y - th / 2), (x - tw / 2, y + r + 2),
+                       (x - tw / 2, y - r - th - 4)):
+            box = (lx - 2, ly - 2, lx + tw + 2, ly + th + 2)
+            if not any(box[0] < b[2] and b[0] < box[2] and box[1] < b[3] and b[1] < box[3] for b in taken):
+                break
+        taken.append(box)
+        cv.text(lx, ly, text, col, sc)
+
     for s in sorted(slots.values(), key=lambda q: q.castle):
         x, y = P(s.pos[0], s.pos[2])
         col = kind_color(s.kind, s.castle)
@@ -3645,20 +3894,13 @@ def render(ref, data, level, path, background=None, world=None, routes=None, lab
         text = s.label if labels != "costs" else f"{s.label} " + "/".join(str(u["cost"]) for u in s.upgrades if not u.get("disabled"))
         if labels == "reqs" and s.req:
             text = f"{s.label} <- {slots[s.req[0]].label if s.req[0] in slots else s.req[0]}" + (f" L{s.req[1] + 1}" if s.req[1] else "")
-        sc = 1 if len(slots) > 60 else 2
-        tw, th = len(text) * 6 * sc, 7 * sc
-        for lx, ly in ((x + r + 3, y - th / 2), (x + r + 3, y + r), (x + r + 3, y - r - th), (x - r - 3 - tw, y - th / 2), (x - tw / 2, y + r + 2),
-                       (x - tw / 2, y - r - th - 4)):
-            box = (lx - 2, ly - 2, lx + tw + 2, ly + th + 2)
-            if not any(box[0] < b[2] and b[0] < box[2] and box[1] < b[3] and b[1] < box[3] for b in taken):
-                break
-        taken.append(box)
-        cv.text(lx, ly, text, (255, 255, 255), sc)
+        label_at(x, y, r, text, (255, 255, 255), 1 if len(slots) > 60 else 2)
+    if labels != "none":
+        for x, y, r, text, col in place_labels:
+            label_at(x, y, r, text, col, 1 if len(slots) + len(places) > 60 else 2)
     # Legend.
     yy = 8
-    for name, col in (("castle", KIND_COLORS[0][1]), ("economy", KIND_COLORS[1][1]), ("military", KIND_COLORS[2][1]), ("walls", KIND_COLORS[3][1]),
-                      ("special", (170, 120, 230)), ("spawn line", (200, 40, 60)), ("needs castle", (240, 196, 60)),
-                      ("needs slot", (80, 200, 180))):
+    for name, col in legend:
         cv.rect(W - 170, yy, W - 156, yy + 14, col)
         cv.text(W - 150, yy, name, (255, 255, 255), 2, bga=0.5)
         yy += 20

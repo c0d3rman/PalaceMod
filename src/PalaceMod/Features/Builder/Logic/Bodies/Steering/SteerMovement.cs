@@ -139,7 +139,22 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             // 4. path
             if (m.Mode == "path" && !st.PathDone)
             {
-                st.PathPoints ??= SteerPaths.Points(m.Path, st.Entity);
+                if (st.PathPoints == null)
+                {
+                    // Points the unit can stand on: a point inside a building, a cut or water would never be reached.
+                    st.PathPoints = SteerPaths.Points(m.Path, st.Entity);
+                    var seeker = st.Go != null ? st.Go.GetComponent<Pathfinding.Seeker>() : null;
+                    if (seeker != null && AstarPath.active != null)
+                    {
+                        var nn = Pathfinding.NearestNodeConstraint.Walkable;
+                        nn.graphMask = seeker.graphMask;
+                        for (int i = 0; i < st.PathPoints.Count; i++)
+                        {
+                            var hit = AstarPath.active.GetNearest(st.PathPoints[i], nn);
+                            if (hit.node != null) st.PathPoints[i] = hit.position;
+                        }
+                    }
+                }
                 if (st.PathPoints.Count == 0) { SteerLog.Once($"path {st.Entity?.Id}", $"{st.Entity?.Id}: movement path {m.Path} has no points"); st.PathDone = true; }
                 else
                 {

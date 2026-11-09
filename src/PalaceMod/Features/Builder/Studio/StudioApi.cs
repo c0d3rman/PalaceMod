@@ -170,6 +170,11 @@ namespace PalaceMod.Builder.Studio
         /// <summary>Places one at a snapped pose and returns the new item's key (null if it couldn't). It should make
         /// one Studio.Edit.</summary>
         public Func<Vector3, float, string> Place;
+        /// <summary>Optional: a shape drawn with several clicks or a drag (areas, paths) instead of one click. Called
+        /// every frame while armed with the pointer; returns the new item's key once one is made, else null.</summary>
+        public Func<StudioPointer, string> Draw;
+        /// <summary>Esc / right-click while drawing: drops the shape in progress and returns true (else the tool disarms).</summary>
+        public Func<bool> CancelDraw;
     }
 
     /// <summary>A label's parts. Providers fill what they know (null = no opinion); the shell merges them in
@@ -233,6 +238,8 @@ namespace PalaceMod.Builder.Studio
         public static IStudioColors Colors;
         /// <summary>The Enemy Studio (R2-C2 installs it). Null: callers fall back to the pack editor's unit page.</summary>
         public static IStudioEnemyEditor Enemies;
+        /// <summary>The Entity Studio (non-unit templates: projectiles, props, pickups, areas, logic objects).</summary>
+        public static IStudioEntityEditor Entities;
     }
 
     internal interface IStudioColors
@@ -256,6 +263,17 @@ namespace PalaceMod.Builder.Studio
         /// <param name="unitId">The unit to edit, or null to start a new enemy (the editor adds it to the draft).</param>
         /// <param name="returnToLevelStudio">Opened from a running Level Studio: come back to it exactly as it was.</param>
         bool Open(PackDraft draft, string unitId, bool returnToLevelStudio, Action<string> onReturn, out string error);
+    }
+
+    internal interface IStudioEntityEditor
+    {
+        /// <summary>Opens a thing (a pack `entities[]` template) of a draft: in place over a running Level Studio (Back
+        /// restores it), else on its own arena.</summary>
+        /// <param name="templateId">The thing to edit, or null for a new one.</param>
+        /// <param name="newKind">For a new thing: "projectile" | "prop" | "pickup" | "area" | "logic"; null shows the kind
+        /// picker.</param>
+        /// <param name="onReturn">Gets the thing's id (or null) on Back.</param>
+        bool Open(PackDraft draft, string templateId, string newKind, Action<string> onReturn, out string error);
     }
 
     /// <summary>The editor state F5 keeps: W1 captures and restores it, W2 stores it across the swap.</summary>
@@ -492,6 +510,22 @@ namespace PalaceMod.Builder.Studio
 
         internal static IStudioItemSource SourceFor(string key) =>
             key == null ? null : itemSources.FirstOrDefault(s => key.StartsWith(s.Prefix, StringComparison.Ordinal));
+
+        private static readonly List<Func<StudioPointer, bool>> pointerHandlers = [];
+
+        /// <summary>World handles on the selection (path points, area corners): asked by the Select tool before it acts on
+        /// a press; a handler that takes the pointer returns true until its drag ends.</summary>
+        public static void AddPointerHandler(Func<StudioPointer, bool> handler) => pointerHandlers.Add(handler);
+
+        internal static bool RunPointerHandlers(StudioPointer p)
+        {
+            foreach (var h in pointerHandlers)
+            {
+                try { if (h(p)) return true; }
+                catch (Exception e) { Log.For<BuilderManager>().Caught("Studio pointer handler failed", e); }
+            }
+            return false;
+        }
 
         /// <summary>Esc and right-click cancel (edit mode, and the Enemy Studio's Back): a handler that closes one layer of
         /// its own UI returns true and the key goes no further. Asked before the active tool.</summary>
