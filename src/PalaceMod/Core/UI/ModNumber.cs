@@ -111,7 +111,7 @@ namespace PalaceMod
                 }
                 field?.Refresh();
             }
-            void Move(int steps) => Apply((float)NumberMath.Step(Read(), step, steps, min, max, integer));
+            void Move(int steps) => Apply((float)NumberMath.Step(NumberMath.Decimal(Read()), NumberMath.Decimal(step), steps, NumberMath.Decimal(min), NumberMath.Decimal(max), integer));
             // Left/right and the arrows: accelerate while held, x10 with Shift.
             void Step(int sign)
             {

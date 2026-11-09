@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -101,7 +102,7 @@ namespace PalaceMod
 
         public override void Update()
         {
-            if (!On || Headless) return;
+            if (!On || Headless || shooting) return;
             // Draw a frame now and then so the window isn't frozen; the decision applies from the next frame.
             long now = wall.ElapsedMilliseconds;
             if (now - lastRender >= PreviewIntervalMs)
@@ -116,8 +117,14 @@ namespace PalaceMod
         /// mode, where the current frame usually isn't drawn.</summary>
         public static bool ShotFromCamera => Headless || On;
 
-        /// <summary>Writes a screenshot to <paramref name="path"/>: the screen (with UI) normally, the main camera
-        /// rendered into a texture (no UI overlay) headless or in fast mode. Returns how it was taken.</summary>
+        // Frames drawn before a camera shot. On frames that aren't drawn the game's units (skinned, animated meshes)
+        // aren't prepared for rendering, so a camera render on its own shows the level without them.
+        private const int ShotDrawFrames = 3;
+        private static bool shooting;
+
+        /// <summary>Writes a screenshot to <paramref name="path"/>: the screen (with UI) normally; headless or in fast
+        /// mode, the main camera rendered into a texture (no UI overlay) after a few drawn frames, so the file appears
+        /// a moment later (callers wait for it). Returns how it's taken.</summary>
         public static string Screenshot(string path)
         {
             if (!ShotFromCamera)
@@ -125,8 +132,37 @@ namespace PalaceMod
                 ScreenCapture.CaptureScreenshot(path);
                 return "screen";
             }
+            if (Camera.main == null) throw new InvalidOperationException("no main camera to take a screenshot with");
+            Plugin.Instance.StartCoroutine(CameraShot(path));
+            return "camera";
+        }
+
+        private static IEnumerator CameraShot(string path)
+        {
+            shooting = true;
+            OnDemandRendering.renderFrameInterval = 1;
+            for (int i = 0; i < ShotDrawFrames; i++) yield return null;
+            yield return new WaitForEndOfFrame();
+            try
+            {
+                WriteCameraShot(path);
+            }
+            catch (Exception e)
+            {
+                Log.For<FastSimManager>().Warn($"Screenshot failed: {e.Message}");
+            }
+            finally
+            {
+                shooting = false;
+                if (Headless) OnDemandRendering.renderFrameInterval = SkipInterval;
+                else if (!On) OnDemandRendering.renderFrameInterval = 1;
+            }
+        }
+
+        private static void WriteCameraShot(string path)
+        {
             var cam = Camera.main;
-            if (cam == null) throw new InvalidOperationException("no main camera to take a screenshot with");
+            if (cam == null) throw new InvalidOperationException("no main camera");
             int width = Headless ? 1280 : Mathf.Max(320, Screen.width);
             int height = Headless ? 720 : Mathf.Max(180, Screen.height);
             var target = RenderTexture.GetTemporary(width, height, 24, RenderTextureFormat.ARGB32);
@@ -153,7 +189,6 @@ namespace PalaceMod
                 RenderTexture.ReleaseTemporary(target);
                 if (texture != null) UnityEngine.Object.Destroy(texture);
             }
-            return "camera";
         }
     }
 }

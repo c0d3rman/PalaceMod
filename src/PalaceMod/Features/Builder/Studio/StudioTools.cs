@@ -285,31 +285,59 @@ namespace PalaceMod.Builder.Studio
 
     internal sealed class RotateTool : BuiltinTool
     {
-        public RotateTool() : base("rotate", "Rotate", "Drag sideways to turn · , . step · Alt free", "rotate", () => StudioKeys.ToolRotate, 40) { }
+        public RotateTool() : base("rotate", "Rotate", "Drag sideways to turn · X tilt / Z roll scenery · , . step · Alt free", "rotate", () => StudioKeys.ToolRotate, 40) { }
 
-        private Dictionary<string, (Vector3 pos, float yaw)> start;
+        private Dictionary<string, (Vector3 pos, float yaw, float tiltX, float tiltZ)> start;
         private Vector3 center;
         private float angle;
+        /// <summary>0 turn (about the up axis), 1 tilt (props' own x), 2 roll (props' own z). X and Z toggle it.</summary>
+        public int Axis { get; set; }
+
+        public string AxisLabel => Axis == 1 ? "Tilt" : Axis == 2 ? "Roll" : null;
 
         public override bool Cancel()
         {
-            if (start == null) return false;
+            if (start == null)
+            {
+                if (Axis == 0) return false;
+                Axis = 0;   // Esc first leaves tilt/roll, then (with nothing to cancel) the tool
+                return true;
+            }
             start = null;
             StudioScene.Reconcile(Studio.Level);
             return true;
         }
 
-        public override void Deactivate() => Cancel();
+        public override void Deactivate()
+        {
+            Cancel();
+            Axis = 0;
+        }
+
+        /// <summary>The , and . keys while tilting or rolling: steps the selected props' tilt.</summary>
+        public void Step(float degrees)
+        {
+            var props = StudioSelection.Items.Where(i => StudioEdits.Movable(i) && i.Kind == StudioItemKind.Prop).ToList();
+            if (props.Count == 0) { Notify.Show("Only scenery tilts", NotifyKind.Info, 2f, "builder-studio"); return; }
+            StudioEdits.SetTilts(props.Select(i => (i, i.TiltX + (Axis == 1 ? degrees : 0f), i.TiltZ + (Axis == 2 ? degrees : 0f))).ToList(),
+                $"{AxisLabel} {StudioEdits.Count(props.Count, props[0].Name)}", (Axis == 1 ? "tiltx:" : "tiltz:") + string.Join(",", props.Select(i => i.Key)));
+        }
 
         public override void Update(StudioPointer p)
         {
+            if (start == null)
+            {
+                if (Input.GetKeyDown(KeyCode.X)) Axis = Axis == 1 ? 0 : 1;
+                if (Input.GetKeyDown(KeyCode.Z) && !p.Ctrl) Axis = Axis == 2 ? 0 : 2;
+            }
             if (p.LeftDown && !p.OverUI)
             {
                 if (p.HoverKey != null && !StudioSelection.Contains(p.HoverKey)) StudioSelection.ClickSelect(p.HoverKey, p);
-                var items = StudioSelection.Items.Where(StudioEdits.Movable).ToList();
+                var items = StudioSelection.Items.Where(StudioEdits.Movable).Where(i => Axis == 0 || i.Kind == StudioItemKind.Prop).ToList();
+                if (Axis != 0 && items.Count == 0 && StudioSelection.Count > 0) Notify.Show("Only scenery tilts", NotifyKind.Info, 2f, "builder-studio");
                 if (items.Count > 0)
                 {
-                    start = items.ToDictionary(i => i.Key, i => (i.Pos, i.Yaw));
+                    start = items.ToDictionary(i => i.Key, i => (i.Pos, i.Yaw, i.TiltX, i.TiltZ));
                     center = items.Aggregate(Vector3.zero, (a, i) => a + i.Pos) / items.Count;
                     angle = 0f;
                 }
@@ -318,20 +346,27 @@ namespace PalaceMod.Builder.Studio
             float raw = (p.Screen.x - p.DownScreen.x) * 0.5f;
             angle = p.Alt ? raw : Mathf.Round(raw / StudioShell.TurnStep) * StudioShell.TurnStep;
             var rot = Quaternion.Euler(0f, angle, 0f);
+            int count = start.Count;
+            Vector3 c = center;
+            Vector3 PosOf(Vector3 pos) => Axis != 0 || count == 1 ? pos : StudioScene.Ground(c + rot * (pos - c));
             foreach (var kv in start)
             {
                 if (StudioScene.Find(kv.Key) is not { } item) continue;
-                var pos = start.Count == 1 ? kv.Value.pos : center + rot * (kv.Value.pos - center);
-                StudioScene.Preview(item, StudioScene.Ground(pos), kv.Value.yaw + angle);
+                var s = kv.Value;
+                if (Axis == 0) StudioScene.Preview(item, PosOf(s.pos), s.yaw + angle);
+                else StudioScene.Preview(item, s.pos, s.yaw, s.tiltX + (Axis == 1 ? angle : 0f), s.tiltZ + (Axis == 2 ? angle : 0f));
             }
             if (p.LeftUp)
             {
-                var s = start;
+                var st = start;
                 start = null;
-                var items = s.Keys.Select(StudioScene.Find).Where(i => i != null).ToList();
-                if (Mathf.Abs(angle) > 0.01f && items.Count > 0)
-                    StudioEdits.SetPoses(items.Select(i => (i, StudioScene.Ground(s.Count == 1 ? s[i.Key].pos : center + rot * (s[i.Key].pos - center)), s[i.Key].yaw + angle)).ToList(), $"Turn {StudioEdits.Count(items.Count, items[0].Name)}");
-                else StudioScene.Reconcile(Studio.Level);
+                var items = st.Keys.Select(StudioScene.Find).Where(i => i != null).ToList();
+                if (Mathf.Abs(angle) <= 0.01f || items.Count == 0) StudioScene.Reconcile(Studio.Level);
+                else if (Axis == 0)
+                    StudioEdits.SetPoses(items.Select(i => (i, PosOf(st[i.Key].pos), st[i.Key].yaw + angle)).ToList(), $"Turn {StudioEdits.Count(items.Count, items[0].Name)}");
+                else
+                    StudioEdits.SetTilts(items.Select(i => (i, st[i.Key].tiltX + (Axis == 1 ? angle : 0f), st[i.Key].tiltZ + (Axis == 2 ? angle : 0f))).ToList(),
+                        $"{AxisLabel} {StudioEdits.Count(items.Count, items[0].Name)}");
             }
         }
     }

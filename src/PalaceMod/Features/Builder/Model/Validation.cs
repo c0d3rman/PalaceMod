@@ -101,6 +101,11 @@ namespace PalaceMod.Builder.Model
                 if (v != null)
                 {
                     if (v.Tint != null && !TryParseColor(v.Tint, out _)) Error(p + ".visuals.tint", "must be \"#rrggbb\"");
+                    foreach (var kv in v.Colors ?? [])
+                    {
+                        if (string.IsNullOrWhiteSpace(kv.Key)) Error(p + ".visuals.colors", "a part name can't be empty");
+                        else if (!TryParseColor(kv.Value, out _)) Error(p + $".visuals.colors.{kv.Key}", "must be \"#rrggbb\"");
+                    }
                     if (v.Scale is float s && (s < 0.1f || s > 10f)) Error(p + ".visuals.scale", "must be between 0.1 and 10");
                     CheckAsset(v.Icon, p + ".visuals.icon", ImageExtensions);
                     switch (ModelRef.Kind(v.Mesh, out string modelId))

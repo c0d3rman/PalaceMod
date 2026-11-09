@@ -121,7 +121,7 @@ namespace PalaceMod.Builder.Editor
         protected ModField Marked(ModPage page, string label, Func<string> value, string help, string path, Action onClick, Sprite icon = null)
         {
             var row = page.Row(label, "", Tip(help, path), onClick, icon);
-            var field = new ModField(row, label, value, arrows: false);
+            var field = new ModField(row, label, value, arrows: false, page.FieldIndent);
             field.Refresh();
             return Bind(field, path);
         }
