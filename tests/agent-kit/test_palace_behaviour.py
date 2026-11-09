@@ -134,5 +134,23 @@ class Reference(unittest.TestCase):
                          "agent-kit/logic-reference.md is stale: python3 agent-kit/palace.py logic doc --kit")
 
 
+class WaveEstimates(unittest.TestCase):
+    class Ref:
+        def unit(self, uid):
+            return {"id": uid, "name": uid, "maxHp": 10, "flying": False, "large": False, "tags": []}
+
+    def test_death_spawns_count_toward_the_night(self):
+        data = {"units": [{"id": "boss", "base": "vanilla:E Ogre", "stats": {"maxHp": 100},
+                           "rules": [{"when": "death", "do": [{"do": "spawn", "entity": "imp", "count": 2}, {"do": "gold", "amount": 5}]}]},
+                          {"id": "imp", "base": "vanilla:E Racer", "stats": {"maxHp": 20}},
+                          {"id": "slime", "base": "vanilla:E Slime", "stats": {"maxHp": 8},
+                           "rules": [{"when": "death", "if": "self.$gen < 2", "do": [{"do": "spawn", "entity": "=self.template", "count": 2}]}]}]}
+        ws = {"nights": [{"spawns": [{"unit": "boss", "count": 1}, {"unit": "slime", "count": 1}]}]}
+        row = palace.wave_summary(self.Ref(), data, ws)[0]
+        self.assertEqual(row["enemies"], 1 + 2 + 1 + 2 + 4)        # boss + 2 imps; slime + 2 + 4 (two generations)
+        self.assertEqual(row["effectiveHp"], 100 + 40 + 8 * 7)
+        self.assertEqual(row["gold"], 5)
+
+
 if __name__ == "__main__":
     unittest.main()

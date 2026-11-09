@@ -2799,8 +2799,57 @@ def unit_info(ref, data, uref):
     return uref, 0, False, False, False
 
 
+def _expanded_units(data):
+    """Units with preset uses expanded (palace_logic), or as they are when the module isn't there."""
+    try:
+        pl = logic_module()
+        return {u.get("id"): u for u in (pl.expand_presets(copy.deepcopy(data), []).get("units") or [])}
+    except Exception:   # an estimate: fall back to the raw rules
+        return {u.get("id"): u for u in data.get("units") or []}
+
+
+def death_extras(ref, data, uref, units=None, depth=0, gen=0):
+    """What one enemy adds when it dies, from its own `death` rules: (enemies spawned, their HP, gold given), followed
+    through the spawned units' rules. Conditions are ignored except `self.$gen < N` (presets like split-on-death), so
+    it's an upper estimate for chance-based rules."""
+    units = units if units is not None else _expanded_units(data)
+    uid = uref.split("/")[-1].replace("unit:", "")
+    u = units.get(uid)
+    if u is None or depth > 6:
+        return 0, 0.0, 0
+    count, hp, gold = 0, 0.0, 0
+    for r in u.get("rules") or []:
+        w = r.get("when")
+        if (w if isinstance(w, str) else (w or {}).get("on")) != "death" or (isinstance(w, dict) and w.get("of")):
+            continue
+        cond = r.get("if") if isinstance(r.get("if"), str) else ""
+        m = re.search(r"self\.\$(\w+)\s*<\s*(\d+)", cond)
+        if m and gen >= int(m.group(2)):
+            continue
+        for a in r.get("do") or []:
+            if a.get("do") == "gold" and isinstance(a.get("amount"), (int, float)):
+                gold += int(a["amount"])
+            if a.get("do") not in ("spawn", "spawnGroup"):
+                continue
+            ent = a.get("entity") or a.get("unit")
+            n = a.get("count", 1)
+            if not isinstance(ent, str) or not isinstance(n, (int, float)):
+                continue
+            if ent.startswith("="):
+                if ent.replace(" ", "") != "=self.template":
+                    continue
+                ent = uid
+            _, uhp, _, _, _ = unit_info(ref, data, ent if ent.startswith("vanilla:") else "unit:" + ent)
+            sub = death_extras(ref, data, ent, units, depth + 1, gen + 1) if not ent.startswith("vanilla:") else (0, 0.0, 0)
+            count += int(n) * (1 + sub[0])
+            hp += int(n) * (uhp + sub[1])
+            gold += int(n) * sub[2]
+    return count, hp, gold
+
+
 def wave_summary(ref, data, ws):
     rows = []
+    units = _expanded_units(data) if data else {}
     for i, n in enumerate(ws.get("nights", [])):
         diff = float(n.get("difficulty", 1))
         count = hp = gold = fly = large = boss = elite = 0
@@ -2811,8 +2860,10 @@ def wave_summary(ref, data, ws):
             name, uhp, f, l, b = unit_info(ref, data, s["unit"])
             c = int(s.get("count", 1))
             mult = diff * (4 if s.get("elite") else 1)
-            count += c
-            hp += c * uhp * mult
+            dc, dhp, dgold = death_extras(ref, data, s["unit"], units) if units else (0, 0.0, 0)
+            count += c * (1 + dc)
+            hp += c * (uhp + dhp) * mult
+            gold += c * dgold
             gold += int(s.get("gold", 0))
             fly += c if f else 0
             large += c if l else 0
