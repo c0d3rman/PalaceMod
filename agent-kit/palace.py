@@ -1880,12 +1880,13 @@ class Ops:
 
     def op_attach(self, op):
         """{"op":"attach","key":"slot:Tower 3"|"add:<id>"|"prop:<id>"|"line:<name>"|"castle","name":"northTower",
-        "labels":["lit"],"vars":{},"statuses":[]}: names, labels and vars on an object the level already has."""
+        "labels":["lit"],"vars":{},"statuses":[],"light":{"range":8}}: names, labels, vars and a light on an object the level
+        already has."""
         key = op["key"]
         if not (key == "castle" or key.startswith(self.ATTACH_PREFIXES)):
             raise Fail("key is slot:<host slot name> | add:<added slot id> | prop:<prop id> | line:<spawn line> | castle")
         a = ensure(ensure(self.logic(op), "attach", {}), key, {})
-        for f in ("name", "labels", "vars", "statuses", "targeting"):
+        for f in ("name", "labels", "vars", "statuses", "targeting", "light"):
             if op.get(f) is not None:
                 a[f] = op[f]
         return f"attach {key}" + (f" as @{a['name']}" if a.get("name") else "")

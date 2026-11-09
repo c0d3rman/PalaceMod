@@ -12,7 +12,7 @@ namespace PalaceMod.Builder.Logic.Bodies
     internal static class LightMath
     {
         /// <summary>Share of a light's range that is fully lit; beyond it the light fades to 0 at the range.</summary>
-        public const double FullShare = 0.7;
+        public const double FullShare = 0.8;
 
         /// <summary>A light level reads as "lit" from this up (`.lit`, the `lit` filter term).</summary>
         public const double LitThreshold = 0.5;

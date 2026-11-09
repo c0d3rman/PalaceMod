@@ -29,7 +29,7 @@ namespace PalaceMod.Tests
         {
             Near(1, LightMath.Contribution(0, 5, 10, 1, 0, 0), "well inside");
             Near(1, LightMath.Contribution(7, 0, 10, 1, 0, 0), "at 70%");
-            Near(0.5, LightMath.Contribution(0, -8.5, 10, 1, 0, 0), "half-way through the fade");
+            Near(0.5, LightMath.Contribution(0, -9, 10, 1, 0, 0), "half-way through the fade");
             Near(0, LightMath.Contribution(0, 10.1, 10, 1, 0, 0), "past the range");
             Near(0.5, LightMath.Contribution(0, 1, 10, 0.5, 0, 0), "dimmer light");
         }

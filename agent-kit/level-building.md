@@ -760,9 +760,10 @@ One small, pure language everywhere: conditions, numbers, selectors, positions.
   `attacker`, `target`, `entrant`, `collector`, `sender`...), `event.value` / `event.pos` / `event.name` /
   `event.choice`, `@name` (a place or attached object), `@@id` (a template), `$var` (a level variable), `x.$var` (an
   entity variable), globals (`night`, `isNight`, `isDay`, `time`, `nightTime`, `nightProgress`, `gold`, `income`,
-  `enemiesAlive`, `difficulty`, `nights`).
+  `enemiesAlive`, `difficulty`, `nights`, `daylight`).
 - **Properties**: `.hp .maxHp .hpPct .alive .elite .pos .x .y .z .facing .team .kind .template .labels .level .cost
-  .buildingType .age .target .owner .id` (`.maxHp` is the live value, after the night's difficulty and elite; `@@x.hp`
+  .buildingType .age .target .owner .id .light .lit` (`.facing` follows a walking unit's model; `.light` 0..1 and `.lit`
+  are how lit it stands, see 12.7a) (`.maxHp` is the live value, after the night's difficulty and elite; `@@x.hp`
   is the template's catalog value), every stat by name (`.moveSpeed`, `.damageMult`, `.income`...), methods
   `.is('filter')`, `.dist(e)`, `.inside(@area)`, `.stacks('status')`; lists and sets: `.len .first .last .at(i)
   .has(x)`.
@@ -778,6 +779,7 @@ One small, pure language everywhere: conditions, numbers, selectors, positions.
   ceil round clamp sqrt pow sin cos`, `rand()`, `rand(a, b)`, `randInt(a, b)`, `chance(p)` (seeded: the same events
   give the same results).
 - **Waves**: `waveCount(n, filter?)`, `waveUnits(n)`, `strongestUnit(n)`.
+- **Light**: `lightAt(p)` (0..1), `daylight` (the level's own light), `.light`, `.lit` (12.7a).
 - **Types are checked** before the game runs (`palace.py check`): an unknown variable, a role the event doesn't have
   (`other` in `levelStart`), a misspelled filter term or a number compared with text are errors with the column.
 
@@ -787,7 +789,7 @@ A filter is a string: `"foe and Building and not Wall"`, `"#lantern"`, `"in:@moa
 enemy neutral` (foe/ally relative to `self`); kinds `unit building prop projectile area pickup coin king castle line
 point path logic self`; `melee ranged alive dead elite`; any game tag, case-sensitive (`Tower`, `Flying`, `Wall`, `Boss`,
 `Undead`...; see `logic-reference.md`); `#label`; `is:<template>`; `in:@area` / `in:self` (inside an area); `has:<status>`;
-`type:<building kind>` (`type:Mill`); `where(<expression over it>)`. Combine with `and or not ( )`.
+`type:<building kind>` (`type:Mill`); `lit` (standing in the light, 12.7a); `where(<expression over it>)`. Combine with `and or not ( )`.
 
 ### 12.6 Actions
 
@@ -799,10 +801,10 @@ runs once per member and the other params are evaluated per member with `it` bou
 | Make | `spawn` (any template; `then` runs with `spawned`), `launch` (a projectile template toward a target; `onImpact`), `spawnGroup` (a wave-style group that counts toward the night), `replace` (morph into another template) |
 | Health | `damage` (`amount`, `source` credited, `types` like `["fire"]`), `heal`, `kill`, `revive`, `setHp` |
 | Stats | `setStat` (`stat`, one of `value`/`add`/`mult`, `for` seconds or `"night"`/`"day"`), `applyStatus`, `removeStatus` |
-| Team, move | `convert` (switch side), `teleport`, `push` (knockback), `drift` (continuous pull/wind), `moveTo`, `setMovement`, `setTargeting` (`prepend`, `remove`, `for`), `taunt`, `command` (player units: follow/hold/home) |
+| Team, move | `convert` (switch side), `teleport`, `push` (knockback), `drift` (continuous pull/wind), `moveTo`, `setMovement`, `setTargeting` (`prepend`, `remove`, `for`), `taunt`, `command` (player units: follow/hold/home), `turn` (`facing`/`by`/`toward`, `speed`: aim a beam, a turret, an area), `setShape` (an area's shape or size, a body's footprint, at runtime) |
 | Logic | `signal`, `setVar`, `addVar`, `listAdd`/`listRemove`/`listClear`, `addLabel`/`removeLabel`, `enableRule`/`disableRule`, `enable`/`disable`/`toggle`, `wait`, `if` (`cond`, `then`, `else`), `repeat` (`times`, `every`, `actions`), `forEach` (`in`, `actions`, `limit`), `choose` (`options: [{weight, do}]`), `stop` |
 | World | `gold` (give/take), `dropCoins`, `building` (build, upgrade, knockOut, repair, demolish, lock, unlock, setCost, setIncome a slot), `waves` (addSpawn, removeUnit, scaleCount, scaleHp, clearRemaining, startNight, endNight, skipNight), `endLevel` |
-| Show | `effect`, `sound`, `message`, `floatText`, `setVisual`, `hud`, `shake`, `marker` |
+| Show | `effect`, `sound`, `message`, `floatText`, `setVisual`, `hud`, `shake`, `marker`, `lighting` (darken or tint the level: an eclipse, day made night), `setLight` (a light that follows anything: a torch on the king) |
 | End | `destroy` (`drops`, `effects`, `silent`) |
 
 `repeat` and `forEach` take their body as `actions` (the key `do` already names the action). `setVar`/`addVar` write
@@ -819,7 +821,8 @@ runs once per member and the other params are evaluated per member with `it` bou
 | `lifetime`, `maxAlive` | any | seconds before `expire` + destroy; cap on live copies |
 | `projectile` | flying things | `speed`, `homing` 0..1, `arc`, `gravity`, `spin`, `face`, `hits` (filter), `hitRadius`, `pierce`, `onGround`, `range`; events `impact`, `expire` |
 | `mover` | moving props | `path` (`@path` or points), `mode` loop/pingpong/once, `speed`, `wait`, `spin`, `swing`, `running`, `pose` (or `poses`) {name: {`offset` [x,y,z] or world `pos`, `rotY`}}, `turnSpeed` (deg/s, 90); inputs `start stop reverse goto` and each pose's name; events `arrive`, `end`. A walkable mover snaps between poses |
-| `area` | zones | `shape` (`circle {radius}` / `rect {size: [w, d]}` / `polygon {points}`), `watch` (filter), `show`, `color`, `tick`, `surface` (below); events `enter exit inside empty occupied`; filters `in:@area` |
+| `area` | zones | `shape` (`circle {radius}` / `rect {size: [w, d]}` / `polygon {points}` / `sector {radius, angle}`: a cone along its facing), `watch` (filter), `show`, `color`, `tick`, `surface` (below); events `enter exit inside empty occupied`; filters `in:@area` |
+| `light` | anything that shines | `color`, `range` (m it lights), `intensity` (1), `cone` (degrees: a beam along its facing; none = all round), `aim`, `height` (3; lower = longer beam), `flicker`, `on`; also on units (`unit` op) and attaches (12.7a) |
 | `pickup` | collectibles | `by` (filter, e.g. `king`), `radius`, `magnet`, `consume`; event `pickup` |
 | `interact` | king-usable | `prompt` (`{cost}` shows the cost), `cost`, `when` day/night/always, `radius`, `repeat`, `choices` (up to 4 `{id, label, description, cost, icon}`: the game's upgrade-choice popup; the chosen cost is paid and `event.choice` is its id); event `interact` |
 | `attacks` | turrets, units | `[{ "cooldown", "range", "targeting", "launch": {"entity", "from"} \| "weapon", "do", "replace", "when" }]`; the unit's base attacks stay unless `replace` |
@@ -837,6 +840,32 @@ and then. Its top should be within 2.5 m of the ground it meets: an edge that to
 ramp when the step is over 0.45 m), and the map's invisible walls or terrain water under it give way; every other
 edge gets an invisible rail, so units can't step off into the river. Let a bridge overlap each bank by 1 m or more,
 and make it over 8 m wide for large enemies (they keep 4 m from every edge).
+
+### 12.7a Light, darkness, facing and shape at runtime
+
+- **Darkness.** `{"do": "lighting", "brightness": 0.15, "fade": 3, "for": 25}` darkens the whole level (an eclipse by
+  day); `"color": "#ff9060"` tints it; `"phase": "night"` makes day look like the game's night (`"day"` the reverse:
+  a flipped cycle); `"reset": true` brings the game's light back. It fades back after `for` (seconds, or `"night"` /
+  `"day"`) and at the level's end. Units and the king stay readable in the dark. There is no fog.
+- **Lights on things.** A `light` component (`{"range": 8, "color": "#ffc070"}`) on a template, place, unit or
+  attach, or `setLight` on anything at runtime (`{"do": "setLight", "target": "king", "range": 8}`; `remove`, `on`,
+  `for`). It follows its owner; with `cone` it's a beam along the owner's facing (`turn` aims it).
+- **Is it lit?** `daylight` is the level's own light (1 by day, about 0.34 at night, 0.15 in the eclipse above);
+  `lightAt(p)` adds every light reaching `p` (its intensity out to 80% of its range, fading to 0 at the range, so at night a light of intensity 1 lights its
+  whole range; a cone
+  only inside its width), capped at 1. `.lit` / the `lit` filter term mean 0.5 or more: by day everything, at night
+  only what's near a light (the castle's own night fire lights about 15 m round it). `targeting: ["enemy and lit"]`, `all('foe and not
+  lit')`, `"if": "not self.lit"`.
+- **Facing.** `.facing` (0 = north, 90 = east) is where it looks; a walking unit's follows its model. `turn` sets it:
+  `{"do": "turn", "target": "@beam", "toward": "king", "speed": 90}` (or `facing`, `by`). A turned body takes its
+  area, drawn outline, surface and solid footprint with it; a unit turns its model (and turns back when it walks).
+- **Shape.** `setShape` changes an area at runtime (`"angle": 120` widens a sector, `"radius": 12`, `"shape":
+  "rect", "width": 6, "depth": 3`, `points`), redrawing it and moving its membership and surface; `"part": "body"`
+  resizes a body's solid footprint. `for` puts the old shape back.
+- **Recipe: a lighthouse.** One entity: `{"kind": "area", "area": {"shape": {"sector": {"radius": 40, "angle":
+  60}}, "show": "fill", "color": "#fff3a0"}, "light": {"cone": 60, "range": 40}, "mover": {"spin": 45}}`. Widen it
+  with `setShape` `angle` + `setLight` `cone`; aim it with `signal stop` (the mover) + `turn toward`; who's in it is
+  `in:@beam` or, at night, `lit`.
 
 ### 12.8 Statuses
 
@@ -893,7 +922,7 @@ number). Errors in a preset's rules are reported at the place that uses it.
 | `remove_rule` | `on`, `id` |
 | `wire` | `from` (an `on` value), `event` (default `interact`), `to` (a place id/name or attach name), `input` (signal), `value`, `delay`, `do` (the target's listener, for an input that isn't built in) |
 | `var` | `name`, `value` (a level variable), or `on` + `name` + `value` (an entity default) |
-| `attach` | `key`, `name`, `labels`, `vars`, `statuses`, `targeting` |
+| `attach` | `key`, `name`, `labels`, `vars`, `statuses`, `targeting`, `light` |
 | `king_action` | `id`, `name`, `when`, `cooldown`, `uses` |
 | `hud` | `id`, `text`, `icon`, `visible` |
 | `logic` | `seed`, `caps` |
@@ -924,7 +953,7 @@ with `{"op": "rule", "on": "unit:<id>", ...}`.
   change at runtime.
 - Three teams; vanilla units never attack `neutral` things (Builder targeting can).
 - Game tags are a fixed set; your own labels work through Builder targeting and filters.
-- No new scenes, lighting or arbitrary code. Pending `wait`s and Builder projectiles in flight aren't kept by
+- No new scenes, fog or arbitrary code (light: 12.7a). Pending `wait`s and Builder projectiles in flight aren't kept by
   savestates; keep state that matters in variables.
 
 ### 12.14 Cookbook

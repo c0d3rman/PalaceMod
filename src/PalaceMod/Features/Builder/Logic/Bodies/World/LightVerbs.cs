@@ -29,9 +29,9 @@ using Object = UnityEngine.Object;
       lights, but URP lights each object with at most `maxAdditionalLightsCount` of them (1 in this game, so the ground,
       one big mesh, showed only one); while a level has entity lights it's raised to 8 and put back at the end.
     - The light level of a point (LightMath) is daylight (the sun's luminance: 1 by day, about 0.34 at night) plus each
-      light's share: its intensity (max 1) out to 70% of its range, fading to 0 at the range; a cone counts only within
+      light's share: its intensity (max 1) out to 80% of its range, fading to 0 at the range; a cone counts only within
       half its width of its yaw. The game's own lights (the castle's night fire, a teleporter's glow) count too, with
-      intensity / 3 and their range on the ground.
+      intensity / 3 over 40% of their range (URP's falloff leaves little visible light beyond that).
 */
 namespace PalaceMod.Builder.Logic.Bodies
 {
@@ -351,6 +351,9 @@ namespace PalaceMod.Builder.Logic.Bodies
     {
         public static readonly LightLevels Instance = new();
 
+        /// <summary>Share of a game light's Unity range its glow visibly reaches (URP's falloff is steep).</summary>
+        public const float GameLightReach = 0.4f;
+
         /// <summary>Unity intensity per unit of `light.intensity` (3 reads like the game's own fires).</summary>
         public const float UnityPerIntensity = 3f;
 
@@ -395,7 +398,8 @@ namespace PalaceMod.Builder.Logic.Bodies
                 if (l == null || !l.isActiveAndEnabled || l.intensity <= 0f) continue;
                 var at = l.transform.position;
                 float h = Mathf.Max(0f, at.y - p.Y);
-                float ground = l.range * l.range - h * h;
+                float reach = l.range * GameLightReach;
+                float ground = reach * reach - h * h;
                 if (ground <= 0f) continue;
                 var fwd = l.transform.forward;
                 double yaw = Math.Atan2(fwd.x, fwd.z) * 180 / Math.PI;

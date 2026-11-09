@@ -57,7 +57,7 @@ decompiled game; no game was run. `docs/builder-design.md` (data model, runtime,
 |---|---|
 | **Entity** | A live object the engine knows about. Placed ones are build slots, props, spawn lines, placed templates, areas, paths and points. Spawned ones are units, projectiles and pickups. Vanilla units and buildings are entities too (selectors and filters see them), but rules attach only to Builder objects. |
 | **Template** | What an entity is made from: a custom unit (`units[]`, as today) or a non-unit template (`entities[]`: prop, projectile, area, pickup, logic). |
-| **Component** | A data block on a template: `visual`, `body`, `team`, `stats`, `attacks`, `targeting`, `movement`, `projectile`, `mover`, `area`, `interact`, `pickup`. |
+| **Component** | A data block on a template: `visual`, `body`, `team`, `stats`, `attacks`, `targeting`, `movement`, `projectile`, `mover`, `area`, `interact`, `pickup`, `light`. |
 | **Rule** | `when` (an event) + `if` (conditions) + `do` (actions), with options (`id`, `enabled`, `once`, `cooldown`). |
 | **Selector** | An expression that yields one entity or a set: `self`, `other`, `@gate1`, `nearest("foe", 12)`, `all("ally and #undead", 8)`. |
 | **Filter** | A string test on a candidate entity: `"foe and Building and not Wall"`, `"#pylon and alive"`, `"in:@moat"`. |
@@ -273,7 +273,8 @@ apart from what the level places there (props, areas, lights come from the map's
 **`area`**: a zone that detects what's inside it.
 
 ```jsonc
-"area": { "shape": { "circle": { "radius": 6 } },   // or rect {size: [w, d]}, polygon {points}, relative to its position
+"area": { "shape": { "circle": { "radius": 6 } },   // or rect {size: [w, d]}, polygon {points}, sector {radius, angle}
+                                                     // (a cone along its facing), relative to its position and heading
           "watch": "unit",                           // filter of what it reports (default: units and the king)
           "show": "outline", "color": "#d04040",     // "none" | "outline" | "fill"
           "tick": 1 }                                // seconds between "inside" events (null = no inside events)
@@ -298,6 +299,52 @@ paid; with `cost` it uses the game's own pay-hold interaction. The prompt shows 
 coins fill a copy of a build slot's coin display. With `choices`, the game's upgrade-choice popup opens on interact
 (each choice also takes `description` and `icon`, an `asset:` sprite); the picked choice's cost is paid at once (a
 "not enough gold" notice otherwise) and `interact` fires with `event.choice`; Esc cancels without paying.
+
+**Light** (`Logic/Bodies/World/LightVerbs.cs`, `LightMath.cs`). How the game looks lit: `ColorAndLightManager`
+tints one directional light, the sun, from the level's colour scheme (white by day, the scheme's night blue at
+night, through its sunset colour over 3 s each way) and re-tints the shared FlatKit materials' outlines from it. The
+toon shaders take the sun's colour on their lit side, so its colour is what makes night read as night: a dark sun
+turns the whole map dark by day too, while units and the king keep their colours (their materials take little light),
+so they stay readable. Intensity does much less, and Unity fog does nothing (the shaders don't sample it), so there is
+no fog. The shaders do take extra per-pixel lights (the castle's night fire is one), but URP lights each object with
+at most `maxAdditionalLightsCount` of them, 1 in this game (the ground is one big mesh, so it showed one light); while
+a level has entity lights it's raised to 8, and put back at the level's end.
+
+- **`lighting`** (the level's light): `brightness` (multiplies the sun: 1 as the game has it, 0.2 an eclipse, 0
+  black), `color` (tints it), `phase` (`auto` follows the game; `day`, `sunset`, `night` take that colour from the
+  level's scheme whatever the time: a flipped day/night), `fade` (s, default 1), `for` (seconds, `"night"`/`"day"`),
+  `reset`. It writes the sun in LateUpdate, after the game's own transitions; the game's writes are noticed and
+  become the `auto` base, so dusk and dawn still play under it. Outlines and the backdrop beyond the map's edge follow.
+  It reverts at the level's end. Savestates keep it.
+- **`light` component** (templates, places, units, attaches) and **`setLight`** (any entity: units, the king,
+  vanilla buildings, props, projectiles): `{ "color": "#ffd890", "intensity": 1, "range": 10, "cone": null, "aim": 0,
+  "height": 3, "flicker": 0, "on": true }`. A Unity point light (or a spot light for `cone`, degrees wide along the
+  entity's facing plus `aim`) on a child kept `height` above the entity and turned to its facing every frame, so a
+  unit's torch follows its model and a beam follows `turn`. A low light makes a long beam. `setLight` takes the same
+  fields plus `remove` and `for` (back to how it was); its changes are kept by savestates.
+- **How lit a point is** (`daylight`, `lightAt(p)`, `.light`, `.lit`, the `lit` filter term): daylight is the
+  sun's luminance (1 by day, about 0.34 at the game's night, 0.15 for `brightness: 0.15`); each light adds its
+  intensity (max 1) out to 80% of its range, fading to 0 at the range (so at night it lights its whole range), a cone only within half its width of its yaw;
+  the total is capped at 1, and 0.5 or more is lit. So by day everything is lit, at night only what's near a light, and
+  in an eclipse the same. The game's own point and spot lights count too (intensity / 3, over 40% of their Unity range, which is about
+  where their glow shows): the castle's night fire (range 50, intensity 0.75) lights about 15 m round it at night.
+
+**Turning and reshaping** (`ShapeVerbs.cs`). `.facing` reads where a thing looks: a game unit's root never turns, its
+model does (`RotateForwardToRVOVelocity.transformToRotate`), and the king's mesh does (`PlayerMovement.meshParent`), so
+`.facing` follows a walking unit; Builder bodies turn their root.
+
+- **`turn`** (`facing` | `by` | `toward`, `speed` deg/s or at once): a body turns its root, so an area's shape, its
+  drawn outline or fill, its surface cut, a solid footprint (NavmeshCut with rotation) and its collider turn with it;
+  a unit turns its model (it turns back toward where it walks once it moves); the king his mesh. Buildings and spawn
+  lines don't turn. A walkable top doesn't turn with it (its graph is pre-scanned in poses).
+- **`setShape`** (`shape` circle | rect | polygon | sector, `radius`, `angle`, `width`, `depth`, `points`, `part`
+  area | body | both, `for`): an area gets the new shape (outline and fill redrawn, membership from the next 10 Hz
+  poll, its surface's cut rebuilt and re-tagged); a body gets a new footprint (circle or box) on its NavmeshCut and
+  collider, and units the bigger cut would trap are pushed out. Unchanged fields keep the current shape's. Savestates
+  keep the current shape.
+- **`sector`** is an area shape: `{ "sector": { "radius": 40, "angle": 60 } }`, a cone `angle` degrees wide along the
+  entity's facing (360 = a circle). A lighthouse is one entity: a sector area drawn as a fill, a cone light and a
+  spinning mover; `setShape` and `setLight` widen it, `turn` aims it, and `lit` or `in:@beam` says who is in it.
 
 **Projectiles in flight.** The game's own projectiles (`AimbotProjectile`: arrows, bolts, magic, boulders) are
 entities of kind `projectile` while they fly, made the first time an area or selector sees one; their `owner` is the
@@ -484,12 +531,14 @@ variables   $souls (level)   self.$gen  other.$charges  spawned.$x   (an unknown
 roles       self subject other spawned it (the candidate inside a filter or forEach) king castle level
             event.value event.pos event.name   + the per-event aliases (killer, victim, ...)
 named       @gate1 (a place or attach "name")  @@goblin (a template, for spawn/compare)
-properties  .hp .maxHp .hpPct .alive .pos .x .y .z .facing (deg) .team .kind .template .labels
+properties  .hp .maxHp .hpPct .alive .pos .x .y .z .facing (deg; a unit's model) .team .kind .template .labels
+            .light (0..1) .lit (light >= 0.5)
             every stat by name (.moveSpeed .attackCooldown .damageMult .income ...), the value with modifiers
             .level .cost .buildingType (slots: e.g. 'Mill') .age (s since spawn) .target .owner .stacks('burning')
             .$var .is('filter') .dist(e) .inside(@area)
 lists       .len .at(i) .has(x) .first .last   (sets and list vars)
 globals     night (1-based: the current night, or the coming one by day) isNight isDay nights (total)
+            daylight (0..1: the sun's light; 1 by day, about 0.34 at night, lower in an eclipse)
             time (s since level start) nightTime (s since this night began) nightProgress (0..1: the night's spawn
             schedule elapsed, from the spawner's delays and intervals; 1 once everything has spawned)
             gold income (the last dawn's payout) enemiesAlive difficulty
@@ -497,6 +546,7 @@ waves       waveCount(n, f?) (enemies night n will spawn, optionally of a templa
             templates, as a list) strongestUnit(n) (by hp x damage, from the catalog)
 selectors   nearest(f, r?) farthest(f, r?) weakest(f, r?) strongest(f, r?) random(f, r?) all(f, r?)
             best(f, r, scoreExpr) count(f, r?)    anchored at self; e.nearest(...), e.count(...) etc. anchor at e
+light       lightAt(p) (0..1: daylight plus the lights that reach p)
 positions   pointNear(p, r) (random walkable) ahead(e, d) toward(a, b, d) lerp(a, b, t) spawnLine('West')
             dir(deg) (a unit vector; 0 = north) angle(a, b) + - and * by a number
 maths       + - * / % min max abs floor ceil round clamp sqrt pow sin cos lerp rand() rand(a, b) randInt(a, b) chance(p)
@@ -516,6 +566,7 @@ term   := foe | ally | player | enemy | neutral       teams (foe/ally are relati
         | is:goblin                                   template
         | in:@zone                                    inside an area
         | has:burning                                 has a status
+        | lit                                         standing in the light (.light >= 0.5)
         | where(expr)                                 any expression over `it`
 ```
 
@@ -550,6 +601,8 @@ which accepts an entity or a position.
 | | `moveTo` | `at`, `speed`, `then` (`resume`/`hold`): fires `arrive` when there |
 | | `setMovement` / `setTargeting` | a movement block / a targeting list, or `prepend`, `remove`, `for` (seconds; reverts after) |
 | | `taunt` | `toward` (an entity), `for`: forces the targets' aggro onto it (the game's agro mechanism) |
+| | `turn` | `facing` \| `by` \| `toward`, `speed` (deg/s): turns it (a body with its area, cut and collider; a unit's model; the king's mesh). See "Turning and reshaping" |
+| | `setShape` | `shape` (circle/rect/polygon/sector), `radius`, `angle`, `width`, `depth`, `points`, `part` (area/body/both), `for`: an area's shape or a body's footprint at runtime |
 | | `command` | `order` (`follow`/`hold`/`home`): player units, as the king's own commands |
 | **Logic** | `signal` | `name`, `to` (selector, or `"all"`), `value`, `delay` |
 | | `setVar` / `addVar` | `name` (a literal, so it's checked), `value` (on `target` for entity vars; level vars when `target` is `level` or the name has `$`) |
@@ -576,6 +629,8 @@ which accepts an entity or a position.
 | | `hud` | `id`, `text`, `icon`, `visible`: a level HUD line (the `logic.hud` defaults, changed at runtime) |
 | | `shake` | `strength`, `seconds` |
 | | `marker` | `on`, `icon`, `for`: a screen-edge marker like the game's wave markers |
+| | `lighting` | `brightness`, `color`, `phase` (auto/day/sunset/night), `fade`, `for`, `reset`: the level's light (an eclipse, a red dusk, day made night). See "Light" |
+| | `setLight` | the `light` fields, `remove`, `for`: a light that follows the target (a torch on the king, a lantern, a beam) |
 | **End** | `destroy` | `effects` (death effects, true), `drops` (coins, false), `silent` (no `death` event) |
 
 The action set is closed, and each action is generic. A new action needs a mod update, so additions are judged by
@@ -1406,8 +1461,8 @@ three (projectiles in flight, surfaces and spaces above), with no feature coded 
   the brain's.
 - **Game tags are a closed set** (51 `ETag`s, kept in a 64-bit field). Vanilla AI only targets by them, so labels
   work only through Builder targeting, which can be set on any attacker (Builder units, vanilla units and towers).
-- **No new scenes, no fog or lighting changes** beyond the level's colour scheme and tints (a separate arena is an
-  off-map space on the same scene). Recording is only what
+- **No new scenes and no fog** (the toon shaders ignore Unity fog); light is the sun's colour (`lighting`) and point
+  or spot lights (`light`), not shadows or a sky (a separate arena is an off-map space on the same scene). Recording is only what
   list vars can hold: up to 256 sampled values, such as positions.
 - **King actions:** 3 keys. The day phase has no timer in Thronefall, so "shorter day" has no meaning.
 - **No arbitrary code**, by design. A missing verb needs a mod update; the registry's `since` makes that explicit.
