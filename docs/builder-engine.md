@@ -6,7 +6,8 @@ features. A homing tree, a necromancer, a drawbridge, a toll gate and a splittin
 primitives arranged differently, stored as data in the level or enemy JSON. They are authored in the Studios and by
 agents through `palace.py`.
 
-This is a design. Nothing here is built yet. It was worked out from the code on `main` at 3bef6cc and from the
+This is the design; the "as built" sections (L1 runtime core, L4 data model) record what the code does where it
+refines it. It was worked out from the code on `main` at 3bef6cc and from the
 decompiled game; no game was run. `docs/builder-design.md` (data model, runtime, sessions) and `docs/builder-ux.md`
 (the Studios) still apply.
 
@@ -285,6 +286,43 @@ attack, vanilla towers and troops included (`setTargeting` on `all('player and T
 It is implemented on the game's own movement components (see "Runtime"), so pathfinding, avoidance and animation keep
 working. A ranged enemy that kites and prefers towers is just `targeting` plus `movement.keepDistance` plus `kite`.
 
+**Steering as built** (`Logic/Bodies/Steering/`):
+
+- **Targeting.** A rule's `range` is capped by the attack's own range when it picks an attack target; with no
+  `range` a movement target can be anywhere. Prefer `weakest`/`strongest` compare current hp. A unit with no list of
+  its own (vanilla units and towers, or Builder units without `targeting`) keeps the game's priorities: a `prepend`
+  then tries its rules first and falls back to the game's choice, and `remove` has nothing to remove.
+- **`setTargeting`** takes `targeting` (a list that replaces), `prepend` (a list tried first), `remove` (filters,
+  written exactly as in the rules, whose rules are dropped), `reset: true` (back to the template's or the game's), and
+  `for` (seconds; the change reverts after).
+- **`setMovement`** merges the fields it is given (`mode`, `path`, `then`, `speed`, `keepDistance`, `kite`, `flee`,
+  `wander`, `home`, or a whole `movement` block) over the current movement. `for` reverts it; `reset: true` drops
+  earlier `setMovement`s first.
+- **Paths.** `path` is inline (`[[x, z] | [x, y, z], ...]`) or `"@name"` of a placed path whose `points` are world
+  positions. A path follower fires `arrive` at each point (`event.value` = its index), then `end`. `hold` stands
+  where the unit was when it started holding (a `teleport` moves that spot). `wander` picks a new point within
+  `radius` of home every 4-7 s, or on arrival, whenever the unit has nothing to walk to.
+- **`flee.when`** is checked 10 times a second. Without `to`, the unit runs 8 m away from the nearest `from` match
+  within 25 m. **`kite`** steps away from the nearest foe for `for` seconds.
+- **`direct`** moves in a straight line through the unit's own RVO (avoidance and walk animation stay), with no
+  navmesh. Flyers keep their height. The unit stops at `keepDistance` from a target.
+- **`attacks`.** `range` and `cooldown` default to the base unit's first attack. `launch.from` is an offset in the
+  unit's own frame (default `[0, 1, 0]`). An attack with neither `launch` nor `weapon` fires only its `attack` event
+  and `do`. `attack` carries the attack's `id` as `event.name`. The base unit's attack animation plays.
+- **`push`**: `force` is metres of travel, `up` the arc height (default 1.5 m) and `stun` seconds. It uses the game's
+  KnockbackBehavior (added when the unit has none), so it needs the game's unit movement: the king can't be pushed.
+- **`drift`**: `for` absent means until removed. `speed: 0` with no `dir` removes the drift with that `key` (default
+  key `"drift"`). With `dir` and no `speed`, `dir` is the velocity itself.
+- **`taunt`**: `for` defaults to 5 s. The taunted unit walks to the taunter and attacks it once it is in range; until
+  then its attacks pick as usual.
+- **`command`**: `hold` takes an optional `at` (default: where the unit stands).
+- **`convert`**: the counterpart, when the template names none, is the plainest catalog unit of the other side
+  with the same role: P Melee, P Archer or P Firewing for the player, E Melee, E Archer or E Flyer for the enemy.
+  `team` may be an expression (`self.team`). Going `neutral` keeps the unit's own brain, drops its team tags and
+  gives it an empty targeting list (it attacks nothing until a rule gives it targets).
+- **`replace`** keeps nothing unless `keep` says so. `hp` keeps the hp fraction, not the absolute value. `then` runs
+  with `spawned` = the new entity.
+
 ### Rules
 
 ```jsonc
@@ -492,6 +530,31 @@ That covers armour, dodges, "immune to arrows", "misses at long range" and "vuln
 - **Timed `setStat`s** stack independently; give `key` to make a new one replace an earlier one with the same key.
 - `damaged` doesn't fire when modifiers reduce the damage to 0, so an invulnerable door doesn't spam rules.
 - `drift` is a status mod as well (`"drift": { "toward": "@well", "speed": 3 }`).
+- **As built** (`Logic/Bodies/Stats/`):
+  - A stat's value is `(set ?? base) + Σ add, × Π mult`; the latest `set` wins; per stack, `add` sums and `mult`
+    compounds. A status mod takes `value` (= `set`), `add` or `mult`.
+  - `damageMult`, `damageTaken`, `projectileSpeed`, `scale` and `timeScale` are multipliers (base 1, on anything
+    with a body). `scale` multiplies the spawn scale. The other stats exist only where the object has the game field
+    (`.moveSpeed` on a tower is none).
+  - `hp` isn't a modifier: `setStat hp` changes hit points now, like `setHp`. A `maxHp` change keeps the hp fraction.
+  - `damageTaken` (victim) and `damageMult` (attacker) both apply inside the game's own damage call, so they cover
+    vanilla and Builder damage alike. On `damageMult`, test the victim with `when` (`victim.is('Building')`).
+    Conditional modifiers (`from`/`types`/`chance`/`when`) apply only to hits; `.damageTaken` reads the
+    unconditional value.
+  - `stunned` stops attacks and movement, `rooted` movement (speed 0), `disarmed` attacks. `untargetable` drops the
+    object from every game target search. `invulnerable` refuses all damage except `kill`.
+  - `maxStacks` defaults to 1. `refresh`: stacks add up to the cap and the timer restarts. `extend`: stacks add
+    up and the duration is added to the time left. `add`: each stack has its own timer, and past the cap the
+    soonest-ending stack is dropped. `ignore`: re-applying does nothing while it lasts. `removeStatus` takes `stacks`
+    (default: all). `applyStatus`'s `for` overrides `duration`, and takes `"night"`/`"day"` too. `source` defaults to
+    `self`.
+  - A status's own rules hear only its own `statusStart`/`statusTick`/`statusEnd`. Every status event has
+    `event.name` set to the status id. On `statusEnd`, `value` is the stack count it had.
+  - `damage.weapon` (`"vanilla:<weapon>"`) multiplies the amount by that weapon's damage multipliers for the
+    victim's tags (its `damageAdded` is ignored). The damage hooks can read the action's `source` and `types` from
+    `LogicStatsManager.CurrentDamage` (for a source without a body, such as a logic object).
+  - `visual.tint` swaps the carrier's materials for tinted copies while the status lasts. `visual.fx` needs the
+    effects catalog (`StatusVisuals.SpawnFx`).
 
 ### Signals, wires and built-in inputs
 
@@ -543,6 +606,36 @@ into the preset. Presets can also carry components (`"movement"`, `"area"`, ...)
   Pressure plate (area), Moving wall (mover), Door (poses), Sign (message), Pickup (gold).
 - **Library presets** live in `PalaceBuilder/library/presets/<id>.json`, next to levels and enemies (R2-C1's store).
   "Save as preset" on any card or selection writes one, and an export copies every preset that's used into the pack.
+
+### Data model as built (L4)
+
+- **Code.** `Model/Logic/` (pure C#, unit-tested): `LogicDefs.cs` (the defs; number fields that may be `"=expr"` are
+  `LNum`; `when` and targeting entries accept their string shorthands), `Expr.cs` (lexer, parser, AST, filters,
+  `{expr}` text), `ExprChecker.cs` (types, roles per event, variables, names, columns, "did you mean"), `LogicSchema.cs`
+  (the registry), `Presets.cs`, `LogicRefs.cs` (template references, `LogicLowering`), `LogicValidator.cs`. Every def
+  keeps unknown fields, so the Studio and newer packs round-trip.
+- **Param conventions.** A JSON string in a param whose type isn't text is an expression; text params are literal
+  with `{expr}` parts unless they start with `=`; template params are ids unless they start with `=`. `repeat` and
+  `forEach` take their body as `actions` (`do` names the action). `near`'s range is `when.range` (the same key as an
+  `of` listener's radius; only `near` declares a `range` param). In `interact.prompt`, `cost` is a role.
+- **Preset expansion.** `Presets.Expand(pack)` / `ExpandJson` replace every rules-list `{preset, with}` and every
+  place `preset` with plain rules and components before validation and compilation. A whole-string `"{p}"` becomes
+  the typed value; inside a longer string the value is inserted as text (an `=expr` value as `(expr)`). Preset vars,
+  labels and components merge under the owner's own. Every produced rule carries `_src` (the JSON path of its use,
+  e.g. `units[1].rules[0] (preset split-on-death).rules[0]`), which errors and the trace show. Lookup: the pack's
+  presets, then the library's (`Presets.Library`), then the built-ins (`Assets/builder-presets.json`, 21 presets).
+- **Library.** Entities, statuses and presets are library items like enemies (`library/entities|statuses|presets/<id>.json`,
+  `Model/LibraryStore.Logic.cs`): workspaces and the composed pack hold all of them, `SaveWorkspace` writes changed
+  ones, `Export` copies those the exported levels and enemies use (following template, status and preset references
+  transitively, units included), and `Import` reuses identical ones, replaces ones from the same origin and renames
+  clashes, rewriting references. `SavePreset` is "Save as preset".
+- **Agents.** `catalog.json` carries the registry and built-in presets as `logic`; `agent-kit/logic-schema.json` is
+  the same, generated by a test, and `agent-kit/logic-reference.md` is generated from it (`palace.py logic doc`).
+  `palace.py` validates offline with `palace_logic.py`, a port kept in step by `tests/logic-expr-cases.json` and the
+  example fixtures.
+- **Fixtures.** `tests/logic-examples/NN-*.json` holds every example in "Expressiveness check" as a pack plus a `play`
+  script; CI validates them (C# and Python), and `palace.py logic fixture <file>` runs one in a pool instance through
+  L1's `logic do / raise / eval`.
 
 ## Runtime
 
@@ -824,8 +917,13 @@ limits), and `reference.md` gets the generated schema.
     `rules: [{ "when": "death", "do": [{ "do": "spawn", "entity": U, "at": "self", "elite": "inherit" }] }]`;
   - drops `behaviours`.
 
-  The runtime's `spawn` of an enemy on `death` uses the same `Spawn.AdjustEnemyParametersAfterSpawn` path as the
-  game's `enemyToSpawnOnDeath`, so play doesn't change. `UnitFactory.ApplyBehaviour` and `BehaviourTypes` go away.
+  To keep migrated packs playing exactly as before, the unit factory still runs that exact rule shape on the game's
+  own `Hp.enemyToSpawnOnDeath` (`LogicLowering`: a unit's first rule that is exactly `death → spawn U at self,
+  elite inherit`, where U is a unit and not the unit itself), and the logic compiler skips it. Any other spawn-on-death
+  rule runs in the engine. `BehaviourTypes` and `ApplyBehaviour` are gone; UnitPage's "Spawns on death" edits the
+  lowered rule. A corpus check (`PALACE_MIGRATION_CORPUS=<dirs> dotnet run -- MigrationCorpus`) migrated the
+  showcase levels and the player's library and packs: 34 packs, 12 SpawnOnDeath behaviours, each lowering to the same
+  unit, no logic errors.
 - **Readers.** `LibraryStore` (enemies that reference other enemies), `UnitPage`/`EnemyDock` ("spawns on death") and
   the agent kit's `waves` read references from rules: any template param.
 - `Catalog` keeps listing vanilla `enemyToSpawnOnDeath`, for the Enemy Studio's "what the base already does".
@@ -850,7 +948,7 @@ Each behaviour below is pure data in the format above. Unit bases and meshes are
 **2. Kills convert the victim** (the user's example)
 
 ```jsonc
-{ "when": "kill", "if": "other.is('unit and not king')", "do": [{ "do": "convert", "target": "other", "team": "self.team", "hpPct": 0.5 }] }
+{ "when": "kill", "if": "other.is('unit and not king')", "do": [{ "do": "convert", "target": "other", "team": "=self.team", "hpPct": 0.5 }] }
 ```
 
 **3. A unit that multiplies every 8 s** (the user's example, capped)
@@ -1224,10 +1322,10 @@ then.
 
 ## Open questions (the user's)
 
-None block the design. Each has a default and can be changed later:
+Both were decided by the lead:
 
-1. **Caps.** 300 spawned entities, 400 projectiles and 400 rule firings per frame. Should creators be able to raise
-   them per level, behind a "may lag" warning? The default is no, for v1.
-2. **Shared enemies with level-wide effects.** An enemy from someone else's library can carry rules that give gold or
-   end the level. The default is to allow it and show a badge in the Studio ("this enemy affects the level"), rather
-   than restricting what enemy rules may do.
+1. **Caps.** Decided: creators can raise them per level (`logic.caps`: entities, units, projectiles, perTemplate,
+   firingsPerFrame, actionsPerFrame), with a "may lag" validation warning above the default and an error above the
+   hard maximum (2000 / 1000 / 2000 / 1000 / 4000 / 40000). Defaults are unchanged.
+2. **Shared enemies with level-wide effects.** Decided: allowed, with a "this enemy affects the level" badge in the
+   Studio.

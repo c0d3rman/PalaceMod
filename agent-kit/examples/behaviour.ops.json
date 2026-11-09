@@ -1,0 +1,47 @@
+[
+ {"op": "level", "name": "The Grove Rite", "description": "Treants hurl trees, a mercenary camp sells swords by day, and ten souls in the ritual circle win the run."},
+
+ {"op": "entity", "id": "tree-missile", "kind": "projectile", "name": "Hurled tree",
+  "visual": {"mesh": "mesh:Cone Tree", "meshScale": 0.4}, "lifetime": 6,
+  "projectile": {"speed": 9, "homing": 0.6, "arc": 0.2, "spin": [0, 0, 360], "hits": "foe"},
+  "rules": [{"when": "impact", "do": [
+    {"do": "damage", "target": "all('foe', 2)", "amount": 25, "source": "self.owner"},
+    {"do": "effect", "fx": "dust_large", "at": "self"}]}]},
+ {"op": "unit", "id": "treant", "side": "enemy", "base": "vanilla:E Ogre", "name": "Treant",
+  "attacks": [{"replace": true, "cooldown": 3, "range": 18, "targeting": ["foe and Building", "foe"],
+               "launch": {"entity": "tree-missile", "from": [0, 3, 0]}}]},
+
+ {"op": "unit", "id": "merc", "side": "player", "base": "vanilla:P Melee", "name": "Mercenary",
+  "rules": [{"note": "leaves at dawn", "when": "dawn", "do": [{"do": "destroy", "silent": true}]}]},
+ {"op": "place", "id": "camp", "kind": "area", "at": [10, -10],
+  "area": {"shape": {"circle": {"radius": 4}}, "watch": "king", "tick": 3, "show": "outline", "color": "#c0a040"},
+  "rules": [{"when": "inside", "if": "isDay and gold >= 10", "cooldown": 60, "do": [
+    {"do": "gold", "amount": -10},
+    {"do": "spawn", "entity": "merc", "count": 3, "at": "self", "spread": 2, "team": "player",
+     "then": [{"do": "command", "target": "spawned", "order": "follow"}]}]}]},
+
+ {"op": "var", "name": "souls", "value": 0},
+ {"op": "hud", "id": "souls", "text": "Souls {$souls}/10"},
+ {"op": "place", "id": "ritual", "kind": "area", "at": [-4, -20],
+  "area": {"shape": {"circle": {"radius": 6}}, "show": "outline", "color": "#8040c0"}},
+ {"op": "rule", "on": "level", "rules": [
+   {"id": "soul", "when": {"on": "death", "of": "enemy and in:@ritual"}, "do": [{"do": "addVar", "name": "souls", "value": 1}]},
+   {"id": "rite", "when": "varChanged", "if": "$souls >= 10", "once": true,
+    "do": [{"do": "endLevel", "result": "win", "message": "The ritual is complete"}]}]},
+
+ {"op": "status", "id": "warded", "name": "Warded", "duration": 1.2, "stacking": "refresh", "mods": {"damageTaken": {"mult": 0.7}}},
+ {"op": "unit", "id": "shieldbearer", "side": "enemy", "base": "vanilla:E Defensive Melee Variant", "name": "Shield-bearer",
+  "rules": [{"preset": "aura", "with": {"status": "warded", "who": "ally and unit", "range": 6}}]},
+
+ {"op": "entity", "id": "drawbridge", "kind": "prop", "visual": {"mesh": "mesh:Bridge"},
+  "body": {"box": [4, 10], "height": 1, "solid": true},
+  "mover": {"pose": {"up": {"offset": [0, 4, 0]}, "down": {"offset": [0, 0, 0]}}}},
+ {"op": "place", "id": "bridge", "entity": "drawbridge", "at": [20, -10],
+  "rules": [{"when": "dusk", "do": [{"do": "signal", "name": "down", "to": "self"}]}]},
+ {"op": "place", "id": "lever", "preset": "lever", "with": {"prompt": "Raise the bridge", "signal": "up", "to": "@bridge"}, "at": [14, -6]},
+
+ {"op": "king_action", "id": "horn", "name": "War horn", "when": "day", "uses": {"count": 1, "per": "day"}},
+ {"op": "rule", "on": "level", "rule": {"id": "horn", "when": {"on": "kingAction", "action": "horn"}, "do": [
+   {"do": "command", "target": "all('player and unit', 20)", "order": "follow"},
+   {"do": "setStat", "target": "all('player and unit', 20)", "stat": "moveSpeed", "mult": 1.2, "for": "night"}]}}
+]
