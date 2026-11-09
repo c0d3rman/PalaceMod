@@ -1,6 +1,6 @@
 # Behaviour engine reference
 
-Generated from the engine's registry (`palace.py logic doc`; schema version 0.9.0). The guide's "Behaviour" chapter explains how the pieces fit; this lists every piece. `palace.py logic schema <kind> <name>` prints one entry as JSON.
+Generated from the engine's registry (`palace.py logic doc`; schema version 1.0.0). The guide's "Behaviour" chapter explains how the pieces fit; this lists every piece. `palace.py logic schema <kind> <name>` prints one entry as JSON.
 
 ## Param types
 

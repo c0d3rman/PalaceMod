@@ -124,7 +124,7 @@ namespace PalaceMod.Builder.Model.Logic
     public static class LogicSchema
     {
         /// <summary>The PalaceMod version the behaviour engine first shipped in (fills requires.palaceMod).</summary>
-        public const string V1 = "0.9.0";
+        public const string V1 = "1.0.0";
 
         public static readonly Dictionary<string, EventSpec> Events = new(StringComparer.Ordinal);
         public static readonly Dictionary<string, ActionSpec> Actions = new(StringComparer.Ordinal);
