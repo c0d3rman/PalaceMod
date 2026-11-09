@@ -631,7 +631,7 @@ Using a preset is an entry in `rules`: `{ "preset": "split-on-death", "with": { 
 the pack is compiled, with `{param}` substituted as a typed value, so the validator checks the result with paths
 into the preset. Presets can also carry components (`"movement"`, `"area"`, ...), merged under the entity's own.
 
-- **Built-in presets** ship in the DLL (`Assets/builder-presets.json`) and are just data. They include the logic
+- **Built-in presets** ship in the DLL (`Assets/logic-presets.json`) and are just data. They include the logic
   objects: Timer, Counter, Relay (delay), Gate (AND of N signals), Toggle, Random router, Spawner, Lever (interact),
   Pressure plate (area), Moving wall (mover), Door (poses), Sign (message), Pickup (gold).
 - **Library presets** live in `PalaceBuilder/library/presets/<id>.json`, next to levels and enemies (R2-C1's store).
@@ -653,7 +653,7 @@ into the preset. Presets can also carry components (`"movement"`, `"area"`, ...)
   the typed value; inside a longer string the value is inserted as text (an `=expr` value as `(expr)`). Preset vars,
   labels and components merge under the owner's own. Every produced rule carries `_src` (the JSON path of its use,
   e.g. `units[1].rules[0] (preset split-on-death).rules[0]`), which errors and the trace show. Lookup: the pack's
-  presets, then the library's (`Presets.Library`), then the built-ins (`Assets/builder-presets.json`, 21 presets).
+  presets, then the library's (`Presets.Library`), then the built-ins (`Assets/logic-presets.json`, 21 presets).
 - **Library.** Entities, statuses and presets are library items like enemies (`library/entities|statuses|presets/<id>.json`,
   `Model/LibraryStore.Logic.cs`): workspaces and the composed pack hold all of them, `SaveWorkspace` writes changed
   ones, `Export` copies those the exported levels and enemies use (following template, status and preset references
@@ -1324,7 +1324,7 @@ public static class LogicSaveState { static void Register(string id, Func<LogicW
   - `Model/Validation.cs` logic checks (additive);
   - the `Model/UnitDef.cs` and `LevelDef.cs` fields;
   - the `PackSerializer` migration 2 → 3;
-  - `Assets/builder-presets.json` (the built-in logic objects and common presets);
+  - `Assets/logic-presets.json` (the built-in logic objects and common presets);
   - the presets kind in `Model/LibraryStore.cs` (additive, coordinated with R2-C1);
   - `builder dump` → `logic-schema.json`;
   - `agent-kit/palace.py` (ops, the `logic` commands, the Python expression port);

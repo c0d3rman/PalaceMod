@@ -220,7 +220,7 @@ namespace PalaceMod.Builder.Model.Logic
                 {
                     i++;
                     int ns = i;
-                    while (i < s.Length && (char.IsLetterOrDigit(s[i]) || s[i] == '_' || s[i] == '-')) i++;
+                    while (i < s.Length && (char.IsLetterOrDigit(s[i]) || s[i] == '_')) i++;   // no '-': $a-1 is a minus
                     if (i == ns) throw new ExprException("'$' needs a variable name", start);
                     toks.Add(new Token(Tok.Dollar, s.Substring(ns, i - ns), start));
                     continue;
@@ -230,7 +230,7 @@ namespace PalaceMod.Builder.Model.Logic
                     bool two = i + 1 < s.Length && s[i + 1] == '@';
                     i += two ? 2 : 1;
                     int ns = i;
-                    while (i < s.Length && (char.IsLetterOrDigit(s[i]) || s[i] == '_' || s[i] == '-')) i++;
+                    while (i < s.Length && (char.IsLetterOrDigit(s[i]) || s[i] == '_' || s[i] == '-')) i++;   // ids may have '-': @fire-area
                     if (i == ns) throw new ExprException($"'{(two ? "@@" : "@")}' needs a name", start);
                     toks.Add(new Token(two ? Tok.AtAt : Tok.At, s.Substring(ns, i - ns), start));
                     continue;

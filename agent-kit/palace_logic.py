@@ -487,7 +487,7 @@ def _lex(s: str) -> List[_Tok]:
         if c == "$":
             i += 1
             ns = i
-            while i < n and (_is_letter_or_digit(s[i]) or s[i] in "_-"):
+            while i < n and (_is_letter_or_digit(s[i]) or s[i] == "_"):  # no '-': $a-1 is a minus
                 i += 1
             if i == ns:
                 raise ExprError("'$' needs a variable name", start)

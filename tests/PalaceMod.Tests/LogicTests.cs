@@ -266,7 +266,7 @@ namespace PalaceMod.Tests
 
         public static void BuiltInPresetsAllValidate()
         {
-            Assert.Null(Presets.BuiltInError, "builder-presets.json loads");
+            Assert.Null(Presets.BuiltInError, "logic-presets.json loads");
             Assert.True(Presets.BuiltIn.Count >= 15, "built-ins: " + Presets.BuiltIn.Count);
             foreach (var preset in Presets.BuiltIn)
             {
