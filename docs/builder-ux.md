@@ -672,7 +672,9 @@ changes applied by the overlay at load (after Awake, before Start):
      Totend 1046 (the desert and snow maps are mostly rock, which is ground). Every spawn line still reaches the castle
      on all 9 (Wildbach's "Upper Level Side" only once W4's `GroundGraphs.Scan` replaced the plain rescan). Rocks and cliffs stay: they use `rockMaterial`.
    - Scenery colliders under hidden renderers are disabled too. The host's `invisibleWalls` stay, so the map's
-     boundary still holds.
+     boundary still holds, and so does its `flyerSurface` (inactive in play but with enabled renderers, which every
+     rescan rasterizes): hiding it left Uferwind's fliers' graph 20 nodes instead of 816, and a Saltreach flier line
+     over the sea 174 m off it; its furies were put at an infinite position and the night never ended.
 3. **Cleared only:** the host ground stays, so cliffs, water and paths keep working with no new geometry. The
    host's spawn lines stay where they are.
 4. **Flat field only:** the host's ground renderers and colliders are disabled too. W4's ground layer (see
@@ -845,10 +847,14 @@ after the empty base's scenery hide, before Start.
   hidden (and MeshFusion is kept off them), with the Ground-layer colliders, the invisible walls and the flier surface.
   Ocean-material planes go too unless they reach past both opposite edges of the field (a sea, e.g. Frostsee's,
   stays so the field reads as an island): Moorweg draws its ponds with the ocean material. The generated ground
-  replaces them. Triangles steeper than the ground graphs' max slope (30° on every host; read from the graphs) are
-  drawn with the rock material, so cliffs read as cliffs, and each gets an invisible wall (a prism on the Obstacle
-  layer with a collider only, so the graphs don't see it) the king can't pass: what the king can walk down, he can
-  walk back up, exactly where enemies can. (The Far Bank bug: the river bank was a 60° face of one 2 m cell; the king,
+  replaces them. Triangles steeper than the ground graphs' max slope (the strictest ground graph's, per host: 20° on
+  Frostsee, 30° on Nordfels, 40-50° elsewhere) are drawn with the rock material, so cliffs read as cliffs, and each
+  gets an invisible wall (a prism on the Obstacle layer, from below the ground to above the graphs) the king can't
+  pass: what the king can walk down, he can walk back up, exactly where enemies can. The prisms also have an
+  invisible renderer, so the ground graphs rasterize them as walls: recast's erosion (agent radius) only stops at a
+  span with a missing neighbour, and a steep face's voxels are neighbours wherever it drops less than the climb
+  (0.5 m) per 0.2 m voxel, so without them a 6 m raised ramp carried the large graph to its very edges. The fliers'
+  graph is scanned without them (`LayoutScene.GroundOnlyWall`). (The Far Bank bug: the river bank was a 60° face of one 2 m cell; the king,
   slope limit 45°, slid down it, landed against the water's blocker columns and couldn't climb back; the "invisible
   warrior" to the left was the ford's own bank, another face he couldn't climb.) Slots and the king are put on the
   new ground.
@@ -1404,8 +1410,9 @@ Players' own coding agents (Claude Code and the like) build, check, picture and 
   (stdlib Python CLI: JSON edit ops, offline checks, PNG renders, economy and wave summaries, in-game tests with
   purchase plans), `examples/` (a worked level). `palace.py ref build` caches the catalog and every map's dump from the
   running game; `ref doc` regenerates `reference.md`.
-- Offline path checks run on the cached grid (props and terrain applied; large enemies need ~4 m clearance on
-  terrain, measured: an 8 m ramp is closed to the large graph, 14 m open); the game's `paths` is the authority.
+- Offline path checks run on the cached grid (props and terrain applied; large enemies need the host's large-graph
+  radius as clearance: 2 m on most maps, 4 on Nordfels, 1.5 on Durststein; the map dump's `graphs`, else
+  `HOST_GRAPHS` in palace.py); the game's `paths` is the authority. Measured widths: level-building.md section 7.
 
 ### File-overlap table
 

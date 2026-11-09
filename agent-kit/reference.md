@@ -42,17 +42,17 @@ Even on a `cleared` or `flat` base the host map fixes: **which of its slots `add
 | Temple | - | - | - | - | - | yes | yes | yes | yes |
 | Wall | yes | yes | yes | yes | yes | yes | yes | yes | yes |
 
-| Host | Playable rectangle (m) | Castle to west / east / south / north edge (m) | Castle y | Terrain headroom up / down from the castle (m) |
-|---|---|---|---|---|
-| Nordfels | 134 x 116 | 52 / 82 / 93 / 23 | 0.0 | +30.0 / -8.0 |
-| Durststein | 298 x 194 | 132 / 166 / 68 / 126 | 13.5 | +30.0 / -21.5 |
-| Frostsee | 190 x 180 | 157 / 33 / 122 / 58 | 13.5 | +30.0 / -21.5 |
-| Uferwind | 176 x 204 | 118 / 58 / 112 / 92 | 17.6 | +30.0 / -25.6 |
-| Sturmklamm | 142 x 182 | 96 / 46 / 96 / 86 | 31.0 | +30.0 / -39.0 |
-| Wildbach | 158 x 192 | 84 / 74 / 174 / 18 | 17.6 | +30.0 / -25.6 |
-| Moorweg | 210 x 204 | 110 / 100 / 105 / 99 | 19.2 | +30.0 / -27.2 |
-| Freifort | 208 x 262 | 112 / 96 / 162 / 100 | 8.7 | +30.0 / -16.7 |
-| Totend | 184 x 294 | 119 / 65 / 145 / 149 | 27.9 | +30.0 / -35.9 |
+| Host | Playable rectangle (m) | Castle to west / east / south / north edge (m) | Castle y | Terrain headroom up / down from the castle (m) | Large-enemy clearance (m) | Walkable slope (°) |
+|---|---|---|---|---|---|---|
+| Nordfels | 134 x 116 | 52 / 82 / 93 / 23 | 0.0 | +30.0 / -8.0 | 4 | 30 |
+| Durststein | 298 x 194 | 132 / 166 / 68 / 126 | 13.5 | +30.0 / -21.5 | 1.5 | 45 |
+| Frostsee | 190 x 180 | 157 / 33 / 122 / 58 | 13.5 | +30.0 / -21.5 | 2 | 20 |
+| Uferwind | 176 x 204 | 118 / 58 / 112 / 92 | 17.6 | +30.0 / -25.6 | 2 | 40 |
+| Sturmklamm | 142 x 182 | 96 / 46 / 96 / 86 | 31.0 | +30.0 / -39.0 | 2 | 40 |
+| Wildbach | 158 x 192 | 84 / 74 / 174 / 18 | 17.6 | +30.0 / -25.6 | 2 | 40 |
+| Moorweg | 210 x 204 | 110 / 100 / 105 / 99 | 19.2 | +30.0 / -27.2 | 2 | 40 |
+| Freifort | 208 x 262 | 112 / 96 / 162 / 100 | 8.7 | +30.0 / -16.7 | 2 | 50 |
+| Totend | 184 x 294 | 119 / 65 / 145 / 149 | 27.9 | +30.0 / -35.9 | 2 | 50 |
 
 ## Buildings (slot kinds)
 

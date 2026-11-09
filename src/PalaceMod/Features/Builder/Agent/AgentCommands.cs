@@ -423,6 +423,22 @@ namespace PalaceMod.Builder.Agent
                     if (r.OffGraph) o["warning"] = $"the line is {r.Snap:0} m from walkable ground on {r.Graph}: its enemies start at the nearest walkable point ({R(r.Start?.x ?? 0)}, {R(r.Start?.z ?? 0)}), not on the line";
                     return o;
                 })),
+                // Flier lines: how far each is from the fliers' graph (at its worst point).
+                ["air"] = new JArray(PathCheck.CheckAir(scene).Select(a =>
+                {
+                    var o = new JObject
+                    {
+                        ["line"] = a.Line, ["snap"] = R(a.Snap),
+                        ["at"] = new JArray(R(a.Worst.x), R(a.Worst.z)),
+                        ["start"] = a.Start is Vector3 s ? new JArray(R(s.x), R(s.z)) : null,
+                    };
+                    if (a.Lost) o["beyondReach"] = true;   // past A*'s nearest-node limit: the mod moves its fliers onto the graph
+                    if (a.Snap < 0f) o["warning"] = "there is no fliers' graph: fliers from this line can't move";
+                    else if (a.OffGraph) o["warning"] = $"the line is {a.Snap:0} m from the fliers' graph: its fliers start at its nearest point ({R(a.Start?.x ?? 0)}, {R(a.Start?.z ?? 0)}), not on the line; move it over the map";
+                    return o;
+                })),
+                // What the game found wrong after its last rescan (also logged as a warning): empty graphs, lines cut off.
+                ["problems"] = new JArray(PathCheck.Problems(scene)),
             };
         }
 
