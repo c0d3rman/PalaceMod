@@ -12,7 +12,7 @@
     "id": "door",
     "kind": "prop",
     "visual": {
-     "mesh": "mesh:Gate"
+     "mesh": "mesh:Totend Gate Segment"
     },
     "body": {
      "box": [
