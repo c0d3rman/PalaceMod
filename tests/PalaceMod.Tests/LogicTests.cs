@@ -305,6 +305,15 @@ namespace PalaceMod.Tests
             Has(issues, "levels[0].logic.rules[0].do[1].targeting[0]: needs a filter");
         }
 
+        public static void TargetingScoreNeedsPreferBest()
+        {
+            var issues = ValidateLevel(@"{ ""rules"": [{ ""when"": ""dusk"", ""do"": [
+                { ""do"": ""setTargeting"", ""target"": ""all('enemy')"", ""targeting"": [{ ""filter"": ""player"", ""score"": ""it.hp"" }] },
+                { ""do"": ""setTargeting"", ""target"": ""all('enemy')"", ""targeting"": [{ ""filter"": ""player"", ""prefer"": ""weakest"", ""score"": ""it.hp"" }] }] }] }");
+            Assert.True(!issues.Any(i => i.Path.StartsWith("levels[0].logic.rules[0].do[0]")), "a score alone implies prefer best: " + Errors(issues));
+            Assert.True(issues.Any(i => i.Path == "levels[0].logic.rules[0].do[1].targeting[0].score"), "a score with another prefer is an error: " + Errors(issues));
+        }
+
         public static void PlayPackKeepsUnitsTheLogicNames()
         {
             var fx = JObject.Parse(File.ReadAllText(Directory.GetFiles(RepoFile("tests/logic-examples"), "09-*.json")[0]));

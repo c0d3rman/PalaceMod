@@ -765,6 +765,11 @@ log warns by file). Delete or rename shared items with the `remove_*` / `rename_
 - Without `of`, a rule hears only its owner's events. With `"of": "<filter>"` (and optional `"range"`) it hears that
   event on any matching entity: `{ "on": "death", "of": "foe and unit", "range": 12 }` on a necromancer fires when a
   foe dies within 12 m. Then `subject` is the one that died, `other` its killer, `self` still the necromancer.
+- Combat events name the attacker for every hit: `damaged`/`death` `other` (and `hit`/`kill` on the attacker) is
+  the king, a unit, a tower or other building, the shooter of a projectile, or whoever left the burning ground or hot
+  oil that hurt it. Only scenery hazards and a `damage` action without a `source` leave it `none`.
+- `built` and `upgraded` fire for every build slot, map or added (`add:<id>`), however it's built: the king,
+  `palace.py build`, or the `building` action. Use them instead of polling `self.alive` or `self.level`.
 - The level script hears time and night events (`levelStart`, `every`, `dusk`, `dawn`, `waveCleared`, `goldChanged`,
   `kingAction`, `signal`, `varChanged`...) directly; entity events (`death`, `damaged`, `spawn`, `enter`...) need `of`.
   In the level script `foe`/`ally` mean enemy/player.
@@ -792,8 +797,9 @@ One small, pure language everywhere: conditions, numbers, selectors, positions.
 - **Names**: roles (`self subject other spawned it outer king castle level`), per-event aliases (`killer`, `victim`,
   `attacker`, `target`, `entrant`, `collector`, `sender`...), `event.value` / `event.pos` / `event.name` /
   `event.choice`, `@name` (a place or attached object), `@@id` (a template), `$var` (a level variable), `x.$var` (an
-  entity variable), globals (`night`, `isNight`, `isDay`, `time`, `nightTime`, `nightProgress`, `gold`, `income`,
-  `enemiesAlive`, `difficulty`, `nights`).
+  entity variable), globals (`night`, `isNight`, `isDay`, `time`, `nightTime`, `nightProgress`, `gold`, `income`
+  (what the buildings paid at the last dawn, already set when `dawn` rules run), `enemiesAlive`, `difficulty`,
+  `nights`).
 - **Properties**: `.hp .maxHp .hpPct .alive .elite .pos .x .y .z .facing .team .kind .template .labels .level .cost
   .buildingType .age .target .owner .id` (`.maxHp` is the live value, after the night's difficulty and elite; `@@x.hp`
   is the template's catalog value), every stat by name (`.moveSpeed`, `.damageMult`, `.income`...), methods
@@ -873,7 +879,7 @@ runs once per member and the other params are evaluated per member with `it` bou
 | `pickup` | collectibles | `by` (filter, e.g. `king`), `radius`, `magnet`, `consume`; event `pickup` |
 | `interact` | king-usable | `prompt` (`{cost}` shows the cost), `cost`, `when` day/night/always, `radius`, `repeat`, `choices` (up to 4 `{id, label, description, cost, icon}`: the game's upgrade-choice popup; the chosen cost is paid and `event.choice` is its id); event `interact` |
 | `attacks` | turrets, units | `[{ "cooldown", "range", "targeting", "launch": {"entity", "from"} \| "weapon", "do", "replace", "when" }]`; the unit's base attacks stay unless `replace` |
-| `targeting` | attackers | ordered list of filters or `{filter, range, prefer, score}`; works on vanilla towers too (`setTargeting`) |
+| `targeting` | attackers | ordered list of filters or `{filter, range, prefer, score}`: the first rule with a match in range wins (a list with no match leaves it idle: it never falls back to anything the list excludes); `score` (an expression over `it`) picks the highest-scoring match, e.g. `{"filter": "player and building", "score": "it.income"}`, else `prefer` nearest (default), farthest, weakest, strongest or random; works on units, vanilla towers and attached slots (`attach` `targeting`, or `setTargeting`) |
 | `movement` | units | `mode` pathfind/direct/hold/path, `path`, `then`, `speed`, `keepDistance`, `kite`, `flee`, `wander`, `home`, `surfaces` |
 
 A number field may be an expression evaluated when the entity appears: `"hp": "=100 * night"`.

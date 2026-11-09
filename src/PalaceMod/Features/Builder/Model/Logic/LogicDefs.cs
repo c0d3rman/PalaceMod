@@ -524,9 +524,9 @@ namespace PalaceMod.Builder.Model.Logic
     {
         public string Filter;
         public LNum Range;
-        /// <summary>nearest (default) | farthest | weakest | strongest | random | best (+ score).</summary>
+        /// <summary>nearest (default; best when a score is given) | farthest | weakest | strongest | random | best (+ score).</summary>
         public string Prefer;
-        /// <summary>For prefer "best": an expression over `it`; highest wins.</summary>
+        /// <summary>An expression over `it`; highest wins (implies prefer "best").</summary>
         public string Score;
         public JObject Extra;
 

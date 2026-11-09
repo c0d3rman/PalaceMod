@@ -46,7 +46,8 @@ namespace PalaceMod.Builder.Logic
                 return last;
             }
         }
-        public float Facing => Go != null ? Go.transform.eulerAngles.y : 0f;
+        /// <summary>A unit's root never turns, its model does (Bodies.Heading).</summary>
+        public float Facing => Go != null ? Bodies.Heading.Yaw(Go) : 0f;
         float IEntityBody.Hp => hp != null ? hp.HpValue : 0f;
         public float MaxHp => hp != null ? hp.maxHp : 0f;
 

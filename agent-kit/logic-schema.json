@@ -34,7 +34,7 @@
     {
       "name": "damaged",
       "group": "Combat",
-      "description": "It takes damage (not when modifiers reduce it to 0).",
+      "description": "It takes damage (not when modifiers reduce it to 0). `other` is who dealt it: the king, a unit, a tower or building, a projectile's shooter, or whoever left burning ground or hot oil there; none for scenery hazards and plain `damage` actions without a source.",
       "params": [
         {
           "name": "min",
@@ -517,7 +517,7 @@
     {
       "name": "built",
       "group": "Buildings",
-      "description": "(build slots) The player builds it.",
+      "description": "(build slots, map or added) It's built: by the king, `palace.py build` or the `building` action.",
       "params": [
         {
           "name": "level",
@@ -535,7 +535,7 @@
     {
       "name": "upgraded",
       "group": "Buildings",
-      "description": "(build slots) The player upgrades it.",
+      "description": "(build slots, map or added) It's upgraded (any way it's built).",
       "params": [
         {
           "name": "level",
@@ -2821,7 +2821,7 @@
       "on": "entity",
       "name": "facing",
       "returns": "number",
-      "description": "Its yaw in degrees (0 = north)."
+      "description": "Its yaw in degrees (0 = north, clockwise): where a unit's or the king's model faces (its walking direction, or its target while attacking), else its own rotation."
     },
     {
       "on": "entity",
@@ -3095,7 +3095,7 @@
     },
     {
       "name": "income",
-      "description": "The last dawn's payout.",
+      "description": "The gold the buildings paid at the last dawn (`income` stats applied), already counted when `dawn` rules run; the coins themselves land over the next seconds.",
       "type": "number"
     },
     {
@@ -3428,7 +3428,7 @@
     "enum": "one of the listed options",
     "actions": "a nested list of actions",
     "options": "[{ \"weight\": 2, \"do\": [actions] }, ...]",
-    "targeting": "a targeting list: filter strings or { \"filter\", \"range\", \"prefer\", \"score\" }",
+    "targeting": "a targeting list: filter strings or { \"filter\", \"range\", \"prefer\", \"score\" } (a score picks the highest-scoring match)",
     "movement": "a movement block (mode, path, speed, keepDistance, kite, flee, wander, home)",
     "any": "an expression of any type",
     "for": "seconds, or \"night\" / \"day\" (until the next dawn / dusk)",
