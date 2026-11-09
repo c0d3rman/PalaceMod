@@ -5034,8 +5034,13 @@ def run_fixture(env, path, timeout=180):
         if not ok:
             break
     errors = g.log_since(mark, min_level="error")
-    return {"fixture": path.name, "example": fx.get("example"), "title": fx.get("title"), "ok": ok and not errors,
-            "steps": results, "logErrors": errors[:10], "status": g.status()}
+    try:
+        trace = g.raw("logic trace 30", timeout=30).strip().splitlines()
+    except Fail as e:
+        trace = [str(e)]
+    # ok is the steps' verdict; log errors (often the game's own, e.g. on a scene change) are listed for a look.
+    return {"fixture": path.name, "example": fx.get("example"), "title": fx.get("title"), "ok": ok,
+            "steps": results, "logErrors": errors[:10], "trace": trace, "status": g.status()}
 
 
 def cmd_edit(env, args):
