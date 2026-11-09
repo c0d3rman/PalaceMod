@@ -334,6 +334,12 @@ namespace PalaceMod
         /// <summary>Whether the player is typing into a field right now.</summary>
         public static bool Active => editing != null;
 
+        /// <summary>The text typed so far (null when not typing), for live checks such as an expression's error line.</summary>
+        public static string CurrentText => editing != null ? text.ToString() : null;
+
+        /// <summary>The ModField being typed into (null when typing into something else, or not typing).</summary>
+        public static ModField CurrentField { get; private set; }
+
         /// <summary>True while typing and on the frame typing ended, when game menu input is held back.</summary>
         internal static bool BlocksInput => Active || endFrame == Time.frameCount;
 
@@ -349,6 +355,7 @@ namespace PalaceMod
                 target.Override = shown;
                 target.Refresh();
             }, initial, onCommit, maxLength, allowNewlines, hint);
+            CurrentField = target;
         }
 
         /// <summary>Starts typing into any text: <paramref name="show"/> gets the text to display while typing (with the
@@ -359,6 +366,7 @@ namespace PalaceMod
         {
             if (alive == null || show == null) return;
             if (Active) End(confirm: true);
+            CurrentField = null;
             editing = new Target { Label = label, Alive = alive, Show = show };
             commit = onCommit;
             multiline = allowNewlines;
@@ -383,6 +391,7 @@ namespace PalaceMod
             string result = text.ToString();
             editing = null;
             commit = null;
+            CurrentField = null;
             heldKey = KeyCode.None;
             endFrame = Time.frameCount;
             // Back to the widget's own value before committing, so the commit's own refresh shows the new value.

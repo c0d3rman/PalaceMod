@@ -22,6 +22,33 @@ namespace PalaceMod.Builder.Model.Logic
             var expanded = Presets.Expand(pack, issues);
             if (expanded == null) return;
             new Walker(pack, expanded, game, issues).Run();
+            UnknownFields(JObject.FromObject(pack, Serializer), "pack", "", issues);
+        }
+
+        /// <summary>Warns about fields no def knows (a typo like "hitable" would otherwise be silently kept), walking
+        /// LogicSchema.Components. Fields starting with '_' are tool marks and skipped.</summary>
+        public static void UnknownFields(JToken node, string comp, string path, List<ValidationIssue> issues)
+        {
+            if (node is not JObject o || !LogicSchema.Components.TryGetValue(comp, out var spec)) return;
+            foreach (var p in o.Properties())
+            {
+                string here = path.Length == 0 ? p.Name : $"{path}.{p.Name}";
+                if (spec.Children.TryGetValue(p.Name, out var child)) { UnknownFields(p.Value, child, here, issues); continue; }
+                if (spec.Children.TryGetValue(p.Name + "[]", out child))
+                {
+                    if (p.Value is JArray a) for (int i = 0; i < a.Count; i++) UnknownFields(a[i], child, $"{here}[{i}]", issues);
+                    continue;
+                }
+                if (spec.Children.TryGetValue(p.Name + "{}", out child))
+                {
+                    if (p.Value is JObject m) foreach (var q in m.Properties()) UnknownFields(q.Value, child, comp == "logic" && p.Name == "attach" ? $"{here}[\"{q.Name}\"]" : $"{here}.{q.Name}", issues);
+                    continue;
+                }
+                if (p.Name.StartsWith("_") || spec.Fields.Contains(p.Name)) continue;
+                // Only the behaviour engine's blocks are checked; the older pack fields keep their own validation.
+                if (comp is "pack" or "unit" or "level" or "visual") continue;
+                issues.Add(new ValidationIssue(Severity.Warning, here, $"unknown field \"{p.Name}\"" + ExprChecker.Suggest(p.Name, spec.Fields) + " (it's kept but does nothing)"));
+            }
         }
 
         /// <summary>Whether the pack uses the behaviour engine at all (rules, logic, templates, statuses or presets).</summary>
@@ -712,7 +739,11 @@ namespace PalaceMod.Builder.Model.Logic
                 string kind = e.Kind;
                 if (!place && kind == null) Error(p + ".kind", $"needs a kind: {string.Join(", ", EntityKinds.Templates)}");
                 else if (kind != null) Enum(kind, p + ".kind", place ? EntityKinds.Places : EntityKinds.Templates);
-                var owner = new Owner { Path = p, Kind = kind ?? "prop", Vars = vars, Level = level, Rules = e.Rules };
+                // A place that names a template is that template's kind (a unit template places a unit).
+                string ownerKind = kind ?? (place && e is PlaceDef pd && pd.Entity != null
+                    ? pack.FindEntity(pd.Entity)?.Kind ?? (pack.FindUnit(ContentRef.Parse(pd.Entity).Id ?? pd.Entity) != null || pd.Entity.StartsWith("vanilla:") ? "unit" : null)
+                    : null) ?? "prop";
+                var owner = new Owner { Path = p, Kind = ownerKind, Vars = vars, Level = level, Rules = e.Rules };
                 var scope = Scope(owner, null);
                 CheckLabels(e.Labels, p + ".labels");
                 CheckVarDecls(e.Vars, p + ".vars");
@@ -733,6 +764,9 @@ namespace PalaceMod.Builder.Model.Logic
                     Num(e.Body.Hp, p + ".body.hp", scope, 1, 1000000);
                     if (e.Body.Box != null && e.Body.Box.Length != 2) Error(p + ".body.box", "must be [width, depth]");
                     if (e.Body.Hp != null && e.Body.Hittable != true) Warn(p + ".body.hp", "hp only matters when hittable is true");
+                    for (int i = 0; i < (e.Body.Tags?.Count ?? 0); i++)
+                        if (!LogicSchema.Tags.Contains(e.Body.Tags[i])) Error($"{p}.body.tags[{i}]", $"unknown game tag \"{e.Body.Tags[i]}\"" + ExprChecker.Suggest(e.Body.Tags[i], LogicSchema.Tags));
+                    if (e.Body.Tags != null && e.Body.Hittable != true) Warn(p + ".body.tags", "tags only matter when hittable is true");
                 }
                 if (e.CountsAsEnemy == true && (e.Body?.Hittable != true || e.Team != Teams.Enemy))
                     Warn(p + ".countsAsEnemy", "only a hittable enemy-team entity keeps the night open");
@@ -811,7 +845,6 @@ namespace PalaceMod.Builder.Model.Logic
                     Num(it.Radius, p + ".interact.radius", scope, 0.5, 30);
                     if (it.Choices != null)
                     {
-                        Warn(p + ".interact.choices", "choices aren't supported by this PalaceMod yet: the king's interact uses cost and prompt only");
                         if (it.Choices.Count < 1 || it.Choices.Count > 4) Error(p + ".interact.choices", "1 to 4 choices");
                         var ids = new HashSet<string>();
                         for (int i = 0; i < it.Choices.Count; i++)

@@ -71,14 +71,14 @@
       "do": "spawn",
       "entity": "vanilla:P Melee",
       "count": 3,
-      "at": "vec(-4, -14)",
+      "at": "vec(20, 10)",
       "spread": 1,
       "team": "player"
      },
      {
       "do": "spawn",
       "entity": "converter",
-      "at": "vec(-4, -14)"
+      "at": "vec(20, 10)"
      }
     ]
    },

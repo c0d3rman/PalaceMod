@@ -432,6 +432,7 @@ namespace PalaceMod.Builder.Studio
         private static bool CancelOperation()
         {
             if (pick != null) { pick = null; StudioDock.OnToolChanged(); return true; }
+            if (Studio.RunCancelHandlers()) return true;
             try { if (Tool != null && Tool.Cancel()) return true; }
             catch (Exception e) { Log.For<BuilderManager>().Caught($"Studio tool {Tool?.Id} Cancel failed", e); }
             return false;

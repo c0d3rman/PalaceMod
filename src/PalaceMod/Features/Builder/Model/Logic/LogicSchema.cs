@@ -483,12 +483,14 @@ namespace PalaceMod.Builder.Model.Logic
             Named(Globals, "income", "The last dawn's payout.", LType.Number);
             Named(Globals, "enemiesAlive", "Enemies on the map.", LType.Number);
             Named(Globals, "difficulty", "The run's difficulty multiplier.", LType.Number);
+            Named(Globals, "none", "No entity (what a selector gives when nothing matches, or a role the event doesn't have): `other != none`.", LType.Any);
 
             // ---- Properties -----------------------------------------------------------------------------------
             Prop(LType.Entity, "hp", LType.Number, "Hit points.");
             Prop(LType.Entity, "maxHp", LType.Number, "Maximum hit points.");
             Prop(LType.Entity, "hpPct", LType.Number, "hp / maxHp, 0..1.");
             Prop(LType.Entity, "alive", LType.Bool, "Not dead (a knocked-out building is not alive).");
+            Prop(LType.Entity, "elite", LType.Bool, "An elite enemy (the game's elite flag).");
             Prop(LType.Entity, "pos", LType.Position, "Its position.");
             Prop(LType.Entity, "x", LType.Number, "Its x."); Prop(LType.Entity, "y", LType.Number, "Its y (height)."); Prop(LType.Entity, "z", LType.Number, "Its z.");
             Prop(LType.Entity, "facing", LType.Number, "Its yaw in degrees (0 = north).");
@@ -555,7 +557,7 @@ namespace PalaceMod.Builder.Model.Logic
                 ("player", "The player's side."), ("enemy", "The enemy side."), ("neutral", "Neither side."),
                 ("unit", "Units (not buildings)."), ("building", "Buildings."), ("prop", "Props."), ("projectile", "Projectiles."), ("area", "Areas."),
                 ("pickup", "Pickups."), ("coin", "The game's coins."), ("king", "The king."), ("castle", "The castle."), ("self", "The rule's owner."),
-                ("melee", "Melee fighters."), ("ranged", "Ranged fighters."), ("alive", "Alive."), ("dead", "Dead or knocked out."),
+                ("melee", "Melee fighters."), ("ranged", "Ranged fighters."), ("alive", "Alive."), ("dead", "Dead or knocked out."), ("elite", "Elite enemies."),
                 ("logic", "Logic objects."), ("line", "Spawn lines."), ("point", "Points."), ("path", "Paths."),
                 ("#label", "Has a label."), ("is:<template>", "Made from a template."), ("in:@area", "Inside an area (in:self inside this area)."),
                 ("has:<status>", "Has a status."), ("type:<Kind>", "A building of that kind (Mill, Tower...)."), ("where(expr)", "An expression over `it`."),
@@ -658,8 +660,81 @@ namespace PalaceMod.Builder.Model.Logic
             o["inputs"] = JObject.FromObject(Inputs);
             o["paramTypes"] = new JObject(ParamTypes.Select(t => new JProperty(t, ParamTypeDocs.TryGetValue(t, out var d) ? d : "")));
             o["tags"] = new JArray(Tags.OrderBy(t => t, StringComparer.Ordinal));
+            o["components"] = new JObject(Components.Values.Select(c => new JProperty(c.Name, new JObject
+            {
+                ["fields"] = new JArray(c.Fields),
+                ["children"] = JObject.FromObject(c.Children),
+            })));
             o["caps"] = new JObject(LogicCapsDef.Defaults.Fields().Select(f => new JProperty(f.Name, new JObject { ["default"] = f.Default, ["max"] = f.Max })));
             return o;
+        }
+
+        /// <summary>A JSON block's known fields and where its nested blocks are: "key" (an object), "key[]" (each item
+        /// of a list), "key{}" (each value of a map). Read from the defs' JsonProperty names, so it can't drift.</summary>
+        public sealed class ComponentSpec
+        {
+            public string Name;
+            public string[] Fields;
+            public Dictionary<string, string> Children = new(StringComparer.Ordinal);
+        }
+
+        public static readonly Dictionary<string, ComponentSpec> Components = BuildComponents();
+
+        private static string[] FieldsOf(Type t) => t.GetProperties()
+            .Select(p => (p.GetCustomAttributes(typeof(Newtonsoft.Json.JsonPropertyAttribute), true).FirstOrDefault() as Newtonsoft.Json.JsonPropertyAttribute)?.PropertyName)
+            .Where(n => n != null).Distinct().ToArray();
+
+        private static Dictionary<string, ComponentSpec> BuildComponents()
+        {
+            var d = new Dictionary<string, ComponentSpec>(StringComparer.Ordinal);
+            void C(string name, Type t, params (string Key, string Comp)[] children)
+            {
+                var c = new ComponentSpec { Name = name, Fields = FieldsOf(t) };
+                foreach (var (k, v) in children) c.Children[k] = v;
+                d[name] = c;
+            }
+            var template = new[] { ("visual", "visual"), ("body", "body"), ("projectile", "projectile"), ("mover", "mover"), ("area", "area"),
+                ("pickup", "pickup"), ("interact", "interact"), ("attacks[]", "attack"), ("movement", "movement") };
+            C("pack", typeof(DesignPack), ("units[]", "unit"), ("entities[]", "entity"), ("statuses[]", "status"), ("presets[]", "preset"), ("levels[]", "level"));
+            C("unit", typeof(UnitDef), ("movement", "movement"), ("attacks[]", "attack"));
+            C("level", typeof(LevelDef), ("logic", "logic"));
+            C("entity", typeof(EntityDef), template);
+            C("place", typeof(PlaceDef), template);
+            C("visual", typeof(VisualsDef));
+            C("body", typeof(BodyDef));
+            C("projectile", typeof(ProjectileDef));
+            C("mover", typeof(MoverDef), ("swing", "swing"), ("pose{}", "pose"), ("poses{}", "pose"));
+            C("swing", typeof(SwingDef));
+            C("pose", typeof(PoseDef));
+            C("area", typeof(AreaDef), ("shape", "shape"));
+            C("shape", typeof(ShapeDef), ("circle", "circle"), ("rect", "rect"), ("polygon", "polygon"));
+            C("circle", typeof(CircleDef));
+            C("rect", typeof(RectDef));
+            C("polygon", typeof(PolygonDef));
+            C("pickup", typeof(PickupDef));
+            C("interact", typeof(InteractDef), ("choices[]", "choice"));
+            C("choice", typeof(ChoiceDef));
+            C("attack", typeof(AttackDef), ("launch", "launch"));
+            C("launch", typeof(LaunchDef));
+            C("movement", typeof(MovementDef), ("kite", "kite"), ("flee", "flee"), ("wander", "wander"));
+            C("kite", typeof(KiteDef));
+            C("flee", typeof(FleeDef));
+            C("wander", typeof(WanderDef));
+            C("status", typeof(StatusDef), ("mods{}", "mod"), ("visual", "statusVisual"));
+            C("mod", typeof(ModDef));
+            C("statusVisual", typeof(StatusVisualDef));
+            C("preset", typeof(PresetDef), ("params{}", "presetParam"));
+            C("presetParam", typeof(PresetParamDef));
+            C("logic", typeof(LogicDef), ("places[]", "place"), ("attach{}", "attach"), ("hud[]", "hud"), ("kingActions[]", "kingAction"), ("caps", "caps"));
+            C("attach", typeof(AttachDef));
+            C("hud", typeof(HudDef));
+            C("kingAction", typeof(KingActionDef), ("uses", "uses"));
+            C("uses", typeof(UsesDef));
+            C("caps", typeof(LogicCapsDef));
+            // A preset's extra fields are its components; a place's preset/with and the expansion marks are known.
+            d["preset"].Fields = d["preset"].Fields.Concat(d["entity"].Fields).Distinct().ToArray();
+            d["place"].Fields = d["place"].Fields.Concat(["_preset"]).ToArray();
+            return d;
         }
 
         /// <summary>Dump() plus the built-in presets: agent-kit/logic-schema.json and catalog.json's "logic".</summary>

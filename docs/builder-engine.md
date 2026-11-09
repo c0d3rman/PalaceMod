@@ -209,7 +209,33 @@ the scan; switched off, its footprint is a hole unless its deck is higher than a
 - Node tags work as per-unit walkability: a dual NavmeshCut splits the navmesh along an area's outline, a
   `GraphUpdateObject` (no physics) tags the triangles inside (under 35 ms), and a unit whose `Seeker.traversableTags`
   and snap constraint exclude that tag stops at the edge (within about 1 m: RVO avoidance pushes the front row in),
-  while units without the limit walk through. See `body.walkTag` and `movement.walk`.
+  while units without the limit walk through. See "Surfaces" below.
+
+**Surfaces** (per-unit walkability): an area with `surface` makes its ground a named surface.
+
+```jsonc
+"area": { "shape": { "rect": { "size": [30, 4] } },
+          "surface": { "name": "ladder", "allow": "melee", "cost": 1 } }   // or just "surface": "ladder"
+"movement": { "surfaces": { "ladder": true, "mud": 3, "lava": false } }  // a unit's own override: allow, cost, forbid
+```
+
+- A dual NavmeshCut splits the ground graphs along the area's outline, and the triangles inside get one of 31 A*
+  node tags (one per surface name per level).
+- `allow` (a filter, default everything) says who may walk it; `cost` multiplies the path cost for those who may
+  (roads below 1, mud above 1).
+- A unit that may not walk it never paths over it and isn't snapped onto it: its Seeker's traversable tags and its
+  movement's snap constraint leave the tag out, and it walks to the nearest point it can reach. Every unit gets its
+  mask when it spawns (vanilla wave units too, while any surface exists) and again when a surface appears, moves or
+  goes; tags are re-applied after every graph rescan.
+- Combined with a walkable body this is "only melee can climb the wall" (a walkable rampart whose area surface
+  allows `melee`), "flyers only" (`allow: "Flying"`), toll roads, and slow ground that some units avoid.
+
+**Spaces** (a separate arena): walkable bodies placed outside the host map's graphs (an arena 300 m off the map, a
+dream stage, a boss room) get pathfinding of their own. Each ground graph is duplicated as `PalaceBuilder space
+<graph>`, bounded to those decks and scanned on its own (small, so fast), and every unit's graph masks gain the copies,
+so the same unit walks on the map or in a space. `teleport` moves units and the king between them, and the camera
+follows the king. The fliers' graph isn't copied: fliers in a space need `movement.mode: "direct"`. The space is empty
+apart from what the level places there (props, areas, lights come from the map's own scheme).
 
 **`area`**: a zone that detects what's inside it.
 
@@ -222,7 +248,9 @@ the scan; switched off, its footprint is a hole unless its deck is higher than a
 
 Events: `enter` / `exit` (`other` is the entity), `inside` (for each entity inside, after every full `tick` it has
 spent inside), `empty`, `occupied`.
-In filters, `in:@moat` tests membership.
+In filters, `in:@moat` tests membership. Areas poll on the world's 10 Hz steps and watch everything the selectors see,
+including projectiles in flight (the game's own arrows too, see "Projectiles in flight"), so a field that slows,
+bends or turns arrows is an area plus `setStat timeScale`, `drift` or `taunt`.
 
 **`pickup`**: `{ "by": "king", "radius": 1.5, "magnet": 4 }` (`by` is a filter: `"king"`, `"player and unit"`).
 It fires `pickup` (`other` is the collector), then destroys itself unless `"consume": false` (then a rule decides,
@@ -233,7 +261,16 @@ e.g. with `destroy`).
 "cost" }`; each `cost` replaces the top-level one and may be an `=` expression) shows the game's upgrade-choice popup
 instead, and `event.choice` is the chosen id: a loan of 100, 250 or
 500, or "rebuild as tower / house". It fires `interact` (`other` is the king) after the cost is
-paid; with `cost` it uses the game's own pay-hold interaction.
+paid; with `cost` it uses the game's own pay-hold interaction. The prompt shows in the game's own tooltip, and the
+coins fill a copy of a build slot's coin display. With `choices`, the game's upgrade-choice popup opens on interact
+(each choice also takes `description` and `icon`, an `asset:` sprite); the picked choice's cost is paid at once (a
+"not enough gold" notice otherwise) and `interact` fires with `event.choice`; Esc cancels without paying.
+
+**Projectiles in flight.** The game's own projectiles (`AimbotProjectile`: arrows, bolts, magic, boulders) are
+entities of kind `projectile` while they fly, made the first time an area or selector sees one; their `owner` is the
+shooter. `timeScale` and `projectileSpeed` scale their flight, drifts move them (a homing arrow re-aims, so wind bends
+its path), `taunt` on one sends it at a new target (it then damages that target with the shooter's weapon) or at a
+point (it lands there and hits nothing), and `destroy` removes it. Builder projectiles take the same verbs.
 
 **`attacks`**: an automatic attack, like the game's `AutoAttack` but generic. A unit's base attacks stay unless
 `"replace": true`.
@@ -499,6 +536,36 @@ which accepts an entity or a position.
 The action set is closed, and each action is generic. A new action needs a mod update, so additions are judged by
 whether they unlock many behaviours rather than one.
 
+World and Show details (as built, `Logic/Bodies/World/`):
+
+- `gold` with `at`: up to 40 of the game's income coins rise there and fly to the king, each paying 1 on arrival
+  (the rest is paid at once). A negative amount is `SpendCoins` (the game's spend effect on the king).
+- `dropCoins`: the enemy drop coin, in the ring a dying enemy drops them in (max 100).
+- `building`: without `slot`, the action's `target` (default self). `slot` also takes `castle` and a slot's object
+  name. `build`/`upgrade` are free and pick `branch` (default: a random one from the logic random source); they do
+  nothing when the slot can't be upgraded (castle level, max level, locked). `demolish` undoes each applied upgrade's
+  switched objects and hp, hides the slots it had switched on, and leaves castle-upgrade perks in place. Locks and
+  `setIncome` survive savestates; `setCost` prices the next level.
+- `waves`: `night` is 1-based; the default is the night after the current or coming one's index (by day: the coming
+  night). A night that is running counts as `"current"`. `addSpawn` defaults: `count` 1, `interval` 0.5, `line` the
+  night's first line. `endNight` removes the remaining enemies without coins or death events; `skipNight` works by
+  day only and skips the coming night (not the last). Future-night edits are replayed after a savestate load.
+- `spawnGroup` spawns like the game's death spawns (Instantiate + `Spawn.AdjustEnemyParametersAfterSpawn`), `interval`
+  default 0.5, coins spread over the group; at night the night stays open until the group is done. `clearRemaining`
+  on the running night drops pending groups too.
+- `effect` ids are the game's effect prefabs (`builder dump` → `effects`) plus short aliases: `smoke`, `dust_small`,
+  `dust_large`, `explosion`, `burst`, `summon`, `spikes`, `slash`, `hit`, `fire_small`, `ward`, `coins`, `blood`,
+  `impact`, `goo`, `ally_death`. `sound` ids are the game's AudioSet clips in camelCase (`builder dump` → `sounds`).
+  Status `visual.fx` uses the same catalog, parented to the carrier.
+- `setVisual`: `tint`/`glow` paint the model (FlatKit lit and shaded colours); `glow` is a colour, `true` (gold) or
+  0..1; `scale` multiplies the original scale; `mesh` takes the `visuals.mesh` forms. With `for`, all of it reverts.
+- `hud` lines stack at the top right (under the game's night-score panel while it shows), re-evaluated every 0.25 s,
+  hidden while a menu is open. `icon` is an `asset:` sprite or a unit id (its marker icon).
+- `marker`: one per `on` entity or point; `for: 0` removes it; without `for` it lasts while `on` exists. `icon` as for
+  `hud` (default: the entity's own marker icon).
+- `shake`: the game's camera punch scaled by `strength`; off when the player disabled screen shake.
+- Dev: `logic-world status | slots | hud | fx | sounds | gallery`.
+
 ### Statuses
 
 ```jsonc
@@ -604,7 +671,7 @@ Using a preset is an entry in `rules`: `{ "preset": "split-on-death", "with": { 
 the pack is compiled, with `{param}` substituted as a typed value, so the validator checks the result with paths
 into the preset. Presets can also carry components (`"movement"`, `"area"`, ...), merged under the entity's own.
 
-- **Built-in presets** ship in the DLL (`Assets/builder-presets.json`) and are just data. They include the logic
+- **Built-in presets** ship in the DLL (`Assets/logic-presets.json`) and are just data. They include the logic
   objects: Timer, Counter, Relay (delay), Gate (AND of N signals), Toggle, Random router, Spawner, Lever (interact),
   Pressure plate (area), Moving wall (mover), Door (poses), Sign (message), Pickup (gold).
 - **Library presets** live in `PalaceBuilder/library/presets/<id>.json`, next to levels and enemies (R2-C1's store).
@@ -626,7 +693,7 @@ into the preset. Presets can also carry components (`"movement"`, `"area"`, ...)
   the typed value; inside a longer string the value is inserted as text (an `=expr` value as `(expr)`). Preset vars,
   labels and components merge under the owner's own. Every produced rule carries `_src` (the JSON path of its use,
   e.g. `units[1].rules[0] (preset split-on-death).rules[0]`), which errors and the trace show. Lookup: the pack's
-  presets, then the library's (`Presets.Library`), then the built-ins (`Assets/builder-presets.json`, 21 presets).
+  presets, then the library's (`Presets.Library`), then the built-ins (`Assets/logic-presets.json`, 21 presets).
 - **Library.** Entities, statuses and presets are library items like enemies (`library/entities|statuses|presets/<id>.json`,
   `Model/LibraryStore.Logic.cs`): workspaces and the composed pack hold all of them, `SaveWorkspace` writes changed
   ones, `Export` copies those the exported levels and enemies use (following template, status and preset references
@@ -878,6 +945,48 @@ limits), and `reference.md` gets the generated schema.
 │ [+ rule]  [+ preset ▾]                                            │
 └───────────────────────────────────────────────────────────────────┘
 ```
+
+**As built (L3, `Features/Builder/Studio/Logic/`).** Where it differs from the sketch below, this wins:
+
+- **Behaviour tab** (a right-panel tab, `Studio.AddPanel`): the selected thing's name (`@name`), labels, variables,
+  place fields (areas: shape, size, watches, shown; interactables: prompt, cost, usable; paths: points) and its rules
+  as one-line sentences ("When this dies → Spawn Slime × 2 at this"), plus its wires. With nothing selected it's the
+  level: variables, the level script, king actions, HUD lines and limits. The Inspector gets a one-row "Behaviour"
+  summary that jumps there.
+- **Rule editor**: a 620 px panel beside the right panel (the 340 px panel is too narrow for cards). When / If / Then
+  top to bottom; an action row opens to its fields, nested lists (`then`, `else`, `onImpact`, `choose` options) indent
+  under it. Options (once, cooldown, starts on, id, note) and Duplicate / Copy (JSON) / Save as preset / Delete at the
+  foot. Pickers (events, actions, entities, filters, templates, variables, signals, statuses, stats) open in the same
+  panel, not ModPopups: popups can't scroll, and lists of 50 actions must. Esc closes the picker, then the editor.
+- **Fields**: numbers step with the arrows and take a typed number or formula; formulas and filters are checked as
+  you type by the engine's `ExprChecker` (the error shows under the field, with its column); entity fields offer the
+  event's roles, `@names`, Pick on the map (gives the thing a name such as `tower-3` if it has none; place ids are `counter1`, `pressure-plate1`), Nearest / Every… within / Random /
+  Weakest / Strongest / Farthest (a team + kind + extra-terms filter builder), and a typed formula.
+- **Params come from `LogicSchema`** (`LogicSchemaBridge`): the Studio keeps only phrasing, picker categories and
+  which fields a card shows; an event or action only the registry has still gets a plain card.
+- **Placed logic** (`logic.places`) are Studio items `place:<id>` through a new shell extension point,
+  `Studio.AddItemSource`: picked, selected, moved, turned, duplicated and deleted like props, drawn as a coloured
+  ring, an area's outline, or a stand-in box at a solid body's size.
+- **Logic palette tab** (`Studio.AddPaletteTab`): Area, Point and Path, then every built-in preset of category
+  "Logic". They are placed unpacked (kind, components, vars and rules with the params' defaults), so their cards edit
+  like any rule; outputs are rules with an empty or signal-only Then.
+- **Wire tool** (J): drag (or click, click) from one thing to another; the panel lists the source's outputs, then its
+  events; then the target's built-in inputs, its own "gets signal" inputs, or a new signal (which opens the target's
+  new listener). Wires draw as arcs labelled "event → input", coloured by signal; all of them while the tool is
+  active or View ▾ Wires is on, else the selection's. A wire's row in the Behaviour tab removes both rules.
+- **Limits**: the level's `logic.caps` as number fields with the defaults; raising one marks it and shows "Raised
+  limits may lag" (the validator warns too).
+- **Shared enemies**: the Enemy Studio's Behaviour tab shows "Affects the level" when a unit's rules give gold, spawn,
+  change nights, end the level, set level variables or signal everyone.
+- **Enemy Studio**: Behaviour replaces Abilities; a Moves tab edits targeting (ordered filters with range and
+  preference), movement (mode, speed, keep away, kite, wander, flee) and extra attacks (`EnemyDock.AddTab`).
+- **Play mode**: a "Logic" play panel with live level variables (editable), Send a signal, the trace in words (the
+  rule's sentence, its value and other, throttles and errors in red) and the count of spawned things; rule cards show
+  "fired N×"; a pip rises over a thing when its rule fires (View ▾ Rule pips).
+- **Dev**: `builder-logic state | owner | rules | open | new | act | press <text> | set | place | wire | unwire |
+  wires | json | check | rows | tab | close` drives all of it the way the mouse does.
+
+The original sketch:
 
 - **Behaviour tab.** Every selected thing gets one: a slot, a prop, a line, a placed entity, an area or the castle,
   through `Studio.AddInspectorSection`. The Enemy Studio's "Abilities" tab becomes the same Behaviour tab, plus
@@ -1161,8 +1270,8 @@ ambiguities, which were also fixed in the text.
 | 10 | Plague cart | Yes | trail areas with lifetime; `noIncome`; `damageTaken {mult 0, types [ranged, tower]}` |
 | 11 | Collapse tiles | Yes | an area preset using `in:self`, a blocker and a stun status; reset at `dawn` |
 | 12 | Swap totem | Yes | position vars + two `teleport`s |
-| 13 | Time-dilation field | Partly | `timeScale` on units and Builder projectiles; vanilla arrows in flight aren't slowed |
-| 14 | Siege ladder: only melee climb the wall | Partly | no per-unit walkability; a teleport or a ramp for everyone |
+| 13 | Time-dilation field | Yes (was Partly) | `timeScale` on units and on every projectile in the area, the game's arrows included |
+| 14 | Siege ladder: only melee climb the wall | Yes (was Partly) | a walkable rampart whose area `surface` allows `melee` |
 | 15 | Dawn bell income streak | Yes | `dawn` + `income` + a streak var |
 | 16 | Mimic chests | Yes | `interact` + `choose`; mimics with explode-on-`near` |
 | 17 | Seasons: ice, income, spreading fire | Yes | walkable ice enabled in winter; `income` on `type:Mill`; fire spreads by status to `#flammable` |
@@ -1173,30 +1282,35 @@ ambiguities, which were also fixed in the text.
 | 22 | Decoy banner | Yes | `taunt` all enemies toward it for 8 s |
 | 23 | Reverse spawn at 80 % of the night | Yes | `nightProgress` → `waves clearRemaining` (current) + `spawnGroup at @inner` |
 | 24 | Cursed coins | Yes | `coinDrop` counter → `addLabel cursed`; `coinPickup` of `#cursed` → gold + `taunt` |
-| 25 | Wind gusts | Partly | flyers and Builder projectiles `drift`; vanilla arrows don't |
+| 25 | Wind gusts | Yes (was Partly) | `drift` on flyers and every projectile in flight, the game's arrows included |
 | 26 | Shapeshifting shrine | Yes | cycling var; area `inside` applies the state's status |
 | 27 | Rain | Yes | slow status; modifier `when: dist > 15` with `chance`; `income` on mills |
 | 28 | Reclaimed ruins | Yes | interact `choices` with costs from `.cost`; locked slots unlocked by `choose`; vanilla AI ignores a neutral "haunted" ruin |
-| 29 | Dream stage | Partly | a walled-off arena on the same map; no second scene |
+| 29 | Dream stage | Yes (was Partly) | an off-map space (walkable floor placed past the map's edge) and `teleport`; not a second scene |
 | 30 | Loan banker | Yes | `choices` 100/250/500; dusk check → collector targeting `where(it.income > 0)` |
 
-The remaining "partly" items all hit the same three engine limits: vanilla projectiles, per-unit walkability and
-scenes. None of the mechanics needed a feature coded for it.
+The four "partly" items hit three engine limits: vanilla projectiles, per-unit walkability and scenes. L2 lifted all
+three (projectiles in flight, surfaces and spaces above), with no feature coded for any mechanic.
 
 ## Known limits
 
 - **Movement physics is limited.**
   - Units ride a walkable mover only when it snaps between poses, not while it glides.
-  - There is no per-unit walkability (one navmesh per size class, as in the game), so "only melee can climb this wall"
-    is a teleport, not a path.
+  - Walkable bodies must exist when the level starts (places): one spawned at runtime costs a ~1 s rescan (the
+    validator warns). A body switched off or a pose not taken is hidden by a cut, not removed: a deck over walkable
+    ground hides that ground in both states.
+  - Per-unit walkability is by surface (31 names per level), not per triangle; RVO avoidance can push the front row
+    of a blocked crowd about 1 m into a surface it may not walk.
   - Terrain height doesn't change at runtime; walkable props and blockers change where units can go.
-- **Vanilla projectiles in flight** (the game's `AimbotProjectile`) aren't affected by `timeScale`, `drift` or
-  redirection. Builder projectiles are.
+  - Spaces have no fliers' graph; fliers there fly straight.
+- **Projectiles in flight**: the game's own are entities only while they fly, and a redirected one still deals its
+  shooter's weapon damage; it can't gain Builder `impact` rules (use an area or `near` on it instead).
 - **Team model.** There are three teams. There's no "hostile to all": Builder targeting can make a thing attack
   both sides, but vanilla AI sees only `PlayerOwned`/`EnemyOwned`, so vanilla units never attack a neutral. A converted unit uses the other side's nearest equivalent brain.
 - **Game tags are a closed set** (51 `ETag`s, kept in a 64-bit field). Vanilla AI only targets by them, so labels
   work only through Builder targeting, which can be set on any attacker (Builder units, vanilla units and towers).
-- **No new scenes, no fog or lighting changes** beyond the level's colour scheme and tints. Recording is only what
+- **No new scenes, no fog or lighting changes** beyond the level's colour scheme and tints (a separate arena is an
+  off-map space on the same scene). Recording is only what
   list vars can hold: up to 256 sampled values, such as positions.
 - **King actions:** 3 keys. The day phase has no timer in Thronefall, so "shorter day" has no meaning.
 - **No arbitrary code**, by design. A missing verb needs a mod update; the registry's `since` makes that explicit.
@@ -1297,7 +1411,7 @@ public static class LogicSaveState { static void Register(string id, Func<LogicW
   - `Model/Validation.cs` logic checks (additive);
   - the `Model/UnitDef.cs` and `LevelDef.cs` fields;
   - the `PackSerializer` migration 2 → 3;
-  - `Assets/builder-presets.json` (the built-in logic objects and common presets);
+  - `Assets/logic-presets.json` (the built-in logic objects and common presets);
   - the presets kind in `Model/LibraryStore.cs` (additive, coordinated with R2-C1);
   - `builder dump` → `logic-schema.json`;
   - `agent-kit/palace.py` (ops, the `logic` commands, the Python expression port);

@@ -27,9 +27,9 @@
        "kind": "area",
        "id": "ritual",
        "pos": [
-        -4,
+        20,
         0,
-        -20
+        10
        ],
        "area": {
         "shape": {
@@ -87,13 +87,10 @@
       "do": "spawn",
       "entity": "vanilla:E Weakling",
       "count": 10,
-      "at": "vec(-4, -20)",
+      "at": "vec(20, 10)",
       "spread": 2
      }
     ]
-   },
-   {
-    "wait": 1
    },
    {
     "do": [
@@ -108,7 +105,7 @@
     "within": 5
    },
    {
-    "expectLog": "The ritual is complete",
+    "expectState": "AfterMatchVictory",
     "within": 10
    }
   ]

@@ -12,6 +12,9 @@
     "id": "spore",
     "base": "vanilla:E Slime",
     "name": "Spore",
+    "stats": {
+     "maxHp": 500
+    },
     "rules": [
      {
       "when": {
@@ -53,7 +56,7 @@
      {
       "do": "spawn",
       "entity": "spore",
-      "at": "vec(-4, -60)"
+      "at": "vec(70, -2)"
      }
     ]
    },

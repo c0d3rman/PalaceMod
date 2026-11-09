@@ -17,11 +17,25 @@ namespace PalaceMod.Builder.Logic.Bodies
         {
             var astar = AstarPath.active;
             if (astar == null) return GraphMask.everything;
-            uint mask = 0;
-            var graphs = astar.data.graphs;
-            for (int i = 0; i < graphs.Length; i++)
-                if (graphs[i] != null && graphs[i].name != AirGraph) mask |= 1u << (int)graphs[i].graphIndex;
-            return new GraphMask(mask);
+            GraphMask mask = default;
+            bool any = false;
+            foreach (var g in astar.data.graphs)
+                if (g != null && g.name != AirGraph) { mask = any ? mask | GraphMask.FromGraph(g) : GraphMask.FromGraph(g); any = true; }
+            return any ? mask : GraphMask.everything;
+        }
+
+        /// <summary>Where a unit spawned at a point stands: the nearest walkable ground node (host graphs and spaces)
+        /// within 20 m, else the point itself.</summary>
+        public static Vector3 UnitGround(Vector3 p)
+        {
+            var astar = AstarPath.active;
+            if (astar == null) return p;
+            var nn = NearestNodeConstraint.Walkable;
+            nn.graphMask = GroundMask();
+            var hit = astar.GetNearest(p, nn);
+            if (hit.node == null) return p;
+            var flat = new Vector2(hit.position.x - p.x, hit.position.z - p.z);
+            return flat.sqrMagnitude < 400f ? hit.position : p;
         }
 
         /// <summary>Moving cuts follow at most 4 times a second (docs/builder-engine.md, "Movers").</summary>

@@ -13,7 +13,7 @@ namespace PalaceMod.Builder.Model.Logic
     /// {"preset": id, "with": {...}} or a place's "preset" is expanded when the pack is compiled: {param} is
     /// substituted (a whole-string "{p}" by the typed value, else as text), the preset's vars, labels and components are
     /// merged under the owner's own, and every produced rule gets "_src" (the path it came from) for errors and the
-    /// trace. Lookup order: the pack's presets, the library's (Library), then the built-in ones (Assets/builder-presets.json).
+    /// trace. Lookup order: the pack's presets, the library's (Library), then the built-in ones (Assets/logic-presets.json).
     /// </summary>
     public static class Presets
     {
@@ -37,8 +37,8 @@ namespace PalaceMod.Builder.Model.Logic
                 try
                 {
                     var asm = typeof(Presets).Assembly;
-                    string name = asm.GetManifestResourceNames().FirstOrDefault(n => n.EndsWith("builder-presets.json", StringComparison.Ordinal));
-                    if (name == null) { builtInError = "builder-presets.json isn't embedded"; return builtIn = []; }
+                    string name = asm.GetManifestResourceNames().FirstOrDefault(n => n.EndsWith("logic-presets.json", StringComparison.Ordinal));
+                    if (name == null) { builtInError = "logic-presets.json isn't embedded"; return builtIn = []; }
                     using var s = asm.GetManifestResourceStream(name);
                     using var r = new StreamReader(s);
                     builtIn = ParseBuiltIn(r.ReadToEnd());
