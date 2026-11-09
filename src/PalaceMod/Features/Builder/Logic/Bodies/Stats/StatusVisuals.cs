@@ -33,7 +33,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             var go = e.Go();
             if (go == null || visual == null) return null;
             var a = new Applied { E = e };
-            if ((string)visual["tint"] is { } hex && ColorUtility.TryParseHtmlString(hex, out var c)) a.Tint = c;
+            if ((string)visual["tint"] is { } hex && WorldCommon.TryColor(hex, out var c)) a.Tint = c;
             if ((string)visual["fx"] is { Length: > 0 } fx)
             {
                 try { a.Fx = SpawnFx(fx, go.transform); }

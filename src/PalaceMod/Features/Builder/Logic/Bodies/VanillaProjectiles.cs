@@ -73,7 +73,9 @@ namespace PalaceMod.Builder.Logic.Bodies
             var s = states.GetValue(p, _ => new State());
             if (s.Entity != null && !s.Entity.Destroyed) return s.Entity;
             var by = firedByRef(p);
-            var owner = by != null ? LogicGame.EntityOf(by.gameObject) : null;
+            // a tower fires with no TaggedObject; the hooks remember which attack fired it
+            var shooter = by != null ? (Component)by : LogicManager.ShooterOf(p);
+            var owner = shooter != null ? LogicGame.EntityOf(shooter.gameObject) : null;
             s.Entity = new LogicEntity
             {
                 Template = "vanilla:" + p.name.Replace("(Clone)", "").Trim(),

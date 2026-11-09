@@ -108,7 +108,7 @@ namespace PalaceMod.Builder.Logic.Bodies
         {
             WorldCommon.RequireMatch("building");
             string op = p.Text("op") ?? throw new LogicError("building: needs \"op\"");
-            var slot = ResolveSlot(ctx, p) ?? throw new LogicError("building: no build slot found for \"slot\"");
+            var slot = ResolveSlot(ctx, p, out string what) ?? throw new LogicError($"building {op}: {what}, not a build slot");
             switch (op)
             {
                 case "build":
@@ -187,23 +187,43 @@ namespace PalaceMod.Builder.Logic.Bodies
         }
 
         /// <summary>
-        /// `slot`: a Studio key ("slot:Tower 3", "add:a1", "castle"), an attach/place name, a slot's object name, or a
-        /// selector (a building entity). Without `slot`, the action's target (default self).
+        /// `slot`: a Studio key ("slot:Tower 3", "add:a1", "castle") or any expression giving a building or slot
+        /// entity (@name, it, $var, it.$slot, nearest('unbuilt and type:House')...). Without `slot`, the action's
+        /// target (default self). <paramref name="what"/> describes what was given, for the error.
         /// </summary>
-        internal static BuildSlot ResolveSlot(LogicContext ctx, ActionParams p)
+        internal static BuildSlot ResolveSlot(LogicContext ctx, ActionParams p, out string what)
         {
-            LogicEntity entity = null;
-            if (!p.Has("slot")) entity = p.Target ?? ctx.Self;
-            else if (p.Raw("slot") is JValue { Type: JTokenType.String } v && !((string)v).StartsWith("="))
+            LogicEntity entity;
+            if (!p.Has("slot"))
             {
-                string s = (string)v;
-                if (s == "castle") return LayoutScene.Castle(HostScene);
-                if (s.StartsWith("slot:")) return LayoutScene.FindSlot(HostScene, s.Substring(5));
-                if (s.StartsWith("add:")) return LayoutScene.FindSlot(HostScene, LayoutScene.AddedPrefix + s.Substring(4));
-                entity = ctx.World?.FindNamed(s.TrimStart('@'));
-                if (entity == null) return LayoutScene.FindSlot(HostScene, s);
+                entity = p.Target ?? ctx.Self;
+                what = $"the target {(entity == null ? "(none)" : entity.Kind == "level" ? "(the level: give \"slot\" or a \"target\")" : entity.Id)}";
+                return SlotOf(entity);
             }
-            else entity = p.Entity("slot");
+            string raw = p.Raw("slot") is JValue { Type: JTokenType.String } v ? (string)v : p.Raw("slot")?.ToString(Newtonsoft.Json.Formatting.None);
+            if (raw != null && Model.Logic.ParamForms.IsSlotKey(raw))
+            {
+                what = $"\"{raw}\" (no such slot on this map)";
+                if (raw == "castle") return LayoutScene.Castle(HostScene);
+                if (raw.StartsWith("slot:")) return LayoutScene.FindSlot(HostScene, raw.Substring(5));
+                return LayoutScene.FindSlot(HostScene, LayoutScene.AddedPrefix + raw.Substring(4));
+            }
+            // Older levels name a slot bare ("gate1", "Tower 3"): a name, then a host slot, before the expression.
+            if (raw != null && !raw.StartsWith("=") && !raw.StartsWith("@"))
+            {
+                var named = ctx.World?.FindNamed(raw);
+                if (named != null) { what = $"\"{raw}\" ({named.Id})"; return SlotOf(named); }
+                var host = LayoutScene.FindSlot(HostScene, raw);
+                if (host != null) { what = raw; return Root(host); }
+            }
+            var value = p.Get("slot");
+            entity = value.Kind switch
+            {
+                ValueKind.Entity => value.AsEntity,
+                ValueKind.Set => value.AsSet.Count > 0 ? value.AsSet[0] : null,
+                _ => null,
+            };
+            what = $"\"slot\": \"{raw}\" is {(entity != null ? entity.Id + $" (a {entity.Kind})" : Values.Describe(value))}";
             return SlotOf(entity);
         }
 
@@ -224,10 +244,16 @@ namespace PalaceMod.Builder.Logic.Bodies
             slot = Root(slot);
             if (!slot.CanBeUpgraded) return;
             if (ChoiceManager.instance != null && ChoiceManager.instance.ChoiceCoroutineRunning) throw new LogicError("building: the player has a choice open");
-            var upgrade = slot.Upgrades[slot.Level];
-            int count = upgrade.upgradeBranches.Count;
+            int count = slot.Upgrades[slot.Level].upgradeBranches.Count;
             int branch = p.Has("branch") ? (int)Math.Round(p.Number("branch")) : count > 1 ? (ctx.World?.Random.RangeInt(0, count - 1) ?? 0) : 0;
             if (branch < 0 || branch >= count) throw new LogicError($"building: branch must be 0-{count - 1}");
+            UpgradeFree(slot, branch);
+        }
+
+        /// <summary>Builds or upgrades a slot one level for free with a chosen branch (no popup), like the player would.</summary>
+        internal static void UpgradeFree(BuildSlot slot, int branch)
+        {
+            var upgrade = slot.Upgrades[slot.Level];
             var player = PlayerInteraction.instance;
             foreach (var child in slot.BuiltSlotsThatRelyOnThisBuilding.Where(c => c != null && c.ActivatorUpgradesThis && c.ActivatorBuilding == slot).ToList())
             {
@@ -263,6 +289,14 @@ namespace PalaceMod.Builder.Logic.Bodies
                 if (i == 0) firstMesh = b.replacementMesh;
             }
             if (firstMesh != null && MainMeshRef(slot) != null) MainMeshRef(slot).mesh = firstMesh;
+            // Some objects an upgrade switches on remove themselves once active (a house picks its look and destroys
+            // the rest). The game never needs the list again; an empty slot's build preview walks it every frame.
+            foreach (var u in slot.OwnUpgrades)
+                foreach (var b in u.upgradeBranches)
+                {
+                    b.objectsToActivate.RemoveAll(o => o == null);
+                    b.objectsToDisable.RemoveAll(o => o == null);
+                }
             SlotLevel(slot) = 0;
             applied.Clear();
             slot.GoldIncome = 0;
@@ -335,7 +369,10 @@ namespace PalaceMod.Builder.Logic.Bodies
             var gs = LocalGamestate.Instance;
             if (gs == null || gs.CurrentState != LocalGamestate.State.InMatch) yield break;
             WorldCommon.log.Info($"endLevel: {(win ? "victory" : "defeat")}");
-            gs.SetState(win ? LocalGamestate.State.AfterMatchVictory : LocalGamestate.State.AfterMatchDefeat);
+            // logic.game's victory/defeat "rules" veto the game's own endings, never this one.
+            GameRules.EndingByRule = true;
+            try { gs.SetState(win ? LocalGamestate.State.AfterMatchVictory : LocalGamestate.State.AfterMatchDefeat); }
+            finally { GameRules.EndingByRule = false; }
         }
 
         /// <summary>Dev: every slot of the host with level, income, next cost, hp and lock.</summary>

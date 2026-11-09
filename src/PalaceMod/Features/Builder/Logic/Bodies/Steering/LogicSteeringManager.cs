@@ -35,6 +35,15 @@ namespace PalaceMod
             LogicServices.Targeting = TargetingService;
             LogicServices.TargetOf = TargetOf;
             BodyEvents.UnitSpawned += OnUnitSpawned;
+            // attaches (a slot's tower) and placed bodies (a turret prop): their `targeting` and `attacks` (units get
+            // theirs from UnitSpawned)
+            BodyEvents.EntityBuilt += (e, go) =>
+            {
+                if (e?.Def == null || e.Kind == "unit" || go == null || (e.Def["targeting"] == null && e.Def["attacks"] == null) || !Live()) return;
+                var parts = new JObject();
+                foreach (var k in new[] { "targeting", "attacks" }) if (e.Def[k] != null) parts[k] = e.Def[k].DeepClone();
+                ApplyComponents(e, go, parts);
+            };
             Teams.Convert = (e, go, team) => SteerTeams.Convert(e, go, team);
             SteerActions.Register();
             LogicSaveState.Register("steering", SteerSave.Capture, SteerSave.Restore);
@@ -72,9 +81,11 @@ namespace PalaceMod
         internal static SteerState ForAttack(AutoAttack a)
         {
             if (a == null || states.Count == 0 || !Live()) return null;
-            if (states.TryGetValue(a.gameObject.GetInstanceID(), out var st)) return st;
-            var owner = a.GetComponentInParent<TaggedObject>();
-            return owner != null && states.TryGetValue(owner.gameObject.GetInstanceID(), out st) ? st : null;
+            // The state may sit on any ancestor: the unit or tower object, or an attached build slot's root (attach
+            // registers the slot, whose tower and AutoAttack are children of it).
+            for (var t = a.transform; t != null; t = t.parent)
+                if (states.TryGetValue(t.gameObject.GetInstanceID(), out var st) && st.Go == t.gameObject) return st;
+            return null;
         }
 
         /// <summary>The state for an entity's object, made on first use (null for an entity without a game object).</summary>
@@ -471,6 +482,13 @@ namespace PalaceMod
                 float baseSpeed = en != null ? en.movementSpeed : pu.movementSpeed;
                 // a moveTo speed still feels slows and haste (the stat factor), like the game's own speed field
                 float? orderSpeed = st.MoveTo?.Speed * (float)StatsService.Instance.Factor(st.Entity, "moveSpeed");
+                // follow: keep the path on the leader's moving slot, and hurry when left behind
+                if (orderSpeed == null && st.FollowDest is Vector3 fd && st.FollowLeader is { } leader && leader.Alive)
+                {
+                    var slot = SteerMovement.FollowSlot(st, leader, pos);
+                    if (SteerMovement.Flat(slot, fd) > 0.4f) SteerMovement.Repath(st);
+                    if (SteerMovement.Flat(pos, slot) > Mathf.Max(1.5f, st.Move.Spacing)) orderSpeed = baseSpeed * Mathf.Max(1f, st.Move.CatchUp);
+                }
                 float speed = orderSpeed ?? baseSpeed;
                 if (st.Move.Mode == "direct")
                 {

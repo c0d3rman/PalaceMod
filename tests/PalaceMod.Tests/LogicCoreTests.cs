@@ -127,6 +127,23 @@ namespace PalaceMod.Tests
             Assert.Equal(3.0, Num(w2, "n"), "every 1 s at 5 fps");
         }
 
+        public static void EveryJitterIsAShareOfTheInterval()
+        {
+            // jitter 0.5 on every 10 s: each interval is 5..15 s, so 100 s gives 7..20 ticks (absolute ±0.5 s gave ~10).
+            var w = NewWorld("""{ "vars": { "n": 0 }, "rules": [ { "when": { "on": "every", "seconds": 10, "jitter": 0.5 }, "do": [ { "do": "addVar", "name": "$n", "value": 1 } ] } ] }""");
+            w.BeginLevel();
+            var gaps = new List<double>();
+            double last = 0, n = 0;
+            for (int i = 0; i < 60 * 300; i++)
+            {
+                w.Tick(1.0 / 60);
+                if (Num(w, "n") > n) { n = Num(w, "n"); gaps.Add(w.Time - last); last = w.Time; }
+            }
+            Assert.True(gaps.Count >= 20, $"ticks {gaps.Count}");
+            Assert.True(gaps.Skip(1).All(g => g >= 4.9 && g <= 15.1), $"every gap within 5..15 s: {string.Join(", ", gaps.Select(g => g.ToString("0.0")))}");
+            Assert.True(gaps.Skip(1).Max() - gaps.Skip(1).Min() > 3, "the gaps vary by more than ±0.5 s");
+        }
+
         public static void AfterFiresOnceAndWaitResumes()
         {
             var w = NewWorld("""{ "vars": { "a": 0, "b": 0 }, "rules": [ { "when": { "on": "after", "seconds": 0.5 }, "do": [ { "do": "setVar", "name": "$a", "value": 1 }, { "do": "wait", "seconds": 1 }, { "do": "setVar", "name": "$b", "value": 1 } ] } ] }""");
@@ -340,6 +357,21 @@ namespace PalaceMod.Tests
             Assert.Equal(2.0, Num(w, "n"), "re-armed by healing above");
         }
 
+        public static void DamageEventsCarryTypesAndWeapon()
+        {
+            var w = NewWorld("""{ "vars": { "fire": 0, "weapon": "''", "n": 0 } }""");
+            var e = Place(w, """{ "id": "u", "rules": [ { "when": "damaged", "do": [ { "do": "addVar", "name": "$n" }, { "do": "if", "cond": "event.types.has('fire')", "then": [ { "do": "addVar", "name": "$fire" } ] }, { "do": "setVar", "name": "$weapon", "value": "event.weapon" } ] } ] }""", Vec.Zero);
+            w.Raise("damaged", e, null, 5, null, null, types: ["fire", "vanilla:P Fire Archer"], weapon: "vanilla:P Fire Archer");
+            w.Tick(0.016);
+            Assert.Equal(1.0, Num(w, "fire"), "event.types.has('fire')");
+            Assert.Equal("vanilla:P Fire Archer", w.GetVar(w.Level, "weapon").Str, "event.weapon");
+            w.Raise("damaged", e, null, 5, null, null);
+            w.Tick(0.016);
+            Assert.Equal(2.0, Num(w, "n"), "a hit without types still fires");
+            Assert.Equal(1.0, Num(w, "fire"), "no types: an empty list");
+            Assert.True(w.GetVar(w.Level, "weapon").IsNone, "no weapon: none");
+        }
+
         public static void PresetsExpandWithParams()
         {
             var w = new LogicWorld();
@@ -428,6 +460,25 @@ namespace PalaceMod.Tests
             var f = Place(w, """{ "id": "v" }""", Vec.Zero);
             w.Rename(f, "hero");
             Assert.True(w.FindNamed("hero") == f, "@name moves to the new entity");
+        }
+
+        public static void LevelBoundRefsResolveAgainstTheLevelOrErrorNamingTheTemplate()
+        {
+            var w = NewWorld("""{ "vars": { "next": 2 }, "places": [ { "id": "route", "kind": "path" } ] }""", """{ "pillar": { "kind": "logic" } }""");
+            var p = Place(w, """{ "id": "p1" }""", new Vec(0, 0, 0), "pillar");
+            var ctx = new LogicContext { World = w, Self = p };
+            Value E(string s) => ExprCompiler.Compile(s, "test")(ctx);
+            Assert.Equal(2.0, E("$next").Num, "the level's var");
+            Assert.Equal(true, Values.ToBool(E("@route == none")), "a declared name with nothing behind it is none");
+            string Err(string s) { try { E(s); return null; } catch (LogicError e) { return e.Message; } }
+            string a = Err("$wind");
+            Assert.True(a != null && a.Contains("\"$wind\"") && a.Contains("template \"pillar\""), "missing var names the var and template: " + a);
+            string b = Err("@snail-route.pos");
+            Assert.True(b != null && b.Contains("\"@snail-route\"") && b.Contains("template \"pillar\""), "missing name: " + b);
+            var lv = new LogicContext { World = w, Self = w.Level };
+            string c = null;
+            try { ExprCompiler.Compile("$wind", "t")(lv); } catch (LogicError e) { c = e.Message; }
+            Assert.True(c != null && !c.Contains("template"), "the level's own script gets no template note: " + c);
         }
 
         public static void CompileErrorsAreTracedNotThrown()

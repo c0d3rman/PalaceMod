@@ -46,11 +46,15 @@ namespace PalaceMod.Builder.Logic.Bodies
             return self != null && self.Kind != "level" && (self.Body != null || self.Game != null) ? self.Position.ToVector3() : null;
         }
 
-        public static Color ParseColor(string text, string param)
+        public static Color ParseColor(string text, string param) =>
+            TryColor(text, out var c) ? c : throw new LogicError($"\"{param}\": \"{text}\" isn't a colour (use {Model.Logic.ParamForms.ColorHelp})");
+
+        /// <summary>A colour field or param: the one parser the validator checks with (Model.Logic.ParamForms).</summary>
+        public static bool TryColor(string text, out Color c)
         {
-            if (Validator.TryParseColor(text, out var rgb)) return new Color(rgb.r, rgb.g, rgb.b);
-            if (ColorUtility.TryParseHtmlString(text, out var c)) return c;
-            throw new LogicError($"\"{param}\": \"{text}\" isn't a colour (use \"#rrggbb\")");
+            bool ok = Model.Logic.ParamForms.TryParseColor(text, out float r, out float g, out float b, out float a);
+            c = new Color(r, g, b, a);
+            return ok;
         }
 
         public static string Near(IEnumerable<string> names, string wanted)

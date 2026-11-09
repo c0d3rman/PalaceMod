@@ -358,6 +358,13 @@ coins fill a copy of a build slot's coin display. With `choices`, the game's upg
 (each choice also takes `description` and `icon`, an `asset:` sprite); the picked choice's cost is paid at once (a
 "not enough gold" notice otherwise) and `interact` fires with `event.choice`; Esc cancels without paying.
 
+Costs beyond gold: `"pay": [{ "var": "$bread", "amount": 1, "label": "bread" }]` (on the block or on a choice) costs
+level variables as well as (or instead of) `cost`: inventory as data. Everything is paid at once on the press; if
+anything is short nothing is paid, a "Not enough: 1 bread needed" notice shows and `interactRefused` fires (`other`
+the king, `event.name` what was short). `{cost}` in the prompt reads "2 gold + 1 bread" then. `amount` may be an `=`
+expression. Units carry `interact` too (a unit template, a placed or spawned unit, wave units): the interactor is a
+child of the unit, so the prompt follows it as it walks.
+
 **Projectiles in flight.** The game's own projectiles (`AimbotProjectile`: arrows, bolts, magic, boulders) are
 entities of kind `projectile` while they fly, made the first time an area or selector sees one; their `owner` is the
 shooter. `timeScale` and `projectileSpeed` scale their flight, drifts move them (a homing arrow re-aims, so wind bends
@@ -411,6 +418,15 @@ attack, vanilla towers and troops included (`setTargeting` on `all('player and T
   "home": "spawn"                     // "spawn" | a position | "@point"
 }
 ```
+
+`"mode": "follow"` walks in formation: `"leader": "self.parent"` (an entity expression, re-read 10 times a second),
+`"spacing": 1.6` (metres behind the leader, along the line from the leader to the follower: a trail, so a chain
+snakes) or `"offset": [x, z]` (a slot in the leader's frame, x right, z ahead: beside or behind), and `"catchUp": 1.5`
+(speed multiplier while it's more than `max(spacing, 1.5)` m from its slot). It walks there with the game's A* and
+avoidance, and re-paths when the slot moves 0.4 m. A trail slot is always behind the leader (by its model's
+heading): a follower that finds itself in front walks round. Without a live leader (none, dead, unlinked) `then` applies:
+`pathfind` (on its own: it becomes a leader), `hold` or `destroy`; a new leader is picked up again as soon as the
+expression names one.
 
 It is implemented on the game's own movement components (see "Runtime"), so pathfinding, avoidance and animation keep
 working. A ranged enemy that kites and prefers towers is just `targeting` plus `movement.keepDistance` plus `kite`.
@@ -492,6 +508,36 @@ necromancer, `subject` the dead foe, and `other` its killer. `range` is optional
 Without `of`, a rule hears only its owner's events. The level script must give `of` for entity events (filters there
 treat `foe`/`ally` as relative to the player).
 
+### Links
+
+Any entity (a unit, prop, area, hittable body, logic object) can be a **part** of another: a colossus's weak points,
+ladders on its legs, a rider on a beast, a shield in front of a bearer, the links of a chain. Parts are real separate
+entities: their own hitbox and hp, rules, statuses and look; towers, units and the king fight them like anything else
+(an enemy-team hittable body is a real target for the game's AI; `countsAsEnemy` only decides whether it holds the
+night open).
+
+- **Making one.** The `link` action (`target` the part, `to` the parent), or a template's `parts`: `[{ "entity":
+  "weak-point", "offset": [1.5, 4, 0], "name": "shoulder", "damageToParent": 2 }]`, spawned and linked when the
+  template appears (placed, spawned or in a wave; `name` becomes a label, `team` defaults to the parent's). Parts may
+  have parts (4 deep). The king, the castle and buildings can't be parts.
+- **Moving.** `follow: rigid` (default) puts the part at `offset` (x right, y up, z ahead) in the parent's frame every
+  frame, after the game's movement, and turns it with the parent (`rotY` relative); `position` moves it without
+  turning it; `none` makes it a relation only (it moves on its own, e.g. `movement: {mode: follow, leader:
+  self.parent}`). A rigid unit part doesn't walk (it still attacks). A unit's heading is its model's
+  (`Heading.Yaw`), so parts turn as it turns to walk or strike.
+- **Death.** `onParentDeath`: `die` (killed with it: `death` fires, credited to nobody), `drop` (unlinked and set on
+  the ground: its own movement resumes) or `stay` (unlinked where it is). A gone parent counts as dead.
+- **Damage.** On each hit a part takes (after damage modifiers): `damageToParent` × the hit goes to the parent as
+  well (credited to the same attacker; a weak point with 2 doubles it); `damageToGroup` of the hit is split evenly
+  over its whole linked group (`.group`: the root and every part, itself included), the rest × `damageKept` it takes
+  itself. A hit on the root is shared by the largest `damageToGroup` among its parts. `damageToGroup: 1` is one shared pool; `damageKept: 0` with `damageToParent: 1` is a pure proxy hitbox.
+  Shares are dealt as they are: the receivers' own `damageTaken` doesn't apply again (a colossus immune to hits on
+  its body still bleeds through its weak points), `invulnerable` still does. A scripted `kill` isn't shared.
+- **Selectors.** `.parent`, `.children` (a set), `.root`, `.group` (a set): `self.children.len`, `count('#link and
+  where(it.root == self.root)')`, `best('foe', 20, it.parent == none ? 1 : 0)`.
+- **Events.** `linked` / `unlinked` on the part (`other` the parent).
+- **Savestates** keep links made by `link`; a template's parts are rebuilt with their parent.
+
 ### Events
 
 Every event has `self` and `subject`. The table gives `other`, `event.value` and `event.pos` where they apply. Aliases
@@ -502,19 +548,22 @@ keep rules readable.
 |---|---|---|---|
 | `spawn` | | the entity appears (placed: at level start; spawned: on creation) | the spawner or launcher, if any |
 | `death` | | it dies (a unit) or is knocked out (a building, or the king) | killer / — |
-| `damaged` | `min` | it takes damage | attacker (may be none) / amount |
+| `damaged` | `min` | it takes damage (`event.types`, `event.weapon`: see "Damage types") | attacker (may be none) / amount |
 | `healed` | | it is healed | healer / amount |
 | `hpBelow` | `pct` | its hp crosses below pct (edge-triggered; re-arms when healed above) | — / hpPct |
 | `attack` | `attack` (id) | it attacks (any attack, including vanilla) | target |
 | `hit` | | its attack, projectile or `damage` action damaged something | victim / amount |
 | `kill` | | something it damaged died from that damage | victim |
-| `every` | `seconds`, `jitter`, `phase`, `during` (`night`/`day`/`always`) | periodically, from spawn | — / tick count |
+| `every` | `seconds`, `jitter` (0..1: each interval varies by up to that share), `phase`, `during` (`night`/`day`/`always`: skips ticks outside it) | periodically, on the owner's clock from spawn (not from dusk) | — / tick count |
 | `after` | `seconds` | once, that long after spawn | |
 | `near` | `filter`, `range`, `edge` (`enter`/`exit`/`both`) | a matching entity comes within or leaves the range | the entity |
 | `enter` / `exit` / `inside` / `empty` / `occupied` | | (areas) see "area" | entity |
 | `impact` / `expire` | | (projectiles, or anything with a lifetime) | hit entity / — |
 | `arrive` / `end` | | (movers, path followers, `moveTo`) | — / point index |
+| `bump` | | (units) a knockback (`push`, or the game's own) was stopped short by something solid: a wall, a building, a solid body, a cliff, the map's edge | the building or body it hit (none for terrain) / metres of push left; `event.pos` where it stopped |
 | `pickup` / `interact` | | (pickups, interactables) | collector / king |
+| `interactRefused` | | (interactables) the king tried to use it without enough gold or `pay` items (`event.name`: what was short) | king / the gold cost |
+| `linked` / `unlinked` | | it became a part of a parent / stopped being one (`unlink`, or its parent died with `drop`/`stay`) | the parent |
 | `signal` | `name` | it receives the signal | sender / the signal's number (`event.name` is the signal's name) |
 | `varChanged` | `name` | one of its variables changes (or a level var, on the level script) | — / new value |
 | `statusStart` / `statusEnd` / `statusTick` | `status` (when watching one from outside) | a status starts, ends, or every `tick` seconds of the status | the applier / stacks |
@@ -534,13 +583,20 @@ The "any unit" variants are `of`-filters on the same events: "any building destr
 
 ### Expressions
 
-One grammar is used everywhere. A param is an expression whenever its type isn't text. A text or template param
-becomes an expression with a leading `=`. Text interpolates `{expr}`.
+One grammar is used everywhere. How a param's string is read is decided by its schema type, in one place
+(`Model/Logic/ParamForms.cs`, `Classify`) that both the runtime (`CompiledParams`) and the validator (and its Python
+port) call, so `check` accepts exactly what the game can read: number, bool, position, entity(ies), slot and any params
+are expressions (a leading `=` allowed); text, signal and label params are text with `{expr}` parts (`=` makes them an
+expression); colour, effect, sound, enum, status and template params are literals (a colour is `#rgb`, `#rrggbb`,
+`#rrggbbaa` or a name, parsed by `ParamForms.TryParseColor` everywhere colours appear) unless they start with `=`; var,
+rule and local (`forEach.as`) params are always names. With the game present (`ILogicNamesContext`: the in-game
+validator inside a level, or palace.py with a ref cache) effect and sound names are checked against the game's lists.
 
 ```text
 literals    12  0.5  true  'text'  vec(x, z)  vec(x, y, z)
 variables   $souls (level)   self.$gen  other.$charges  spawned.$x   (an unknown var is a validation error)
-roles       self subject other spawned it (the candidate inside a filter or forEach) king castle level
+roles       self subject other spawned it (the candidate inside a filter or forEach) outer (the `it` one scope out)
+            king castle level   + forEach's `as` name for its member
             event.value event.pos event.name   + the per-event aliases (killer, victim, ...)
 named       @gate1 (a place or attach "name")  @@goblin (a template, for spawn/compare)
 properties  .hp .maxHp .hpPct .alive .pos .x .y .z .facing (deg) .team .kind .template .labels
@@ -570,7 +626,9 @@ term   := foe | ally | player | enemy | neutral       teams (foe/ally are relati
         | unit | building | prop | projectile | area | pickup | coin | king | castle | self
         | melee | ranged                              the game's MeeleFighter / RangedFighter
         | type:Mill                                   a building of that kind (the `building:<kind>` names)
-        | alive | dead | Flying | Tower | ...         game tags (TagManager.ETag names, case-sensitive)
+        | alive | dead | disabled | unbuilt            states (naming dead/disabled/unbuilt also lets a selector see them)
+        | include:dead|disabled|unbuilt|self          always true: only widens what a selector sees
+        | Flying | Tower | ...                        game tags (TagManager.ETag names, case-sensitive)
         | #label                                      labels
         | is:goblin                                   template
         | in:@zone                                    inside an area
@@ -578,7 +636,19 @@ term   := foe | ally | player | enemy | neutral       teams (foe/ally are relati
         | where(expr)                                 any expression over `it`
 ```
 
-Selectors never return `self` unless the filter says `self`. Inside `where(...)`, `self` is still the rule's owner and
+Arguments with spaces are quoted with either quote (`type:"Defense Tower"`, `is:'vanilla:E Ogre'`, `#"two words"`);
+unquoted arguments may contain `:` (`is:vanilla:Ogre`).
+
+What a selector sees: it skips its anchor (`self`), the dead (and knocked-out buildings), switched-off entities
+(`Enabled == false`) and empty build slots (a slot or its building at level 0) unless its filter names that state
+(`self`, `dead`, `disabled`, `unbuilt`) or `include:`s it. Empty vanilla slots aren't in the game's tag lists, so a
+filter that opts into `unbuilt` also gets every level-0 `BuildSlot` from `LogicServices.UnbuiltSlots` (as the entity of
+its building object, the same one the built building becomes). A build slot's body is alive while its slot is built
+and standing, so `.alive` is false after `building demolish`; `.level` is the slot's level (0 empty, 1 built); `.cost`
+is the next build or upgrade price (`none` when maxed). A distance to or from `none` is `none`.
+
+`it` is rebound by each set-walking scope (forEach, a targeted action over a set, where, best, .is); the context
+keeps the previous one as `outer`, and forEach's `as` adds a local name that nested scopes keep. Inside `where(...)`, `self` is still the rule's owner and
 `it` the candidate; `in:self` means "inside this area" (for presets). Area membership uses an entity's position, or a
 building's footprint collider. Types are number, bool, text, position, entity, set, list and template. An entity coerces to its position, and a set coerces to its count in numeric contexts. The validator
 type-checks every expression against the event's roles: `other` in a `levelStart` rule is an error, and `event.value`
@@ -602,6 +672,7 @@ which accepts an entity or a position.
 | | `setHp` | `value`: sets hit points without a `damaged`/`healed` event (shared pools) |
 | **Stats** | `setStat` | `stat`, `value` \| `add` \| `mult`, `for` (a timed modifier: seconds, or `"night"`/`"day"` = until the next dawn/dusk) |
 | | `applyStatus` / `removeStatus` | `status`, `for`, `stacks`, `source` |
+| | `setWeapon` | `weapon`: `"vanilla:<weapon>"` (`"=other.weapon"`), an entity to copy (`"=other"`: its weapon, range and keep distance), `"none"` (its attacks do nothing) or `"base"` (its own back); `range`; `for` (seconds, `"night"`/`"day"`; then it gets back what it had). Units, towers, Builder `attacks` with a `weapon`, the king's auto attack; the attack range (and a unit's keep distance) follows the weapon |
 | **Team** | `convert` | `team`, `keepLook` (true), `hpPct`. A dead target is raised as a new entity of the new team. |
 | **Move** | `teleport` | `at` |
 | | `push` | `from` (or `toward` for a pull; entity or position), `force` (metres of travel), `up` (arc), `stun`: a one-off shove on units (flyers included, not buildings), through the game's knockback |
@@ -610,6 +681,8 @@ which accepts an entity or a position.
 | | `setMovement` / `setTargeting` | a movement block / a targeting list, or `prepend`, `remove`, `for` (seconds; reverts after) |
 | | `taunt` | `toward` (an entity), `for`: forces the targets' aggro onto it (the game's agro mechanism) |
 | | `command` | `order` (`follow`/`hold`/`home`): player units, as the king's own commands |
+| **Links** | `link` | `to` (the parent), `offset` [x, y, z] in its frame, `rotY`, `follow` (`rigid`/`position`/`none`), `onParentDeath` (`die`/`drop`/`stay`), `damageToParent`, `damageToGroup`, `damageKept`: see "Links" |
+| | `unlink` | `release` (`drop`/`stay`), `children` (unlink its parts instead) |
 | **Logic** | `signal` | `name`, `to` (selector, or `"all"`), `value`, `delay` |
 | | `setVar` / `addVar` | `name` (a literal, so it's checked), `value` (on `target` for entity vars; level vars when `target` is `level` or the name has `$`) |
 | | `listAdd` / `listRemove` / `listClear` | `name`, `value` (add; or remove the first equal item), `index` (remove at): list vars of one element type (max 256 items, oldest dropped past that). Lists keep insertion order; sets from selectors are ordered by distance from the anchor, then entity id |
@@ -624,7 +697,7 @@ which accepts an entity or a position.
 | | `stop` | ends this action list |
 | **World** | `gold` | `amount` (negative takes, floored at 0), `at` (shows the coin effect there) |
 | | `dropCoins` | `count`, `at` (real coins the king collects) |
-| | `building` | `slot` (an attach name, a selector or a Studio key), `op`: `build` \| `upgrade` \| `knockOut` \| `repair` \| `demolish` (back to an empty slot, gold not refunded unless `value`) \| `lock` (hides an unbuilt slot; a built one keeps standing but can't be upgraded) \| `unlock` \| `setCost` \| `setIncome`, `value`, `branch` |
+| | `building` | `slot` (any expression giving a building or slot entity, or a Studio key; default: each `target`), `op`: `build` \| `upgrade` \| `knockOut` \| `repair` \| `demolish` (back to an empty slot, gold not refunded unless `value`) \| `lock` (hides an unbuilt slot; a built one keeps standing but can't be upgraded) \| `unlock` \| `setCost` \| `setIncome`, `value`, `branch` |
 | | `waves` | `op` with its fields: `addSpawn` (`unit`, `count`, `interval`, `delay`, `line`, `gold`, `elite`), `removeUnit` (`unit`), `scaleCount` / `scaleHp` (`value`, optional `unit`), `clearRemaining` (optional `line`: drops what the running night hasn't spawned yet), `startNight`, `endNight`, `skipNight`. `night`: default the next night; `"current"` edits the running night's remaining schedule |
 | | `endLevel` | `result` (`win`/`lose`), `message` |
 | **Show** | `effect` | `fx` (a game effect from the catalog), `at`, `scale` |
@@ -635,7 +708,7 @@ which accepts an entity or a position.
 | | `hud` | `id`, `text`, `icon`, `visible`: a level HUD line (the `logic.hud` defaults, changed at runtime) |
 | | `shake` | `strength`, `seconds` |
 | | `marker` | `on`, `icon`, `for`: a screen-edge marker like the game's wave markers |
-| **End** | `destroy` | `effects` (death effects, true), `drops` (coins, false), `silent` (no `death` event) |
+| **End** | `destroy` | `effects` (death effects, true), `drops` (coins, false), `silent` (no `death` event). A logic-spawned unit is removed outright (player ones too); a game-made player troop is knocked out with no revive at dawn; buildings, the castle and the king are knocked out |
 
 The action set is closed, and each action is generic. A new action needs a mod update, so additions are judged by
 whether they unlock many behaviours rather than one.
@@ -697,8 +770,24 @@ move speed, attack and rule timers, and its own projectiles). `damageTaken` and 
 `victim` and `dist`; `self` is the carrier).
 That covers armour, dodges, "immune to arrows", "misses at long range" and "vulnerable to fire".
 
-- **Damage types.** Builder damage carries the `types` its action or projectile gives. Vanilla damage gets derived
-  types: `melee` or `ranged` (the attacker's fighter tag), `tower`, `king`, `splash` and `magic` (`MagicProjectile`).
+- **Damage types.** Builder damage carries the `types` its action or projectile gives (plus the `weapon`'s id when
+  the action names one). Vanilla damage gets derived types: `melee` or `ranged` (the attacker's fighter tag), `tower`,
+  `king`, `splash`, `magic` (`MagicProjectile`), the weapon's id (`vanilla:<weapon>`, so any weapon can be told
+  apart), and `fire` when the weapon leaves burning ground (`FireArcherBurn`/`HotOilTower` on its impact objects:
+  fire archers, the Fire Spire, Firewing, potion vials) or its modifiers single out `FireAndExplosionResistant`
+  targets (the game's fire and explosion damage: exploders, the fire snail's blast). The burn ticks of that ground
+  carry `fire` and the weapon that left it, credited to its shooter when known. `damaged`/`hit`/`kill`/`death`
+  carry the hit's types as `event.types` (a sorted list: `event.types.has('fire')`) and its weapon as
+  `event.weapon`. `palace.py game cmd logic-weapons` lists every game weapon with its types.
+- **Weapons** (`Logic/Bodies/Combat/`). `.weapon` is an entity's weapon id: a unit's or tower's first attack, a
+  Builder attack's `weapon`, the king's auto attack (his equipped weapon's passive half; the active ability isn't
+  touched). `setWeapon` swaps the Weapon asset on every holder and writes the new attack range (the copied entity's,
+  else the range of a catalog unit that uses the weapon, else a live holder's; `range` overrides) as the base, with
+  `attackRange` modifiers re-applied on top. A unit's keep distance follows (the copied unit's, else the weapon's
+  usual unit's, else 60 % of the range; always under 90 % of it). `"none"` is an empty weapon whose `Weapon.Attack`
+  is skipped (the swing still plays). A weapon from the other side (the king's bow on an enemy) hurts its new
+  wielder's foes through the game rules' WielderSide/WielderRows patches. The first swap remembers the entity's own weapon for `"base"`; `for` restores
+  what it had before the first timed swap still running. Not kept by savestates.
 - **Status rules** run with `self` = the carrier and `other` = whoever applied it. `statusEnd` fires on expiry and
   on removal.
 - **Timed `setStat`s** stack independently; give `key` to make a new one replace an earlier one with the same key.
@@ -755,6 +844,33 @@ That covers armour, dodges, "immune to arrows", "misses at long range" and "vuln
 "uses": { "count": 1, "per": "day" } }]` (at most 3; `per`: `day` | `night` | `run`). They map to three rebindable keys, "Level action 1-3" (context `BuilderLevel`,
 registered in `Awake` so they get Controls-screen rows). The key fires `kingAction` with that id, and the HUD shows
 the action with its cooldown.
+
+### Game rules
+
+`logic.game` makes the game's own rules data (GameRulesDef; LogicSchema.GameRules is the list the validators, the
+Studio's Level panel > Game rules, `palace.py logic doc` and `logic schema game` read). Each value is a literal or an
+expression over the level scope, re-read every frame, so a level switches a rule through a variable instead of an
+action per rule. Without the block every patch is a no-op (`Logic/Bodies/World/LogicGameRulesManager.cs`).
+
+| Rule | Vanilla | How it's done |
+|---|---|---|
+| `victory` (`lastNight` \| `rules`) | `lastNight` | `LocalGamestate.SetState(AfterMatchVictory)` is vetoed unless `endLevel` is the caller (`GameRules.EndingByRule`). |
+| `defeat` (`castle` \| `rules`) | `castle` | `LocalGamestate.OnVitalObjectKill` is skipped; resigning still loses. |
+| `castle` (`shown` \| `hidden`) | `shown` | Built for free if unbuilt, then renderers, colliders, navmesh cuts (area graph update) and interactors off, removed from the TagManager, skipped by selectors (`GamePhase.HiddenCastle`), damage vetoed, can't lose. |
+| `holdNight` (bool) | `false` | `DayNightCycle.Update` sees the spawner as spawning while it holds (like spawnGroup's KeepNightOpen); the last night's victory waits with it. |
+| `endNight` (bool) / `survivors` (`stay` \| `remove`) | `false` / `stay` | Edge-triggered once per night: `GameRules.EndNight` (also `waves endNight`, whose `survivors` defaults to `remove`) stops spawning, drops spawnGroups, removes or keeps the enemies left and calls `SwithToDay`. |
+| `combat` (bool) | `isNight` | `AutoAttack*.Update` and `ManualAttack.TryToAttack` run with the day/night state switched to what the rule wants (`GamePhase.Switch`, restored in a finalizer; `isNight` still reads the truth meanwhile). By day the dawn's `SetAllUnitsWithTagInvulnerable(true)` is skipped, and toggled when the rule flips mid-day. |
+| `build` (bool) | `isDay` | `BuildingInteractor.UpdateInteractionState` runs switched likewise; the dusk's forced "no prompt" is redone after `OnDusk`; prompts refresh when the rule flips. |
+| `dayLength` (number) | `0` | Night falls that many seconds after sunrise (not after the last night). |
+
+`logic-game` (dev command; `palace.py game cmd logic-game`) prints the rules as evaluated now; `logic-game castle`
+lists what still draws near the castle.
+
+Weapons follow their wielder's side (same file, always on in a logic session): a vanilla weapon's damage rows name
+the side they hurt by team tag, so a neutral unit (or a weapon copied onto the other side) would deal 0. While
+`Weapon.DealDamage` runs for a wielder whose side isn't the weapon's own (rows naming `EnemyOwned`: a player
+weapon; `PlayerOwned`: an enemy one; else `isPlayerWeapon`, which towers' weapons don't set), a `PlayerOwned` /
+`EnemyOwned` row means "the wielder's foe" (anything, for a neutral wielder).
 
 ### Presets
 
@@ -843,14 +959,15 @@ for agents), `reference.md` and a test that every entry has a runtime handler al
 | Event | Hook |
 |---|---|
 | `spawn` | `BuilderEntity.Start`; vanilla units for `of` listeners: a `TagManager.AddTaggedObject` postfix |
-| `damaged`, `death`, `kill`, `hit` | a `Hp.TakeDamage` prefix/postfix pair (hp before and after, source, `__result` = killed). `hit` and `kill` go to the source's entity, or to a projectile's owner. |
+| `damaged`, `death`, `kill`, `hit` | a `Hp.TakeDamage` prefix/postfix pair (hp before and after, source, `__result` = killed). `hit` and `kill` go to the source's entity, or to a projectile's owner. Types and weapon: `LogicServices.CurrentHit` (the `Weapon.DealDamage` in progress, a `damage` action's or a burn tick's scope) |
+| `bump` | `KnockbackBehavior.ApplyKnockback` postfix (start, aim), measured when the flight leaves its arc phase; `other` from a sphere cast ahead |
 | `healed` | `Hp.Heal` postfix |
 | `attack` | `AutoAttack.OnAttack` postfix and the overrides (`AutoAttackTower`, `...WithKnockback`, `...WithWarning`), `ManualAttack` (the king), and `BuilderAttack` |
 | `dusk`/`dawn`/`day` | one `DayNightCycle.IDaytimeSensitive` registered by the world |
 | `nightStart`, `waveCleared` | `EnemySpawner.StartSpawning` postfix; polled: `SpawningInProgress` false and no `EnemyOwned` object left, once per night |
 | `lineSpawn` | `Spawn.Update` (the spawning group) around `TagManager.AddTaggedObject` |
 | `coinDrop` / `coinPickup` | `Coin.Start` postfix / `PlayerInteraction.AddCoin` inside `Coin.Update` |
-| `built`/`upgraded` | `BuildSlot.OnUpgrade` subscriptions at level start (and on added slots) |
+| `built`/`upgraded` | `BuildSlot.OnUpgradeChoiceComplete` prefix/postfix (level before and after), so every slot counts, whenever it was made; not `ForceManualUpgradeWithoutFeedbackEffects` (loads, previews) nor slots whose level follows their activator |
 | `death`/`repaired` (buildings) | a building's `Hp` knock-out (it has `getsKnockedOutInsteadOfDying`) / `Hp.Revive` postfix |
 | `goldChanged` | `PlayerInteraction.onBalanceGain` / `onBalanceSpend` |
 | `near`, areas | the world's spatial poller (below) |
@@ -909,7 +1026,7 @@ Synchronous modifiers (not rules) run inside the game's own calls:
 | `repeat.times`, `forEach`, set size | 100, 256, 256 | clamped |
 | Area and `near` polling | 10 Hz, on a 4 m spatial hash of the tagged objects | — |
 | Solid mover navmesh updates | 4 per second per mover, 20 per second in total | queued |
-| Expression size | 512 characters | validation error |
+| Expression size | 8192 characters, nested 100 deep | validation error |
 
 The validator also does a static loop check. A rule whose `signal` reaches a listener that, with no `wait`, signals
 back to the first rule is a warning ("this loop runs until the chain-depth cap"). Target cost: under 0.5 ms per frame
@@ -962,7 +1079,16 @@ Where the build settles what the text above leaves open:
 - **Division by zero** is 0, `pow` overflow 0: an expression never yields NaN or infinity.
 - **Attribution.** A tower's `AutoAttack` has no `TaggedObject`, so the game passes a null attacker to its arrows.
   The hooks remember the attacking component (during `OnAttack`, and per `AimbotProjectile` from `Fire` to its hit)
-  and credit `hit`/`kill` to it, without changing what the game passes (that would change aggro).
+  and credit `hit`/`kill` to it, without changing what the game passes (that would change aggro). The king's
+  `ManualAttack` is remembered the same way. Damage scripts that call `TakeDamage` with no attacker (every game method
+  whose IL calls it: hot oil, spikes, a fire archer's burning ground, the king's charge...) credit the object they sit
+  on, or the shooter of the projectile that instantiated them (`SpawnWeaponObjectOnHit`/`SpawnProjectileObjectOnHit`
+  are transpiled to record it). Only an object with a `TaggedObject` (or a Builder entity) is named, so scenery
+  hazards stay `none`. The victim's `damaged`/`death` always resolve the attacker; `hit`/`kill` wrap a vanilla
+  attacker only when something listens. A vanilla projectile entity's `owner` is its shooter the same way.
+- **Dawn income.** `income` counts the amounts `CoinSpawner.TriggerCoinSpawn` is asked for between the first and the
+  last dawn callback (buildings' harvests, `income` stats applied); the coins land over the next seconds, the count
+  doesn't wait for them.
 - **Wave clones of Builder units** carry `BuilderEntity.TemplateId` (set on the template by `UnitFactory`), so they
   register in `Start` with the template's rules. They aren't "spawned" for the caps or savestates (the game restores
   them as its own enemies).
@@ -1009,6 +1135,22 @@ units[1].rules[0].do[0].entity: "=self.template" is a template, but "count" expe
 Unknown actions or events are errors: "unknown action "pull" (made with a newer PalaceMod?)". The schema's `since`
 fields fill `requires.palaceMod` on save, so an older mod refuses the pack with the right message.
 
+**Shared items are checked where they're used** (`Model/Logic/LevelScope.cs`; `palace.py` `level_scope`). The
+library's units, entities, statuses and presets are shared by every level, and a template may name the level it runs
+in (`$vars`, `@names`). A level uses an item when its logic, nights, slots or an item it uses names it (whole-string
+ids, `unit:` refs, `is:`/`@@`/`has:` and quoted ids in text), transitively. A library level is validated as
+`LevelScope.For(library, level)`: that level, its nights and the items it uses, so each template is checked in that
+level's context and nothing else in the library can block it (library play, `agent validate/play`, session launch,
+Studio edit and test loads). The whole library (`agent validate library`, `palace.py check library`) is each level that
+way, then the unused items alone (level references unchecked), deduplicated. `LevelScope.Attribute` reports each issue
+with its library `File` (`entities/fire.json`), the `Level` it was found in for a shared item, and a path naming the
+item by id (`entities[id=fire].rules[0].if`; a level's own paths start with `level.`, its nights' with `nights.`).
+A Studio edit load (`TestPacks.Edit`) keeps the units the level's logic names, and a broken shared item there is a
+logged warning by file instead of a refusal, so the layout always opens. At run time a template's `$var` and `@name`
+resolve against the level being played; a missing level variable, or a name the level never declared nor any entity
+had, is a `LogicError` naming it and the template (`ExprCompiler.TemplateNote`); a unit's `movement.path: "@x"` the
+level lacks is traced the same way (`LogicWorld.ReportError`). A declared name whose entity is gone stays `none`.
+
 ## Authoring
 
 ### Agents (`palace.py`)
@@ -1026,6 +1168,8 @@ New ops (JSON, as the existing ones):
 | `var` | `name`, `value` (level) or `on` + `name` + `value` (entity default) |
 | `attach` | `key`, `name`, `labels` |
 | `king_action` | `id`, `name`, `when`, `cooldown`, `uses` |
+| `remove_unit` / `_entity` / `_status` / `_preset` | `id`, `force`: refuses while anything names it (lists the users) |
+| `rename_unit` / `_entity` / `_status` / `_preset` | `from`, `to`: rewrites every reference, or refuses listing what it can't rewrite |
 
 Commands:
 
@@ -1471,9 +1615,13 @@ three (projectiles in flight, surfaces and spaces above), with no feature coded 
 - **No new scenes, no fog or lighting changes** beyond the level's colour scheme and tints (a separate arena is an
   off-map space on the same scene). Recording is only what
   list vars can hold: up to 256 sampled values, such as positions.
-- **King actions:** 3 keys. The day phase has no timer in Thronefall, so "shorter day" has no meaning.
+- **King actions:** 3 keys. The day phase has no timer in Thronefall; `logic.game.dayLength` adds one.
 - **No arbitrary code**, by design. A missing verb needs a mod update; the registry's `since` makes that explicit.
-- **Savestates** don't keep pending `wait`s or Builder projectiles in flight.
+- **Savestates** don't keep pending `wait`s or Builder projectiles in flight. A template's parts come back rebuilt
+  (full hp), not as they were.
+- **Links.** A rigid part is placed, not simulated: it passes through walls with its parent, and a solid part re-cuts
+  the navmesh as it moves (keep moving parts not `solid`). Standing on a moving part is E2's riding (`Links.Moved`
+  fires after parts are placed each frame).
 
 ## Workstreams
 

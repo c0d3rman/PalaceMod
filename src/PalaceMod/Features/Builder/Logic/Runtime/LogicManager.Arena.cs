@@ -69,6 +69,7 @@ namespace PalaceMod.Builder.Logic
             var world = new LogicWorld();
             LogicServices.Game = new ArenaGameState(game);
             LogicServices.Spatial = spatial;
+            GameSlots.Install();
             world.TraceListener = OnTrace;
             LogicWorld.Current = world;
             arenaWorld = true;

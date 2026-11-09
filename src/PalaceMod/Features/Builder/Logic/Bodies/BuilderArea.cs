@@ -33,7 +33,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             Watch = (string)a["watch"] ?? Watch;
             Tick = a["tick"] is JToken t && t.Type is JTokenType.Integer or JTokenType.Float ? Mathf.Max(0.1f, (float)t) : -1f;
             Show = (string)a["show"] ?? Show;
-            if ((string)a["color"] is { } c && ColorUtility.TryParseHtmlString(c, out var col)) Color = col;
+            if ((string)a["color"] is { } c && WorldCommon.TryColor(c, out var col)) Color = col;
             if (a["surface"] is JToken surface && surface.Type != JTokenType.Null) Surfaces.Add(this, surface);
         }
 

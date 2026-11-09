@@ -378,21 +378,7 @@ namespace PalaceMod.Builder.Studio
 
         /// <summary>The pack an edit load runs with: a copy holding only the level (no wave set, units, assets or
         /// requirements), so problems elsewhere in the pack never stop the layout from being edited.</summary>
-        public static DesignPack EditPack(DesignPack pack, string levelId)
-        {
-            var copy = PackSerializer.Clone(pack);
-            var only = copy.FindLevel(levelId) ?? throw new ArgumentException("no such level", nameof(levelId));
-            only.WaveSet = null;
-            // Without its wave set the level would play the map's own nights, which may spawn from a line the level
-            // removes (a validation error). An edit load never applies the overlay, so the copy can keep them all.
-            if (only.SpawnLines != null) only.SpawnLines.Remove = null;
-            copy.Units.Clear();
-            copy.WaveSets.Clear();
-            copy.Levels = [only];
-            copy.Requires = null;
-            copy.Assets?.Clear();
-            return copy;
-        }
+        public static DesignPack EditPack(DesignPack pack, string levelId) => Play.TestPacks.Edit(pack, levelId);
 
         /// <summary>The ground under the pointer (or the dev cursor) in edit mode.</summary>
         public static Vector3? CursorGround => Mode == StudioMode.Edit ? Shell?.CursorGround : null;

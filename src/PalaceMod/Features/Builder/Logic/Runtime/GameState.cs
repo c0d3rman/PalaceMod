@@ -9,6 +9,44 @@ using UnityEngine;
 */
 namespace PalaceMod.Builder.Logic
 {
+    /// <summary>
+    /// The real day or night. logic.game's `combat` and `build` rules run some of the game's own code with its day/night
+    /// state switched for the length of one call (GameRules.Swap); expressions evaluated meanwhile still see the truth.
+    /// </summary>
+    internal static class GamePhase
+    {
+        internal static readonly HarmonyLib.AccessTools.FieldRef<DayNightCycle, DayNightCycle.Timestate> StateRef =
+            HarmonyLib.AccessTools.FieldRefAccess<DayNightCycle, DayNightCycle.Timestate>("currentTimestate");
+
+        private static int depth;
+        private static DayNightCycle.Timestate real;
+
+        /// <summary>logic.game.castle = hidden: the castle's object, which selectors skip (GameRules sets it).</summary>
+        internal static TaggedObject HiddenCastle;
+
+        public static bool IsNight => depth > 0 ? real == DayNightCycle.Timestate.Night
+            : DayNightCycle.Instance != null && DayNightCycle.Instance.CurrentTimestate == DayNightCycle.Timestate.Night;
+
+        /// <summary>Makes the game see <paramref name="as"/> until <see cref="Restore"/>; returns the state to restore
+        /// (null: nothing switched).</summary>
+        public static DayNightCycle.Timestate? Switch(DayNightCycle.Timestate @as)
+        {
+            var dnc = DayNightCycle.Instance;
+            if (dnc == null || dnc.CurrentTimestate == @as) return null;
+            var before = dnc.CurrentTimestate;
+            if (depth++ == 0) real = before;
+            StateRef(dnc) = @as;
+            return before;
+        }
+
+        public static void Restore(DayNightCycle.Timestate? before)
+        {
+            if (before is not { } b || depth == 0) return;
+            depth--;
+            if (DayNightCycle.Instance != null) StateRef(DayNightCycle.Instance) = b;
+        }
+    }
+
     internal sealed class GameState : IGameState
     {
         public int IncomeAtDawn;
@@ -16,7 +54,7 @@ namespace PalaceMod.Builder.Logic
 
         private static EnemySpawner Spawner => EnemySpawner.instance;
 
-        public bool IsNight => DayNightCycle.Instance != null && DayNightCycle.Instance.CurrentTimestate == DayNightCycle.Timestate.Night;
+        public bool IsNight => GamePhase.IsNight;
 
         /// <summary>1-based: the running night, or the coming one by day (Wavenumber is -1 on day 1, n-1 during night n
         /// and the day after it).</summary>
@@ -141,8 +179,10 @@ namespace PalaceMod.Builder.Logic
             if (world == null) return;
             var seen = new HashSet<LogicEntity>();
             float r2 = radius * radius;
+            var hidden = GamePhase.HiddenCastle;
             foreach (var e in world.Entities)
-                if (e.Exists && e.Kind != "level" && (radius <= 0 || Vec.FlatDistanceSq(e.Position, center) <= r2) && seen.Add(e)) into.Add(e);
+                if (e.Exists && e.Kind != "level" && (radius <= 0 || Vec.FlatDistanceSq(e.Position, center) <= r2)
+                    && (hidden == null || e.Hp()?.TaggedObj != hidden) && seen.Add(e)) into.Add(e);
             var tm = TagManager.instance;
             if (tm == null) return;
             buffer.Clear();

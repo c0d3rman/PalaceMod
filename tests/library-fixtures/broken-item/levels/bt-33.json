@@ -1,0 +1,319 @@
+{
+  "format": "palace-builder",
+  "version": 3,
+  "id": "bt-33",
+  "name": "bt-33",
+  "levels": [
+    {
+      "id": "bt-33",
+      "name": "bt-33",
+      "description": "",
+      "host": "Nordfels",
+      "base": "flat",
+      "waveSet": "bt-33-nights",
+      "terrain": {
+        "origin": [
+          -56.0,
+          -92.0
+        ],
+        "cell": 2.0,
+        "size": [
+          67,
+          58
+        ],
+        "y": 0.0,
+        "format": 2
+      },
+      "spawnLines": {
+        "add": [
+          {
+            "id": "south",
+            "pos": [
+              -4.0,
+              0.0,
+              -60.0
+            ],
+            "rotY": 0.0,
+            "width": 10.0,
+            "ground": true,
+            "large": true,
+            "flying": true
+          },
+          {
+            "id": "camp-line",
+            "pos": [
+              50.0,
+              0.0,
+              -80.0
+            ],
+            "rotY": 0.0,
+            "width": 6.0,
+            "ground": true,
+            "large": false,
+            "flying": false
+          }
+        ],
+        "remove": [
+          "Forest",
+          "Main Bridge",
+          "Right Bridge",
+          "Fly - Pond",
+          "Fly - River"
+        ]
+      },
+      "buildSlots": {
+        "add": [
+          {
+            "id": "h1",
+            "base": "scene:House Variant",
+            "pos": [
+              6.0,
+              0.0,
+              6.0
+            ],
+            "rotY": 0.0,
+            "requires": {
+              "slot": "castle",
+              "level": 0
+            }
+          },
+          {
+            "id": "h2",
+            "base": "scene:House Variant",
+            "pos": [
+              -15.0,
+              0.0,
+              6.0
+            ],
+            "rotY": 0.0,
+            "requires": {
+              "slot": "castle",
+              "level": 0
+            }
+          },
+          {
+            "id": "h3",
+            "base": "scene:House Variant",
+            "pos": [
+              6.0,
+              0.0,
+              14.0
+            ],
+            "rotY": 0.0,
+            "requires": {
+              "slot": "castle",
+              "level": 0
+            }
+          },
+          {
+            "id": "m1",
+            "base": "scene:Mill Variant",
+            "pos": [
+              -16.0,
+              0.0,
+              16.0
+            ],
+            "rotY": 0.0,
+            "requires": {
+              "slot": "castle",
+              "level": 0
+            }
+          },
+          {
+            "id": "t1",
+            "base": "scene:Defense Tower Variant",
+            "pos": [
+              -14.0,
+              0.0,
+              -18.0
+            ],
+            "rotY": 0.0,
+            "requires": {
+              "slot": "castle",
+              "level": 0
+            }
+          },
+          {
+            "id": "t2",
+            "base": "scene:Defense Tower Variant",
+            "pos": [
+              6.0,
+              0.0,
+              -18.0
+            ],
+            "rotY": 0.0,
+            "requires": {
+              "slot": "castle",
+              "level": 0
+            }
+          },
+          {
+            "id": "b1",
+            "base": "scene:Outpost Variant",
+            "pos": [
+              -4.0,
+              0.0,
+              -12.0
+            ],
+            "rotY": 0.0,
+            "requires": {
+              "slot": "castle",
+              "level": 0
+            }
+          }
+        ]
+      },
+      "logic": {
+        "vars": {
+          "flipped": false
+        },
+        "hud": [
+          {
+            "id": "phase",
+            "text": "{$flipped ? (isDay ? 'FLIPPED: build under attack!' : 'FLIPPED: raid the enemy camps') : (isDay ? 'Day' : 'Night')}"
+          }
+        ],
+        "rules": [
+          {
+            "id": "flip-day",
+            "when": "day",
+            "if": "night == 2",
+            "do": [
+              {
+                "do": "setVar",
+                "name": "flipped",
+                "value": true
+              },
+              {
+                "do": "message",
+                "text": "The cycle is reversed! They attack while you build.",
+                "kind": "warn",
+                "seconds": 6
+              }
+            ]
+          },
+          {
+            "id": "day-assault",
+            "when": {
+              "on": "every",
+              "seconds": 12,
+              "during": "day"
+            },
+            "if": "$flipped",
+            "do": [
+              {
+                "do": "spawn",
+                "entity": "day-raider",
+                "count": 2,
+                "at": "spawnLine('south')",
+                "spread": 3,
+                "team": "enemy"
+              }
+            ]
+          },
+          {
+            "id": "raid-night",
+            "when": "nightStart",
+            "if": "$flipped",
+            "do": [
+              {
+                "do": "spawn",
+                "entity": "enemy-camp",
+                "at": "vec(50, -70)",
+                "team": "enemy"
+              },
+              {
+                "do": "spawn",
+                "entity": "enemy-camp",
+                "at": "vec(-45, -70)",
+                "team": "enemy"
+              },
+              {
+                "do": "message",
+                "text": "Night raid: destroy the enemy camps",
+                "kind": "info"
+              }
+            ]
+          },
+          {
+            "id": "unflip",
+            "when": "dawn",
+            "if": "$flipped and night >= 2",
+            "do": [
+              {
+                "do": "setVar",
+                "name": "flipped",
+                "value": false
+              },
+              {
+                "do": "forEach",
+                "in": "all('enemy and unit')",
+                "actions": [
+                  {
+                    "do": "destroy",
+                    "target": "it",
+                    "silent": true
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "waveSets": [
+    {
+      "id": "bt-33-nights",
+      "name": "bt-33-nights",
+      "host": "Nordfels",
+      "nights": [
+        {
+          "difficulty": 1.0,
+          "spawns": [
+            {
+              "unit": "vanilla:E Melee",
+              "count": 3,
+              "interval": 1.0,
+              "delay": 0.0,
+              "line": "south",
+              "gold": 3
+            }
+          ]
+        },
+        {
+          "difficulty": 1.0,
+          "spawns": [
+            {
+              "unit": "camp-guard",
+              "count": 1,
+              "interval": 1.0,
+              "delay": 0.0,
+              "line": "camp-line",
+              "gold": 1
+            }
+          ],
+          "warning": "Raid night"
+        },
+        {
+          "difficulty": 1.0,
+          "spawns": [
+            {
+              "unit": "vanilla:E Melee",
+              "count": 5,
+              "interval": 1.0,
+              "delay": 0.0,
+              "line": "south",
+              "gold": 5
+            }
+          ]
+        }
+      ],
+      "startingGold": 30
+    }
+  ],
+  "library": {
+    "created": "2026-11-09T03:48:07Z",
+    "kind": "level"
+  }
+}

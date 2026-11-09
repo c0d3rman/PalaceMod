@@ -177,7 +177,7 @@ namespace PalaceMod.Builder.Logic.Bodies
 
         private static void Update(Surface s, uint tag)
         {
-            if (s.Area == null) return;
+            if (s.Area == null || AstarPath.active == null) return;   // the level is unloading: no graphs left to untag
             var t = s.Area.transform;
             var pts = s.Area.Shape.Outline().Select(p => t.TransformPoint(new Vector3(p.x, 0f, p.y))).ToArray();
             if (tag != 0) s.LastOutline = pts;
