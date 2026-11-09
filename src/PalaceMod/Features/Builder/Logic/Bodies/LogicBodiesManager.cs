@@ -31,6 +31,17 @@ namespace PalaceMod
             NavSpike.Tick();
         }
 
+        // A seeker limited to some tags may find its target behind tags it can't cross: walk as near as it can instead
+        // of failing (a failed path keeps the unit on its stale one, through the forbidden area).
+        [HarmonyPatch(typeof(Pathfinding.Seeker), "StartPathInternal")]
+        private static class PartialWhenTagged
+        {
+            private static void Prefix(Pathfinding.Seeker __instance, Pathfinding.Path p)
+            {
+                if (__instance.traversableTags != -1 && p is Pathfinding.ABPath ab) ab.calculatePartial = true;
+            }
+        }
+
         [HarmonyPatch(typeof(NavmeshUpdates.NavmeshUpdateSettings), nameof(NavmeshUpdates.NavmeshUpdateSettings.ReloadDirtyTilesImmediately))]
         private static class TimeCutReload
         {

@@ -127,6 +127,24 @@ namespace PalaceMod.Builder.Logic.Bodies
                     foreach (var g in astar.data.graphs) g?.GetNodes(n => { if (n.Tag == uint.Parse(a[5])) tagged++; });
                     return $"tagged in {sw.ElapsedMilliseconds} ms; nodes with tag {a[5]}: {tagged}";
                 }
+                case "count":
+                {
+                    // count x z w d: enemies inside a box, and the tags under them
+                    var c = new Vector3(F(a[1]), 0, F(a[2]));
+                    float w = F(a[3]) / 2, d = F(a[4]) / 2;
+                    int inside = 0, total = 0;
+                    var tags = new Dictionary<uint, int>();
+                    foreach (var m in Object.FindObjectsOfType<PathfindMovementEnemy>())
+                    {
+                        total++;
+                        var p = m.transform.position;
+                        if (Mathf.Abs(p.x - c.x) <= w && Mathf.Abs(p.z - c.z) <= d) inside++;
+                        var node = astar.GetNearest(p, NearestNodeConstraint.None).node;
+                        if (node != null) tags[node.Tag] = tags.TryGetValue(node.Tag, out int k) ? k + 1 : 1;
+                    }
+                    var sample = Object.FindObjectsOfType<PathfindMovementEnemy>().Take(6).Select(m => $"({m.transform.position.x:0},{m.transform.position.z:0})->{(m.SeekToTargetObj != null ? m.SeekToTargetObj.name : "home")}");
+                    return $"{inside}/{total} inside; tags under enemies: {string.Join(", ", tags.Select(t => $"{t.Key}:{t.Value}"))}; e.g. {string.Join(" ", sample)}";
+                }
                 case "walk":
                 {
                     // walk <mask>: every enemy's seeker and snap constraint may only use these tags (-1 = all)
@@ -137,6 +155,8 @@ namespace PalaceMod.Builder.Logic.Bodies
                         m.GetComponent<Seeker>().traversableTags = mask;
                         var nn = Traverse.Create(m).Field("nearestConstraint").GetValue<NNConstraint>();
                         nn.constrainTags = true; nn.tags = mask;
+                        m.ClearCurrentPath();
+                        m.OriginalPathRequest();
                         n++;
                     }
                     return $"{n} enemies limited to tags {mask}";
