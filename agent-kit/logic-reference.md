@@ -85,13 +85,13 @@ Names an expression can use for entities in a rule.
 
 | Event | Params | other | event.value | Fires when |
 |---|---|---|---|---|
-| `death` |  | killer (killer = other, victim = subject) |  | It dies (a unit) or is knocked out (a building or the king). `other` is the killer (may be none). |
-| `damaged` | `min` | attacker (attacker = other) | number: the damage taken | It takes damage (not when modifiers reduce it to 0). `other` is who dealt it: the king, a unit, a tower or building, a projectile's shooter, or whoever left burning ground or hot oil there; none for scenery hazards and plain `damage` actions without a source. |
+| `death` |  | killer (killer = other, victim = subject) |  | It dies (a unit) or is knocked out (a building or the king). `other` is the killer (may be none). event.types / event.weapon: the killing hit's (see damaged). Fields: event.types, event.weapon. |
+| `damaged` | `min` | attacker (attacker = other) | number: the damage taken | It takes damage (not when modifiers reduce it to 0). `other` is who dealt it: the king, a unit, a tower or building, a projectile's shooter, or whoever left burning ground or hot oil there; none for scenery hazards and plain `damage` actions without a source. event.types is the hit's damage types (a list: melee, ranged, tower, king, splash, magic, fire, the damage action's own types, and the weapon's id); event.weapon is the weapon that dealt it ("vanilla:<weapon>"), or none. Fields: event.types, event.weapon. |
 | `healed` |  | healer (healer = other) | number: the amount healed | It is healed. |
 | `hpBelow` | `pct`* |  | number: hpPct | Its hp crosses below a fraction (edge-triggered; re-arms when healed above). Only its own hp: no `of`. |
 | `attack` | `attack` | target (target = other) |  | It attacks (any attack, vanilla ones included). |
-| `hit` |  | victim (victim = other) | number: the damage dealt | Its attack, projectile or damage action damaged something. |
-| `kill` |  | victim (victim = other) |  | Something it damaged died from that damage. |
+| `hit` |  | victim (victim = other) | number: the damage dealt | Its attack, projectile or damage action damaged something. event.types / event.weapon as for damaged. Fields: event.types, event.weapon. |
+| `kill` |  | victim (victim = other) |  | Something it damaged died from that damage. event.types / event.weapon as for damaged. Fields: event.types, event.weapon. |
 | `targetChanged` |  | target (target = other) |  | Its attack or move target changes. |
 
 ### Time
@@ -124,6 +124,7 @@ Names an expression can use for entities in a rule.
 | Event | Params | other | event.value | Fires when |
 |---|---|---|---|---|
 | `arrive` |  |  | number: the point index | (movers, path followers, moveTo) It reached a point. |
+| `bump` (unit) |  | obstacle (obstacle = other) | number: the push distance left (metres) | A push (the push action or the game's knockback) was stopped short by something solid: a wall or building, a solid body, a cliff or the map's edge. `other` is what it hit when that's an entity (a building, a wall, a solid body), else none; event.pos is where it stopped. |
 | `end` |  |  |  | (movers, path followers) It reached the end of its path (before then: destroy acts). |
 
 ### Pickups
@@ -301,6 +302,15 @@ Each action is `{"do": "<name>", ...params}`. `target` (where listed) is a selec
 - `target` (entities; default "self"): Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self.
 - `status` (status; required): The status id.
 - `stacks` (int; 1..): Stacks to remove (default all).
+
+**`setWeapon`**: Gives it another weapon (units, towers, the king): a weapon id, a copy of another entity's weapon, none, or its own back. A ranged weapon makes it shoot: its range follows the weapon.
+
+- `target` (entities; default "self"): Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self.
+- `weapon` (text; required): "vanilla:<weapon>" (e.g. "=other.weapon"), an entity to copy ("=other": its weapon, range and keep distance), "none" (its attacks do nothing) or "base" (the weapon it started with).
+- `range` (number; 0..): Attack range in metres (default: the copied entity's, else the weapon's usual range).
+- `for` (for): Seconds, or "night"/"day"; then it gets back the weapon it had before. Omit to keep it.
+
+  `{ "do": "setWeapon", "weapon": "=other" }`
 
 ### Team
 
@@ -654,6 +664,7 @@ Selector functions anchor at `self`; call them as methods (`castle.count('enemy'
 | entity | `.target` | entity | Its current attack/move target. |
 | entity | `.owner` | entity | Who spawned or launched it. |
 | entity | `.id` | text | Its entity id. |
+| entity | `.weapon` | text | Its current weapon's id ("vanilla:<weapon>"; the king's is his equipped weapon's auto attack), "none" when disarmed by setWeapon, or none. |
 | entity | `.moveSpeed` | number | Movement speed, m/s. (with modifiers) |
 | entity | `.attackCooldown` | number | Seconds between attacks. (with modifiers) |
 | entity | `.attackRange` | number | Attack range, m. (with modifiers) |
@@ -681,6 +692,8 @@ Selector functions anchor at `self`; call them as methods (`castle.count('enemy'
 | event | `.name` | text | signal: the name; varChanged: the var; status events: the status. |
 | event | `.choice` | text | interact with choices: the chosen id. |
 | event | `.result` | text | levelEnd: 'win' or 'lose'. |
+| event | `.types` | list | damaged/hit/kill/death: the hit's damage types, e.g. event.types.has('fire'). |
+| event | `.weapon` | text | damaged/hit/kill/death: the weapon that dealt the hit ("vanilla:<weapon>"), or none. |
 
 ## Fields of each block
 

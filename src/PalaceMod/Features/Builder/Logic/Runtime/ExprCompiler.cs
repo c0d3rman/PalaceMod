@@ -197,6 +197,8 @@ namespace PalaceMod.Builder.Logic
                     "value" => ctx => ctx.Event == null ? Value.None : !ctx.Event.Payload.IsNone ? ctx.Event.Payload : Value.Number(ctx.Event.Value),
                     "pos" => ctx => ctx.Event?.Pos is Vec p ? Value.Position(p) : ctx.Event?.Subject != null ? Value.Position(ctx.Event.Subject.Position) : Value.None,
                     "name" or "choice" or "result" => ctx => ctx.Event?.Text != null ? Value.Text(ctx.Event.Text) : Value.None,
+                    "types" => ctx => Value.List(ctx.Event?.Types?.Select(Value.Text).ToList() ?? []),
+                    "weapon" => ctx => ctx.Event?.Weapon != null ? Value.Text(ctx.Event.Weapon) : Value.None,
                     _ => throw new LogicError($"col {n.Col + 1}: event has no \"{name}\""),
                 };
             }
@@ -283,6 +285,7 @@ namespace PalaceMod.Builder.Logic
                 case "name": return Value.Text(e.Name ?? e.Id);
                 case "enabled": return Value.Bool(e.Enabled);
                 case "elite": return Value.Bool(LogicServices.IsElite?.Invoke(e) ?? false);
+                case "weapon": return LogicServices.WeaponOf?.Invoke(e) is string w ? Value.Text(w) : Value.None;
             }
             if (LogicServices.GameProperty?.Invoke(e, name) is Value game) return game;
             var stats = LogicServices.Stats;

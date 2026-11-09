@@ -318,6 +318,21 @@ namespace PalaceMod.Tests
             Assert.Equal(2.0, Num(w, "n"), "re-armed by healing above");
         }
 
+        public static void DamageEventsCarryTypesAndWeapon()
+        {
+            var w = NewWorld("""{ "vars": { "fire": 0, "weapon": "''", "n": 0 } }""");
+            var e = Place(w, """{ "id": "u", "rules": [ { "when": "damaged", "do": [ { "do": "addVar", "name": "$n" }, { "do": "if", "cond": "event.types.has('fire')", "then": [ { "do": "addVar", "name": "$fire" } ] }, { "do": "setVar", "name": "$weapon", "value": "event.weapon" } ] } ] }""", Vec.Zero);
+            w.Raise("damaged", e, null, 5, null, null, types: ["fire", "vanilla:P Fire Archer"], weapon: "vanilla:P Fire Archer");
+            w.Tick(0.016);
+            Assert.Equal(1.0, Num(w, "fire"), "event.types.has('fire')");
+            Assert.Equal("vanilla:P Fire Archer", w.GetVar(w.Level, "weapon").Str, "event.weapon");
+            w.Raise("damaged", e, null, 5, null, null);
+            w.Tick(0.016);
+            Assert.Equal(2.0, Num(w, "n"), "a hit without types still fires");
+            Assert.Equal(1.0, Num(w, "fire"), "no types: an empty list");
+            Assert.True(w.GetVar(w.Level, "weapon").IsNone, "no weapon: none");
+        }
+
         public static void PresetsExpandWithParams()
         {
             var w = new LogicWorld();

@@ -443,11 +443,12 @@ namespace PalaceMod.Builder.Logic
 
         private int droppedThisFrame;
 
-        public void Raise(string name, LogicEntity subject, LogicEntity other, double value, Vec? pos, string text, int depth = 0)
+        public void Raise(string name, LogicEntity subject, LogicEntity other, double value, Vec? pos, string text, int depth = 0,
+            IReadOnlyList<string> types = null, string weapon = null)
         {
             if (depth > Caps.ChainDepth) { Drop(name, subject); return; }
             if (queue.Count >= Caps.Queue) { Drop(name, subject, full: true); return; }
-            queue.Enqueue(new LogicEvent { Name = name, Subject = subject, Other = other, Value = value, Pos = pos, Text = text, Depth = depth, Seq = ++seq });
+            queue.Enqueue(new LogicEvent { Name = name, Subject = subject, Other = other, Value = value, Pos = pos, Text = text, Depth = depth, Seq = ++seq, Types = types, Weapon = weapon });
         }
 
         public void Signal(string name, IReadOnlyList<LogicEntity> to, double value, LogicEntity sender, int depth = 0)
@@ -566,7 +567,7 @@ namespace PalaceMod.Builder.Logic
             if (firingsThisFrame >= Caps.FiringsPerFrame)
             {
                 if (!throttledThisFrame) { throttledThisFrame = true; throttled++; TraceAdd(owner.Id, r.Label, r.Path, e.Name, TraceOutcome.Throttled, $"over {Caps.FiringsPerFrame} rule firings this frame; the rest run next frame", e.Value, e.Other?.Id); }
-                deferred.Enqueue(new LogicEvent { Name = e.Name, Subject = e.Subject, Other = e.Other, Value = e.Value, Pos = e.Pos, Text = e.Text, Payload = e.Payload, Seq = e.Seq, Depth = e.Depth, Target = ri });
+                deferred.Enqueue(new LogicEvent { Name = e.Name, Subject = e.Subject, Other = e.Other, Value = e.Value, Pos = e.Pos, Text = e.Text, Payload = e.Payload, Types = e.Types, Weapon = e.Weapon, Seq = e.Seq, Depth = e.Depth, Target = ri });
                 return;
             }
             if (Time - ri.WindowStart >= 1) { ri.WindowStart = Time; ri.WindowCount = 0; }

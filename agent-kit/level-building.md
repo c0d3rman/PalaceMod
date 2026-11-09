@@ -776,6 +776,11 @@ log warns by file). Delete or rename shared items with the `remove_*` / `rename_
 - `near` takes its own `filter` and `range`: `{ "on": "near", "filter": "king", "range": 2 }`.
 - Event params narrow it: `{ "on": "signal", "name": "open" }`, `{ "on": "hpBelow", "pct": 0.5 }`, `{ "on": "dusk",
   "night": 4 }`, `{ "on": "damaged", "min": 20 }`. Events with a value: `event.value` (damage, tick count, night...).
+- `damaged`, `hit`, `kill` and `death` carry the hit's damage types as `event.types` (a list: `event.types.has('fire')`)
+  and the weapon that dealt it as `event.weapon` (`"vanilla:<weapon>"`, or none). See 12.8 for the types.
+- `bump` (units): a shove (`push`, or the game's own knockback) was stopped short by something solid: a wall, a
+  building, a solid body, a cliff or the map's edge. `other` is the building or body it hit (none for terrain),
+  `event.value` the metres of push it didn't travel, `event.pos` where it stopped.
 - Rules run one frame after the event, in order; actions that raise events queue them after. Waits resume later.
 
 ### 12.4 Expressions (the one formula language)
@@ -795,13 +800,14 @@ One small, pure language everywhere: conditions, numbers, selectors, positions.
   at most 100 deep.
 - **Literals**: `12`, `0.5`, `true`, `'text'`, `vec(x, z)` (a ground position), `vec(x, y, z)`.
 - **Names**: roles (`self subject other spawned it outer king castle level`), per-event aliases (`killer`, `victim`,
-  `attacker`, `target`, `entrant`, `collector`, `sender`...), `event.value` / `event.pos` / `event.name` /
-  `event.choice`, `@name` (a place or attached object), `@@id` (a template), `$var` (a level variable), `x.$var` (an
+  `attacker`, `target`, `entrant`, `collector`, `sender`, `obstacle`...), `event.value` / `event.pos` / `event.name` /
+  `event.choice` / `event.types` / `event.weapon`, `@name` (a place or attached object), `@@id` (a template), `$var` (a level variable), `x.$var` (an
   entity variable), globals (`night`, `isNight`, `isDay`, `time`, `nightTime`, `nightProgress`, `gold`, `income`
   (what the buildings paid at the last dawn, already set when `dawn` rules run), `enemiesAlive`, `difficulty`,
   `nights`).
 - **Properties**: `.hp .maxHp .hpPct .alive .elite .pos .x .y .z .facing .team .kind .template .labels .level .cost
-  .buildingType .age .target .owner .id` (`.maxHp` is the live value, after the night's difficulty and elite; `@@x.hp`
+  .buildingType .age .target .owner .id .weapon` (`.weapon` is its weapon's id, `"vanilla:<weapon>"`: a unit's or
+  tower's attack, the king's equipped weapon; `"none"` after `setWeapon none`; `.maxHp` is the live value, after the night's difficulty and elite; `@@x.hp`
   is the template's catalog value), every stat by name (`.moveSpeed`, `.damageMult`, `.income`...), methods
   `.is('filter')`, `.dist(e)`, `.inside(@area)`, `.stacks('status')`; lists and sets: `.len .first .last .at(i)
   .has(x)`.
@@ -853,12 +859,19 @@ runs once per member and the other params are evaluated per member with `it` bou
 |---|---|
 | Make | `spawn` (any template; `then` runs with `spawned`), `launch` (a projectile template toward a target; `onImpact`), `spawnGroup` (a wave-style group that counts toward the night), `replace` (morph into another template) |
 | Health | `damage` (`amount`, `source` credited, `types` like `["fire"]`), `heal`, `kill`, `revive`, `setHp` |
-| Stats | `setStat` (`stat`, one of `value`/`add`/`mult`, `for` seconds or `"night"`/`"day"`), `applyStatus`, `removeStatus` |
+| Stats | `setStat` (`stat`, one of `value`/`add`/`mult`, `for` seconds or `"night"`/`"day"`), `applyStatus`, `removeStatus`, `setWeapon` (below) |
 | Team, move | `convert` (switch side), `teleport`, `push` (knockback), `drift` (continuous pull/wind), `moveTo`, `setMovement`, `setTargeting` (`prepend`, `remove`, `for`), `taunt`, `command` (player units: follow/hold/home) |
 | Logic | `signal`, `setVar`, `addVar`, `listAdd`/`listRemove`/`listClear`, `addLabel`/`removeLabel`, `enableRule`/`disableRule`, `enable`/`disable`/`toggle`, `wait`, `if` (`cond`, `then`, `else`), `repeat` (`times`, `every`, `actions`), `forEach` (`in`, `actions`, `limit`), `choose` (`options: [{weight, do}]`), `stop` |
 | World | `gold` (give/take), `dropCoins`, `building` (build, upgrade, knockOut, repair, demolish, lock, unlock, setCost, setIncome a slot: `slot` is any expression giving a building or slot entity, `@name`, `it`, `$var`, `it.$slot`, `nearest('unbuilt and type:House')`, or a Studio key `"add:h1"`; without `slot` it acts on each `target`), `waves` (addSpawn, removeUnit, scaleCount, scaleHp, clearRemaining, startNight, endNight, skipNight), `endLevel` |
 | Show | `effect`, `sound`, `message`, `floatText`, `setVisual`, `hud`, `shake`, `marker` |
 | End | `destroy` (`drops`, `effects`, `silent`): removes anything; a unit the logic spawned is removed outright, one of the game's own player troops is knocked out for good (no revive at dawn); buildings, the castle and the king are only knocked out |
+
+**`setWeapon`** gives units, towers and the king another weapon: `"weapon": "vanilla:<weapon>"` (or
+`"=other.weapon"`), `"=other"` (copy that entity's weapon with its range and keep distance), `"none"` (its attacks
+swing but do nothing) or `"base"` (the weapon it started with). The attack range follows the weapon (a melee unit
+given a bow shoots from the bow's range; `range` overrides), and so does a unit's keep distance. `for` (seconds,
+`"night"`, `"day"`) gives back what it had before. On the king it swaps his auto attack (the equipped weapon's
+passive half). `palace.py game cmd logic-weapons` lists every weapon id with its damage types.
 
 `repeat` and `forEach` take their body as `actions` (the key `do` already names the action); `forEach` also takes
 `limit` and `as` (a name for the member, 12.4). `setVar`/`addVar` write
@@ -908,7 +921,13 @@ and make it over 8 m wide for large enemies (they keep 4 m from every edge).
 
 In a status's rules `self` is the carrier and `other` whoever applied it. `damageTaken` works on anything with hit
 points, buildings and the castle included (`setStat` on `castle` with `"for": "night"` is a one-night shield). `drift` is a mod too (`"drift": {"toward":
-"@well", "speed": 3}`). Vanilla damage carries types `melee`/`ranged`, `tower`, `king`, `splash`, `magic`.
+"@well", "speed": 3}`). Vanilla damage carries types `melee`/`ranged`, `tower`, `king`, `splash`, `magic`, the
+weapon's id (`vanilla:P Fire Archer`, so any weapon can be told apart), and `fire` for weapons that leave burning
+ground (fire archers, the Fire Spire, Firewing, potion vials) or that the game marks as fire or explosion damage
+(exploders, the fire snail's blast); the burning ground's ticks are `fire` too, credited to the shooter.
+
+A status's rules also hear the carrier's own events (`damaged`, `signal`, `attack`...), so a status can end itself:
+`{"when": "damaged", "do": [{"do": "removeStatus", "status": "asleep"}]}` (see "Sleeping enemies" in the cookbook).
 
 **How long a status lasts.** `duration` is in seconds (0.05 to 36000). Leave it out and the status is permanent: it
 stays until `removeStatus`, the way to give something a lasting buff, curse or flag.
@@ -1166,6 +1185,27 @@ the mirror rule at `dawn` on the werewolf.
 **War horn** (a king action): `{"op": "king_action", "id": "horn", "name": "War horn", "when": "day", "uses": {"count":
 1, "per": "day"}}` and a level rule on `{"on": "kingAction", "action": "horn"}`: `command follow` and `setStat
 moveSpeed mult 1.2 for "night"` on `all('player and unit', 20)`.
+
+**Mirror knight** (copies the weapon of whatever hit it; a tower's bow makes it shoot from the tower's range):
+`{"when": "damaged", "if": "event.weapon != none and event.weapon != self.weapon", "do": [{"do": "if", "cond":
+"other != none and other.weapon == event.weapon", "then": [{"do": "setWeapon", "weapon": "=other"}], "else": [{"do":
+"setWeapon", "weapon": "=event.weapon"}]}]}`.
+
+**Thief** (steals the king's weapon until he picks it up): on the thief `{"when": {"on": "near", "filter": "king",
+"range": 2.5}, "if": "king.weapon != 'none'", "do": [{"do": "setWeapon", "weapon": "=king"}, {"do": "setWeapon",
+"target": "king", "weapon": "none"}, {"do": "spawn", "entity": "lost-weapon", "at": "pointNear(self, 12)"}]}`; the
+`lost-weapon` pickup (`by: "king"`) runs `setWeapon` `"base"` on `king` and on the thief.
+
+**Sleeping enemies** (wake when hit or called): a status `{"id": "asleep", "duration": 36000, "flags": ["stunned"],
+"rules": [{"when": "damaged", "do": [{"do": "removeStatus", "status": "asleep"}]}, {"when": {"on": "signal", "name":
+"wake"}, "do": [{"do": "removeStatus", "status": "asleep"}]}]}` in the unit's `statuses`; a horn wakes them with
+`{"do": "signal", "name": "wake", "to": "all('enemy and has:asleep', 14)"}`.
+
+**Shove into a wall** (a knockback that hits something solid): on the unit `{"when": "bump", "if": "event.value > 1",
+"do": [{"do": "applyStatus", "status": "flipped"}]}`; `other` is the wall or building it hit (none for a cliff).
+
+**Weak to fire**: a status mod `"damageTaken": {"mult": 2, "types": ["fire"]}`, or a rule `{"when": "damaged", "if":
+"event.types.has('fire')", ...}`: fire archers, the Fire Spire and burning ground all count.
 
 ### 12.15 Pitfalls
 

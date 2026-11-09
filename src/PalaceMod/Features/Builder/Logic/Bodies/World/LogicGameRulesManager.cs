@@ -494,6 +494,21 @@ namespace PalaceMod
         private static Side SideOf(TaggedObject t) =>
             t.Tags.Contains(TagManager.ETag.PlayerOwned) ? Side.Player : t.Tags.Contains(TagManager.ETag.EnemyOwned) ? Side.Enemy : Side.Neutral;
 
+        private static readonly Dictionary<Weapon, Side> nativeSides = [];
+
+        /// <summary>The side a weapon is made for, from the rows it hurts with: rows naming EnemyOwned make it a player
+        /// weapon, PlayerOwned an enemy one; else `isPlayerWeapon` (which towers' weapons don't set).</summary>
+        private static Side NativeSide(Weapon w)
+        {
+            if (nativeSides.TryGetValue(w, out var s)) return s;
+            bool Names(TagManager.ETag tag) =>
+                (w.directDamage?.Any(m => m?.requiredTags != null && m.requiredTags.Contains(tag)) ?? false)
+                || (w.splashDamage?.Any(m => m?.requiredTags != null && m.requiredTags.Contains(tag)) ?? false);
+            s = Names(TagManager.ETag.EnemyOwned) ? Side.Player : Names(TagManager.ETag.PlayerOwned) ? Side.Enemy
+                : w.isPlayerWeapon ? Side.Player : Side.Enemy;
+            return nativeSides[w] = s;
+        }
+
         [HarmonyPatch(typeof(Weapon), nameof(Weapon.DealDamage))]
         private static class WielderSide
         {
@@ -502,7 +517,7 @@ namespace PalaceMod
                 __state = wielder;
                 if (LogicWorld.Current == null || _attacker == null) return;
                 var side = SideOf(_attacker);
-                wielder = side == (__instance.isPlayerWeapon ? Side.Player : Side.Enemy) ? Side.None : side;
+                wielder = side == NativeSide(__instance) ? Side.None : side;
             }
 
             private static void Finalizer(Side __state) => wielder = __state;

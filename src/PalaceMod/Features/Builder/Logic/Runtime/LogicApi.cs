@@ -148,6 +148,8 @@ namespace PalaceMod.Builder.Logic
         public Vec? Pos;                     // event.pos (defaults to the subject's position when read)
         public string Text;                  // event.name for signals; event.choice for interact; the status id for status events
         public Value Payload;                // a non-numeric event.value (e.g. a signal carrying text), else None
+        public IReadOnlyList<string> Types;  // damage events: the hit's damage types (event.types), else null
+        public string Weapon;                // damage events: the weapon that dealt it, "vanilla:<weapon>" (event.weapon), else null
         public long Seq;                     // dispatch order
         public int Depth;                    // chain depth (0 = from the game)
         internal object Target;              // internal: a directed delivery (signals, own timers)
@@ -446,6 +448,11 @@ namespace PalaceMod.Builder.Logic
         /// <summary>Extra selector/`near` candidates beyond the registry and the game's tagged objects (L2: vanilla
         /// projectiles in flight). Called with (center, radius, into); radius &lt;= 0 = everywhere.</summary>
         public static Action<Vec, float, List<LogicEntity>> ExtraCandidates;
+        /// <summary>During Hp.TakeDamage: the hit's damage types and weapon id ("vanilla:&lt;weapon&gt;" or null), given the
+        /// game's attacker (a TaggedObject, or null). L2 Stats installs it; the damage hooks put them on their events.</summary>
+        public static Func<object, (IReadOnlyList<string> Types, string Weapon)> CurrentHit;
+        /// <summary>`.weapon`: the id of the entity's current weapon ("vanilla:&lt;weapon&gt;", "none"), or null (L2).</summary>
+        public static Func<LogicEntity, string> WeaponOf;
         /// <summary>Empty build slots (level 0) as entities, for selectors whose filter opts in (`unbuilt`,
         /// `include:unbuilt`); L1 installs it (GameSlots). Called with (center, radius, into).</summary>
         public static Action<Vec, float, List<LogicEntity>> UnbuiltSlots;
