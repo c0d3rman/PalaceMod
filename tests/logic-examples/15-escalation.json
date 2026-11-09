@@ -89,10 +89,7 @@
  "play": {
   "steps": [
    {
-    "cmd": "skipnights 3"
-   },
-   {
-    "cmd": "night"
+    "cmd": "agent night 4"
    },
    {
     "expect": "$added == 1",
