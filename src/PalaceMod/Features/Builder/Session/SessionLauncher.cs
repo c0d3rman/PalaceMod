@@ -222,7 +222,15 @@ namespace PalaceMod.Builder
             var pack = request?.Pack;
             if (pack == null) { error = "no pack"; return false; }
 
-            var errors = BuilderServices.Packs.Validate(pack).Where(i => i.Severity == Severity.Error).ToList();
+            // The library is one pack of unrelated levels: only this level, its nights and their enemies must be valid
+            // (a broken level elsewhere in the library must not block it). A shared pack is checked whole.
+            var checkedPack = pack;
+            if (pack.Id == DesignLibrary.PackId && request.LevelId != null)
+            {
+                checkedPack = Studio.Play.TestPacks.Play(pack, request.LevelId, out string playError);
+                if (checkedPack == null) { error = playError; return false; }
+            }
+            var errors = BuilderServices.Packs.Validate(checkedPack).Where(i => i.Severity == Severity.Error).ToList();
             if (errors.Count > 0) { error = $"{pack.Name ?? pack.Id} has {errors.Count} error(s): {string.Join("; ", errors.Take(3).Select(e => e.Message))}"; return false; }
 
             if (request.LevelId != null)
