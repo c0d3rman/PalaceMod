@@ -64,6 +64,14 @@ namespace PalaceMod.Builder.Logic.Bodies
 
         private string When => (string)Def["when"] ?? "always";
 
+        public int Price(JToken c)
+        {
+            if (c == null) return cost;
+            if (c.Type is JTokenType.Integer or JTokenType.Float) return Mathf.Max(0, (int)c);
+            if (c.Type == JTokenType.String) return Mathf.Max(0, (int)(EvalNumber((string)c, Entity) ?? 0));
+            return cost;
+        }
+
         public override bool CanBeInteractedWith
         {
             get
@@ -114,8 +122,26 @@ namespace PalaceMod.Builder.Logic.Bodies
             if (!CanBeInteractedWith) return;
             Refresh();
             paid = false;
+            if (Def["choices"] is JArray choices && choices.Count > 0) { BodyChoices.Present(this, choices, player); return; }
             if (cost <= 0) { Fire(player); return; }
             holding = true;
+        }
+
+        /// <summary>A choice was picked in the game's choice popup: pay its cost (all at once), then fire.</summary>
+        public void Chosen(PlayerInteraction player, string id, int price)
+        {
+            if (price > 0)
+            {
+                if (player.Balance < price)
+                {
+                    Notify.Show($"Not enough gold ({price} needed)", NotifyKind.Warning, 3f, "builder-interact");
+                    return;
+                }
+                player.SpendCoins(price);
+            }
+            used = true;
+            BodyDev.Raise("interact", Entity, LogicGame.EntityOf(player.gameObject), price, transform.position.ToVec(), id);
+            if (focused) Refresh();
         }
 
         public override void InteractionHold(PlayerInteraction player)

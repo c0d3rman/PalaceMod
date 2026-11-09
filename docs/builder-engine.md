@@ -262,7 +262,9 @@ e.g. with `destroy`).
 instead, and `event.choice` is the chosen id: a loan of 100, 250 or
 500, or "rebuild as tower / house". It fires `interact` (`other` is the king) after the cost is
 paid; with `cost` it uses the game's own pay-hold interaction. The prompt shows in the game's own tooltip, and the
-coins fill a copy of a build slot's coin display. `choices` isn't built yet (the validator warns).
+coins fill a copy of a build slot's coin display. With `choices`, the game's upgrade-choice popup opens on interact
+(each choice also takes `description` and `icon`, an `asset:` sprite); the picked choice's cost is paid at once (a
+"not enough gold" notice otherwise) and `interact` fires with `event.choice`; Esc cancels without paying.
 
 **Projectiles in flight.** The game's own projectiles (`AimbotProjectile`: arrows, bolts, magic, boulders) are
 entities of kind `projectile` while they fly, made the first time an area or selector sees one; their `owner` is the
