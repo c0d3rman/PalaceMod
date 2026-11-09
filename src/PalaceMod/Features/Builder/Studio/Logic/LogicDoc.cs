@@ -204,11 +204,14 @@ namespace PalaceMod.Builder.Studio.Logic
             for (int i = 2; ; i++) if (!taken.Contains(root + i)) return root + i;
         }
 
-        /// <summary>A unique place id ("timer-1").</summary>
+        /// <summary>A unique place id ("timer1"): letters and digits only, so formulas can name it (@timer1; a hyphen
+        /// would read as a minus).</summary>
         public static string NewPlaceId(JObject logic, string prefix)
         {
             var taken = Names(logic);
-            for (int i = 1; ; i++) if (!taken.Contains($"{prefix}-{i}")) return $"{prefix}-{i}";
+            string root = NameFor(prefix, new HashSet<string>()).TrimEnd('0', '1', '2', '3', '4', '5', '6', '7', '8', '9');
+            if (root.Length == 0) root = "thing";
+            for (int i = 1; ; i++) if (!taken.Contains(root + i)) return root + i;
         }
 
         // ---- Action lists inside a rule ----------------------------------------------------------------------------

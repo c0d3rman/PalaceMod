@@ -28,7 +28,6 @@ namespace PalaceMod.Builder.Studio.Logic
             Studio.AddOverlay(WireOverlay.Instance);
             Studio.AddItemSource(PlaceItems.Instance);
             Studio.AddPanel(LogicStudio.Tab, StudioMode.Edit, () => true, page => BehaviourPanel.Build(page, LogicStudio.SelectedOwner()));
-            Studio.AddPanel("Logic", StudioMode.Play, () => LogicWorld.Current != null || LogicDoc.Logic(Studio.Level) != null, LogicPlay.Build);
             Studio.AddInspectorSection("behaviour", 150, keys => keys.Count == 1 && LogicOwner.ForItem(keys[0]) != null, LogicStudio.InspectorSummary);
             Studio.AddPaletteTab("logic", "Logic", LogicStudio.Palette);
             Studio.AddViewToggle("wires", "Wires", () => WireOverlay.ShowAll, v => WireOverlay.ShowAll = v);
@@ -50,6 +49,10 @@ namespace PalaceMod.Builder.Studio.Logic
             RuleText.TemplateName = LogicStudio.TemplateName;
             DevCommands.Register("builder-logic", "builder-logic state | owner <key|level> | rules | open <i> | new <event> | act <action> | press <text> | set <path> <json> | place <object> [x z] | wire <from> <event> <to> <input> | unwire <from> <signal> | json | check <expr> | tab | close   drive the Studio's behaviour editor", LogicDev.Run);
         }
+
+        // After every Awake, so the sandbox panel stays the first play tab.
+        public override void Start() =>
+            Studio.AddPanel("Logic", StudioMode.Play, () => LogicWorld.Current != null || LogicDoc.Logic(Studio.Level) != null, LogicPlay.Build);
 
         public override void Update()
         {
@@ -232,7 +235,7 @@ namespace PalaceMod.Builder.Studio.Logic
 
         public static List<PaletteObject> PaletteObjects() => Shapes.Concat(PresetUi.LogicObjects().Select(d => new PaletteObject
         {
-            Id = d.Id, Name = d.Name ?? d.Id, Desc = d.Description ?? "", IdPrefix = d.Id.Split('-')[0], Place = PresetUi.AsPlace(d),
+            Id = d.Id, Name = d.Name ?? d.Id, Desc = d.Description ?? "", IdPrefix = d.Id, Place = PresetUi.AsPlace(d),
         })).ToList();
 
         public static StudioPlaceable Placeable(PaletteObject obj) => new()

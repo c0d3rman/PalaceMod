@@ -205,8 +205,7 @@ namespace PalaceMod.Builder.Studio.Logic
                 var place = LogicDoc.Place(logic, id);
                 if (place == null) return;
                 var copy = (JObject)place.DeepClone();
-                string prefix = id.Contains('-') ? id.Substring(0, id.LastIndexOf('-')) : id;
-                made = LogicDoc.NewPlaceId(logic, prefix);
+                made = LogicDoc.NewPlaceId(logic, id);
                 copy["id"] = made;
                 if (copy["name"] != null) copy["name"] = LogicDoc.NameFor((string)copy["name"], LogicDoc.Names(logic));
                 var pos = Pos(place) + offset;

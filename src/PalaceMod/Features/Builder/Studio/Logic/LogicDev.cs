@@ -26,6 +26,7 @@ namespace PalaceMod.Builder.Studio.Logic
                 case "owner":
                     owner = rest == "level" ? LogicOwner.Level() : rest == "unit" ? LogicOwner.Unit(EnemyStudio.UnitId, EnemyStudio.UnitId) : LogicOwner.ForItem(rest) ?? throw new ArgumentException($"no item \"{rest}\"");
                     if (owner.StudioKey != null) Studio.Select([owner.StudioKey], SelectOp.Replace);
+                    else if (owner.Kind == OwnerKind.Level) Studio.Select([], SelectOp.Replace);
                     return $"owner {owner.Kind} {owner.Id} ({owner.Title})";
                 case "tab":
                     if (EnemyStudio.Active) { EnemyDock.PanelTab = "behaviour"; EnemyDock.RefreshInspector(); return "enemy behaviour tab"; }
@@ -118,7 +119,8 @@ namespace PalaceMod.Builder.Studio.Logic
 
         private static IEnumerable<TFUITextButton> Buttons()
         {
-            return Roots().SelectMany(r => r.GetComponentsInChildren<TFUITextButton>()).Distinct();
+            // Then any other visible row (the play dock's panels).
+            return Roots().SelectMany(r => r.GetComponentsInChildren<TFUITextButton>()).Concat(UnityEngine.Object.FindObjectsOfType<TFUITextButton>()).Distinct();
         }
 
         // The rule editor's panel first, then the docks (and an open popup).
@@ -142,7 +144,7 @@ namespace PalaceMod.Builder.Studio.Logic
                     b.onApply?.Invoke();
                     return "pressed row " + Plain(t.text).Replace("\n", " / ");
                 }
-                foreach (var tile in Roots().SelectMany(r => r.GetComponentsInChildren<ModTile>()))
+                foreach (var tile in Roots().SelectMany(r => r.GetComponentsInChildren<ModTile>()).Concat(UnityEngine.Object.FindObjectsOfType<ModTile>()).Distinct())
                 {
                     if (!tile.gameObject.activeInHierarchy) continue;
                     string label = tile.Label != null ? Plain(tile.Label.text) : tile.name;

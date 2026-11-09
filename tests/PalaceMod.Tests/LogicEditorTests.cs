@@ -138,6 +138,11 @@ namespace PalaceMod.Tests
             Assert.Equal("tower32", LogicDoc.NameFor("Tower 3", taken), "unique");
             Assert.Equal("northGate", LogicDoc.NameFor("North gate", taken), "camel");
             Assert.Equal("n12", LogicDoc.NameFor("12", taken), "leading digit");
+            var logic = JObject.Parse("{ 'places': [ { 'id': 'counter1' } ] }");
+            Assert.Equal("counter2", LogicDoc.NewPlaceId(logic, "counter"), "next free");
+            Assert.Equal("pressurePlate1", LogicDoc.NewPlaceId(logic, "pressure-plate"), "no hyphen (a formula reads it as minus)");
+            Assert.Equal("counter2", LogicDoc.NewPlaceId(logic, "counter1"), "a copy's id");
+            Assert.Equal(0, ExprLint.Check("count('unit and in:@pressurePlate1') > 0").Count, "usable in a formula");
         }
     }
 }
