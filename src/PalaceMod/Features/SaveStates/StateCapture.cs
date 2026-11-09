@@ -322,6 +322,8 @@ namespace PalaceMod
         /// savestates menu) the UI is hidden for that one frame so the picture shows the level, not the menu.</summary>
         public static IEnumerator WriteThumbnail(string path, Action<byte[]> done)
         {
+            // Headless (-batchmode) draws no frames: the screen capture would only log a Unity error.
+            if (Application.isBatchMode) yield break;
             var hidden = new List<Canvas>();
             if (UIFrameManager.instance != null && UIFrameManager.instance.ActiveFrame != null)
             {
