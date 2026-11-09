@@ -230,10 +230,47 @@ namespace PalaceMod.Builder.Studio.Logic
             StudioDock.SmallHeader(page, "This level");
             Variables(page, level, "Level variables", "Level-wide values every rule can read ($name) and HUD lines can show.");
             Rules(page, level, "Level script");
+            GameRules(page);
             KingActions(page);
             Hud(page);
             Templates(page);
             Caps(page);
+        }
+
+        // ---- Game rules (logic.game) -------------------------------------------------------------------------------
+
+        private static readonly Dictionary<string, string> GameRuleLabels = new()
+        {
+            ["victory"] = "Win by", ["defeat"] = "Lose by", ["castle"] = "Castle", ["holdNight"] = "Night lasts while",
+            ["endNight"] = "Night ends when", ["survivors"] = "Enemies left then", ["combat"] = "Fighting when",
+            ["build"] = "Building when", ["dayLength"] = "Day length (s)",
+        };
+
+        /// <summary>The game's own rules: win and lose, the castle, night flow, when fighting and building happen.</summary>
+        private static void GameRules(ModPage page)
+        {
+            StudioDock.SmallHeader(page, "Game rules");
+            var set = LogicOwner.LevelLogic()?["game"] as JObject;
+            if (set == null || !set.HasValues) page.Text(Dim("Vanilla: survive every night; the castle falling loses."));
+            var scope = LogicOwner.Level().Scope(null);
+            foreach (var spec in Model.Logic.LogicSchema.GameRules)
+            {
+                string name = spec.Name;
+                string label = GameRuleLabels.TryGetValue(name, out var l) ? l : LogicCatalog.Humanize(name);
+                var ui = new ParamUi
+                {
+                    Name = name, Label = label, Desc = spec.Description, Default = spec.Default?.ToString(Newtonsoft.Json.Formatting.None).Trim('"'),
+                    Kind = spec.Type switch { "enum" => ParamKind.Choice, "number" => ParamKind.Number, _ => ParamKind.Condition },
+                    Options = spec.Options ?? [],
+                };
+                LogicFields.Param(page, label, ui, () => (LogicOwner.LevelLogic()?["game"] as JObject)?[name],
+                    (v, what) => LogicOwner.Level().Edit(what ?? $"Set {label}", n =>
+                    {
+                        if (n["game"] is not JObject g) n["game"] = g = new JObject();
+                        if (v == null || v.Type == JTokenType.Null || (v.Type == JTokenType.String && (string)v == "")) g.Remove(name); else g[name] = v;
+                        if (!g.HasValues) n.Remove("game");
+                    }, "game:" + name), scope);
+            }
         }
 
         /// <summary>The pack's things (non-unit templates) and statuses: each opens here (or in the Entity Studio).</summary>

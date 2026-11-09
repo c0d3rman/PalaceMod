@@ -337,6 +337,7 @@ class Schema:
         self.param_types: List[str] = list(data.get("paramTypes", []))
         self.caps: Dict[str, Tuple[int, int]] = {k: (v["default"], v["max"]) for k, v in data.get("caps", {}).items()}
         self.presets: List[dict] = list(data.get("presets", []))
+        self.game_rules: List[dict] = list(data.get("gameRules", []))
         self.role_aliases: Dict[str, str] = {}
         for e in self.events.values():
             self.role_aliases.update(e.aliases)
@@ -2551,6 +2552,38 @@ class _Walker:
         if mx is not None and d > mx:
             self.error(p, f"{cs_double(d)} is outside {cs_double(mn if mn is not None else 0)}..{cs_double(mx)}")
 
+    def check_game_rules(self, g, p, scope):
+        """logic.game: each rule a literal of its type or an expression (LogicSchema.GameRules)."""
+        if g is None:
+            return
+        for spec in self.schema.game_rules:
+            name = spec["name"]
+            v = g.get(name)
+            if v is None:
+                continue
+            path = f"{p}.{name}"
+            t = spec["type"]
+            if t == "enum":
+                if not isinstance(v, str):
+                    self.error(path, f"must be one of {', '.join(spec.get('options') or [])}")
+                elif v.startswith("="):
+                    self.expression(v[1:], path, scope, TEXT, name)
+                else:
+                    self.enum(v, path, spec.get("options") or [])
+            elif t == "bool":
+                if isinstance(v, str):
+                    self.expression(v, path, scope, BOOL, name)
+                elif not isinstance(v, bool):
+                    self.error(path, "must be true, false or a condition")
+            elif t == "number":
+                if isinstance(v, str):
+                    self.expression(v, path, scope, NUMBER, name)
+                elif isinstance(v, bool) or not isinstance(v, (int, float)):
+                    self.error(path, "must be a number or a formula")
+                elif spec.get("min") is not None and v < spec["min"]:
+                    mn = spec["min"]
+                    self.error(path, f"must be {int(mn) if float(mn).is_integer() else mn} or more")
+
     def enum(self, v, p, options):
         if v is not None and v not in options:
             self.error(p, f"must be one of {', '.join(options)}" + suggest(v, options))
@@ -2901,6 +2934,7 @@ class _Walker:
                     self.warn(f"{p}.caps.{name}", f"{v} is above the default {dflt}: may lag")
         level_owner = _Owner(p, "level", level_script=True, level=lv, rules=_list(logic.get("rules")))
         level_scope = self.scope(level_owner, None)
+        self.check_game_rules(_dict(logic.get("game")), p + ".game", level_scope)
         hud_ids = set()
         for i, h in enumerate(_list(logic.get("hud")) or []):
             hp = f"{p}.hud[{i}]"

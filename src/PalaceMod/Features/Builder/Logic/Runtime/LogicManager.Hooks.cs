@@ -350,8 +350,9 @@ namespace PalaceMod.Builder.Logic
             {
                 var w = World;
                 if (w == null) return;
-                bool won = CastleCenter.instance != null && CastleCenter.instance.GetComponentInParent<Hp>() is { } hp ? !hp.KnockedOut
-                    : EnemySpawner.instance != null && EnemySpawner.instance.MatchOver;
+                var state = LocalGamestate.Instance != null ? LocalGamestate.Instance.CurrentState : LocalGamestate.State.InMatch;
+                bool won = state == LocalGamestate.State.AfterMatchVictory || state != LocalGamestate.State.AfterMatchDefeat && (CastleCenter.instance != null && CastleCenter.instance.GetComponentInParent<Hp>() is { } hp ? !hp.KnockedOut
+                    : EnemySpawner.instance != null && EnemySpawner.instance.MatchOver);
                 w.Raise("levelEnd", w.Level, null, won ? 1 : 0, null, won ? "win" : "lose");
                 w.Drain();
             }

@@ -660,6 +660,37 @@ namespace PalaceMod.Builder.Model.Logic
                 }
             }
 
+            /// <summary>logic.game: each rule a literal of its type or an expression (LogicSchema.GameRules).</summary>
+            private void CheckGameRules(GameRulesDef g, string p, CheckScope scope)
+            {
+                if (g == null) return;
+                var values = JObject.FromObject(g);
+                foreach (var spec in LogicSchema.GameRules)
+                {
+                    var v = values[spec.Name];
+                    if (v == null || v.Type == JTokenType.Null) continue;
+                    string path = $"{p}.{spec.Name}";
+                    switch (spec.Type)
+                    {
+                        case "enum":
+                            if (v.Type != JTokenType.String) { Error(path, $"must be one of {string.Join(", ", spec.Options)}"); break; }
+                            string s = (string)v;
+                            if (s.StartsWith("=")) Expression(s.Substring(1), path, scope, LType.Text, spec.Name);
+                            else Enum(s, path, spec.Options);
+                            break;
+                        case "bool":
+                            if (v.Type == JTokenType.String) Expression((string)v, path, scope, LType.Bool, spec.Name);
+                            else if (v.Type != JTokenType.Boolean) Error(path, "must be true, false or a condition");
+                            break;
+                        case "number":
+                            if (v.Type == JTokenType.String) Expression((string)v, path, scope, LType.Number, spec.Name);
+                            else if (v.Type is not (JTokenType.Integer or JTokenType.Float)) Error(path, "must be a number or a formula");
+                            else if (spec.Min is double min && (double)v < min) Error(path, $"must be {min} or more");
+                            break;
+                    }
+                }
+            }
+
             private void Enum(string v, string p, params string[] options)
             {
                 if (v != null && !options.Contains(v)) Error(p, $"must be one of {string.Join(", ", options)}" + ExprChecker.Suggest(v, options));
@@ -954,6 +985,7 @@ namespace PalaceMod.Builder.Model.Logic
                 }
                 var levelOwner = new Owner { Path = p, Kind = "level", LevelScript = true, Level = lv, Rules = logic.Rules };
                 var levelScope = Scope(levelOwner, null);
+                CheckGameRules(logic.Game, p + ".game", levelScope);
                 var hudIds = new HashSet<string>();
                 for (int i = 0; i < (logic.Hud?.Count ?? 0); i++)
                 {

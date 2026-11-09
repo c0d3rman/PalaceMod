@@ -2094,11 +2094,22 @@ class Ops:
         return f"hud {d['id']} " + self._upsert(ensure(self.logic(op), "hud", []), d)
 
     def op_logic(self, op):
-        """{"op":"logic","seed":1234,"caps":{"entities":600}}: level logic settings (caps above the defaults may lag)."""
+        """{"op":"logic","seed":1234,"caps":{"entities":600},"game":{"victory":"rules"}}: level logic settings (caps above
+        the defaults may lag). `game` (the game's own rules: win, lose, castle, night flow, combat, building) is merged
+        field by field; a null field goes back to vanilla."""
         lg = self.logic(op)
         for f in ("seed", "caps"):
             if f in op:
                 lg[f] = op[f]
+        if "game" in op:
+            game = lg.setdefault("game", {})
+            for k, v in (op["game"] or {}).items():
+                if v is None:
+                    game.pop(k, None)
+                else:
+                    game[k] = v
+            if not game:
+                lg.pop("game", None)
         return "logic settings"
 
     # ---- terrain -----------------------------------------------------------------------------------------------------
@@ -5406,9 +5417,9 @@ def cmd_logic(env, args):
         if rest and rest[0] not in ("--json",):
             key = {"events": "events", "actions": "actions", "functions": "functions", "fns": "functions", "stats": "stats", "flags": "flags",
                    "presets": "presets", "globals": "globals", "roles": "roles", "properties": "properties", "filters": "filterTerms",
-                   "tags": "tags", "inputs": "inputs", "caps": "caps"}.get(rest[0])
+                   "tags": "tags", "inputs": "inputs", "caps": "caps", "game": "gameRules"}.get(rest[0])
             if key is None:
-                raise Fail("logic schema [events|actions|functions|properties|globals|roles|stats|flags|filters|tags|inputs|presets|caps] "
+                raise Fail("logic schema [events|actions|functions|properties|globals|roles|stats|flags|filters|tags|inputs|presets|caps|game] "
                            "| logic schema <event|action|fn|stat|flag|preset|global|role|filter> <name>")
             out(schema.get(key))
             return
@@ -5553,6 +5564,13 @@ def logic_reference_markdown(schema):
           "Per level in `logic.caps`; above the default draws a \"may lag\" warning, above the maximum an error.", "",
           "| Cap | Default | Max |", "|---|---|---|"]
     L += [f"| `{k}` | {v['default']} | {v['max']} |" for k, v in (schema.get("caps") or {}).items()]
+    if schema.get("gameRules"):
+        L += ["", "## Game rules", "", "Per level in `logic.game` (op `{\"op\": \"logic\", \"game\": {...}}`): the game's own rules. Each is a "
+              "literal or an expression the level reads again every frame (an enum takes its word or `\"=expr\"`), so a rule can switch "
+              "it through a variable. Leave a rule out for vanilla.", "", "| Rule | Type | Vanilla | Meaning |", "|---|---|---|---|"]
+        for g in schema["gameRules"]:
+            t = g["type"] + (f" ({' / '.join(g['options'])})" if g.get("options") else "")
+            L.append(f"| `{g['name']}` | {t} | `{json.dumps(g.get('default'))}` | {_md(g['description'])} |")
     L += ["", "## Built-in presets", "", "Use one in a rules list as `{\"preset\": \"<id>\", \"with\": {params}}`, or place a logic object with "
           "`{\"op\": \"place\", \"preset\": \"<id>\", \"with\": {...}}`.", ""]
     for pr in schema.get("presets") or []:
