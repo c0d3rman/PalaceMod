@@ -62,7 +62,7 @@ namespace PalaceMod.Tests
         public static void RuleSentences()
         {
             var split = JObject.Parse("{ 'when': 'death', 'if': 'self.$gen < 3', 'do': [ { 'do': 'spawn', 'entity': '=self.template', 'count': 2, 'at': 'self' } ] }");
-            Assert.Equal("When this dies if ƒ self.$gen < 3 → Spawn ƒ self.template × 2 at this", RuleText.Summary(split), "split rule");
+            Assert.Equal("When this dies if self.$gen < 3 → Spawn ƒ self.template × 2 at this", RuleText.Summary(split), "split rule");
             var necro = JObject.Parse("{ 'when': { 'on': 'death', 'of': 'foe and unit', 'range': 12 }, 'do': [ { 'do': 'spawn', 'entity': 'skeleton', 'at': 'subject' } ] }");
             Assert.Equal("When a foe unit within 12 m dies → Spawn skeleton × 1 at the one it happened to", RuleText.Summary(necro), "of rule");
             var stat = JObject.Parse("{ 'do': 'setStat', 'target': \"all('player and Tower')\", 'stat': 'attackCooldown', 'mult': 0.5, 'for': 5 }");
@@ -70,7 +70,7 @@ namespace PalaceMod.Tests
             var timer = JObject.Parse("{ 'when': { 'on': 'every', 'seconds': 8, 'during': 'night' }, 'do': [] }");
             Assert.Equal("When every 8 s at night → (nothing yet)", RuleText.Summary(timer), "every");
             Assert.Equal("Damage nearest foe Tower within 20 m by 5", RuleText.Action(JObject.Parse("{ 'do': 'damage', 'target': \"nearest('foe and Tower', 20)\", 'amount': 5 }")), "selector words");
-            Assert.True(RuleText.Action(JObject.Parse("{ 'do': 'spawn' }")).EndsWith("⚠"), "missing required param flagged");
+            Assert.True(RuleText.Action(JObject.Parse("{ 'do': 'spawn' }")).EndsWith("(!)"), "missing required param flagged");
         }
 
         public static void ExpressionChecks()

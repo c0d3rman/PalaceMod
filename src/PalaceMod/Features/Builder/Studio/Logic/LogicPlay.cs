@@ -204,7 +204,7 @@ namespace PalaceMod.Builder.Studio.Logic
                 t.font = ModStyle.BoldFont;
                 t.alignment = TextAlignmentOptions.Center;
                 t.fontSize = 8f;
-                t.text = "◆";
+                t.text = "!";
                 state = new PipState { Text = t };
                 pips.Add(state);
             }

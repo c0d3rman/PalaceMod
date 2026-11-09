@@ -28,7 +28,7 @@ namespace PalaceMod.Builder.Studio.Logic
         public static string IssueText(IReadOnlyList<ExprIssue> issues)
         {
             if (issues == null || issues.Count == 0) return "";
-            return "\n<size=78%>" + string.Join("\n", issues.Take(2).Select(i => Tint("⚠ " + Esc(i.ToString()), i.Warning ? WarnColor : ErrorColor))) + "</size>";
+            return "\n<size=78%>" + string.Join("\n", issues.Take(2).Select(i => Tint("! " + Esc(i.ToString()), i.Warning ? WarnColor : ErrorColor))) + "</size>";
         }
 
         // ---- Raw values ---------------------------------------------------------------------------------------------
@@ -126,7 +126,7 @@ namespace PalaceMod.Builder.Studio.Logic
         public static string Show(JToken v, ParamUi p, ExprScope scope)
         {
             string raw = Raw(v);
-            string shown = v == null ? Dim(p.Default != null ? RuleText.Value(null, p, scope?.Event) : p.Required ? "choose…" : "—") : Esc(RuleText.Value(v, p, scope?.Event));
+            string shown = v == null ? Dim(p.Default != null ? RuleText.Value(null, p, scope?.Event) : p.Required ? "choose…" : "—") : p.Kind is ParamKind.Condition or ParamKind.Expr || (p.Kind == ParamKind.Number && v.Type == JTokenType.String) ? Esc(Raw(v)) : Esc(RuleText.Value(v, p, scope?.Event));
             return shown + IssueText(v == null ? (p.Required && p.Default == null ? Check("", p, scope) : []) : Check(raw, p, scope));
         }
 
@@ -191,7 +191,7 @@ namespace PalaceMod.Builder.Studio.Logic
                     lastText = typed;
                     List<ExprIssue> issues;
                     try { issues = Check(typed); } catch { issues = []; }
-                    lastSuffix = issues.Count == 0 ? (typed.Length > 0 ? "\n<size=78%>" + Tint("✓", new Color(0.55f, 0.88f, 0.6f)) + "</size>" : "") : IssueText(issues);
+                    lastSuffix = issues.Count == 0 ? (typed.Length > 0 ? "\n<size=78%>" + Tint("ok", new Color(0.55f, 0.88f, 0.6f)) + "</size>" : "") : IssueText(issues);
                 }
                 string shown = (Field.Override ?? "") + lastSuffix;
                 if (value.text != shown) value.text = shown;

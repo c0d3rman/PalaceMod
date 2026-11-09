@@ -188,7 +188,7 @@ namespace PalaceMod.Builder.Studio.Logic
             }
             var place = owner.Read();
             int count = LogicDoc.Rules(place)?.Count ?? 0;
-            return new StudioLabel { Card = PlaceItems.KindLabel(PlaceItems.KindOf(place)) + (count > 0 ? $" · {count} rule{(count == 1 ? "" : "s")}" : "") };
+            return count == 0 ? null : new StudioLabel { Card = count == 1 ? "1 rule" : $"{count} rules" };
         }
 
         public static IEnumerable<(string label, Action run)> ContextItems(IReadOnlyList<string> keys)

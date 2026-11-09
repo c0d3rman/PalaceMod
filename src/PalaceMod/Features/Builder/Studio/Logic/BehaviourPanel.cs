@@ -41,7 +41,7 @@ namespace PalaceMod.Builder.Studio.Logic
         {
             var effects = LogicDoc.LevelEffects(node["rules"] as JArray);
             if (effects.Count == 0) return;
-            var row = page.Row(LogicFields.Tint("⚠ Affects the level", LogicFields.WarnColor), null,
+            var row = page.Row(LogicFields.Tint("! Affects the level", LogicFields.WarnColor), null,
                 () => "Its rules reach beyond itself: " + string.Join(", ", effects) + ".\nShared with others, it does this in their levels too.");
             StudioDock.Compact(row, false, 10f, page.Size.x);
         }
@@ -248,7 +248,7 @@ namespace PalaceMod.Builder.Studio.Logic
                 bool outgoing = w.FromKind == owner.Kind && w.FromId == owner.Id;
                 string other = outgoing ? RuleText.PlaceName(w.ToName) : LogicOwner.FromId(w.FromId)?.Title ?? w.FromId;
                 string text = outgoing ? $"{w.Event} → {w.Signal} {other}" : $"{other} {w.Event} → {w.Signal}";
-                LogicFields.Action(page, Esc(text), () => WireTool.Confirm(wire), "Click to remove it (both rules).", "✕");
+                LogicFields.Action(page, Esc(text), () => WireTool.Confirm(wire), "Click to remove it (both rules).", "×");
             }
         }
 
@@ -381,7 +381,7 @@ namespace PalaceMod.Builder.Studio.Logic
             var raised = Raised(LogicOwner.LevelLogic());
             if (raised.Count > 0)
             {
-                var row = page.Row(LogicFields.Tint("⚠ Raised limits may lag", LogicFields.WarnColor), null,
+                var row = page.Row(LogicFields.Tint("! Raised limits may lag", LogicFields.WarnColor), null,
                     () => "Above the defaults, busy moments can drop the frame rate on slower machines. Test with many things alive.");
                 StudioDock.Compact(row, false, 10f, page.Size.x);
             }

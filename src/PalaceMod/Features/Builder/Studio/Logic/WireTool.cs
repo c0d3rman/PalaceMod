@@ -231,7 +231,7 @@ namespace PalaceMod.Builder.Studio.Logic
                 if (!tool && !ShowAll && !mine) continue;
                 var color = Color.HSVToRGB(Wires.Hue(w.Signal), 0.55f, 1f);
                 if (!mine && (tool || ShowAll) && selected.Count > 0) color.a = 0.5f;
-                Arc(a.Value, b.Value, color, mine ? 0.3f : 0.2f, w.Label + (w.Delayed ? " ⏱" : ""));
+                Arc(a.Value, b.Value, color, mine ? 0.3f : 0.2f, w.Label + (w.Delayed ? " (delayed)" : ""));
             }
             // The rubber band while dragging a new wire.
             if (tool && WireTool.From != null && Studio.Find(WireTool.From) is { } src && WireTool.Cursor is Vector3 c)

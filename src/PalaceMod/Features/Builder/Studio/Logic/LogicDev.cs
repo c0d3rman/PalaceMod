@@ -115,31 +115,38 @@ namespace PalaceMod.Builder.Studio.Logic
 
         private static IEnumerable<TFUITextButton> Buttons()
         {
-            var dock = RuleEditor.Dock ?? StudioDock.Dock;
-            var roots = new[] { dock?.Root, StudioDock.Dock?.Root, EnemyDock.Dock?.Root }.Where(r => r != null).Distinct();
-            return roots.SelectMany(r => r.GetComponentsInChildren<TFUITextButton>());
+            return Roots().SelectMany(r => r.GetComponentsInChildren<TFUITextButton>()).Distinct();
         }
 
-        private static string Plain(string s) => System.Text.RegularExpressions.Regex.Replace(s ?? "", "<[^>]+>", "");
+        // The rule editor's panel first, then the docks (and an open popup).
+        private static IEnumerable<Transform> Roots() =>
+            new Transform[] { ModPopup.Current != null && ModPopup.Current.IsOpen ? ModPopupRoot() : null, RuleEditor.PanelRect, StudioDock.Dock?.Root, EnemyDock.Dock?.Root }.Where(r => r != null);
 
-        /// <summary>Clicks the first row or tile whose text contains the given text (rule editor first, then the dock).</summary>
+        private static Transform ModPopupRoot() => UnityEngine.Object.FindObjectsOfType<RectTransform>().FirstOrDefault(r => r.name.StartsWith("ModPopup") && r.gameObject.activeInHierarchy);
+
+        private static string Plain(string s) => System.Text.RegularExpressions.Regex.Replace(s ?? "", "<[^>]+>", "").Trim();
+
+        /// <summary>Clicks the first row or tile whose text starts with (else contains) the given text, rule editor first.</summary>
         private static string Press(string text)
         {
-            foreach (var b in Buttons())
+            foreach (bool start in new[] { true, false })
             {
-                var t = b.GetComponent<TMPro.TextMeshProUGUI>();
-                if (t == null || !Plain(t.text).Contains(text, StringComparison.OrdinalIgnoreCase) || !b.gameObject.activeInHierarchy) continue;
-                b.onApply?.Invoke();
-                return "pressed row " + Plain(t.text).Replace("\n", " / ");
-            }
-            var dock = RuleEditor.Dock ?? StudioDock.Dock;
-            foreach (var tile in new[] { dock?.Root, StudioDock.Dock?.Root, EnemyDock.Dock?.Root }.Where(r => r != null).SelectMany(r => r.GetComponentsInChildren<ModTile>()))
-            {
-                if (!tile.gameObject.activeInHierarchy) continue;
-                string label = tile.Label != null ? Plain(tile.Label.text) : tile.name;
-                if (!label.Contains(text, StringComparison.OrdinalIgnoreCase) && !tile.name.Contains(text, StringComparison.OrdinalIgnoreCase)) continue;
-                tile.Press();
-                return "pressed tile " + label;
+                bool Match(string s) => start ? s.StartsWith(text, StringComparison.OrdinalIgnoreCase) : s.Contains(text, StringComparison.OrdinalIgnoreCase);
+                foreach (var b in Buttons())
+                {
+                    var t = b.GetComponent<TMPro.TextMeshProUGUI>();
+                    if (t == null || !b.gameObject.activeInHierarchy || !Match(Plain(t.text))) continue;
+                    b.onApply?.Invoke();
+                    return "pressed row " + Plain(t.text).Replace("\n", " / ");
+                }
+                foreach (var tile in Roots().SelectMany(r => r.GetComponentsInChildren<ModTile>()))
+                {
+                    if (!tile.gameObject.activeInHierarchy) continue;
+                    string label = tile.Label != null ? Plain(tile.Label.text) : tile.name;
+                    if (!Match(label)) continue;
+                    tile.Press();
+                    return "pressed tile " + label;
+                }
             }
             throw new ArgumentException($"nothing showing \"{text}\"");
         }

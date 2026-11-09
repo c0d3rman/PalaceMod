@@ -173,7 +173,7 @@ namespace PalaceMod.Builder.Studio.Logic
                     if (v == null && h == "to") return "this";
                     return Value(v, p, ev);
                 }, out bool missing);
-                if (missing) s += " ⚠";
+                if (missing) s += " (!)";
             }
             int nested = ui.Nested.Sum(n => (a[n] as JArray)?.Count ?? 0) + ((a["options"] as JArray)?.Count ?? 0);
             if (nested > 0) s += $" (+{nested})";
@@ -238,10 +238,17 @@ namespace PalaceMod.Builder.Studio.Logic
             if (rule["preset"] != null) return $"Preset {(string)rule["preset"]}";
             var ev = LogicCatalog.Event(LogicDoc.EventOf(rule));
             var conds = LogicDoc.Conditions(rule);
-            string cond = conds.Count == 0 ? "" : " if " + string.Join(" and ", conds.Select(c => Expr(c, ev)));
+            string cond = conds.Count == 0 ? "" : " if " + string.Join(" and ", conds.Select(c => Formula(c, ev)));
             var acts = (rule["do"] as JArray)?.OfType<JObject>().ToList() ?? [];
             string then = acts.Count == 0 ? "(nothing yet)" : string.Join("; ", acts.Take(2).Select(a => Action(a, ev))) + (acts.Count > 2 ? $"; +{acts.Count - 2} more" : "");
             return $"When {When(rule, owner)}{cond} → {then}";
+        }
+
+        /// <summary>A formula where one is expected (a condition): roles in words when it's just a role, else as written.</summary>
+        public static string Formula(string s, EventUi ev = null)
+        {
+            string e = Expr(s, ev);
+            return e.StartsWith("ƒ ") ? e.Substring(2) : e;
         }
 
         /// <summary>Options shown under the card: "once · cooldown 5 s · off".</summary>

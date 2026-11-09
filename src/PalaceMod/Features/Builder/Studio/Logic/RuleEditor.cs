@@ -37,6 +37,8 @@ namespace PalaceMod.Builder.Studio.Logic
         public static bool IsShown => panel?.Visible == true && (IsOpen || picker != null);
         public static bool Standalone => Owner == null && picker != null;
         public static ModDock Dock => dock;
+        /// <summary>The panel's rect while shown (dev: press its rows first).</summary>
+        public static RectTransform PanelRect => panel?.Visible == true ? panel.Rect : null;
 
         // Picker mode: a title and a builder replacing the card until Back.
         private static string pickerTitle;
@@ -146,7 +148,7 @@ namespace PalaceMod.Builder.Studio.Logic
             if (picker != null)
             {
                 StudioDock.SmallHeader(page, LogicFields.Esc(pickerTitle));
-                LogicFields.Action(page, Owner == null ? "◂ Cancel" : "◂ Back to the rule", ClosePicker, "Esc");
+                LogicFields.Action(page, Owner == null ? "Cancel" : "Back to the rule", ClosePicker, "Esc");
                 try { picker(page); }
                 catch (Exception e) { Log.For<BuilderManager>().Caught("Rule editor picker failed", e); }
                 return;
@@ -156,7 +158,7 @@ namespace PalaceMod.Builder.Studio.Logic
             int count = Owner.Rules()?.Count ?? 0;
             StudioDock.SmallHeader(page, $"{LogicFields.Esc(Owner.Title)} · rule {Rule + 1} of {count}");
             LogicFields.Buttons(page,
-                ("◂ Close", Close, "Esc"),
+                ("Close", Close, "Esc"),
                 ("Previous", Rule > 0 ? () => Open(Owner, Rule - 1, dock, panel.OffsetMin, panel.OffsetMax) : null, null),
                 ("Next", Rule < count - 1 ? () => Open(Owner, Rule + 1, dock, panel.OffsetMin, panel.OffsetMax) : null, null));
             if (rule["preset"] != null) { PresetCard(page, rule); return; }
