@@ -664,6 +664,8 @@ namespace PalaceMod.Builder.Model.Logic
                     Num(t.Range, tp + ".range", scope, 0, null);
                     Enum(t.Prefer, tp + ".prefer", "nearest", "farthest", "weakest", "strongest", "random", "best");
                     if (t.Prefer == "best" && t.Score == null) Error(tp + ".score", "prefer best needs a score (an expression over `it`)");
+                    if (t.Score != null && t.Prefer != null && t.Prefer != "best")
+                        Error(tp + ".score", $"a score ranks targets only with prefer \"best\" (the default when a score is given); drop prefer \"{t.Prefer}\" or the score");
                     if (t.Score != null) Expression(t.Score, tp + ".score", scope.With(s => s.HasIt = true), LType.Number, "score");
                 }
             }
