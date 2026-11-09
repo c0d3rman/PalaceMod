@@ -15,6 +15,15 @@ namespace PalaceMod.Builder.Logic
             "set <var|entity.var> <expr> | eval <expr> | do <action json> | raise <event> <on-selector> [other-selector] [name] [value] | " +
             "king <1-3> | snapshot   the behaviour engine";
 
+        /// <summary>Schema actions with no runtime handler yet (the interpreter's own control actions excluded).</summary>
+        private static string MissingHandlers()
+        {
+            var missing = Model.Logic.LogicSchema.Actions.Values
+                .Where(a => !ActionCompiler.Control.Contains(a.Name) && !LogicActions.IsRegistered(a.Name))
+                .Select(a => $"{a.Name} ({a.Owner})").ToList();
+            return missing.Count == 0 ? "\n  every schema action has a handler" : $"\n  no handler yet: {string.Join(", ", missing)}";
+        }
+
         private void RegisterDevCommands()
         {
             DevCommands.Register("logic", Usage, args =>
@@ -36,7 +45,8 @@ namespace PalaceMod.Builder.Logic
                             return $"time {w.Time:0.0}s frame {w.Frame}, {w.Entities.Count()} entities, {w.Entities.Sum(e => e.Rules.Count) + w.Level.Rules.Count} rule instances, " +
                                 $"{w.FiringsTotal} firings, {w.ActionsTotal} action steps, pending tasks {w.PendingTasks}, queued {b.QueuedEvents}; " +
                                 $"throttled {b.Throttled}, dropped {b.Dropped}, capped spawns {b.CappedSpawns}, errors {b.Errors}, compile problems {w.CompileErrors.Count}" +
-                                (w.CompileErrors.Count > 0 ? "\n  " + string.Join("\n  ", w.CompileErrors.Take(10)) : "");
+                                (w.CompileErrors.Count > 0 ? "\n  " + string.Join("\n  ", w.CompileErrors.Take(10)) : "") +
+                                MissingHandlers();
                         }
                     case "vars":
                         {

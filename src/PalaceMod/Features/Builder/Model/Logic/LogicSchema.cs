@@ -124,7 +124,7 @@ namespace PalaceMod.Builder.Model.Logic
     public static class LogicSchema
     {
         /// <summary>The PalaceMod version the behaviour engine first shipped in (fills requires.palaceMod).</summary>
-        public const string V1 = "0.9.0";
+        public const string V1 = "1.0.0";
 
         public static readonly Dictionary<string, EventSpec> Events = new(StringComparer.Ordinal);
         public static readonly Dictionary<string, ActionSpec> Actions = new(StringComparer.Ordinal);
@@ -575,6 +575,40 @@ namespace PalaceMod.Builder.Model.Logic
             "label", "enum", "actions", "options", "targeting", "movement", "any", "for", "night", "slot", "types", "keep", "fx", "sound", "color", "json",
         ];
 
+        /// <summary>What each param type accepts (for the reference and the Studio's hovers).</summary>
+        public static readonly Dictionary<string, string> ParamTypeDocs = new()
+        {
+            ["number"] = "a number, or an expression string (\"night * 2\")",
+            ["int"] = "a whole number, or an expression string",
+            ["bool"] = "true/false, or an expression string",
+            ["text"] = "text with {expr} parts (\"Souls {$souls}/10\"); \"=expr\" makes the whole field an expression",
+            ["position"] = "an expression giving a position or an entity (self, other, @name, vec(x, z), pointNear(self, 3)), or [x, y, z]",
+            ["entity"] = "a selector expression giving one entity (self, other, @name, nearest('foe', 10))",
+            ["entities"] = "a selector expression giving one entity or a set (all('foe', 6)); the action runs on each member with `it` bound",
+            ["template"] = "a template id: a pack unit, a pack entity, or \"vanilla:<id>\"; \"=expr\" for an expression (\"=self.template\")",
+            ["filter"] = "a filter string (\"foe and Building and not Wall\")",
+            ["status"] = "a status id from the pack's statuses",
+            ["rule"] = "a rule's id",
+            ["var"] = "a variable name (declared in vars; \"$name\" or target \"level\" for a level variable)",
+            ["signal"] = "a signal name (a built-in input or your own)",
+            ["label"] = "a label name (without #)",
+            ["enum"] = "one of the listed options",
+            ["actions"] = "a nested list of actions",
+            ["options"] = "[{ \"weight\": 2, \"do\": [actions] }, ...]",
+            ["targeting"] = "a targeting list: filter strings or { \"filter\", \"range\", \"prefer\", \"score\" }",
+            ["movement"] = "a movement block (mode, path, speed, keepDistance, kite, flee, wander, home)",
+            ["any"] = "an expression of any type",
+            ["for"] = "seconds, or \"night\" / \"day\" (until the next dawn / dusk)",
+            ["night"] = "a night number expression, or \"current\"",
+            ["slot"] = "a build slot: @name, a selector, or a Studio key (\"slot:Tower 3\", \"add:<id>\", \"castle\")",
+            ["types"] = "a list of damage-type labels ([\"fire\"])",
+            ["keep"] = "a list of the listed options",
+            ["fx"] = "a game effect name",
+            ["sound"] = "\"asset:<key>\" or a game sound",
+            ["color"] = "\"#rrggbb\"",
+            ["json"] = "a JSON block",
+        };
+
         /// <summary>The whole registry as JSON (logic-schema.json, written by `builder dump`).</summary>
         public static JObject Dump()
         {
@@ -622,7 +656,7 @@ namespace PalaceMod.Builder.Model.Logic
             o["flags"] = Named(Flags, false);
             o["filterTerms"] = Named(FilterTerms, false);
             o["inputs"] = JObject.FromObject(Inputs);
-            o["paramTypes"] = new JArray(ParamTypes);
+            o["paramTypes"] = new JObject(ParamTypes.Select(t => new JProperty(t, ParamTypeDocs.TryGetValue(t, out var d) ? d : "")));
             o["tags"] = new JArray(Tags.OrderBy(t => t, StringComparer.Ordinal));
             o["caps"] = new JObject(LogicCapsDef.Defaults.Fields().Select(f => new JProperty(f.Name, new JObject { ["default"] = f.Default, ["max"] = f.Max })));
             return o;
