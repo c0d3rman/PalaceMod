@@ -150,7 +150,7 @@ namespace PalaceMod.Builder.Studio.Enemies
                 }
             }
             if (ModTextInput.Active || !EnemyDock.Active) return;
-            if (EnemyKeys.Down(EnemyKeys.Back) && !(ModPopup.Current != null && ModPopup.Current.IsOpen)) { EnemyStudio.Back(); return; }
+            if (EnemyKeys.Down(EnemyKeys.Back) && !(ModPopup.Current != null && ModPopup.Current.IsOpen)) { if (!Studio.RunCancelHandlers()) EnemyStudio.Back(); return; }
             if (EnemyKeys.Down(EnemyKeys.Redo, EnemyKeys.RedoCtrl, EnemyKeys.RedoCtrlY)) { EnemyStudio.Redo(); return; }
             if (EnemyKeys.Down(EnemyKeys.Undo, EnemyKeys.UndoCtrl)) { EnemyStudio.Undo(); return; }
             if (EnemyKeys.Down(EnemyKeys.Save, EnemyKeys.SaveCtrl)) { EnemyStudio.Save(); return; }

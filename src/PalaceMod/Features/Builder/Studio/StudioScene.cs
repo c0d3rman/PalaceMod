@@ -54,6 +54,8 @@ namespace PalaceMod.Builder.Studio
         private static readonly Dictionary<string, NativeLine> lineOf = new(StringComparer.Ordinal);
         private static readonly Dictionary<string, PropBase> propOf = new(StringComparer.Ordinal);
         private static readonly Dictionary<string, string> groupOf = new(StringComparer.Ordinal);
+        /// <summary>Item sources' objects (Studio.AddItemSource), by key.</summary>
+        private static readonly Dictionary<string, StudioItemSpec> specOf = new(StringComparer.Ordinal);
         private static readonly HashSet<string> hidden = new(StringComparer.Ordinal);
         private static List<PathCheck.Route> routes = [];
 
@@ -271,6 +273,37 @@ namespace PalaceMod.Builder.Studio
                 item.Moved = edit != null && !item.Removed;
                 seen.Add(item.Key);
             }
+            foreach (var source in Studio.ItemSources)
+            {
+                List<StudioItemSpec> specs;
+                try { specs = source.Items(lv)?.ToList() ?? []; }
+                catch (Exception e) { Log.For<BuilderManager>().Caught($"Studio item source {source.Prefix} failed", e); continue; }
+                foreach (var spec in specs)
+                {
+                    if (spec?.Id == null) continue;
+                    var item = Get(source.Prefix + spec.Id, StudioItemKind.Place, spec.Id);
+                    if (specOf.TryGetValue(item.Key, out var was) && was.Look != spec.Look && item.Proxy != null) { UnityEngine.Object.Destroy(item.Proxy); item.Proxy = null; }
+                    specOf[item.Key] = spec;
+                    item.Name = spec.Name ?? spec.Id;
+                    item.TypeName = spec.TypeName ?? "Logic";
+                    item.Pos = spec.Pos;
+                    item.Yaw = spec.Yaw;
+                    if (spec.MakeProxy != null)
+                    {
+                        if (item.Proxy == null)
+                        {
+                            try { EnsureProxy(item, () => spec.MakeProxy(Root)); }
+                            catch (Exception e) { Log.For<BuilderManager>().Caught($"Studio item {item.Key}: proxy failed", e); }
+                        }
+                        if (item.Proxy != null)
+                        {
+                            item.Proxy.transform.SetPositionAndRotation(item.Pos, Quaternion.Euler(0f, item.Yaw, 0f));
+                            item.Proxy.SetActive(!hidden.Contains(item.Key));
+                        }
+                    }
+                    seen.Add(item.Key);
+                }
+            }
             groupOf.Clear();
             foreach (var g in lv.Groups ?? [])
             {
@@ -292,6 +325,7 @@ namespace PalaceMod.Builder.Studio
                 nativeOf.Remove(key);
                 lineOf.Remove(key);
                 propOf.Remove(key);
+                specOf.Remove(key);
                 hidden.Remove(key);
             }
             ordered.AddRange(items.Values.OrderBy(i => (int)i.Kind).ThenBy(i => i.IsCastle ? 0 : 1).ThenBy(i => i.Name, StringComparer.OrdinalIgnoreCase));
@@ -385,6 +419,7 @@ namespace PalaceMod.Builder.Studio
         {
             if (item.Kind == StudioItemKind.Prop) return LayoutMarkers.PropColor;
             if (item.Kind == StudioItemKind.Line) return LayoutMarkers.LineColor;
+            if (item.Kind == StudioItemKind.Place && specOf.TryGetValue(item.Key, out var spec)) return spec.Color;
             if (item.IsCastle) return LayoutMarkers.CastleColor;
             return LayoutMarkers.KindColor(item.TypeName);
         }
@@ -399,9 +434,11 @@ namespace PalaceMod.Builder.Studio
             if (item.Locked && item.Kind == StudioItemKind.Slot && !item.IsCastle) color = Color.Lerp(color, LayoutMarkers.LockedColor, 0.5f);
             if (selected) color = LayoutMarkers.SelectedColor;
             else if (hover) color = Color.Lerp(color, LayoutMarkers.SelectedColor, 0.5f);
-            float size = item.Kind switch { StudioItemKind.Line => 5f, StudioItemKind.Prop => 3f, _ => item.IsCastle ? 9f : 4.2f };
+            specOf.TryGetValue(item.Key, out var spec);
+            float size = item.Kind switch { StudioItemKind.Line => 5f, StudioItemKind.Prop => 3f, StudioItemKind.Place => spec?.Size ?? 3f, _ => item.IsCastle ? 9f : 4.2f };
             if (selected) size *= 1.15f;
-            List<Vector3> poly = item.Kind == StudioItemKind.Line ? LinePoints(lineOf[item.Key], pos, yaw) : null;
+            List<Vector3> poly = item.Kind == StudioItemKind.Line ? LinePoints(lineOf[item.Key], pos, yaw)
+                : spec?.Outline != null ? spec.Outline.Select(o => pos + Quaternion.Euler(0f, yaw, 0f) * o).ToList() : null;
             markers.Set(item.Key, pos, yaw, size, color, item.Removed, poly, selected, StudioViewOptions.XRay);
         }
 
@@ -412,6 +449,7 @@ namespace PalaceMod.Builder.Studio
             {
                 if (item.Kind == StudioItemKind.Prop && propOf.TryGetValue(item.Key, out var b)) item.Proxy.transform.SetPositionAndRotation(pos, Quaternion.Euler(0f, yaw, 0f) * b.Upright);
                 else if (nativeOf.TryGetValue(item.Key, out var n)) item.Proxy.transform.SetPositionAndRotation(pos, LayoutScene.WithYaw(n.Rot, yaw));
+                else if (item.Kind == StudioItemKind.Place) item.Proxy.transform.SetPositionAndRotation(pos, Quaternion.Euler(0f, yaw, 0f));
             }
             Mark(item, pos, yaw);
         }
@@ -432,7 +470,7 @@ namespace PalaceMod.Builder.Studio
         public static float PickRadius => 2.2f * Mathf.Max(0.8f, StudioCamera.Zoom);
 
         public static float RadiusOf(StudioItem item) =>
-            item.Kind == StudioItemKind.Line ? PickRadius * 1.6f : item.IsCastle ? PickRadius * 2f : item.Kind == StudioItemKind.Prop ? PickRadius * 0.85f : PickRadius;
+            item.Kind == StudioItemKind.Line ? PickRadius * 1.6f : item.IsCastle ? PickRadius * 2f : item.Kind is StudioItemKind.Prop or StudioItemKind.Place ? PickRadius * 0.85f : PickRadius;
 
         /// <summary>The item at a ground point: the smallest pick radius that contains it first, then the nearest.</summary>
         public static StudioItem ItemAt(Vector3 p)

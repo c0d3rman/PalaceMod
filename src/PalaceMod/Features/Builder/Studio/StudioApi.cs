@@ -27,7 +27,37 @@ namespace PalaceMod.Builder.Studio
     /// <summary>How Studio.Select combines keys with the current selection.</summary>
     internal enum SelectOp { Replace, Add, Toggle, Remove }
 
-    internal enum StudioItemKind { Slot, Added, Prop, Line, Group }
+    internal enum StudioItemKind { Slot, Added, Prop, Line, Group, Place }
+
+    /// <summary>One object an item source (Studio.AddItemSource) puts on the map.</summary>
+    internal sealed class StudioItemSpec
+    {
+        public string Id, Name, TypeName;
+        public Vector3 Pos;
+        public float Yaw;
+        public Color Color = Color.white;
+        /// <summary>Marker ring size (m).</summary>
+        public float Size = 3f;
+        /// <summary>Changes when the proxy must be rebuilt (e.g. its mesh).</summary>
+        public string Look;
+        /// <summary>The editor proxy under parent (no colliders, no game scripts), or null for a marker only.</summary>
+        public Func<Transform, GameObject> MakeProxy;
+        /// <summary>An outline on the ground (areas), relative to Pos at yaw 0; null: a ring.</summary>
+        public List<Vector3> Outline;
+    }
+
+    /// <summary>Objects another workstream keeps in the level (the behaviour engine's places: areas, timers, levers),
+    /// shown, picked, moved, turned and deleted like the Studio's own. Keys are Prefix + Id; the edit methods run inside
+    /// a Studio.Edit.</summary>
+    internal interface IStudioItemSource
+    {
+        string Prefix { get; }
+        IEnumerable<StudioItemSpec> Items(LevelDef lv);
+        void SetPose(LevelDef lv, string id, Vector3 pos, float yaw);
+        void Delete(LevelDef lv, string id);
+        /// <summary>A copy at an offset (inside the edit); returns its id, or null.</summary>
+        string Duplicate(LevelDef lv, string id, Vector3 offset);
+    }
 
     /// <summary>Keybind contexts (Keybinds.Register's context:).</summary>
     internal static class StudioContexts
@@ -444,6 +474,43 @@ namespace PalaceMod.Builder.Studio
         private static readonly List<ViewToggle> viewToggles = [];
         private static readonly List<Func<IReadOnlyList<string>, Action, bool>> deleteGuards = [];
         private static readonly List<Panel> panels = [];
+        private static readonly List<IStudioItemSource> itemSources = [];
+        private static readonly List<Func<bool>> cancelHandlers = [];
+        private static readonly List<(string Id, string Label, Action<ModPage> Build)> paletteTabs = [];
+
+        internal static IReadOnlyList<IStudioItemSource> ItemSources => itemSources;
+        internal static IReadOnlyList<(string Id, string Label, Action<ModPage> Build)> PaletteTabs => paletteTabs;
+
+        /// <summary>Objects kept by another workstream (see IStudioItemSource).</summary>
+        public static void AddItemSource(IStudioItemSource source)
+        {
+            itemSources.RemoveAll(s => s.Prefix == source.Prefix);
+            itemSources.Add(source);
+        }
+
+        internal static IStudioItemSource SourceFor(string key) =>
+            key == null ? null : itemSources.FirstOrDefault(s => key.StartsWith(s.Prefix, StringComparison.Ordinal));
+
+        /// <summary>Esc and right-click cancel (edit mode, and the Enemy Studio's Back): a handler that closes one layer of
+        /// its own UI returns true and the key goes no further. Asked before the active tool.</summary>
+        public static void AddCancelHandler(Func<bool> handler) => cancelHandlers.Add(handler);
+
+        internal static bool RunCancelHandlers()
+        {
+            foreach (var h in cancelHandlers)
+            {
+                try { if (h()) return true; }
+                catch (Exception e) { Log.For<BuilderManager>().Caught("Studio cancel handler failed", e); }
+            }
+            return false;
+        }
+
+        /// <summary>A palette tab after the Studio's own (Slots, Scenery, Spawns, Library).</summary>
+        public static void AddPaletteTab(string id, string label, Action<ModPage> build)
+        {
+            paletteTabs.RemoveAll(t => t.Id == id);
+            paletteTabs.Add((id, label, build));
+        }
 
         internal static IReadOnlyList<StudioTool> Tools => tools;
         internal static IReadOnlyList<InspectorSection> InspectorSections => sections;

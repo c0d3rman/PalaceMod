@@ -369,17 +369,49 @@ namespace PalaceMod.Builder.Studio.Enemies
 
         private static readonly (string id, string label)[] RightTabs = [("stats", "Stats"), ("attack", "Attack"), ("tags", "Tags"), ("look", "Look"), ("abilities", "Abilities")];
 
+        private static readonly List<(string Id, string Label, string Replaces, Action<ModPage> Build)> extraTabs = [];
+
+        /// <summary>An inspector tab from another workstream (the behaviour editor's Behaviour, Targeting, Movement);
+        /// <paramref name="replaces"/> names a built-in tab it takes the place of (null: added at the end).</summary>
+        public static void AddTab(string id, string label, string replaces, Action<ModPage> build)
+        {
+            extraTabs.RemoveAll(t => t.Id == id);
+            extraTabs.Add((id, label, replaces, build));
+        }
+
+        /// <summary>The inspector's ModDockPanel rect offsets (for panels placed beside it).</summary>
+        public static (Vector2 Min, Vector2 Max) BesideInspector(float width) =>
+            (new Vector2(-G - RightW - G - width, G), new Vector2(-G - RightW - G, -(G + TopH + G)));
+
+        public static void RefreshInspector() => dirtyRight = true;
+
+        private static List<(string id, string label)> Tabs()
+        {
+            var list = new List<(string, string)>();
+            foreach (var (id, label) in RightTabs)
+            {
+                var swap = extraTabs.FirstOrDefault(t => t.Replaces == id);
+                list.Add(swap.Id != null ? (swap.Id, swap.Label) : (id, label));
+            }
+            list.AddRange(extraTabs.Where(t => t.Replaces == null).Select(t => (t.Id, t.Label)));
+            return list;
+        }
+
         private static void BuildRight()
         {
             if (right?.Body == null) return;
             right.Fill(page =>
             {
-                Tabs(page, RightTabs, () => PanelTab, id => { PanelTab = id; dirtyRight = true; }, 3);
+                var tabs = Tabs();
+                if (tabs.All(t => t.id != PanelTab)) PanelTab = "stats";
+                Tabs(page, tabs, () => PanelTab, id => { PanelTab = id; dirtyRight = true; }, 3);
                 var unitPage = EnemyStudio.Page;
                 unitPage.Index = EnemyStudio.UnitIndex;
                 page.FieldIndent = 235f;
+                var extra = extraTabs.FirstOrDefault(t => t.Id == PanelTab);
                 try
                 {
+                    if (extra.Build != null) { extra.Build(page); return; }
                     switch (PanelTab)
                     {
                         case "attack": unitPage.BuildSection(page, "weapon"); break;
