@@ -89,9 +89,30 @@ namespace PalaceMod.Builder.Logic.Bodies
             return v;
         }
 
+        /// <summary>Drop every drift of an entity (it's gone).</summary>
+        public static void Forget(LogicEntity e) { if (e != null) drifts.Remove(e); }
+
         public static bool Any => drifts.Count > 0;
         public static IEnumerable<LogicEntity> Drifting => drifts.Keys;
         public static void Clear() => drifts.Clear();
+    }
+
+    /// <summary>Team changes of live units (Steering installs it; `convert` uses the same code).</summary>
+    internal static class Teams
+    {
+        /// <summary>Make a live unit fight for another side ("player" | "enemy" | "neutral"). Returns the object that
+        /// now carries the entity (a replacement when the side's brain differs), or null with an error. The factory
+        /// calls it when `spawn` asks for a team other than the template's side.</summary>
+        public static Func<LogicEntity, GameObject, string, (GameObject go, string error)> Convert =
+            (_, go, _) => (null, "team changes aren't available");
+    }
+
+    /// <summary>Projectiles in flight, Builder and vanilla (Bodies installs it).</summary>
+    internal static class Projectiles
+    {
+        /// <summary>Send a projectile entity at a new target entity or point (taunt on a projectile, deflection).
+        /// Returns false when the entity isn't a projectile in flight.</summary>
+        public static Func<LogicEntity, LogicEntity, Vector3?, bool> Redirect = (_, _, _) => false;
     }
 
     /// <summary>What `launch` and attacks with `launch` ask Bodies for.</summary>
