@@ -651,8 +651,8 @@ island with three causeways; if that's where yours is heading, check whether ano
 | load warnings in `play` | names that don't exist on the host (slot, line, mesh); fix the ops |
 | buildings float or sink | an added slot's y is off the ground; use `at` instead of `pos` |
 | king can't reach a slot | the slot is on unwalkable ground (cliff, water, inside props) |
-| enemies spawned by day reach buildings but deal no damage; towers don't fire by day | the game's attacks only work at night: deal daytime damage with Builder `attacks` (`"when": "always"`) or `damage` rules (12.16) |
-| a rule meant to run "after the wave" never fires | the night ended with the last enemy's death: hold it open with a `countsAsEnemy` keeper (12.16) |
+| enemies spawned by day reach buildings but deal no damage; towers don't fire by day | the game's attacks only work at night by default: `logic.game.combat` (12.9), or Builder `attacks` (`"when": "always"`) and `damage` rules (12.16) |
+| a rule meant to run "after the wave" never fires | the night ended with the last enemy's death: hold it open with `logic.game.holdNight` or a `countsAsEnemy` keeper (12.16) |
 | a test's `sleep` overshoots or a rule fired "early" | fast mode runs faster than real time: wait on `logic eval time` (12.12) |
 
 ## 11. Worked example
