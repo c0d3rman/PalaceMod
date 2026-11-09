@@ -174,7 +174,8 @@ namespace PalaceMod.Builder.Studio.Logic
                     if (v == null && h == "to") return "this";
                     return Value(v, p, ev);
                 }, out bool missing);
-                if (missing) s += " (!)";
+                // Only a needed field left empty is a problem; an optional one just drops out of the sentence.
+                if (missing && ui.Params.Any(p => p.Required && p.Default == null && p.Name is not ("target" or "to") && LogicDoc.IsEmpty(a[p.Name]))) s += " (!)";
             }
             int nested = ui.Nested.Sum(n => (a[n] as JArray)?.Count ?? 0) + ((a["options"] as JArray)?.Count ?? 0);
             if (nested > 0) s += $" (+{nested})";
