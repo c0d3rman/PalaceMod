@@ -434,6 +434,22 @@ namespace PalaceMod.Tests
             Has(issues, "levels[0].logic.places[4].interact.offer: offer picks from choices");
         }
 
+        /// <summary>An attach carries interact and (on a build slot) item costs per level; level is for slots only.</summary>
+        public static void AttachInteractAndSlotPay()
+        {
+            var issues = ValidateLevel(@"{ ""vars"": { ""wood"": 0 }, ""attach"": {
+                ""slot:Tower 3"": { ""interact"": { ""prompt"": ""Pray"" }, ""pay"": [{ ""var"": ""$wood"", ""amount"": 2, ""level"": 1 }] },
+                ""line:West"": { ""pay"": [{ ""var"": ""$wood"" }] },
+                ""castle"": { ""pay"": [{ ""var"": ""$wod"", ""level"": 0 }] } },
+                ""places"": [{ ""id"": ""p"", ""kind"": ""prop"", ""pos"": [0,0,0], ""interact"": { ""pay"": [{ ""var"": ""$wood"", ""level"": 2 }] } }] }");
+            string all = string.Join("\n", issues);
+            Assert.True(!all.Contains("attach[\"slot:Tower 3\"]"), "interact and pay on a slot validate:\n" + all);
+            Has(issues, "attach[\"line:West\"].pay: item costs go on a build slot");
+            Has(issues, "attach[\"castle\"].pay[0].var: no level variable \"wod\"");
+            Has(issues, "attach[\"castle\"].pay[0].level: 1 (the build) to 10");
+            Has(issues, "places[0].interact.pay[0].level: level is for a build slot's pay");
+        }
+
         public static void UnknownFieldsAndBodyTags()
         {
             var issues = ValidateLevel(@"{ ""bogus"": 1, ""places"": [{ ""id"": ""t"", ""kind"": ""prop"", ""pos"": [0,0,0], ""body"": { ""hitable"": true, ""hittable"": true, ""tags"": [""Biulding""] } }] }");

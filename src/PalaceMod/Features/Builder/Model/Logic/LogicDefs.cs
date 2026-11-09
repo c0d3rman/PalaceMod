@@ -145,6 +145,12 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("rules")] public List<RuleDef> Rules { get; set; }
         /// <summary>A light on the object (a lantern on a tower, a fire on the castle).</summary>
         [JsonProperty("light")] public LightDef Light { get; set; }
+        /// <summary>The king can use it with the interact key (a prop, a slot that has no build prompt of its own).</summary>
+        [JsonProperty("interact")] public InteractDef Interact { get; set; }
+        /// <summary>A build slot's item costs: level variables paid on its own build prompt with the gold,
+        /// [{ "var": "$wood", "amount": 2, "label": "wood", "level": 1 }] (level: 1 = the build, 2 = the first upgrade...;
+        /// none = every level).</summary>
+        [JsonProperty("pay")] public List<PayDef> Pay { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
@@ -546,6 +552,8 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("amount")] public LNum Amount { get; set; }
         /// <summary>The word the prompt uses (default: the variable's name).</summary>
         [JsonProperty("label")] public string Label { get; set; }
+        /// <summary>A build slot's pay only: the level this item is paid for (1 = the build); none = every level.</summary>
+        [JsonProperty("level")] public int? Level { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 

@@ -972,7 +972,7 @@ namespace PalaceMod.Builder.Model.Logic
                 }
             }
 
-            private void CheckPay(List<PayDef> pay, string p, CheckScope scope)
+            private void CheckPay(List<PayDef> pay, string p, CheckScope scope, bool slot = false)
             {
                 for (int i = 0; i < (pay?.Count ?? 0); i++)
                 {
@@ -983,6 +983,8 @@ namespace PalaceMod.Builder.Model.Logic
                     if (scope.LevelVars != null && !scope.LevelVars.Contains(name))
                         Error(pp + ".var", $"no level variable \"{name}\" (declare it in logic.vars)");
                     Num(x.Amount, pp + ".amount", scope, 0, 100000);
+                    if (x.Level != null && !slot) Error(pp + ".level", "level is for a build slot's pay (attach pay); an interact pays every time");
+                    else if (x.Level is < 1 or > 10) Error(pp + ".level", "1 (the build) to 10");
                 }
             }
 
@@ -1147,6 +1149,13 @@ namespace PalaceMod.Builder.Model.Logic
                     var owner = new Owner { Path = ap, Kind = kind ?? "building", Vars = VarSet(a.Vars), Level = lv, Rules = a.Rules };
                     CheckTargeting(a.Targeting, ap + ".targeting", owner);
                     CheckLight(a.Light, ap + ".light", Scope(owner, null));
+                    if (a.Interact != null) CheckInteract(a.Interact, ap + ".interact", Scope(owner, null));
+                    if (a.Pay != null)
+                    {
+                        if (!(kv.Key == "castle" || kv.Key.StartsWith("slot:") || kv.Key.StartsWith("add:")))
+                            Error(ap + ".pay", "item costs go on a build slot (slot:, add: or castle)");
+                        CheckPay(a.Pay, ap + ".pay", Scope(owner, null), slot: true);
+                    }
                     CheckRules(owner);
                 }
                 CheckRules(levelOwner);

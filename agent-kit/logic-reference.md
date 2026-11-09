@@ -836,7 +836,7 @@ What each JSON block accepts (a field not listed draws an "unknown field" warnin
 - **pickup**: `by`, `radius`, `magnet`, `consume`
 - **interact**: `prompt`, `cost`, `when`, `radius`, `repeat`, `pay`, `choices`, `offer` (blocks: `choices[]` → choice, `pay[]` → pay)
 - **choice**: `id`, `label`, `description`, `cost`, `pay`, `icon`, `if` (blocks: `pay[]` → pay)
-- **pay**: `var`, `amount`, `label`
+- **pay**: `var`, `amount`, `label`, `level`
 - **part**: `entity`, `offset`, `rotY`, `team`, `name`, `follow`, `onParentDeath`, `damageToParent`, `damageToGroup`, `damageKept`
 - **attack**: `id`, `replace`, `cooldown`, `jitter`, `range`, `minRange`, `when`, `targeting`, `launch`, `weapon`, `do` (blocks: `launch` → launch)
 - **launch**: `entity`, `from`
@@ -850,7 +850,7 @@ What each JSON block accepts (a field not listed draws an "unknown field" warnin
 - **preset**: `id`, `name`, `description`, `category`, `kind`, `params`, `vars`, `labels`, `rules`, `visual`, `body`, `team`, `countsAsEnemy`, `lifetime`, `maxAlive`, `projectile`, `mover`, `area`, `pickup`, `interact`, `light`, `parts`, `attacks`, `targeting`, `movement`, `statuses` (blocks: `params{}` → presetParam)
 - **presetParam**: `type`, `default`, `min`, `max`, `options`, `description`
 - **logic**: `seed`, `vars`, `rules`, `places`, `attach`, `hud`, `kingActions`, `caps`, `game` (blocks: `places[]` → place, `attach{}` → attach, `hud[]` → hud, `kingActions[]` → kingAction, `caps` → caps, `game` → game)
-- **attach**: `name`, `labels`, `vars`, `statuses`, `targeting`, `rules`, `light` (blocks: `light` → light)
+- **attach**: `name`, `labels`, `vars`, `statuses`, `targeting`, `rules`, `light`, `interact`, `pay` (blocks: `light` → light, `interact` → interact, `pay[]` → pay)
 - **hud**: `id`, `text`, `icon`, `visible`
 - **kingAction**: `id`, `name`, `icon`, `when`, `cooldown`, `uses` (blocks: `uses` → uses)
 - **uses**: `count`, `per`

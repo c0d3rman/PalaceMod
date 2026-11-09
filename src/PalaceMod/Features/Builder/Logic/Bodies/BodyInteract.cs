@@ -78,22 +78,27 @@ namespace PalaceMod.Builder.Logic.Bodies
             public PayItem(string v, double a, string l) { Var = v; Amount = a; Label = l; }
         }
 
-        public List<PayItem> Pays(JToken pay)
+        public List<PayItem> Pays(JToken pay) => ReadPays(pay, Entity);
+
+        /// <summary>`pay` items, evaluated for <paramref name="self"/>. With <paramref name="level"/>, only items
+        /// without a `level` or with that one (a build slot's: 1 = the build, 2 = the first upgrade...).</summary>
+        public static List<PayItem> ReadPays(JToken pay, LogicEntity self, int? level = null)
         {
             var list = new List<PayItem>();
             if (pay is not JArray a) return list;
             foreach (var t in a)
             {
                 if (t is not JObject o || (string)o["var"] is not { Length: > 1 } name || !name.StartsWith("$")) continue;
+                if (level != null && o["level"] is JValue lv && lv.Type is JTokenType.Integer or JTokenType.Float && (int)lv != level) continue;
                 var amt = o["amount"];
-                double n = amt == null ? 1 : amt.Type is JTokenType.Integer or JTokenType.Float ? (double)amt : amt.Type == JTokenType.String ? EvalNumber((string)amt, Entity) ?? 0 : 0;
+                double n = amt == null ? 1 : amt.Type is JTokenType.Integer or JTokenType.Float ? (double)amt : amt.Type == JTokenType.String ? EvalNumber((string)amt, self) ?? 0 : 0;
                 if (n <= 0) continue;
                 list.Add(new PayItem(name, n, (string)o["label"] ?? name.Substring(1)));
             }
             return list;
         }
 
-        private static double Have(string var)
+        internal static double Have(string var)
         {
             var w = LogicWorld.Current;
             if (w == null) return 0;
@@ -124,9 +129,19 @@ namespace PalaceMod.Builder.Logic.Bodies
                 return false;
             }
             if (gold > 0) player.SpendCoins(gold);
+            Charge(pays);
+            return true;
+        }
+
+        /// <summary>The items in <paramref name="pays"/> the level doesn't have enough of ("3 stone").</summary>
+        internal static List<string> Short(List<PayItem> pays) =>
+            pays.Where(p => Have(p.Var) < p.Amount - 1e-9).Select(p => $"{p.Amount:0.##} {p.Label}").ToList();
+
+        /// <summary>Takes the items from their level variables.</summary>
+        internal static void Charge(List<PayItem> pays)
+        {
             var w = LogicWorld.Current;
             foreach (var p in pays) w?.SetVar(w.Level, p.Var, Value.Number(Have(p.Var) - p.Amount));
-            return true;
         }
 
         public int Price(JToken c)

@@ -1210,7 +1210,8 @@ class Ops:
         return match[0]
 
     def op_add_slot(self, op):
-        """{"op":"add_slot","id":"h1","kind":"House"|"from":"<host slot>","at":[x,z],"rotY":0,"requires":"castle","costs":[..],"upgradeCap":0}"""
+        """{"op":"add_slot","id":"h1","kind":"House"|"from":"<host slot>","at":[x,z],"rotY":0,"requires":"castle","costs":[..],"upgradeCap":0,
+        "pay":[{"var":"$wood","amount":2,"label":"wood","level":1}]}: pay = item costs on its build prompt (logic.attach["add:<id>"].pay)"""
         lv = self.level(op)
         sid = op["id"]
         if not ID_RE.match(sid):
@@ -1238,6 +1239,8 @@ class Ops:
         if op.get("costs"):
             entry["upgrades"] = [{"cost": int(c)} if c is not None else None for c in op["costs"]]
         adds.append(entry)
+        if op.get("pay") is not None:
+            ensure(ensure(self.logic(op), "attach", {}), "add:" + sid, {})["pay"] = op["pay"]
         return f"added {sid} ({base['kind']}, " + ("the game's standard one: this map has none)" if standard else f"from {base['name']})")
 
     def find_slot_entry(self, lv, ref_name):
@@ -2083,15 +2086,24 @@ class Ops:
         ensure(owner, "vars", {})[op["name"]] = op["value"]
         return f"var {op['name']} on {where}"
 
+    ATTACH_FIELDS = ("name", "labels", "vars", "statuses", "targeting", "light", "interact", "pay")
+
     def op_attach(self, op):
         """{"op":"attach","key":"slot:Tower 3"|"add:<id>"|"prop:<id>"|"line:<name>"|"castle","name":"northTower",
-        "labels":["lit"],"vars":{},"statuses":[],"light":{"range":8}}: names, labels, vars and a light on an object the level
-        already has."""
+        "labels":["lit"],"vars":{},"statuses":[],"light":{"range":8},"interact":{...},
+        "pay":[{"var":"$wood","amount":2,"label":"wood","level":1}]}: names, labels, vars, a light, an interact block and
+        (on a build slot) item costs on its own build prompt, on an object the level already has. Rules: the `rule` op."""
         key = op["key"]
         if not (key == "castle" or key.startswith(self.ATTACH_PREFIXES)):
             raise Fail("key is slot:<host slot name> | add:<added slot id> | prop:<prop id> | line:<spawn line> | castle")
+        unknown = [f for f in op if f not in ("op", "level", "key") + self.ATTACH_FIELDS]
+        if unknown:
+            raise Fail(f"attach doesn't take {', '.join(map(repr, unknown))}: it takes {', '.join(self.ATTACH_FIELDS)}"
+                       + (" (rules: the `rule` op with \"on\": the key)" if "rules" in unknown else ""))
+        if op.get("pay") is not None and not (key == "castle" or key.startswith(("slot:", "add:"))):
+            raise Fail("pay (item costs) goes on a build slot: slot:<name>, add:<id> or castle")
         a = ensure(ensure(self.logic(op), "attach", {}), key, {})
-        for f in ("name", "labels", "vars", "statuses", "targeting", "light"):
+        for f in self.ATTACH_FIELDS:
             if op.get(f) is not None:
                 a[f] = op[f]
         return f"attach {key}" + (f" as @{a['name']}" if a.get("name") else "")
