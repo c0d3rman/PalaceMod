@@ -664,8 +664,13 @@ namespace PalaceMod.Builder.Logic
     {
         public static bool Contains(LogicEntity area, LogicEntity e)
         {
-            var r = LogicServices.Areas?.Contains(area, e);
-            if (r.HasValue) return r.Value;
+            // A dead or removed entity (a `death` dispatched after the unit is gone) is no longer in the area's
+            // live membership: judge it by where it was, from the shape.
+            if (e.Alive)
+            {
+                var r = LogicServices.Areas?.Contains(area, e);
+                if (r.HasValue) return r.Value;
+            }
             var shape = area.Def?["area"]?["shape"] ?? area.Def?["shape"];
             if (shape == null) return false;
             var p = e.Position - area.Position;
