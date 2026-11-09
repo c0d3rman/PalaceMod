@@ -129,8 +129,16 @@ namespace PalaceMod
                 if (a.LastTarget != null && a.LastTarget.Alive) return a.LastTarget;
             TaggedObject t = go.GetComponent<PathfindMovementEnemy>() is { } en ? SteerMovement.E_seekObj(en)
                 : go.GetComponent<PathfindMovementPlayerunit>() is { } pu ? SteerMovement.P_seekObj(pu) : null;
+            // A tower (or any building with the game's tower attack) has no mover: what its attack last aimed at.
+            if (t == null && go.GetComponent<PathfindMovement>() == null && StatWriter.Of(go) is { } parts)
+                foreach (var a in parts.Attacks)
+                    if (a is AutoAttackTower tower && tower.isActiveAndEnabled)
+                        foreach (var x in towerTargets(tower))
+                            if (x != null && x.Hp != null && x.Hp.HpValue > 0) { t = x; break; }
             return t != null ? LogicGame.EntityOf(t.gameObject) : null;
         }
+
+        private static readonly AccessTools.FieldRef<AutoAttackTower, List<TaggedObject>> towerTargets = AccessTools.FieldRefAccess<AutoAttackTower, List<TaggedObject>>("attackTargets");
 
         private static readonly Dictionary<int, TaggedObject> lastSeek = [];
 

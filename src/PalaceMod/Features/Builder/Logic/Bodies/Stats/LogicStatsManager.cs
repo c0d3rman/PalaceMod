@@ -83,7 +83,7 @@ namespace PalaceMod
             {
                 if (LogicWorld.Current == null) return "no logic session";
                 var ctx = new LogicContext { World = LogicWorld.Current, Self = LogicWorld.Current.Level };
-                var list = DevParams.Resolve(args.FirstOrDefault() ?? "king", ctx);
+                var list = DevParams.Resolve(args.Length > 0 ? string.Join(" ", args) : "king", ctx);
                 if (list == null || list.Count == 0) return "no entity";
                 return string.Join("\n", list.Take(20).Select(Stats.Describe));
             });

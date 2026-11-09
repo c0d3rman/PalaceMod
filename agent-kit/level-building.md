@@ -820,7 +820,7 @@ One small, pure language everywhere: conditions, numbers, selectors, positions.
   `attacker`, `target`, `entrant`, `collector`, `sender`, `obstacle`...), `event.value` / `event.pos` / `event.name` /
   `event.choice` / `event.types` / `event.weapon`, `@name` (a place or attached object), `@@id` (a template), `$var` (a level variable), `x.$var` (an
   entity variable), globals (`night`, `isNight`, `isDay`, `time`, `nightTime`, `nightProgress`, `gold`, `income`
-  (what the buildings paid at the last dawn, already set when `dawn` rules run), `enemiesAlive`, `difficulty`,
+  (what the buildings paid at the last dawn, already set when `dawn` rules run; a building knocked out that night pays 0, and wave gold isn't counted), `enemiesAlive`, `difficulty`,
   `nights`, `daylight`).
 - **Properties**: `.hp .maxHp .hpPct .alive .elite .pos .x .y .z .facing .team .kind .template .labels .level .cost
   .buildingType .age .target .owner .id .weapon .light .lit` (12.7a), links `.parent .children .root .group` (12.7) (`.weapon` is its weapon's id, `"vanilla:<weapon>"`: a unit's or
@@ -1080,7 +1080,7 @@ frame, so rules switch with a variable (`"combat": "isNight or $flipped"`); enum
 |---|---|---|
 | `victory` | `lastNight` | `rules`: surviving the last night doesn't win; only `endLevel win` does. After the last night the day goes on (a new night replays the last one). |
 | `defeat` | `castle` | `rules`: the castle falling doesn't lose; only `endLevel lose` (or resigning) does. |
-| `castle` | `shown` | `hidden`: no castle. It counts as built (slots that need it open), is invisible and not solid, nothing targets or hurts it, selectors don't see it, and it can't lose the level. |
+| `castle` | `shown` | `hidden`: no castle. It counts as built (slots that need it open), is invisible and not solid, nothing targets or hurts it, selectors don't see it, and it can't lose the level. To move it instead, `teleport` it (Limits). |
 | `holdNight` | `false` | A condition: while true the night doesn't end, even with no enemies left (`"count('#camp') > 0"`; `"$held < $goal"` keeps the last night's victory waiting). |
 | `endNight` | `false` | A condition: when it turns true at night, the night ends now, enemies alive or not (`"nightProgress >= 1 and count('is:boss') == 0"`). |
 | `survivors` | `stay` | What `endNight` does with the enemies left: `stay` (they stay on the map and count toward the next night) or `remove`. |
@@ -1203,7 +1203,10 @@ Write one per mechanic you want to keep working, next to your ops, and re-run it
 - A rigid part is placed every frame, not simulated: it goes wherever its parent goes. A template's parts come back
   from a savestate rebuilt (full hp); links made by `link` are kept.
 - Game tags are a fixed set; your own labels work through Builder targeting and filters.
-- The castle can be hidden (`logic.game.castle`) but not moved at runtime; place it where the level needs it.
+- The castle can't move in the layout (`move_slot`), but a rule can move it at runtime: `{"do": "teleport", "target":
+  "castle", "at": "vec(30, -20)"}` (any building too: `"target": "nearest('type:House')"`). The whole build slot moves onto the ground
+  there (building, colliders, navmesh cut, add-ons); enemies repath to it, it still loses the level when it falls, and
+  savestates keep the new spot. Moving it onto units pushes them out; keep it on open, walkable ground.
 - No new scenes, fog or arbitrary code (light: 12.7a). Pending `wait`s and Builder projectiles in flight aren't kept by
   savestates; keep state that matters in variables.
 - No world queries beyond entities: expressions can't ask for the ground height at a point (`vec(x, z).y` is 0, not
