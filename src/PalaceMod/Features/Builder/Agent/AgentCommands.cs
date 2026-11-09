@@ -41,7 +41,7 @@ namespace PalaceMod.Builder.Agent
         private const string Usage =
             "agent status | slots | catalog <file> | host <file> [cell] | packs | reload | validate <pack> [level] | library list|export|code|import ... | " +
             "play <pack> <level> | sandbox <pack> <level> [x z] | edit <pack> <level> | infinitegold on|off | spawn <unit> [count] [elite] [line <name>|at <x> <z>] | vanilla <scene> | menu | night [n] | endnight | report | build <slot|all> [level] [branch] [pay] | " +
-            "gold <n> | god on|off | invulnerable on|off | speed <x> | fast on|off [fps] | kill | heal | teleport <x> <z> | paths [rescan] | reach <x1> <z1> <x2> <z2> | " +
+            "gold <n> | god on|off | invulnerable on|off | speed <x> | fast on|off [fps] [keep] | kill | heal | teleport <x> <z> | paths [rescan] | reach <x1> <z1> <x2> <z2> | " +
             "share code <pack> [clipboard] | share export <pack> [path] | capture <file> [pixels] | screenshot <file>   agent bridge: JSON state, level tests, map dumps (see agent-kit/)";
 
         internal static void Register()
@@ -218,13 +218,9 @@ namespace PalaceMod.Builder.Agent
                 case "speed": return Json(new JObject { ["result"] = DebugActions.SetSpeed(F(Arg(args, 1))) });
                 case "fast":
                 {
-                    // fast [on|off] [fps]: fixed-step simulation as fast as the CPU allows (FastSimManager).
-                    if (args.Length > 1)
-                    {
-                        string mode = args[1].ToLowerInvariant();
-                        if (mode is not ("on" or "off")) throw new ArgumentException("usage: agent fast [on|off] [fps]");
-                        FastSimManager.Set(mode == "on", args.Length > 2 ? F(args[2]) : 60f);
-                    }
+                    // fast [on|off] [fps] [keep]: fixed-step simulation as fast as the CPU allows (FastSimManager); off
+                    // again at the next scene load unless keep.
+                    if (args.Length > 1) FastSimManager.Apply(args.Skip(1).ToArray(), "agent fast");
                     return Json(FastStatus());
                 }
                 case "kill": return Json(new JObject { ["result"] = DebugActions.KillEnemies() });
@@ -337,7 +333,7 @@ namespace PalaceMod.Builder.Agent
 
         private static JObject FastStatus() => new()
         {
-            ["on"] = FastSimManager.On, ["fps"] = FastSimManager.Fps, ["headless"] = FastSimManager.Headless,
+            ["on"] = FastSimManager.On, ["keep"] = FastSimManager.Keep, ["fps"] = FastSimManager.Fps, ["headless"] = FastSimManager.Headless,
             ["framesPerSecond"] = Math.Round(FastSimManager.FramesPerSecond),
         };
 

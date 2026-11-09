@@ -344,7 +344,7 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 | `render <pack> [level] -o f.png [--labels names\|costs\|reqs\|none] [--live]` | top-down picture; routes in one colour per line, named, lengths in the legend; offline they're an estimate, `--live` = real game render + the game's routes (level loaded). Also draws `logic.places` (templates and presets resolved): areas in their shape and `color` (dashed when `show: none`), paths with direction chevrons, bodies' footprints (a mover's path, other poses and a spin's reach dashed), points and logic objects as diamonds; labelled by `name` or `id`, "(off)" when `active: false` |
 | `economy <pack> [level] [--compare] [--report test.json]` | gold curve of a greedy all-economy player (harbours grow and mines run dry each dawn as in the game; assumes nothing is ever knocked out); vs the base map's vanilla; `--report`: what a saved `test` run actually received per dawn and which buildings were knocked out most |
 | `waves <pack> [level] [--compare [Map]]` | per night: enemies, effective HP, gold, flyers; vs vanilla |
-| `play <pack> <level>` | load as a normal run (real gold); prints load warnings |
+| `play <pack> <level> [--fast]` | load as a normal run (real gold); prints load warnings; real time unless `--fast` |
 | `sandbox <pack> <level> [--at X Z]` | Studio test play: unlimited gold, king at X,Z (the result has `"at": "ok"` once he stands there) |
 | `edit <pack> <level>` | open the level in the in-game Studio (the player's editor: F5 there test-plays); it edits its own copy and Ctrl+S writes pack.json, so don't `apply` while the player has unsaved Studio changes |
 | `test <pack> <level> [--nights 1-3] [--plan p.json] [--carry] [--save] [--catchup play\|free\|none] [--free] [--king castle\|<slot>\|X,Z] [--build all] [--god] [--invulnerable] [--gold N] [--speed 3] [--no-fast] [--from-night N] [--no-states] [--shots dir] [--quiet]` | load, buy per plan each day once its gold is in, play nights, report each (one progress line per night on stderr); fast simulation unless `--no-fast`; saves a resume state each dawn for `--from-night` |
@@ -455,6 +455,11 @@ low frame rate because it's in the background or on battery) make defences do me
 so keep `--speed` at 3 or less (5 still matched real time in our tests; 8 did not). `--no-fast` plays in real time
 at `--speed` (for watching). Screenshots in fast mode are a render of the game camera: the 3D view without the HUD.
 The game has some randomness of its own; for a close call, run the test two or three times.
+Fast mode belongs to one level load: `game cmd "agent fast on"` lasts until the next level load (play, sandbox,
+retry, savestate load), which turns it off again; `agent fast on keep` lasts across loads until `agent fast off`.
+`test` turns it on with `keep` for its own run and off at the end; `play` sets it every time (off unless `--fast`).
+So a script that loads a level and then polls in real time runs in real time unless it turns fast mode on itself,
+after the load; `agent fast` (no argument) shows `on` and `keep`.
 
 **Resuming from a later night.** Every full `test` saves a savestate at each dawn (once that morning's gold is in,
 before buying). `test ... --from-night N` loads the one before night N and plays only nights N.. with the current
@@ -1133,7 +1138,7 @@ with `{"op": "rule", "on": "unit:<id>", ...}`.
 **Testing helpers and traps.**
 
 - Measure waits in game time, not wall time: `test` and `game cmd "agent fast on"` run the game several times faster
-  than real time, so a `sleep` overshoots. Read `logic eval time` (seconds since level start) before and after and
+  than real time, so a `sleep` overshoots (send `agent fast on` after the level has loaded: a load turns it off). Read `logic eval time` (seconds since level start) before and after and
   poll until the difference is reached; poll conditions with `logic eval` the same way.
 - `logic raise interact <place>` fires the `interact` rules without charging the `cost` (the king pays only when he
   really interacts). To test a paid interaction, check `gold` before and after a real one, or charge it with
