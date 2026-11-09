@@ -151,17 +151,20 @@ namespace PalaceMod
             yield return 0.5f;
             var before = pm.transform.position;
             Analysis.BuildPublic(slot);
-            var path = new List<string>();
-            for (int i = 0; i < 6; i++)
+            yield return 2f;
+            var sb = new StringBuilder($"{slot.buildingName} {Id(slot)}: king at {V(before)}, built on him, he stays at {V(pm.transform.position)}. Walking out (2 s each, real input):");
+            int ground = 1 << LayerMask.NameToLayer("Ground");
+            foreach (var (h, v) in new[] { (1f, 0f), (-1f, 0f), (0f, 1f), (0f, -1f) })
             {
-                yield return 0.5f;
-                path.Add(V(pm.transform.position));
+                pm.TeleportTo(before);
+                yield return 0.3f;
+                DevToolsManager.Execute($"run {h} {v} 2", out _);
+                yield return 2.5f;
+                var end = pm.transform.position;
+                string under = Physics.Raycast(end + Vector3.up * 200f, Vector3.down, out var hit, 400f, ground, QueryTriggerInteraction.Ignore) ? $"{hit.point.y:0.0}" : "none";
+                sb.Append($" [{h},{v}] -> {V(end)} ({Vector3.Distance(new Vector3(before.x, 0, before.z), new Vector3(end.x, 0, end.z)):0.0} m, top ground {under})");
             }
-            var end = pm.transform.position;
-            bool ground = Physics.Raycast(end + Vector3.up * 200f, Vector3.down, out var hit, 400f, 1 << LayerMask.NameToLayer("Ground"), QueryTriggerInteraction.Ignore);
-            status = $"finished: {slot.buildingName} {Id(slot)}: king stood at {V(before)}, after the build {string.Join(" ", path)}; " +
-                     $"moved {Vector3.Distance(new Vector3(before.x, 0, before.z), new Vector3(end.x, 0, end.z)):0.0} m sideways, {end.y - before.y:0.0} m up; " +
-                     $"top ground under him {(ground ? hit.point.y.ToString("0.0") : "none")}";
+            status = "finished: " + sb;
             a.RestorePublic(snap);
             pm.TeleportTo(before);
         }
