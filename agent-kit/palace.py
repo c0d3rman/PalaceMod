@@ -43,7 +43,11 @@ PACK_VERSION = 3
 
 
 class Fail(Exception):
-    pass
+    """A failure the user can fix; `path` (e.g. "ops[3]") says where, when known."""
+
+    def __init__(self, message="", path=None):
+        super().__init__(message)
+        self.path = path
 
 
 def out(obj):
@@ -1063,17 +1067,17 @@ class Ops:
             name = op.get("op")
             fn = getattr(self, "op_" + str(name), None)
             if fn is None:
-                raise Fail(f"ops[{i}]: unknown op {name!r}; ops: {', '.join(sorted(n[3:] for n in dir(self) if n.startswith('op_')))}")
+                raise Fail(f"ops[{i}]: unknown op {name!r}; ops: {', '.join(sorted(n[3:] for n in dir(self) if n.startswith('op_')))}", path=f"ops[{i}]")
             if name != "add_prop":
                 self._prop_ids = None
             try:
                 r = fn(op)
             except Fail as e:
-                raise Fail(f"ops[{i}] ({name}): {e}")
+                raise Fail(f"ops[{i}] ({name}): {e}", path=f"ops[{i}]")
             except (KeyError, TypeError, ValueError, IndexError) as e:
                 what = f"missing field {e.args[0]!r}" if isinstance(e, KeyError) and e.args else f"bad field: {e}"
                 usage = (fn.__doc__ or "").strip().split("\n")[0]
-                raise Fail(f"ops[{i}] ({name}): {what}" + (f". Usage: {usage}" if usage else ""))
+                raise Fail(f"ops[{i}] ({name}): {what}" + (f". Usage: {usage}" if usage else ""), path=f"ops[{i}]")
             self.log.append(r or name)
         self.resnap()
 
@@ -2093,11 +2097,22 @@ class Ops:
         return f"hud {d['id']} " + self._upsert(ensure(self.logic(op), "hud", []), d)
 
     def op_logic(self, op):
-        """{"op":"logic","seed":1234,"caps":{"entities":600}}: level logic settings (caps above the defaults may lag)."""
+        """{"op":"logic","seed":1234,"caps":{"entities":600},"game":{"victory":"rules"}}: level logic settings (caps above
+        the defaults may lag). `game` (the game's own rules: win, lose, castle, night flow, combat, building) is merged
+        field by field; a null field goes back to vanilla."""
         lg = self.logic(op)
         for f in ("seed", "caps"):
             if f in op:
                 lg[f] = op[f]
+        if "game" in op:
+            game = lg.setdefault("game", {})
+            for k, v in (op["game"] or {}).items():
+                if v is None:
+                    game.pop(k, None)
+                else:
+                    game[k] = v
+            if not game:
+                lg.pop("game", None)
         return "logic settings"
 
     # ---- terrain -----------------------------------------------------------------------------------------------------
@@ -3520,7 +3535,7 @@ def check_pack(ref, data):
 
     # The behaviour engine's rules, entities, statuses and presets (palace_logic.py, the mod's own checks).
     try:
-        issues.extend(logic_issues(data))
+        issues.extend(logic_issues(data, ref))
     except Fail as e:
         warn("logic", str(e))
     return issues
@@ -4265,6 +4280,14 @@ def cmd_ref(env, args):
             m = ref.map(args.name)
             rows[f"on {args.name} (map's own)"] = [{"mesh": x["base"][5:], "count": x["count"], "size": x.get("size")} for x in m.get("scenery", [])]
         out(rows)
+    elif args.what in ("effects", "sounds"):
+        # The names the `effect` / `sound` actions take (check validates against this list).
+        items = ref.catalog.get(args.what) or []
+        names = [x["id"] if isinstance(x, dict) else x for x in items]
+        if args.name:
+            names = [n for n in names if args.name.lower() in n.lower()]
+        out({args.what: names, "note": "effect aliases (smoke, explosion, hit...) are listed too" if args.what == "effects" else
+             'also "asset:<key>" for a sound file in the pack'})
     elif args.what == "doc":
         path = Path(args.out or env.ref / "reference.md")
         path.write_text(reference_markdown(ref), encoding="utf-8")
@@ -4275,7 +4298,7 @@ def cmd_ref(env, args):
         routes = offline_routes(ref, {}, level, slots, castle) if castle in slots else []
         out(render(ref, {}, level, args.out or f"{args.name}.png", routes=routes, labels=args.labels))
     else:
-        raise Fail("ref build | maps | slots <map> | buildings | enemies | waves <map> | scenery [map] | render <map>")
+        raise Fail("ref build | maps | slots <map> | buildings | enemies | waves <map> | scenery [map] | effects [part] | sounds [part] | render <map>")
 
 
 def reference_markdown(ref):
@@ -4657,12 +4680,22 @@ def library_check(ref, data, level_ids=None, only_files=None, skipped=()):
 def cmd_apply(env, args):
     ref = Ref(env)
     path, data = load_pack(env, args.pack)
-    if args.fresh:
-        fresh_level(env, ref, data, args.level)
-    ops = Ops(env, ref, data, args.level)
-    ops.store = path
-    ops_list = read_ops(args.ops)
-    ops.run(ops_list)
+    ops = None
+    try:
+        if args.fresh:
+            fresh_level(env, ref, data, args.level)
+        ops = Ops(env, ref, data, args.level)
+        ops.store = path
+        try:
+            ops_list = read_ops(args.ops)
+        except (OSError, ValueError) as e:
+            raise Fail(f"can't read the ops: {e}", path="ops")
+        ops.run(ops_list)
+    except Fail as e:
+        # Nothing is saved; the failure is an errors[] entry like every other problem, with where it happened.
+        out({"applied": ops.log if ops else [], "saved": None, "errors": [{"severity": "error", "path": e.path or "apply", "message": str(e)}],
+             "warnings": []})
+        sys.exit(1)
     if args.no_check:
         issues = []
     elif isinstance(path, LibraryRef):
@@ -5350,11 +5383,27 @@ def logic_module():
     return palace_logic
 
 
-def logic_issues(data):
-    """The behaviour engine's offline checks, as check_pack issues."""
+def game_names(ref):
+    """The game's effect and sound names from the ref cache (catalog.json), for the logic check; None without one."""
+    if ref is None:
+        return None
+    f = ref.env.ref / "catalog.json"
+    if not f.exists():
+        return None
+    try:
+        cat = ref.catalog
+    except (Fail, ValueError):
+        return None
+    effects = [e["id"] if isinstance(e, dict) else e for e in cat.get("effects") or []]
+    sounds = list(cat.get("sounds") or [])
+    return {"effects": effects or None, "sounds": sounds or None}
+
+
+def logic_issues(data, ref=None):
+    """The behaviour engine's offline checks, as check_pack issues (with the ref cache: game effect and sound names)."""
     pl = logic_module()
     raw = []
-    pl.validate_logic(data, raw)
+    pl.validate_logic(data, raw, names=game_names(ref))
     return [{"severity": sev, "path": path, "message": msg} for sev, path, msg in raw]
 
 
@@ -5405,9 +5454,9 @@ def cmd_logic(env, args):
         if rest and rest[0] not in ("--json",):
             key = {"events": "events", "actions": "actions", "functions": "functions", "fns": "functions", "stats": "stats", "flags": "flags",
                    "presets": "presets", "globals": "globals", "roles": "roles", "properties": "properties", "filters": "filterTerms",
-                   "tags": "tags", "inputs": "inputs", "caps": "caps"}.get(rest[0])
+                   "tags": "tags", "inputs": "inputs", "caps": "caps", "game": "gameRules"}.get(rest[0])
             if key is None:
-                raise Fail("logic schema [events|actions|functions|properties|globals|roles|stats|flags|filters|tags|inputs|presets|caps] "
+                raise Fail("logic schema [events|actions|functions|properties|globals|roles|stats|flags|filters|tags|inputs|presets|caps|game] "
                            "| logic schema <event|action|fn|stat|flag|preset|global|role|filter> <name>")
             out(schema.get(key))
             return
@@ -5431,11 +5480,11 @@ def cmd_logic(env, args):
             find_level(data, rest[1])
             if isinstance(lpath, LibraryRef):
                 scoped = level_scope(data, rest[1])
-                issues = [attribute(scoped, i, level=rest[1]) for i in logic_issues(scoped)]
+                issues = [attribute(scoped, i, level=rest[1]) for i in logic_issues(scoped, Ref(env))]
             else:
-                issues = logic_issues(scope_levels(data, {rest[1]}))
+                issues = logic_issues(scope_levels(data, {rest[1]}), Ref(env))
         else:
-            issues = logic_issues(data)
+            issues = logic_issues(data, Ref(env))
         ok = not any(i["severity"] == "error" for i in issues)
         out({"ok": ok, "errors": [i for i in issues if i["severity"] == "error"], "warnings": [i for i in issues if i["severity"] == "warning"]})
         if not ok:
@@ -5552,6 +5601,13 @@ def logic_reference_markdown(schema):
           "Per level in `logic.caps`; above the default draws a \"may lag\" warning, above the maximum an error.", "",
           "| Cap | Default | Max |", "|---|---|---|"]
     L += [f"| `{k}` | {v['default']} | {v['max']} |" for k, v in (schema.get("caps") or {}).items()]
+    if schema.get("gameRules"):
+        L += ["", "## Game rules", "", "Per level in `logic.game` (op `{\"op\": \"logic\", \"game\": {...}}`): the game's own rules. Each is a "
+              "literal or an expression the level reads again every frame (an enum takes its word or `\"=expr\"`), so a rule can switch "
+              "it through a variable. Leave a rule out for vanilla.", "", "| Rule | Type | Vanilla | Meaning |", "|---|---|---|---|"]
+        for g in schema["gameRules"]:
+            t = g["type"] + (f" ({' / '.join(g['options'])})" if g.get("options") else "")
+            L.append(f"| `{g['name']}` | {t} | `{json.dumps(g.get('default'))}` | {_md(g['description'])} |")
     L += ["", "## Built-in presets", "", "Use one in a rules list as `{\"preset\": \"<id>\", \"with\": {params}}`, or place a logic object with "
           "`{\"op\": \"place\", \"preset\": \"<id>\", \"with\": {...}}`.", ""]
     for pr in schema.get("presets") or []:
@@ -5837,7 +5893,7 @@ def main(argv=None):
     p.add_argument("--feature", action="append", help="log: only these [Feature] lines (e.g. Builder)")
     p.add_argument("--level", default="warn", choices=["error", "warn", "info", "debug"])
 
-    p = sub.add_parser("ref", help="reference data: build | maps | slots <map> | buildings | enemies | waves <map> | scenery [map] | render <map> | doc")
+    p = sub.add_parser("ref", help="reference data: build | maps | slots <map> | buildings | enemies | waves <map> | scenery [map] | effects [part] | sounds [part] | render <map> | doc")
     p.add_argument("what")
     p.add_argument("name", nargs="?")
     p.add_argument("--maps", help="build: comma-separated maps (default: all)")

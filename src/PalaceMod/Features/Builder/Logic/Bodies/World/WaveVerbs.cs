@@ -130,12 +130,9 @@ namespace PalaceMod.Builder.Logic.Bodies
                 }
                 case "endNight":
                 {
-                    if (!WorldCommon.IsNight) return;
-                    Groups.Clear();
-                    spawner.StopSpawnAfterWaveAndReset();
-                    var enemies = new List<TaggedObject>();
-                    TagManager.instance.FindAllTaggedObjectsWithTags(enemies, [TagManager.ETag.EnemyOwned], []);
-                    foreach (var e in enemies) if (e != null) Object.Destroy(e.gameObject);
+                    string survivors = p.Text("survivors", "remove");
+                    if (survivors != "remove" && survivors != "stay") throw new LogicError($"waves endNight: survivors must be \"stay\" or \"remove\", not \"{survivors}\"");
+                    GameRules.EndNight(survivors == "remove");
                     return;
                 }
                 case "skipNight":

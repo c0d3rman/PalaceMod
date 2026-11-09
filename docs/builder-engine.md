@@ -449,7 +449,7 @@ keep rules readable.
 | `attack` | `attack` (id) | it attacks (any attack, including vanilla) | target |
 | `hit` | | its attack, projectile or `damage` action damaged something | victim / amount |
 | `kill` | | something it damaged died from that damage | victim |
-| `every` | `seconds`, `jitter`, `phase`, `during` (`night`/`day`/`always`) | periodically, from spawn | — / tick count |
+| `every` | `seconds`, `jitter` (0..1: each interval varies by up to that share), `phase`, `during` (`night`/`day`/`always`: skips ticks outside it) | periodically, on the owner's clock from spawn (not from dusk) | — / tick count |
 | `after` | `seconds` | once, that long after spawn | |
 | `near` | `filter`, `range`, `edge` (`enter`/`exit`/`both`) | a matching entity comes within or leaves the range | the entity |
 | `enter` / `exit` / `inside` / `empty` / `occupied` | | (areas) see "area" | entity |
@@ -475,13 +475,20 @@ The "any unit" variants are `of`-filters on the same events: "any building destr
 
 ### Expressions
 
-One grammar is used everywhere. A param is an expression whenever its type isn't text. A text or template param
-becomes an expression with a leading `=`. Text interpolates `{expr}`.
+One grammar is used everywhere. How a param's string is read is decided by its schema type, in one place
+(`Model/Logic/ParamForms.cs`, `Classify`) that both the runtime (`CompiledParams`) and the validator (and its Python
+port) call, so `check` accepts exactly what the game can read: number, bool, position, entity(ies), slot and any params
+are expressions (a leading `=` allowed); text, signal and label params are text with `{expr}` parts (`=` makes them an
+expression); colour, effect, sound, enum, status and template params are literals (a colour is `#rgb`, `#rrggbb`,
+`#rrggbbaa` or a name, parsed by `ParamForms.TryParseColor` everywhere colours appear) unless they start with `=`; var,
+rule and local (`forEach.as`) params are always names. With the game present (`ILogicNamesContext`: the in-game
+validator inside a level, or palace.py with a ref cache) effect and sound names are checked against the game's lists.
 
 ```text
 literals    12  0.5  true  'text'  vec(x, z)  vec(x, y, z)
 variables   $souls (level)   self.$gen  other.$charges  spawned.$x   (an unknown var is a validation error)
-roles       self subject other spawned it (the candidate inside a filter or forEach) king castle level
+roles       self subject other spawned it (the candidate inside a filter or forEach) outer (the `it` one scope out)
+            king castle level   + forEach's `as` name for its member
             event.value event.pos event.name   + the per-event aliases (killer, victim, ...)
 named       @gate1 (a place or attach "name")  @@goblin (a template, for spawn/compare)
 properties  .hp .maxHp .hpPct .alive .pos .x .y .z .facing (deg) .team .kind .template .labels
@@ -511,7 +518,9 @@ term   := foe | ally | player | enemy | neutral       teams (foe/ally are relati
         | unit | building | prop | projectile | area | pickup | coin | king | castle | self
         | melee | ranged                              the game's MeeleFighter / RangedFighter
         | type:Mill                                   a building of that kind (the `building:<kind>` names)
-        | alive | dead | Flying | Tower | ...         game tags (TagManager.ETag names, case-sensitive)
+        | alive | dead | disabled | unbuilt            states (naming dead/disabled/unbuilt also lets a selector see them)
+        | include:dead|disabled|unbuilt|self          always true: only widens what a selector sees
+        | Flying | Tower | ...                        game tags (TagManager.ETag names, case-sensitive)
         | #label                                      labels
         | is:goblin                                   template
         | in:@zone                                    inside an area
@@ -519,7 +528,19 @@ term   := foe | ally | player | enemy | neutral       teams (foe/ally are relati
         | where(expr)                                 any expression over `it`
 ```
 
-Selectors never return `self` unless the filter says `self`. Inside `where(...)`, `self` is still the rule's owner and
+Arguments with spaces are quoted with either quote (`type:"Defense Tower"`, `is:'vanilla:E Ogre'`, `#"two words"`);
+unquoted arguments may contain `:` (`is:vanilla:Ogre`).
+
+What a selector sees: it skips its anchor (`self`), the dead (and knocked-out buildings), switched-off entities
+(`Enabled == false`) and empty build slots (a slot or its building at level 0) unless its filter names that state
+(`self`, `dead`, `disabled`, `unbuilt`) or `include:`s it. Empty vanilla slots aren't in the game's tag lists, so a
+filter that opts into `unbuilt` also gets every level-0 `BuildSlot` from `LogicServices.UnbuiltSlots` (as the entity of
+its building object, the same one the built building becomes). A build slot's body is alive while its slot is built
+and standing, so `.alive` is false after `building demolish`; `.level` is the slot's level (0 empty, 1 built); `.cost`
+is the next build or upgrade price (`none` when maxed). A distance to or from `none` is `none`.
+
+`it` is rebound by each set-walking scope (forEach, a targeted action over a set, where, best, .is); the context
+keeps the previous one as `outer`, and forEach's `as` adds a local name that nested scopes keep. Inside `where(...)`, `self` is still the rule's owner and
 `it` the candidate; `in:self` means "inside this area" (for presets). Area membership uses an entity's position, or a
 building's footprint collider. Types are number, bool, text, position, entity, set, list and template. An entity coerces to its position, and a set coerces to its count in numeric contexts. The validator
 type-checks every expression against the event's roles: `other` in a `levelStart` rule is an error, and `event.value`
@@ -565,7 +586,7 @@ which accepts an entity or a position.
 | | `stop` | ends this action list |
 | **World** | `gold` | `amount` (negative takes, floored at 0), `at` (shows the coin effect there) |
 | | `dropCoins` | `count`, `at` (real coins the king collects) |
-| | `building` | `slot` (an attach name, a selector or a Studio key), `op`: `build` \| `upgrade` \| `knockOut` \| `repair` \| `demolish` (back to an empty slot, gold not refunded unless `value`) \| `lock` (hides an unbuilt slot; a built one keeps standing but can't be upgraded) \| `unlock` \| `setCost` \| `setIncome`, `value`, `branch` |
+| | `building` | `slot` (any expression giving a building or slot entity, or a Studio key; default: each `target`), `op`: `build` \| `upgrade` \| `knockOut` \| `repair` \| `demolish` (back to an empty slot, gold not refunded unless `value`) \| `lock` (hides an unbuilt slot; a built one keeps standing but can't be upgraded) \| `unlock` \| `setCost` \| `setIncome`, `value`, `branch` |
 | | `waves` | `op` with its fields: `addSpawn` (`unit`, `count`, `interval`, `delay`, `line`, `gold`, `elite`), `removeUnit` (`unit`), `scaleCount` / `scaleHp` (`value`, optional `unit`), `clearRemaining` (optional `line`: drops what the running night hasn't spawned yet), `startNight`, `endNight`, `skipNight`. `night`: default the next night; `"current"` edits the running night's remaining schedule |
 | | `endLevel` | `result` (`win`/`lose`), `message` |
 | **Show** | `effect` | `fx` (a game effect from the catalog), `at`, `scale` |
@@ -576,7 +597,7 @@ which accepts an entity or a position.
 | | `hud` | `id`, `text`, `icon`, `visible`: a level HUD line (the `logic.hud` defaults, changed at runtime) |
 | | `shake` | `strength`, `seconds` |
 | | `marker` | `on`, `icon`, `for`: a screen-edge marker like the game's wave markers |
-| **End** | `destroy` | `effects` (death effects, true), `drops` (coins, false), `silent` (no `death` event) |
+| **End** | `destroy` | `effects` (death effects, true), `drops` (coins, false), `silent` (no `death` event). A logic-spawned unit is removed outright (player ones too); a game-made player troop is knocked out with no revive at dawn; buildings, the castle and the king are knocked out |
 
 The action set is closed, and each action is generic. A new action needs a mod update, so additions are judged by
 whether they unlock many behaviours rather than one.
@@ -696,6 +717,32 @@ That covers armour, dodges, "immune to arrows", "misses at long range" and "vuln
 "uses": { "count": 1, "per": "day" } }]` (at most 3; `per`: `day` | `night` | `run`). They map to three rebindable keys, "Level action 1-3" (context `BuilderLevel`,
 registered in `Awake` so they get Controls-screen rows). The key fires `kingAction` with that id, and the HUD shows
 the action with its cooldown.
+
+### Game rules
+
+`logic.game` makes the game's own rules data (GameRulesDef; LogicSchema.GameRules is the list the validators, the
+Studio's Level panel > Game rules, `palace.py logic doc` and `logic schema game` read). Each value is a literal or an
+expression over the level scope, re-read every frame, so a level switches a rule through a variable instead of an
+action per rule. Without the block every patch is a no-op (`Logic/Bodies/World/LogicGameRulesManager.cs`).
+
+| Rule | Vanilla | How it's done |
+|---|---|---|
+| `victory` (`lastNight` \| `rules`) | `lastNight` | `LocalGamestate.SetState(AfterMatchVictory)` is vetoed unless `endLevel` is the caller (`GameRules.EndingByRule`). |
+| `defeat` (`castle` \| `rules`) | `castle` | `LocalGamestate.OnVitalObjectKill` is skipped; resigning still loses. |
+| `castle` (`shown` \| `hidden`) | `shown` | Built for free if unbuilt, then renderers, colliders, navmesh cuts (area graph update) and interactors off, removed from the TagManager, skipped by selectors (`GamePhase.HiddenCastle`), damage vetoed, can't lose. |
+| `holdNight` (bool) | `false` | `DayNightCycle.Update` sees the spawner as spawning while it holds (like spawnGroup's KeepNightOpen); the last night's victory waits with it. |
+| `endNight` (bool) / `survivors` (`stay` \| `remove`) | `false` / `stay` | Edge-triggered once per night: `GameRules.EndNight` (also `waves endNight`, whose `survivors` defaults to `remove`) stops spawning, drops spawnGroups, removes or keeps the enemies left and calls `SwithToDay`. |
+| `combat` (bool) | `isNight` | `AutoAttack*.Update` and `ManualAttack.TryToAttack` run with the day/night state switched to what the rule wants (`GamePhase.Switch`, restored in a finalizer; `isNight` still reads the truth meanwhile). By day the dawn's `SetAllUnitsWithTagInvulnerable(true)` is skipped, and toggled when the rule flips mid-day. |
+| `build` (bool) | `isDay` | `BuildingInteractor.UpdateInteractionState` runs switched likewise; the dusk's forced "no prompt" is redone after `OnDusk`; prompts refresh when the rule flips. |
+| `dayLength` (number) | `0` | Night falls that many seconds after sunrise (not after the last night). |
+
+`logic-game` (dev command; `palace.py game cmd logic-game`) prints the rules as evaluated now; `logic-game castle`
+lists what still draws near the castle.
+
+Weapons follow their wielder's side (same file, always on in a logic session): a vanilla weapon's damage rows name
+the side they hurt by team tag, so a neutral unit (or a weapon copied onto the other side) would deal 0. While
+`Weapon.DealDamage` runs for a wielder whose side isn't the weapon's own (`isPlayerWeapon`), a `PlayerOwned` /
+`EnemyOwned` row means "the wielder's foe" (anything, for a neutral wielder).
 
 ### Presets
 
@@ -850,7 +897,7 @@ Synchronous modifiers (not rules) run inside the game's own calls:
 | `repeat.times`, `forEach`, set size | 100, 256, 256 | clamped |
 | Area and `near` polling | 10 Hz, on a 4 m spatial hash of the tagged objects | — |
 | Solid mover navmesh updates | 4 per second per mover, 20 per second in total | queued |
-| Expression size | 512 characters | validation error |
+| Expression size | 8192 characters, nested 100 deep | validation error |
 
 The validator also does a static loop check. A rule whose `signal` reaches a listener that, with no `wait`, signals
 back to the first rule is a warning ("this loop runs until the chain-depth cap"). Target cost: under 0.5 ms per frame
@@ -1436,7 +1483,7 @@ three (projectiles in flight, surfaces and spaces above), with no feature coded 
 - **No new scenes, no fog or lighting changes** beyond the level's colour scheme and tints (a separate arena is an
   off-map space on the same scene). Recording is only what
   list vars can hold: up to 256 sampled values, such as positions.
-- **King actions:** 3 keys. The day phase has no timer in Thronefall, so "shorter day" has no meaning.
+- **King actions:** 3 keys. The day phase has no timer in Thronefall; `logic.game.dayLength` adds one.
 - **No arbitrary code**, by design. A missing verb needs a mod update; the registry's `since` makes that explicit.
 - **Savestates** don't keep pending `wait`s or Builder projectiles in flight.
 

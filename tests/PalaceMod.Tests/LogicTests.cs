@@ -364,6 +364,18 @@ namespace PalaceMod.Tests
             Has(issues, "levels[0].logic.attach[\"tower\"]: attach keys are");
         }
 
+        public static void ValidatorChecksGameRules()
+        {
+            var issues = ValidateLevel(@"{ ""vars"": { ""flipped"": false }, ""game"": { ""victory"": ""survive"", ""castle"": ""hidden"", ""holdNight"": ""count('#camp') > 0"",
+                ""endNight"": ""$flipd"", ""combat"": ""isNight or $flipped"", ""build"": 3, ""dayLength"": -5, ""survivors"": ""=night > 2 ? 'stay' : 'remove'"", ""speed"": 2 } }");
+            Has(issues, "levels[0].logic.game.victory: must be one of lastNight, rules");
+            Has(issues, "levels[0].logic.game.endNight: col 1: unknown variable \"$flipd\"");
+            Has(issues, "levels[0].logic.game.build: must be true, false or a condition");
+            Has(issues, "levels[0].logic.game.dayLength: must be 0 or more");
+            foreach (var ok in new[] { "castle", "holdNight", "combat", "survivors" })
+                Assert.True(!issues.Any(i => i.ToString().Contains("logic.game." + ok + ":")), $"game.{ok} flagged: {string.Join("; ", issues)}");
+        }
+
         public static void ValidatorChecksComponentsAndCaps()
         {
             var issues = ValidateLevel(@"{ ""caps"": { ""entities"": 900, ""units"": 5000 },
