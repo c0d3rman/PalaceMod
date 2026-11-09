@@ -12,7 +12,7 @@
     "id": "bolt",
     "kind": "projectile",
     "visual": {
-     "mesh": "mesh:Spear"
+     "mesh": "mesh:Icicle Sharp"
     },
     "lifetime": 3,
     "projectile": {
