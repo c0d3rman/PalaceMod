@@ -160,6 +160,7 @@ namespace PalaceMod.Builder.Logic
                 "income" => _ => Value.Number(G().Income),
                 "enemiesAlive" => _ => Value.Number(G().EnemiesAlive),
                 "difficulty" => _ => Value.Number(G().Difficulty),
+                "daylight" => _ => Value.Number(LogicLighting.Daylight),
                 "none" or "null" => _ => Value.None,
                 _ => ctx => ctx.Locals != null && ctx.Locals.TryGetValue(name, out var v) ? v : throw new LogicError($"unknown name \"{name}\""),
             };
@@ -263,6 +264,8 @@ namespace PalaceMod.Builder.Logic
                 case "name": return Value.Text(e.Name ?? e.Id);
                 case "enabled": return Value.Bool(e.Enabled);
                 case "elite": return Value.Bool(LogicServices.IsElite?.Invoke(e) ?? false);
+                case "light": return Value.Number(LogicLighting.LightAt(e.Position));
+                case "lit": return Value.Bool(LogicLighting.Lit(e.Position));
             }
             var stats = LogicServices.Stats;
             if (stats != null)
@@ -497,6 +500,7 @@ namespace PalaceMod.Builder.Logic
                     }
                 case "waveUnits":
                     return ctx => Value.List((LogicServices.Game ?? throw new LogicError("game state isn't available")).WaveUnits((int)Num(A0(ctx), name)).Select(Value.Template).ToList());
+                case "lightAt": return ctx => Value.Number(LogicLighting.LightAt(Pos(A0(ctx))));
                 case "strongestUnit":
                     return ctx => (LogicServices.Game ?? throw new LogicError("game state isn't available")).StrongestUnit((int)Num(A0(ctx), name)) is { } t ? Value.Template(t) : Value.None;
             }
@@ -624,6 +628,7 @@ namespace PalaceMod.Builder.Logic
                 case "alive": return (_, c) => c.Alive;
                 case "elite": return (_, c) => LogicServices.IsElite?.Invoke(c) ?? false;
                 case "dead": return (_, c) => !c.Alive;
+                case "lit": return (_, c) => LogicLighting.Lit(c.Position);
                 case "label": return (_, c) => c.Labels.Contains(arg);
                 case "is": return (_, c) => c.Template == arg || c.Template == "vanilla:" + arg;
                 case "has": return (_, c) => LogicServices.Stats != null && LogicServices.Stats.Stacks(c, arg) > 0;
@@ -687,6 +692,13 @@ namespace PalaceMod.Builder.Logic
                 double yaw = -(area.Body?.Facing ?? (float?)area.Def?["rotY"] ?? 0) * Math.PI / 180;
                 double lx = p.X * Math.Cos(yaw) - p.Z * Math.Sin(yaw), lz = p.X * Math.Sin(yaw) + p.Z * Math.Cos(yaw);
                 return Math.Abs(lx) <= (float)size[0] / 2 && Math.Abs(lz) <= (float)size[1] / 2;
+            }
+            if (shape["sector"] is Newtonsoft.Json.Linq.JObject sector)
+            {
+                // Into the area's frame (yaw clockwise from north): local z runs along its facing.
+                double yaw = (area.Body?.Facing ?? (float?)area.Def?["rotY"] ?? 0) * Math.PI / 180;
+                double lx = p.X * Math.Cos(yaw) - p.Z * Math.Sin(yaw), lz = p.X * Math.Sin(yaw) + p.Z * Math.Cos(yaw);
+                return PalaceMod.Builder.Logic.Bodies.LightMath.SectorContains(lx, lz, (float?)sector["radius"] ?? 6, (float?)sector["angle"] ?? 60);
             }
             if (shape["polygon"] is Newtonsoft.Json.Linq.JObject poly && poly["points"] is Newtonsoft.Json.Linq.JArray pts && pts.Count >= 3)
             {

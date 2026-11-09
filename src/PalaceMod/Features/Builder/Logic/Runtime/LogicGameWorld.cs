@@ -41,7 +41,8 @@ namespace PalaceMod.Builder.Logic
                 return last;
             }
         }
-        public float Facing => Go != null ? Go.transform.eulerAngles.y : 0f;
+        /// <summary>Where it looks: a unit's model or the king's mesh (their roots never turn), else the object.</summary>
+        public float Facing => Go != null ? PalaceMod.Builder.Logic.Bodies.Facing.Of(Go) : 0f;
         float IEntityBody.Hp => hp != null ? hp.HpValue : 0f;
         public float MaxHp => hp != null ? hp.maxHp : 0f;
 
