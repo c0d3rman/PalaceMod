@@ -291,6 +291,31 @@ namespace PalaceMod.Tests
             }
         }
 
+        public static void PlaceRulesKeepTheirPathsBesideAPreset()
+        {
+            var issues = ValidateLevel(@"{ ""places"": [{ ""id"": ""t"", ""preset"": ""timer"", ""pos"": [0,0,0], ""rules"": [{ ""when"": ""dusk"", ""do"": [{ ""do"": ""nope"" }] }] }] }");
+            Has(issues, "levels[0].logic.places[0].rules[0].do[0].do: unknown action \"nope\"");
+        }
+
+        public static void MalformedListsAreReportedNotThrown()
+        {
+            var issues = ValidateLevel(@"{ ""rules"": [{ ""when"": ""dusk"", ""do"": [{ ""do"": ""if"", ""cond"": ""true"", ""then"": [""oops""] },
+                { ""do"": ""setTargeting"", ""target"": ""all('enemy')"", ""targeting"": [3] }] }] }");
+            Has(issues, "levels[0].logic.rules[0].do[0].then[0]: is empty");
+            Has(issues, "levels[0].logic.rules[0].do[1].targeting[0]: needs a filter");
+        }
+
+        public static void PlayPackKeepsUnitsTheLogicNames()
+        {
+            var fx = JObject.Parse(File.ReadAllText(Directory.GetFiles(RepoFile("tests/logic-examples"), "09-*.json")[0]));
+            var pack = PackSerializer.FromJObject((JObject)fx["pack"], null);
+            pack.Units.Add(new UnitDef { Id = "unrelated", Base = "vanilla:E Melee" });
+            var play = PalaceMod.Builder.Studio.Play.TestPacks.Play(pack, pack.Levels[0].Id, out string err);
+            Assert.Null(err, "play pack");
+            Assert.Equal("bat", string.Join(",", play.Units.Select(u => u.Id)), "is:bat in the level script keeps the bat");
+            Assert.Equal("", Errors(Validator.Validate(play)), "the play pack validates");
+        }
+
         // ---- Validator messages ------------------------------------------------------------------------------
 
         private static List<ValidationIssue> ValidateLevel(string logicJson, string extraPack = null)

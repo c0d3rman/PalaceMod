@@ -374,6 +374,10 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("running")] public bool? Running { get; set; }
         /// <summary>Named poses; the signal of a pose's name moves to it.</summary>
         [JsonProperty("pose")] public Dictionary<string, PoseDef> Pose { get; set; }
+        /// <summary>Accepted alias of "pose".</summary>
+        [JsonProperty("poses")] public Dictionary<string, PoseDef> Poses { get; set; }
+        /// <summary>Degrees per second for pose turns (default 90).</summary>
+        [JsonProperty("turnSpeed")] public LNum TurnSpeed { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
@@ -388,6 +392,8 @@ namespace PalaceMod.Builder.Model.Logic
     {
         /// <summary>Offset from the placed position, [x, y, z].</summary>
         [JsonProperty("offset")] public float[] Offset { get; set; }
+        /// <summary>Or a world position [x, y, z].</summary>
+        [JsonProperty("pos")] public float[] Pos { get; set; }
         [JsonProperty("rotY")] public float? RotY { get; set; }
         [JsonProperty("scale")] public float? Scale { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
@@ -403,6 +409,10 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("color")] public string Color { get; set; }
         /// <summary>Seconds between "inside" events; null = no inside events.</summary>
         [JsonProperty("tick")] public LNum Tick { get; set; }
+        /// <summary>Makes the area a named pathfinding surface: "mud", or {"name": "mud", "allow": "&lt;filter: who may walk
+        /// it&gt;", "cost": &lt;path cost multiplier, default 1&gt;}. Units' movement.surfaces override per unit. At most 31
+        /// surface names per level.</summary>
+        [JsonProperty("surface")] public JToken Surface { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
@@ -540,6 +550,8 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("wander")] public WanderDef Wander { get; set; }
         /// <summary>"spawn" | [x, y, z] | "@point".</summary>
         [JsonProperty("home")] public JToken Home { get; set; }
+        /// <summary>Per surface name: true (may walk it), false (may not), or a path cost multiplier.</summary>
+        [JsonProperty("surfaces")] public Dictionary<string, JToken> Surfaces { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 

@@ -101,6 +101,9 @@
   "setup": "Build slot:Tower 3 first (`building` action), then enemies in range.",
   "steps": [
    {
+    "cmd": "agent build castle"
+   },
+   {
     "do": [
      {
       "do": "building",

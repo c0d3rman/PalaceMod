@@ -124,7 +124,9 @@ namespace PalaceMod.Builder.Logic
 
         public bool Exists => !Destroyed && (Body == null || Body.Exists);
         public bool Alive => Exists && (Body == null || Body.Alive);
-        public Vec Position => Body?.Position ?? StaticPos;
+        /// <summary>The body's position, or StaticPos for a body-less entity and once the body is gone (Forget stores
+        /// the last position there, so a `death` rule still reads where it died).</summary>
+        public Vec Position => Body != null && (Body.Exists || !Destroyed) ? Body.Position : StaticPos;
         public Vec StaticPos;                // position for body-less entities (a logic object or area without a game object)
 
         public override string ToString() => Id;

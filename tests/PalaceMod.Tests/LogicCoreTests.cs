@@ -344,6 +344,17 @@ namespace PalaceMod.Tests
             _ = rnd;
         }
 
+        public static void EveryL1SchemaActionHasAHandler()
+        {
+            _ = new LogicWorld();   // registers the core's actions
+            var missing = PalaceMod.Builder.Model.Logic.LogicSchema.Actions.Values
+                .Where(a => a.Owner == "L1" && !ActionCompiler.Control.Contains(a.Name) && !LogicActions.IsRegistered(a.Name))
+                .Select(a => a.Name).ToList();
+            Assert.True(missing.Count == 0, "L1 actions without a handler: " + string.Join(", ", missing));
+            var unknown = ActionCompiler.Control.Where(c => !PalaceMod.Builder.Model.Logic.LogicSchema.Actions.ContainsKey(c)).ToList();
+            Assert.True(unknown.Count == 0, "control actions missing from the schema: " + string.Join(", ", unknown));
+        }
+
         public static void CompileErrorsAreTracedNotThrown()
         {
             var w = NewWorld("""{ "rules": [ { "when": "levelStart", "if": "1 +", "do": [] }, { "when": "levelStart", "do": [ { "do": "nosuch" } ] } ] }""");

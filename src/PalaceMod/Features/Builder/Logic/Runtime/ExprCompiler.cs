@@ -540,12 +540,14 @@ namespace PalaceMod.Builder.Logic
                 var anchorEntity = Values.ToEntity(av);
                 Vec center = Values.ToPosition(av) ?? ctx.Self?.Position ?? Vec.Zero;
                 float r = (float)Num(radius(ctx), name);
+                // The level has no position: a selector anchored at it looks everywhere (a radius means nothing).
+                bool anchorIsLevel = anchorEntity?.Kind == "level";
+                if (anchorIsLevel) r = 0;
                 var f = filter(ctx);
                 var cands = new List<LogicEntity>();
                 ctx.World.Query(center, r, cands);
                 var fctx = ctx.With();
                 var hits = new List<(LogicEntity e, float d)>();
-                bool anchorIsLevel = anchorEntity?.Kind == "level";
                 foreach (var c in cands)
                 {
                     if (c == null || !c.Exists) continue;
