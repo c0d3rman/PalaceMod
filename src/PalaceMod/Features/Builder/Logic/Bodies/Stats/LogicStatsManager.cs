@@ -117,7 +117,8 @@ namespace PalaceMod
                 amount *= WeaponFactor(wname, vt, splash);
                 weaponId = wname.StartsWith("vanilla:") ? wname : "vanilla:" + wname;
             }
-            Deal(victim, amount, source, types, splash, weaponId);
+            // Exact unless the rule opts into the source's own multipliers (`scaled: true`); the victim's damageTaken applies either way.
+            Deal(victim, amount, source, types, splash, weaponId, exact: !p.Bool("scaled"));
         }
 
         /// <summary>
@@ -129,14 +130,14 @@ namespace PalaceMod
         private static bool ByPlayer(LogicEntity source, LogicEntity victim) =>
             source?.Team == "player" && source.Kind != "level" && victim?.Team == "enemy";
 
-        internal static bool Deal(LogicEntity victim, double amount, LogicEntity source, HashSet<string> types, bool splash, string weapon = null)
+        internal static bool Deal(LogicEntity victim, double amount, LogicEntity source, HashSet<string> types, bool splash, string weapon = null, bool exact = false)
         {
             var hp = HpOf(victim);
             if (hp == null || amount <= 0 || hp.HpValue <= 0) return false;
             if (splash) (types ??= new HashSet<string>(StringComparer.Ordinal)).Add("splash");
             var from = source?.Go() != null ? source.Tagged() ?? source.Go().GetComponentInChildren<TaggedObject>() : null;
             if (weapon != null) (types ??= new HashSet<string>(StringComparer.Ordinal)).Add(weapon);
-            scope.Add(new DamageInfo { Types = types, Splash = splash, Source = source, Weapon = weapon });
+            scope.Add(new DamageInfo { Types = types, Splash = splash, Source = source, Weapon = weapon, ExactFor = exact ? hp : null });
             try { return hp.TakeDamage((float)amount, from, ByPlayer(source, victim), true); }
             finally { scope.RemoveAt(scope.Count - 1); }
         }
@@ -297,8 +298,12 @@ namespace PalaceMod
                 if (__instance.HpValue <= 0) return true;
                 var vs = Stats.SheetOfGo(__instance.gameObject);
                 var asheet = _damageComingFrom != null ? Stats.SheetOfGo(_damageComingFrom.gameObject) : null;
-                if (vs == null && asheet == null) return true;
                 if (vs != null && vs.MyFlags.Contains("invulnerable")) { __result = false; return false; }
+                // A tower's arrows pass no attacker to the game's damage call: its damageMult goes by the attack that fired them.
+                if (_damageComingFrom == null && LogicManager.CurrentAttacker is { } shooter) asheet = Stats.SheetOfGo(shooter.gameObject);
+                // A scripted `damage` hit is exact: its source's damageMult doesn't scale it unless the rule asked (`scaled`).
+                if (CurrentDamage is { ExactFor: { } exactHp } && exactHp == __instance) asheet = null;
+                if (vs == null && asheet == null) return true;
                 var victim = vs?.E ?? LogicGame.EntityOf(__instance.gameObject);
                 var attacker = asheet?.E ?? (_damageComingFrom != null ? LogicGame.EntityOf(_damageComingFrom.gameObject) : CurrentDamage?.Source);
                 double f = Stats.DamageFactor(vs, asheet, victim, attacker, () => HitTypes(_damageComingFrom));

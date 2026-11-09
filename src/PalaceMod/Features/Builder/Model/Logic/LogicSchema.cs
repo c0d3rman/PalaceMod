@@ -327,13 +327,14 @@ namespace PalaceMod.Builder.Model.Logic
             ], targeted: true, owner: "L2");
 
             // ---- Health ---------------------------------------------------------------------------------------
-            Act("damage", "Health", "Deals damage.",
+            Act("damage", "Health", "Deals exactly `amount`: the victim's damageTaken and a `weapon`'s modifiers apply, the source's own damageMult only with `scaled`.",
             [
                 P("amount", "number", "Hit points.", req: true, min: 0),
                 P("source", "entity", "Who is credited (fires their hit/kill events). Default self.", def: "self"),
                 P("types", "types", "Damage-type labels (fire, ...) that status modifiers test."),
                 P("splash", "bool", "Counts as splash damage (the game's splash modifiers).", def: false),
                 P("weapon", "text", "Apply a weapon's tag modifiers (\"vanilla:<weapon>\")."),
+                P("scaled", "bool", "Scale it by the source's own damageMult (its statuses and setStat), as the source's own attacks are.", def: false),
             ], targeted: true, example: "{ \"do\": \"damage\", \"target\": \"all('foe', 3)\", \"amount\": 25 }");
             Act("heal", "Health", "Heals.", [P("amount", "number", "Hit points.", req: true, min: 0)], targeted: true);
             Act("kill", "Health", "Kills it (fires death).", [P("source", "entity", "Who is credited.")], targeted: true);

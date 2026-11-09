@@ -146,7 +146,8 @@ namespace PalaceMod
 
         // ---- patches -------------------------------------------------------------------------------------------
 
-        /// <summary>A unit carried by its parent doesn't walk (it's placed every frame); it still attacks.</summary>
+        /// <summary>A unit carried by its parent, or riding a riding deck (DeckCarrier), doesn't walk (it's placed every
+        /// frame); it still attacks.</summary>
         [HarmonyPatch]
         private static class CarriedUnits
         {
@@ -156,7 +157,12 @@ namespace PalaceMod
                 yield return AccessTools.Method(typeof(PathfindMovementPlayerunit), "Update");
             }
 
-            private static bool Prefix(Component __instance) => Links.Carried.Count == 0 || !Links.CarriedGo.Contains(__instance.gameObject.GetInstanceID());
+            private static bool Prefix(Component __instance)
+            {
+                if (Links.Carried.Count == 0 && DeckCarrier.Riding.Count == 0) return true;
+                int id = __instance.gameObject.GetInstanceID();
+                return !Links.CarriedGo.Contains(id) && !DeckCarrier.Riding.Contains(id);
+            }
         }
 
         private sealed class ShareState

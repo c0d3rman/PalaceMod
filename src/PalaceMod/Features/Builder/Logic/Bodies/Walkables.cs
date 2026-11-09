@@ -14,6 +14,10 @@ using UnityEngine;
     - a deck that's switched off, or a pose ghost the mover isn't at, is hidden from the graphs by a non-dual
       NavmeshCut limited to a 1.2 m band around the deck's top (cut updates, ~10 ms, not rescans).
     A walkable mover snaps between poses and carries the units standing on it.
+    A riding deck (a walkable body linked as a moving part: a howdah on an elephant, the back of a walking colossus)
+    is kept off the graphs: they can't move with it, and under a deck its parent's own ground would have no clearance,
+    so the parent would stand in a hole and never walk. Its collider still carries the king, and DeckCarrier carries
+    the units on it (they ride, not walk).
 */
 namespace PalaceMod.Builder.Logic.Bodies
 {
@@ -28,6 +32,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             public Vector3 Size;
             public string Pose;
             public bool InSpace;              // off the map: its own space graphs, no walls to open
+            public bool Riding;               // a moving linked part: off the graphs (the parent walks under it)
             public readonly List<DeckOpenings.Top> Tops = [];   // what the host graphs rasterize: the proxy, or the pose ghosts
         }
 
@@ -66,10 +71,58 @@ namespace PalaceMod.Builder.Logic.Bodies
 
         public static Mesh BoxMesh() => Box();
 
-        /// <summary>The decks that carry riders (DeckCarrier): every walkable body's own deck.</summary>
-        public static IEnumerable<Transform> LiveDecks()
+        /// <summary>The decks that carry riders (DeckCarrier): every walkable body's own deck; offGraph: a riding deck,
+        /// which the graphs don't have, so units on it ride instead of walking.</summary>
+        public static IEnumerable<(Transform deck, bool offGraph)> LiveDecks()
         {
-            foreach (var d in decks) if (d.Body != null && d.Proxy != null && d.Body.isActiveAndEnabled) yield return d.Proxy.transform;
+            foreach (var d in decks) if (d.Body != null && d.Proxy != null && d.Body.isActiveAndEnabled) yield return (d.Proxy.transform, d.Riding);
+        }
+
+        /// <summary>A point stands on (or just above) a riding deck's top: a unit put there rides it.</summary>
+        public static bool OnRidingDeck(Vector3 p)
+        {
+            foreach (var d in decks)
+            {
+                if (!d.Riding || d.Proxy == null || d.Body == null || !d.Body.isActiveAndEnabled) continue;
+                var l = d.Proxy.transform.InverseTransformPoint(p);
+                if (Mathf.Abs(l.x) > 0.5f || Mathf.Abs(l.z) > 0.5f) continue;
+                float dy = p.y - d.Proxy.transform.TransformPoint(new Vector3(l.x, 0.5f, l.z)).y;
+                if (dy > -0.6f && dy < 1.5f) return true;
+            }
+            return false;
+        }
+
+        /// <summary>A walkable body linked as a moving part leaves the graphs (and comes back when it's unlinked).</summary>
+        private static void UpdateRiding(Deck d)
+        {
+            if (d.Body == null || d.Proxy == null || d.Ghosts.Count > 0) return;
+            var e = d.Body.Entity;
+            bool ride = e?.Parent != null && e.Link is { } l && l.Moves;
+            if (ride == d.Riding) return;
+            var area = AreaAround(d.Proxy);
+            d.Riding = ride;
+            if (d.Proxy.GetComponent<MeshRenderer>() is { } r) r.enabled = !ride;
+            if (ride)
+            {
+                foreach (var t in d.Tops) if (t.Edges != null) Object.Destroy(t.Edges);
+                d.Tops.Clear();
+            }
+            else if (d.Tops.Count == 0) d.Tops.Add(new DeckOpenings.Top { Mesh = d.Proxy, Live = true });
+            Log.For<LogicBodiesManager>().Info($"walkable {d.Body.name}: {(ride ? "a moving part now; off the graphs (riders ride it)" : "no longer a moving part; back on the graphs")}");
+            if (d.InSpace || AstarPath.active == null) return;
+            if (settled) pendingAreas.Add(area);
+            else RequestScan();
+        }
+
+        private static Bounds AreaAround(GameObject proxy)
+        {
+            var t = new DeckOpenings.Top { Mesh = proxy };
+            t.Update();
+            var b = new Bounds(t.Corners[0], Vector3.zero);
+            foreach (var c in t.Corners) b.Encapsulate(c);
+            b.Expand(new Vector3(2f * AreaMargin, 0f, 2f * AreaMargin));
+            b.size = new Vector3(b.size.x, 60f, b.size.z);
+            return b;
         }
 
         public static void Add(BuilderBody body, BuilderMover mover)
@@ -206,6 +259,7 @@ namespace PalaceMod.Builder.Logic.Bodies
                 Log.For<LogicBodiesManager>().Info($"spaces: {Spaces.Describe()}, scan {spaceMs} ms");
                 foreach (var d in decks) Refresh(d);
             }
+            foreach (var d in decks) UpdateRiding(d);
             if (AstarPath.active == null) return;
             bool first = !settled;
             settled = true;
@@ -240,6 +294,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             var mask = BodyNav.GroundMask();
             d.Hide.graphMask = mask;
             foreach (var g in d.Ghosts.Values) g.hide.graphMask = mask;
+            if (d.Riding) { Switch(d.Hide, false); return; }
             if (d.Ghosts.Count == 0) { Switch(d.Hide, !on); return; }
             // A posed mover: the live deck is never cut (it's off the graph while moving, units wait); the ghost of
             // the current pose shows, every other ghost is hidden.
@@ -319,6 +374,6 @@ namespace PalaceMod.Builder.Logic.Bodies
             return box;
         }
 
-        public static string Describe() => $"{decks.Count} walkable decks ({string.Join(", ", decks.Select(d => $"{d.Body?.name}{(d.Pose != null ? " @" + d.Pose : "")}{(d.Hide.enabled ? " hidden" : "")}"))})";
+        public static string Describe() => $"{decks.Count} walkable decks ({string.Join(", ", decks.Select(d => $"{d.Body?.name}{(d.Pose != null ? " @" + d.Pose : "")}{(d.Riding ? " riding" : "")}{(d.Hide.enabled ? " hidden" : "")}"))})";
     }
 }

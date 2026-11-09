@@ -949,7 +949,7 @@ ground (the touched cells are then drawn by the terrain). Savestates keep the ch
 | `parts` | any template, units too | `[{ "entity", "offset" [x,y,z], "rotY", "name" (a label), "team", "follow", "onParentDeath", "damageToParent", "damageToGroup", "damageKept" }]`: spawned and linked when it appears (Links, below) |
 | `attacks` | turrets, units | `[{ "cooldown", "range", "targeting", "launch": {"entity", "from"} \| "weapon", "do", "replace", "when" }]`; the unit's base attacks stay unless `replace` |
 | `targeting` | attackers | ordered list of filters or `{filter, range, prefer, score}`: the first rule with a match in range wins (a list with no match leaves it idle: it never falls back to anything the list excludes); `score` (an expression over `it`) picks the highest-scoring match, e.g. `{"filter": "player and building", "score": "it.income"}`, else `prefer` nearest (default), farthest, weakest, strongest or random; works on units, vanilla towers and attached slots (`attach` `targeting`, or `setTargeting`) |
-| `movement` | units | `mode` pathfind/direct/hold/path/follow, `path`, `then`, `speed`, `keepDistance`, `kite`, `flee`, `wander`, `home`, `surfaces`; for `follow`: `leader` (an entity expression, e.g. `"self.parent"`), `spacing` (m behind it, a trail; default 2), `offset` [x, z] (a slot in the leader's frame: x right, z ahead), `catchUp` (speed × while behind; 1.5) |
+| `movement` | units | `mode` pathfind/direct/hold/path/follow, `path`, `then`, `speed`, `keepDistance`, `kite`, `flee`, `wander`, `home`, `surfaces`; for `follow`: `leader` (an entity expression, e.g. `"self.parent"`), `spacing` (m behind it, a trail; default 2), `offset` [x, z] (a slot in the leader's frame: x right, z ahead), `catchUp` (speed × once it's more than 15% of its spacing behind its slot; 1.5) |
 
 A number field may be an expression evaluated when the entity appears: `"hp": "=100 * night"`.
 
@@ -992,6 +992,11 @@ mover path, a spinning one, a teleported raft, a lift whose path climbs (`"path"
 walkable part linked to a moving unit. Pathing units are carried too but snap back to the ground's paths when they walk,
 so give riders `command hold` (troops) or `setMovement hold`: their hold point moves with the deck. Movers with `pose`s snap between poses (their poses are
 pre-scanned for paths) and carry riders at the snap.
+A walkable part linked to a walking unit (the back of a colossus, a howdah: `parts` with `body.walkable`) is a riding
+deck: the unit walks freely under it, the king can stand on it and is carried, and units on it ride (they stay aboard
+and still attack, but don't walk). Nothing paths onto a riding deck: put units aboard with `teleport` to a point on its
+top (e.g. a ladder area's `enter` rule: `{"do": "teleport", "target": "other", "at": "self.root.pos + vec(0, 3, 0)"}`
+for a deck at offset y 3); teleport them off to let them walk again.
 
 **Surfaces follow their area**: one placed `"active": false` and enabled later starts stopping units then, disabled it
 stops, and a moved or turned area re-tags where it is (`paths` and `paths --between` don't model surfaces; test them
@@ -1057,7 +1062,11 @@ stays until `removeStatus`, the way to give something a lasting buff, curse or f
 the attacker; its `when` is an expression where `self` is the carrier, `attacker` (also `other`, `it`) who deals the
 hit, `victim` (also `subject`) who takes it, and `dist` the ground distance between them. A hit with no known attacker
 fails `from`, and `attacker` is `none` in `when`. `chance` is rolled per hit. These keys only work on the two damage
-stats.
+stats. A tower's damageMult applies to its arrows. A scripted `damage` action deals exactly its `amount` (only the
+victim's damageTaken, and a `weapon`'s tag modifiers, change it); add `"scaled": true` to scale it by its `source`'s
+damageMult like that source's own attacks. A hit that the victim's own damageTaken reduces to 0 is not shared with its
+linked parts or group either (an immune body stays immune), while a hit on a part still reaches the parent through its
+`damageToParent` whatever the parent's damageTaken.
 
 ### 12.9 Variables, HUD, king actions, caps
 

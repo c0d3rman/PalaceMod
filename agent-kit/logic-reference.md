@@ -254,7 +254,7 @@ Each action is `{"do": "<name>", ...params}`. `target` (where listed) is a selec
 
 ### Health
 
-**`damage`**: Deals damage.
+**`damage`**: Deals exactly `amount`: the victim's damageTaken and a `weapon`'s modifiers apply, the source's own damageMult only with `scaled`.
 
 - `target` (entities; default "self"): Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self.
 - `amount` (number; required; 0..): Hit points.
@@ -262,6 +262,7 @@ Each action is `{"do": "<name>", ...params}`. `target` (where listed) is a selec
 - `types` (types): Damage-type labels (fire, ...) that status modifiers test.
 - `splash` (bool; default false): Counts as splash damage (the game's splash modifiers).
 - `weapon` (text): Apply a weapon's tag modifiers ("vanilla:<weapon>").
+- `scaled` (bool; default false): Scale it by the source's own damageMult (its statuses and setStat), as the source's own attacks are.
 
   `{ "do": "damage", "target": "all('foe', 3)", "amount": 25 }`
 
