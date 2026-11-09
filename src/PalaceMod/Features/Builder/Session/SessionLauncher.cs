@@ -89,6 +89,10 @@ namespace PalaceMod.Builder
                 Current.WaveSet = ws;
                 BuilderServices.Waves.SetPending(request.Pack, ws);
                 resultRecorded = false;
+                // Every Studio load is a fresh day 1. The play run's dawn save stays in memory, so without this the next
+                // play (Restart, or F5 again after editing) continued that run: its buildings, walls included, came back.
+                Traverse.Create(typeof(MatchSaveLoadHandler)).Field("currentSave").SetValue(null);
+                MatchSaveLoadHandler.OverwriteCurrentSave = true;
                 Log.For<BuilderManager>().Info($"Studio session: {kind} on {host}");
             }
             else if (!Start(request, out error)) return false;

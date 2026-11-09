@@ -275,6 +275,25 @@ namespace PalaceMod.Builder.Level
             if (sle != null) Traverse.Create(sle).Field("guid").SetValue(guid);
         }
 
+        /// <summary>
+        /// Removes from a fresh copy of a live slot the children the source's scripts made for themselves at runtime.
+        /// A UnitProductionSelector instantiates its "command these units" ring (SelectUnitUI) in OnEnable and keeps it
+        /// in a private field, so a copy of an enabled selector carries the source's ring while its own field is empty:
+        /// the copy makes a second ring of its own, and the copied one is never updated again. It shows as the prefab
+        /// left it (the sword icon, two-thirds filled) whenever the building stands.
+        /// </summary>
+        public static int DropRuntimeChildren(GameObject copy)
+        {
+            int n = 0;
+            foreach (var ui in copy.GetComponentsInChildren<SelectUnitUI>(true))
+            {
+                if (ui == null || ui.GetComponentInParent<UnitProductionSelector>(true) == null) continue;
+                UnityEngine.Object.DestroyImmediate(ui.gameObject);
+                n++;
+            }
+            return n;
+        }
+
         // ---- Inert copies ----------------------------------------------------------------------------------------
 
         /// <summary>

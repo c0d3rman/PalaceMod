@@ -96,6 +96,7 @@ namespace PalaceMod.Builder.Level
                 }
                 var go = UnityEngine.Object.Instantiate(source.gameObject, holder.transform);
                 go.name = LayoutScene.AddedPrefix + add.Id;
+                LayoutScene.DropRuntimeChildren(go);
                 go.transform.SetPositionAndRotation(LayoutScene.ToVector(add.Pos), LayoutScene.WithYaw(source.transform.rotation, add.RotY));
                 LayoutScene.SetGuid(go, LayoutScene.Guid(pack.Id, level.Id, add.Id));
                 var clone = go.GetComponent<BuildSlot>();

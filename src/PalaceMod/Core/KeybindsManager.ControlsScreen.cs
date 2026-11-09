@@ -395,7 +395,8 @@ namespace PalaceMod
                         if (otherMap.controllerType != map.controllerType || otherMap.controllerId != map.controllerId) continue;
                         foreach (var other in otherMap.AllMaps)
                         {
-                            if (other.actionId == actionId || !other.enabled) continue;
+                            // A binding a claimed context switched off for now still clashes once the claim ends.
+                            if (other.actionId == actionId || (!other.enabled && !blocked.Contains(other))) continue;
                             if (other.elementType != element.elementType || other.elementIdentifierId != element.elementIdentifierId) continue;
                             if (map.controllerType == ControllerType.Keyboard && other.modifierKeyFlags != element.modifierKeyFlags) continue;
                             // Opposite halves of one axis (wheel up / wheel down, stick left / right) are separate inputs.
