@@ -50,6 +50,18 @@ namespace PalaceMod.Builder
 
         internal static bool IsTemplateObject(GameObject go) => go != null && templateRoot != null && go.transform.IsChildOf(templateRoot);
 
+        /// <summary>A built template by its name ("E Racer [pack/unit]"), e.g. for a savestate's enemy; null if none.</summary>
+        internal static GameObject FindTemplate(string name)
+        {
+            if (templateRoot == null || string.IsNullOrEmpty(name)) return null;
+            for (int i = templateRoot.childCount - 1; i >= 0; i--)
+            {
+                var child = templateRoot.GetChild(i);
+                if (child.name == name) return child.gameObject;
+            }
+            return null;
+        }
+
         /// <summary>Destroys all templates. Only call outside a session: live enemies can reference templates.</summary>
         public void Clear()
         {

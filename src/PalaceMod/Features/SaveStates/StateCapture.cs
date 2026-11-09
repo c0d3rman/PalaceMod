@@ -26,7 +26,7 @@ namespace PalaceMod
                 reason = "Not in a level";
             else if (SceneManager.GetActiveScene().name == StateUtil.TutorialScene) reason = "Savestates don't work in the tutorial";
             else if (LocalGamestate.SelectedGameMode != LocalGamestate.GameMode.Classic) reason = "Savestates only work in normal levels";
-            else if (StateUtil.CustomSession) reason = "Savestates don't work in custom (Builder) levels";
+            else if (StateUtil.StudioEditing) reason = "Savestates work in test play, not while editing";
             else if (SceneTransitionManager.instance != null && SceneTransitionManager.instance.SceneTransitionIsRunning) reason = "The level is still loading";
             else if (LocalMatchSaveLoad.CurrentlyLoadingMatch) reason = "The level is still loading";
             else if (LocalGamestate.Instance.CurrentState != LocalGamestate.State.InMatch) reason = "The match is over";
@@ -58,7 +58,9 @@ namespace PalaceMod
             {
                 modVersion = MyPluginInfo.PLUGIN_VERSION,
                 gameVersion = Application.version,
-                level = SceneManager.GetActiveScene().name,
+                level = StateUtil.LevelKey(SceneManager.GetActiveScene().name),
+                scene = SceneManager.GetActiveScene().name,
+                builder = StateUtil.BuilderPin,
                 createdUtc = DateTime.UtcNow.ToString("o"),
                 wave = spawner.Wavenumber,
                 waveCount = spawner.WaveCount,
