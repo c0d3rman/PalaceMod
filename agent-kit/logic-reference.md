@@ -67,6 +67,7 @@ Names an expression can use for entities in a rule.
 | `income` | number | The last dawn's payout. |
 | `enemiesAlive` | number | Enemies on the map. |
 | `difficulty` | number | The run's difficulty multiplier. |
+| `daylight` | number | The level's own light, 0..1: 1 by day, about 0.34 at night, lower in an eclipse (`lighting`). |
 | `none` | any | No entity (what a selector gives when nothing matches, or a role the event doesn't have): `other != none`. |
 
 ## Events
@@ -371,6 +372,30 @@ Each action is `{"do": "<name>", ...params}`. `target` (where listed) is a selec
 - `target` (entities; default "self"): Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self.
 - `order` (enum; required; one of follow, hold, home): The order.
 
+**`turn`**: Turns it to face a direction: aim a beam, a turret, a blade wall, a placed area (its shape, outline, surface and solid footprint turn with it). Units turn their model (they turn back when they walk).
+
+- `target` (entities; default "self"): Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self.
+- `facing` (number): Yaw in degrees to face (0 = north, 90 = east).
+- `by` (number): Degrees to turn by (clockwise; negative = anticlockwise).
+- `toward` (position): Face this entity or position.
+- `speed` (number; 0..): Degrees per second (empty: at once).
+
+  `{ "do": "turn", "target": "@beam", "toward": "king", "speed": 90 }`
+
+**`setShape`**: Changes an area's shape or size (its outline, fill, membership and surface follow), or a body's footprint (its solid cut and collider follow).
+
+- `target` (entities; default "self"): Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self.
+- `shape` (enum; one of circle, rect, polygon, sector): The new kind (default: keep the kind it has).
+- `radius` (number; 0.1..): circle, sector: the radius (m).
+- `angle` (number; 1..360): sector: how wide (degrees), centred on its facing.
+- `width` (number; 0.1..): rect: width (m).
+- `depth` (number; 0.1..): rect: depth (m).
+- `points` (json): polygon: [[x, z], ...] relative to it.
+- `part` (enum; one of area, body, both): What to reshape (default: its area, else its body).
+- `for` (for): Seconds (or "night"/"day"); then the old shape comes back.
+
+  `{ "do": "setShape", "target": "@beam", "angle": "$beamWidth" }`
+
 ### Logic
 
 **`signal`**: Sends a named signal (optionally with a number) to entities or everyone.
@@ -567,6 +592,33 @@ Each action is `{"do": "<name>", ...params}`. `target` (where listed) is a selec
 - `icon` (text): Icon.
 - `for` (number): Seconds (omit: until it's gone).
 
+**`lighting`**: Changes the level's light: darken it (an eclipse by day, a pitch-black night), tint it, or make day look like night. Reverts at the level's end, after `for`, or with `reset`.
+
+- `brightness` (number; 0..2): Multiplies the sun's light: 1 = as the game has it, 0.2 = an eclipse, 0 = black. Units stay readable.
+- `color` (color): Tints the sunlight, #rrggbb (#ff9060 = a red dusk).
+- `phase` (enum; one of auto, day, sunset, night): The base light from the level's colours: day, sunset or night whatever the time; auto follows the game's day and night.
+- `fade` (number; default 1; 0..60): Seconds to blend into the new light.
+- `for` (for): Seconds (or "night"/"day": until the next dawn/dusk); then it fades back.
+- `reset` (bool; default false): Back to the game's own light (the other params are ignored).
+
+  `{ "do": "lighting", "brightness": 0.15, "color": "#8090ff", "fade": 3, "for": 25 }`
+
+**`setLight`**: Gives it a light that follows it (or changes or removes its `light`): a torch on the king, a lantern on a unit, a lighthouse beam. Works on anything: units, the king, buildings, props, projectiles.
+
+- `target` (entities; default "self"): Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self.
+- `color` (color; default "#ffd890"): #rrggbb.
+- `intensity` (number; default 1; 0..4): How bright: 1 lights its range fully.
+- `range` (number; default 10; 0.5..200): Radius it lights on the ground (m); a cone's length.
+- `cone` (number; 1..179): A beam this many degrees wide along its facing (empty: all round).
+- `aim` (number; default 0): A cone's yaw relative to its facing (degrees).
+- `height` (number; default 3; 0..60): Metres above it.
+- `flicker` (number; default 0; 0..1): 0..1: a fire's flicker (looks only).
+- `on` (bool): Switches it on or off (keeps its settings).
+- `remove` (bool; default false): Removes the light.
+- `for` (for): Seconds (or "night"/"day"); then it goes back to how it was.
+
+  `{ "do": "setLight", "target": "king", "color": "#ffc070", "range": 8 }`
+
 ### End
 
 **`destroy`**: Removes it.
@@ -615,6 +667,7 @@ Selector functions anchor at `self`; call them as methods (`castle.count('enemy'
 | `chance(number)` | bool | True with probability p. |
 | `waveCount(number, filter?)` | number | Enemies night n will spawn, optionally only templates matching a filter. |
 | `waveUnits(number)` | list | The templates night n spawns. |
+| `lightAt(position)` | number | How lit a point is, 0..1: daylight plus every light that reaches it (entity lights and the game's own, such as the castle's night fire). 0.5 and up counts as lit. e.g. `lightAt(self) < 0.5` |
 | `strongestUnit(number)` | template | Night n's strongest template (hp x damage). |
 | `<entity>.stacks(status)` | number | Stacks of a status on it. |
 | `<entity>.is(filter)` | bool | Whether it matches a filter. |
@@ -649,6 +702,8 @@ Selector functions anchor at `self`; call them as methods (`castle.count('enemy'
 | entity | `.target` | entity | Its current attack/move target. |
 | entity | `.owner` | entity | Who spawned or launched it. |
 | entity | `.id` | text | Its entity id. |
+| entity | `.light` | number | How lit it is, 0..1: daylight plus the lights that reach it (lightAt(its position)). |
+| entity | `.lit` | bool | Whether it stands in the light (light >= 0.5): day, or near a light at night or in an eclipse. |
 | entity | `.moveSpeed` | number | Movement speed, m/s. (with modifiers) |
 | entity | `.attackCooldown` | number | Seconds between attacks. (with modifiers) |
 | entity | `.attackRange` | number | Attack range, m. (with modifiers) |
@@ -682,10 +737,10 @@ Selector functions anchor at `self`; call them as methods (`castle.count('enemy'
 What each JSON block accepts (a field not listed draws an "unknown field" warning). `key[]` is a list of that block, `key{}` a map of them.
 
 - **pack**: `format`, `version`, `id`, `name`, `author`, `description`, `gameVersion`, `requires`, `assets`, `units`, `waveSets`, `levels`, `entities`, `statuses`, `presets` (blocks: `units[]` → unit, `entities[]` → entity, `statuses[]` → status, `presets[]` → preset, `levels[]` → level)
-- **unit**: `id`, `side`, `base`, `name`, `description`, `visuals`, `stats`, `weapon`, `tags`, `labels`, `vars`, `targeting`, `movement`, `attacks`, `statuses`, `counterpart`, `rules` (blocks: `movement` → movement, `attacks[]` → attack)
+- **unit**: `id`, `side`, `base`, `name`, `description`, `visuals`, `stats`, `weapon`, `tags`, `labels`, `vars`, `targeting`, `movement`, `attacks`, `statuses`, `counterpart`, `light`, `rules` (blocks: `movement` → movement, `attacks[]` → attack, `light` → light)
 - **level**: `id`, `name`, `description`, `host`, `waveSet`, `base`, `buildSlots`, `spawnLines`, `props`, `terrain`, `colors`, `groups`, `logic` (blocks: `logic` → logic)
-- **entity**: `id`, `kind`, `name`, `description`, `visual`, `body`, `team`, `countsAsEnemy`, `labels`, `vars`, `lifetime`, `maxAlive`, `projectile`, `mover`, `area`, `pickup`, `interact`, `attacks`, `targeting`, `movement`, `statuses`, `rules` (blocks: `visual` → visual, `body` → body, `projectile` → projectile, `mover` → mover, `area` → area, `pickup` → pickup, `interact` → interact, `attacks[]` → attack, `movement` → movement)
-- **place**: `id`, `entity`, `preset`, `with`, `pos`, `rotY`, `scale`, `active`, `points`, `kind`, `name`, `description`, `visual`, `body`, `team`, `countsAsEnemy`, `labels`, `vars`, `lifetime`, `maxAlive`, `projectile`, `mover`, `area`, `pickup`, `interact`, `attacks`, `targeting`, `movement`, `statuses`, `rules`, `_preset` (blocks: `visual` → visual, `body` → body, `projectile` → projectile, `mover` → mover, `area` → area, `pickup` → pickup, `interact` → interact, `attacks[]` → attack, `movement` → movement)
+- **entity**: `id`, `kind`, `name`, `description`, `visual`, `body`, `team`, `countsAsEnemy`, `labels`, `vars`, `lifetime`, `maxAlive`, `projectile`, `mover`, `area`, `pickup`, `interact`, `light`, `attacks`, `targeting`, `movement`, `statuses`, `rules` (blocks: `visual` → visual, `body` → body, `projectile` → projectile, `mover` → mover, `area` → area, `pickup` → pickup, `interact` → interact, `attacks[]` → attack, `movement` → movement, `light` → light)
+- **place**: `id`, `entity`, `preset`, `with`, `pos`, `rotY`, `scale`, `active`, `points`, `kind`, `name`, `description`, `visual`, `body`, `team`, `countsAsEnemy`, `labels`, `vars`, `lifetime`, `maxAlive`, `projectile`, `mover`, `area`, `pickup`, `interact`, `light`, `attacks`, `targeting`, `movement`, `statuses`, `rules`, `_preset` (blocks: `visual` → visual, `body` → body, `projectile` → projectile, `mover` → mover, `area` → area, `pickup` → pickup, `interact` → interact, `attacks[]` → attack, `movement` → movement, `light` → light)
 - **visual**: `icon`, `tint`, `colors`, `scale`, `mesh`, `meshScale`, `meshRotY`, `meshRotX`, `meshRotZ`, `meshOffset`, `meshLook`, `motion`, `texture`, `sounds`
 - **body**: `radius`, `height`, `box`, `solid`, `walkable`, `hittable`, `hp`, `flying`, `tags`
 - **projectile**: `speed`, `accel`, `homing`, `arc`, `gravity`, `spin`, `face`, `hits`, `hitRadius`, `pierce`, `onGround`, `range`
@@ -693,7 +748,9 @@ What each JSON block accepts (a field not listed draws an "unknown field" warnin
 - **swing**: `angle`, `speed`
 - **pose**: `offset`, `pos`, `rotY`, `scale`
 - **area**: `shape`, `watch`, `show`, `color`, `tick`, `surface` (blocks: `shape` → shape)
-- **shape**: `circle`, `rect`, `polygon` (blocks: `circle` → circle, `rect` → rect, `polygon` → polygon)
+- **shape**: `circle`, `rect`, `polygon`, `sector` (blocks: `circle` → circle, `rect` → rect, `polygon` → polygon, `sector` → sector)
+- **sector**: `radius`, `angle`
+- **light**: `color`, `intensity`, `range`, `cone`, `aim`, `height`, `flicker`, `on`
 - **circle**: `radius`
 - **rect**: `size`
 - **polygon**: `points`
@@ -709,10 +766,10 @@ What each JSON block accepts (a field not listed draws an "unknown field" warnin
 - **status**: `id`, `name`, `description`, `icon`, `duration`, `stacking`, `maxStacks`, `tick`, `mods`, `flags`, `visual`, `rules` (blocks: `mods{}` → mod, `visual` → statusVisual)
 - **mod**: `mult`, `add`, `value`, `types`, `from`, `chance`, `when`, `toward`, `away`, `dir`, `speed`
 - **statusVisual**: `tint`, `fx`, `glow`
-- **preset**: `id`, `name`, `description`, `category`, `kind`, `params`, `vars`, `labels`, `rules`, `visual`, `body`, `team`, `countsAsEnemy`, `lifetime`, `maxAlive`, `projectile`, `mover`, `area`, `pickup`, `interact`, `attacks`, `targeting`, `movement`, `statuses` (blocks: `params{}` → presetParam)
+- **preset**: `id`, `name`, `description`, `category`, `kind`, `params`, `vars`, `labels`, `rules`, `visual`, `body`, `team`, `countsAsEnemy`, `lifetime`, `maxAlive`, `projectile`, `mover`, `area`, `pickup`, `interact`, `light`, `attacks`, `targeting`, `movement`, `statuses` (blocks: `params{}` → presetParam)
 - **presetParam**: `type`, `default`, `min`, `max`, `options`, `description`
 - **logic**: `seed`, `vars`, `rules`, `places`, `attach`, `hud`, `kingActions`, `caps` (blocks: `places[]` → place, `attach{}` → attach, `hud[]` → hud, `kingActions[]` → kingAction, `caps` → caps)
-- **attach**: `name`, `labels`, `vars`, `statuses`, `targeting`, `rules`
+- **attach**: `name`, `labels`, `vars`, `statuses`, `targeting`, `rules`, `light` (blocks: `light` → light)
 - **hud**: `id`, `text`, `icon`, `visible`
 - **kingAction**: `id`, `name`, `icon`, `when`, `cooldown`, `uses` (blocks: `uses` → uses)
 - **uses**: `count`, `per`
@@ -769,6 +826,7 @@ Combine with `and`, `or`, `not` and parentheses.
 - `ranged`: Ranged fighters.
 - `alive`: Alive.
 - `dead`: Dead or knocked out.
+- `lit`: Standing in the light (.light >= 0.5).
 - `elite`: Elite enemies.
 - `logic`: Logic objects.
 - `line`: Spawn lines.
