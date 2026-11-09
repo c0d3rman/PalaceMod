@@ -736,7 +736,13 @@ action per rule. Without the block every patch is a no-op (`Logic/Bodies/World/L
 | `build` (bool) | `isDay` | `BuildingInteractor.UpdateInteractionState` runs switched likewise; the dusk's forced "no prompt" is redone after `OnDusk`; prompts refresh when the rule flips. |
 | `dayLength` (number) | `0` | Night falls that many seconds after sunrise (not after the last night). |
 
-`logic-game` (dev command; `palace.py game cmd logic-game`) prints the rules as evaluated now.
+`logic-game` (dev command; `palace.py game cmd logic-game`) prints the rules as evaluated now; `logic-game castle`
+lists what still draws near the castle.
+
+Weapons follow their wielder's side (same file, always on in a logic session): a vanilla weapon's damage rows name
+the side they hurt by team tag, so a neutral unit (or a weapon copied onto the other side) would deal 0. While
+`Weapon.DealDamage` runs for a wielder whose side isn't the weapon's own (`isPlayerWeapon`), a `PlayerOwned` /
+`EnemyOwned` row means "the wielder's foe" (anything, for a neutral wielder).
 
 ### Presets
 

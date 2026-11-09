@@ -1048,7 +1048,9 @@ Write one per mechanic you want to keep working, next to your ops, and re-run it
 - Per-unit walkability is by surfaces (above), not by terrain: a "ladder" is an area surface only some units may
   path through. Walkable movers snap between poses; they don't carry units while gliding. Terrain height doesn't
   change at runtime.
-- Three teams; vanilla units never attack `neutral` things (Builder targeting can).
+- Three teams; vanilla units never attack `neutral` things (Builder targeting can). A weapon hurts its wielder's
+  foes whatever side it was made for: a `neutral` unit's vanilla swing hurts whatever its targeting picks, and a
+  copied or stolen weapon hurts the new owner's foes.
 - Game tags are a fixed set; your own labels work through Builder targeting and filters.
 - The castle can be hidden (`logic.game.castle`) but not moved at runtime; place it where the level needs it.
 - No new scenes, lighting or arbitrary code. Pending `wait`s and Builder projectiles in flight aren't kept by
