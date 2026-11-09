@@ -361,6 +361,23 @@ namespace PalaceMod.Tests
             Assert.True(unknown.Count == 0, "control actions missing from the schema: " + string.Join(", ", unknown));
         }
 
+        public static void ReviveAndRename()
+        {
+            var w = NewWorld("""{ "vars": { "n": 0 } }""");
+            var e = Place(w, """{ "id": "u", "name": "hero", "rules": [ { "when": { "on": "every", "seconds": 1 }, "do": [ { "do": "addVar", "name": "$n" } ] } ] }""", Vec.Zero);
+            Run(w, 1.1);
+            w.Forget(e);
+            Run(w, 2);
+            Assert.Equal(1.0, Num(w, "n"), "forgotten: its timer stops");
+            w.Revive(e);
+            Run(w, 1.1);
+            Assert.Equal(2.0, Num(w, "n"), "revived: its rules run again");
+            Assert.True(w.FindNamed("hero") == e, "@name back");
+            var f = Place(w, """{ "id": "v" }""", Vec.Zero);
+            w.Rename(f, "hero");
+            Assert.True(w.FindNamed("hero") == f, "@name moves to the new entity");
+        }
+
         public static void CompileErrorsAreTracedNotThrown()
         {
             var w = NewWorld("""{ "rules": [ { "when": "levelStart", "if": "1 +", "do": [] }, { "when": "levelStart", "do": [ { "do": "nosuch" } ] } ] }""");
