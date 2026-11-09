@@ -74,6 +74,7 @@ namespace PalaceMod.Builder.Logic
                 actionKeys[i] = Keybinds.Register("Builder", $"level-action-{i + 1}", $"Level action {i + 1}",
                     new KeyboardShortcut(KeyCode.Alpha8 + i), $"A custom level's king action {i + 1} (levels define up to 3).", context: "BuilderLevel");
             PerformanceManager.SummaryLines.Add(SummaryLine);
+            LogicServices.IsElite = e => e.Hp() is { } hp && hp.Elite;
         }
 
         // ------------------------------------------------------------------ lifecycle

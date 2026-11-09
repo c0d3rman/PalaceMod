@@ -40,6 +40,8 @@ namespace PalaceMod
                     "signal" => BodyDev.Signal(args.Skip(1).ToArray()),
                     "events" => BodyDev.Events(),
                     "vp" => BodyDev.Vanilla(args.Skip(1).ToArray()),
+                    "interact" => BodyDev.Interact(args.Skip(1).ToArray()),
+                    "pick" => BodyChoices.Pick(int.Parse(args.ElementAtOrDefault(1) ?? "0")),
                     _ => "logic-l2 status | nav ... | act ... | build ... | signal ...",
                 };
             });
@@ -84,6 +86,7 @@ namespace PalaceMod
         {
             Surfaces.Clear();
             Walkables.Clear();
+            Spaces.Clear();
             VanillaProjectiles.Clear();
             Drifts.Clear();
             BodyFilter.ClearCache();
@@ -112,6 +115,17 @@ namespace PalaceMod
             private static void Prefix(AimbotProjectile __instance) => VanillaProjectiles.Released(__instance);
         }
 
+        [HarmonyPatch(typeof(BuildSlot), nameof(BuildSlot.GET_LOCIDENTIFIER_CHOICENAME))]
+        private static class ChoiceName
+        {
+            private static bool Prefix(Choice choice, ref string __result)
+            {
+                if (!BodyChoices.TryKey(choice, out var key)) return true;
+                __result = key;
+                return false;
+            }
+        }
+
         // ---- surfaces ------------------------------------------------------------------------------------------
 
         [HarmonyPatch(typeof(GroundGraphs), nameof(GroundGraphs.Scan))]
@@ -123,13 +137,31 @@ namespace PalaceMod
         [HarmonyPatch(typeof(PathfindMovementEnemy), "Start")]
         private static class EnemyStart
         {
-            private static void Postfix(PathfindMovementEnemy __instance) { if (LogicWorld.Current != null && Surfaces.Any) Surfaces.Apply(__instance.gameObject); }
+            // Before Start copies the seeker's graphs into its masks and snaps to the navmesh: a unit spawned in a
+            // space must be able to snap there.
+            private static void Prefix(Component __instance) { if (LogicWorld.Current != null && Spaces.Any) Spaces.ApplySeeker(__instance.gameObject); }
+
+            private static void Postfix(PathfindMovementEnemy __instance)
+            {
+                if (LogicWorld.Current == null) return;
+                if (Spaces.Any) Spaces.Apply(__instance.gameObject);
+                if (Surfaces.Any) Surfaces.Apply(__instance.gameObject);
+            }
         }
 
         [HarmonyPatch(typeof(PathfindMovementPlayerunit), "Start")]
         private static class PlayerUnitStart
         {
-            private static void Postfix(PathfindMovementPlayerunit __instance) { if (LogicWorld.Current != null && Surfaces.Any) Surfaces.Apply(__instance.gameObject); }
+            // Before Start copies the seeker's graphs into its masks and snaps to the navmesh: a unit spawned in a
+            // space must be able to snap there.
+            private static void Prefix(Component __instance) { if (LogicWorld.Current != null && Spaces.Any) Spaces.ApplySeeker(__instance.gameObject); }
+
+            private static void Postfix(PathfindMovementPlayerunit __instance)
+            {
+                if (LogicWorld.Current == null) return;
+                if (Spaces.Any) Spaces.Apply(__instance.gameObject);
+                if (Surfaces.Any) Surfaces.Apply(__instance.gameObject);
+            }
         }
 
         // A seeker limited to some tags may find its target behind tags it can't cross: walk as near as it can instead

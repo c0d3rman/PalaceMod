@@ -239,7 +239,9 @@ class Game:
                 s = self.status_file()
                 if s is not None and s.get("running") is False:
                     request.unlink(missing_ok=True)
-                    raise Fail(f"The game isn't running: it exited while handling `{text}` (process {s.get('pid')} is gone).")
+                    raise Fail(f"The game isn't running: it exited while handling `{text}` (process {s.get('pid')} is gone). "
+                               "If it crashed, the game's Player.log (macOS: ~/Library/Logs/Grizzly Games/Thronefall/) "
+                               "has the details until the game starts again.")
         raise Fail(f"The game didn't answer `{text}` within {timeout} s (loading? check `palace.py game log`).")
 
     LOADS = ("play ", "sandbox ", "edit ", "vanilla ", "menu")
@@ -4514,7 +4516,7 @@ class ResumePoints:
         """Saves the resume point for night n (now: the dawn before it). Returns a warning if it couldn't."""
         name = self.state_name(n)
         try:
-            g.raw(f"savestate delete {name}")
+            g.raw(f"savestate forget {name}")
         except Fail:
             pass
         try:
@@ -5125,7 +5127,17 @@ def cmd_sandbox(env, args):
     time.sleep(2.5)
     if args.no_infinite:
         g.agent("infinitegold off")
-    out({"status": g.status(), "loadWarnings": g.log_since(mark, features=["Builder"], min_level="warn")})
+    result = {}
+    if args.at:
+        # The king is dropped a few frames after the level loads; confirm he's there.
+        x, z = args.at
+        near = lambda s: (s.get("king") or {}).get("pos") and math.hypot(s["king"]["pos"][0] - x, s["king"]["pos"][-1] - z) < 3
+        try:
+            g.wait(lambda s: s.get("sandbox") and near(s), 10, f"the king at ({x:g}, {z:g})")
+            result["at"] = "ok"
+        except Fail:
+            result["at"] = "the king isn't at --at (fell off the map or the spot is outside the level?); see status.king.pos"
+    out({**result, "status": g.status(), "loadWarnings": g.log_since(mark, features=["Builder"], min_level="warn")})
 
 
 def cmd_enemy(env, args):

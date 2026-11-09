@@ -15,7 +15,7 @@ namespace PalaceMod.Builder.Logic.Bodies
         public static string Status() =>
             $"world {(LogicWorld.Current != null ? "on" : "off")}; entities {LogicWorld.Current?.Entities.Count() ?? 0}; " +
             $"projectiles: builder {BuilderProjectile.Live.Count}, vanilla {VanillaProjectiles.Count}; areas {BuilderArea.All.Count}; movers {BuilderMover.All.Count}; " +
-            $"pickups {BuilderPickup.All.Count}; {Surfaces.Describe()}; {Walkables.Describe()}; drifts {(Drifts.Any ? Drifts.Drifting.Count() : 0)}; " +
+            $"pickups {BuilderPickup.All.Count}; {Surfaces.Describe()}; {Walkables.Describe()}; {Spaces.Describe()}; drifts {(Drifts.Any ? Drifts.Drifting.Count() : 0)}; " +
             $"last impacts: {string.Join(" ", BuilderProjectile.LastImpacts)}";
 
         public static string Build(string[] a)
@@ -54,11 +54,11 @@ namespace PalaceMod.Builder.Logic.Bodies
         private static readonly System.Collections.Generic.Queue<string> events = new();
 
         /// <summary>Every event a body raises goes through here (kept for `logic-l2 events`).</summary>
-        public static void Raise(string name, LogicEntity subject, LogicEntity other = null, double value = 0, Vec? pos = null)
+        public static void Raise(string name, LogicEntity subject, LogicEntity other = null, double value = 0, Vec? pos = null, string text = null)
         {
-            events.Enqueue($"{name}:{subject?.Id}{(other != null ? "<-" + other.Id : "")}");
+            events.Enqueue($"{name}:{subject?.Id}{(other != null ? "<-" + other.Id : "")}{(text != null ? "/" + text : "")}");
             while (events.Count > 30) events.Dequeue();
-            LogicEvents.Raise(name, subject, other, value, pos);
+            LogicEvents.Raise(name, subject, other, value, pos, text);
         }
 
         public static string Events()
@@ -133,6 +133,27 @@ namespace PalaceMod.Builder.Logic.Bodies
         }
 
         private static float F(string s) => float.Parse(s, CultureInfo.InvariantCulture);
+
+        /// <summary>interact &lt;entity&gt; [holdFrames]: the king focuses it, presses interact and holds (pays) like the player.</summary>
+        public static string Interact(string[] a)
+        {
+            var world = LogicWorld.Current;
+            var e = a.Length > 0 ? world?.FindNamed(a[0].TrimStart('@')) ?? world?.Find(a[0]) : null;
+            var i = e?.Go()?.GetComponentInChildren<BuilderInteractor>();
+            var player = PlayerInteraction.instance;
+            if (i == null || player == null) return "no interactable / no king";
+            int frames = a.Length > 1 ? int.Parse(a[1]) : 600;
+            Plugin.Instance.StartCoroutine(Hold(i, player, frames));
+            return $"{e.Id}: can interact {i.CanBeInteractedWith}, prompt \"{i.ReturnTooltip()}\"";
+        }
+
+        private static System.Collections.IEnumerator Hold(BuilderInteractor i, PlayerInteraction player, int frames)
+        {
+            i.Focus(player);
+            i.InteractionBegin(player);
+            for (int f = 0; f < frames && i != null; f++) { i.InteractionHold(player); yield return null; }
+            if (i != null) { i.InteractionEnd(player); i.Unfocus(player); }
+        }
 
         public static string Signal(string[] a)
         {

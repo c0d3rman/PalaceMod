@@ -115,7 +115,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             var pack = BuilderServices.Sessions.Current?.Pack;
             var prefab = BuilderServices.Units.Resolve(pack, e.Template, out error);
             if (prefab == null) return false;
-            pos = LayoutScene.Ground(pos);
+            pos = BodyNav.UnitGround(pos);
             var go = Object.Instantiate(prefab, pos, Quaternion.Euler(0f, rotY, 0f));
             go.name = go.name.Replace("(Clone)", "").Trim();
             bool enemySide = go.GetComponentInChildren<TaggedObject>()?.Tags.Contains(TagManager.ETag.EnemyOwned) == true;
@@ -225,6 +225,7 @@ namespace PalaceMod.Builder.Logic.Bodies
         public Vector2? Box;
         public bool Solid, Walkable, Hittable, Flying;
         public bool Despawning;
+        public string[] GameTags = [];
         public NavmeshCut Cut;
         private Collider blocker;
 
@@ -239,6 +240,7 @@ namespace PalaceMod.Builder.Logic.Bodies
                 Walkable = body.Value<bool?>("walkable") ?? false;
                 Hittable = body.Value<bool?>("hittable") ?? false;
                 Flying = body.Value<bool?>("flying") ?? false;
+                if (body["tags"] is JArray extra) GameTags = extra.Select(x => (string)x).Where(x => x != null).ToArray();
             }
             if (Solid) MakeSolid();
             if (Hittable) MakeHittable(body?.Value<float?>("hp") ?? 100f, team, countsAsEnemy);
@@ -284,6 +286,9 @@ namespace PalaceMod.Builder.Logic.Bodies
             if (team == "player") tags.Add(TagManager.ETag.PlayerOwned);
             else if (team == "enemy" && countsAsEnemy) tags.Add(TagManager.ETag.EnemyOwned);
             if (Flying) tags.Add(TagManager.ETag.Flying);
+            // body.tags: extra game tags, so the game's AI treats it as one of its own kinds ("Building", "Tower",
+            // "PlayerUnit"): vanilla enemies only pick targets by tags.
+            foreach (var t in GameTags) if (LogicTags.TryParse(t, out var tag) && !tags.Contains(tag)) tags.Add(tag);
             var h = gameObject.AddComponent<Hp>();
             h.maxHp = hp;
             h.hitFeedbackHeight = Height / 2f;
