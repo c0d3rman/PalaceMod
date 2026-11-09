@@ -11,6 +11,9 @@ using UnityEngine;
     A riding deck (a walkable part linked to a moving parent) isn't on the graphs at all, so the units on its top ride
     it: they don't walk (the game's movement would snap them to the ground) but still attack, and are carried with it.
     One that leaves it (teleported off, or the deck is gone) walks again from the ground under it.
+    A rider on a riding deck (the king too) is taken out of the game's local avoidance (RVO) meanwhile: the avoidance
+    is flat, so a rider standing over the walking parent would sit inside its agent and shove it about (the colossus
+    milled round under the king instead of walking on).
 */
 namespace PalaceMod.Builder.Logic.Bodies
 {
@@ -29,6 +32,7 @@ namespace PalaceMod.Builder.Logic.Bodies
         internal static readonly HashSet<int> Riding = [];
         private static readonly Dictionary<int, PathfindMovement> aboard = [];
         private readonly Dictionary<int, PathfindMovement> stillAboard = [];
+        private static Pathfinding.RVO.RVOController kingAvoidanceOff;
 
         public static void Ensure()
         {
@@ -39,8 +43,10 @@ namespace PalaceMod.Builder.Logic.Bodies
 
         private void LateUpdate()
         {
-            if (LogicWorld.Current == null) { last.Clear(); Riding.Clear(); aboard.Clear(); return; }
+            if (LogicWorld.Current == null) { last.Clear(); Riding.Clear(); aboard.Clear(); KingAvoidance(false); return; }
             stillAboard.Clear();
+            bool kingAboard = false;
+            var king = PlayerInteraction.instance != null ? PlayerInteraction.instance.transform : null;
             foreach (var (deck, offGraph) in Walkables.LiveDecks())
             {
                 if (deck == null || !deck.gameObject.activeInHierarchy) continue;
@@ -48,8 +54,13 @@ namespace PalaceMod.Builder.Logic.Bodies
                 if (!last.TryGetValue(deck, out var before)) { last[deck] = now; before = now; }
                 last[deck] = now;
                 if (!Same(before, now)) Carry(deck, before, now);
-                if (offGraph) Aboard(now);
+                if (offGraph)
+                {
+                    Aboard(now);
+                    if (king != null && OnTop(now.inverse, king.position)) kingAboard = true;
+                }
             }
+            KingAvoidance(kingAboard);
             // Units that left a riding deck walk again, from the ground under them.
             foreach (var kv in aboard)
                 if (!stillAboard.ContainsKey(kv.Key) && kv.Value != null && kv.Value.isActiveAndEnabled) Land(kv.Value);
@@ -72,7 +83,11 @@ namespace PalaceMod.Builder.Logic.Bodies
                 var m = overlap[i].GetComponentInParent<PathfindMovement>();
                 if (m == null || !OnTop(inv, m.transform.position)) continue;
                 int id = m.gameObject.GetInstanceID();
-                if (!stillAboard.ContainsKey(id) && !aboard.ContainsKey(id)) m.ClearCurrentPath();
+                if (!stillAboard.ContainsKey(id) && !aboard.ContainsKey(id))
+                {
+                    m.ClearCurrentPath();
+                    if (m.GetComponent<Pathfinding.RVO.RVOController>() is { } rvo) rvo.enabled = false;
+                }
                 stillAboard[id] = m;
             }
         }
@@ -87,6 +102,25 @@ namespace PalaceMod.Builder.Logic.Bodies
             }
             catch (System.NullReferenceException) { m.transform.position = BodyNav.UnitGround(p); }
             m.ClearCurrentPath();
+            if (m.GetComponent<Pathfinding.RVO.RVOController>() is { } rvo) rvo.enabled = true;
+        }
+
+        /// <summary>The king's avoidance agent is off while he stands on a riding deck (and back on when he leaves it).</summary>
+        private static void KingAvoidance(bool off)
+        {
+            if (off)
+            {
+                if (kingAvoidanceOff != null || PlayerInteraction.instance == null) return;
+                var rvo = PlayerInteraction.instance.GetComponent<Pathfinding.RVO.RVOController>();
+                if (rvo == null || !rvo.enabled) return;
+                rvo.enabled = false;
+                kingAvoidanceOff = rvo;
+            }
+            else if (kingAvoidanceOff != null)
+            {
+                kingAvoidanceOff.enabled = true;
+                kingAvoidanceOff = null;
+            }
         }
 
         private static bool Same(Matrix4x4 a, Matrix4x4 b)

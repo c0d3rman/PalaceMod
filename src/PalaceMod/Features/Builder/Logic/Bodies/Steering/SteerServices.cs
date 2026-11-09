@@ -114,7 +114,8 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
                         }
                         else if (go.GetComponentInChildren<AutoAttack>() is { } aa) picks = aa.FindAutoAttackTarget()?.name ?? "none";
                         return $"{e.Id} attackPick={picks} team={e.Team} hp={e.Body?.Hp:0.#}/{e.Body?.MaxHp:0.#} at {pos} mode={m.Mode} path={st.PathIndex}/{st.PathPoints?.Count ?? 0}{(st.PathDone ? " done" : "")} moveTo={(st.MoveTo != null ? st.MoveTo.Point.ToString("F1") : "-")} " +
-                               $"kite={(st.KiteUntil > LogicWorld.Current.Time)} flee={st.Fleeing} targeting=[{tgt}] taunt={st.Targeting?.Taunt?.Id ?? "-"} seek={seek ?? "-"} attacks={attacks.Length} leader={st.FollowLeader?.Id ?? "-"} slot={(st.FollowDest is Vector3 fd ? fd.ToString("F1") : "-")} overriding={st.Overriding} heading={Heading.Yaw(e):0} vel={(st.Enemy != null && st.Enemy.RVO != null ? st.Enemy.RVO.velocity.ToString("F1") : "-")}";
+                               $"kite={(st.KiteUntil > LogicWorld.Current.Time)} flee={st.Fleeing} targeting=[{tgt}] taunt={st.Targeting?.Taunt?.Id ?? "-"} seek={seek ?? "-"} attacks={attacks.Length} leader={st.FollowLeader?.Id ?? "-"} slot={(st.FollowDest is Vector3 fd ? fd.ToString("F1") : "-")} overriding={st.Overriding} heading={Heading.Yaw(e):0} vel={(st.Enemy != null && st.Enemy.RVO != null ? st.Enemy.RVO.velocity.ToString("F1") : "-")}" +
+                               (st.Enemy != null ? $" chasing={SteerMovement.E_chasing(st.Enemy)} agro={SteerMovement.E_agroTime(st.Enemy):0.#} pathEnd={(SteerMovement.E_path(st.Enemy) is {Count: > 0} pp ? pp[pp.Count - 1].ToString("F1") + $" ({pp.Count} pts)" : "-")}" : "");
                     }
                 case "units":
                     {
