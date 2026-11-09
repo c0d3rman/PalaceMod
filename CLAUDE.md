@@ -66,6 +66,8 @@ python3 scripts/dev.py cmd settings          # open Settings on the Mods tab
 python3 scripts/dev.py cmd "ui down"         # navigate the open menu like a controller (up/down/left/right/apply/close)
 ```
 
+Which slots the king can walk to (and which bridges open the rest): `dev.py cmd "reach run <file> [cell] [baseline]"` walks the king's own CharacterController over the loaded level, then builds each reachable slot and walks again (`reach status`; `Core/ReachCheckManager.cs`). Its "pushed" escapes come from teleporting the probe into a new building and are not real: `reach replay <guid> x y z` builds the slot on the real king and walks him out with real input. The economy planner's reach rules (`Features/Economy/PlannerReach.cs`) came from it.
+
 Then check the result with `dev.py logs` (see Logging) and `dev.py screenshot`. With Performance debug logging on (`dev.py cmd "log debug Performance"`), `PerformanceManager` logs a frame-time summary (fps, percentiles, CPU work per frame, frame-rate cap and reason) every "Summary interval"; settings edited in `BepInEx/config/PalaceMod.cfg` are reloaded live within 2 s. Only ask the user to test what genuinely needs a human, like how motion looks.
 
 ## Agent kit (players' agents)
