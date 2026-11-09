@@ -180,9 +180,13 @@ namespace PalaceMod.Builder.Logic.Bodies
             }
         }
 
+        private static Camera bgCamera;
+        private static Color bgOriginal;
+
         private static void Write(Light sun, Color c)
         {
             sun.color = c;
+            Background(c);
             var m = ColorAndLightManager.Instance;
             var scheme = m?.CurrentColorScheme;
             if (m == null || scheme == null) return;
@@ -190,11 +194,26 @@ namespace PalaceMod.Builder.Logic.Bodies
             catch (Exception e) { log.Caught("Re-tinting outlines", e); }
         }
 
+        /// <summary>The backdrop beyond the map's edge darkens with the light (the game leaves it alone: its own night
+        /// blue barely changes how bright the sun is).</summary>
+        private static void Background(Color c)
+        {
+            var cam = Camera.main;
+            if (cam == null) return;
+            if (cam != bgCamera) { bgCamera = cam; bgOriginal = cam.backgroundColor; }
+            double game = LightMath.Luminance(gameColor.r, gameColor.g, gameColor.b), now = LightMath.Luminance(c.r, c.g, c.b);
+            float k = game > 1e-4 ? Mathf.Clamp((float)(now / game), 0f, 1.5f) : 1f;
+            if (releasing && t >= 1f) k = 1f;
+            cam.backgroundColor = new Color(bgOriginal.r * k, bgOriginal.g * k, bgOriginal.b * k, bgOriginal.a);
+        }
+
         /// <summary>The level ended (or a new world started): give the sun back at once.</summary>
         public static void ResetAll()
         {
             var sun = Sun;
             if (overriding && sun != null && sun == sunOf) Write(sun, gameColor);
+            if (bgCamera != null) bgCamera.backgroundColor = bgOriginal;
+            bgCamera = null;
             overriding = releasing = false;
             haveWritten = false;
             sunOf = null;
