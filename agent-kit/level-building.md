@@ -256,14 +256,15 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
   "behaviours": [{ "type": "SpawnOnDeath", "unit": "vanilla:E Slime" }] }
 ```
 
-**Colours.** `visuals.colors` replaces colours outright, per part: `"body"` is the unit's body (the enemy colour),
-any other key is one of the model's materials by name (`builder-enemy parts` through the bridge lists them with their
-colours while the Enemy Studio is open). The lit side becomes the colour and the shaded side follows it the way the
+**Colours.** `visuals.colors` replaces colours outright, per part: `"body"` is the unit's body (the enemy colour, all
+of it), any other key is one piece of the model (`"Bow"`, `"Helmet"`: its renderer's name) or one of its materials
+by name; the most specific wins. `builder-enemy parts` through the bridge lists the pieces, their materials and colours
+while the Enemy Studio is open. The lit side becomes the colour and the shaded side follows it the way the
 level's colour scheme pairs them; elites keep it with the elite outline. `visuals.tint` only multiplies the body's lit
 colour (a subtle shift): use `colors` for a new colour.
 
 ```jsonc
-"visuals": { "colors": { "body": "#3a6ee8", "<material name>": "#d0d0d8" } }
+"visuals": { "colors": { "body": "#3a6ee8", "Bow": "#e8c23a" } }   // an archer base: blue, with a gold bow
 ```
 
 **Ranged attacks.** A unit attacks with its weapon: a ranged one fires a projectile that homes on its target, a melee

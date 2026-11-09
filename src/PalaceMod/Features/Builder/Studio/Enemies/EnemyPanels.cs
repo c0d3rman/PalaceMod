@@ -366,6 +366,8 @@ namespace PalaceMod.Builder.Studio.Enemies
         {
             public string Key, Label;
             public Color? Original;
+            /// <summary>0: whole materials (the body first), 1: single pieces.</summary>
+            public int Group;
         }
 
         private static List<Part> Parts()
@@ -374,6 +376,8 @@ namespace PalaceMod.Builder.Studio.Enemies
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             // The base unit's own materials give the original colours; the stage's model adds a replacement body's.
             var originals = new Dictionary<string, Color>(StringComparer.OrdinalIgnoreCase);
+            int pieces = EnemyStage.Model == null ? 0 : EnemyStage.Model.GetComponentsInChildren<Renderer>(true)
+                .Count(r => (r is MeshRenderer || r is SkinnedMeshRenderer) && r.enabled && UnitFactory.PieceName(r) != null);
             void Collect(GameObject go, bool originalsOnly)
             {
                 if (go == null) return;
@@ -388,8 +392,12 @@ namespace PalaceMod.Builder.Studio.Enemies
                         string key = body ? ModelRef.BodyPart : name;
                         var c = m.HasProperty("_BaseColor") ? m.GetColor("_BaseColor") : m.HasProperty("_Color") ? m.GetColor("_Color") : (Color?)null;
                         if (c != null && !originals.ContainsKey(key)) originals[key] = c.Value;
-                        if (originalsOnly || !seen.Add(key)) continue;
-                        parts.Add(new Part { Key = key, Label = body ? "Body" : Schema.Words(name.Replace('_', ' ')) });
+                        string piece = UnitFactory.PieceName(r);
+                        if (piece != null && c != null && !originals.ContainsKey(piece)) originals[piece] = c.Value;
+                        if (originalsOnly) continue;
+                        if (seen.Add(key)) parts.Add(new Part { Key = key, Label = body ? "Body (all of it)" : Schema.Words(name.Replace('_', ' ')), Group = 0 });
+                        // Each named piece of the model on its own (the bow, the helmet), when there's more than one.
+                        if (piece != null && pieces > 1 && seen.Add(piece)) parts.Add(new Part { Key = piece, Label = Schema.Words(piece.Replace('_', ' ')), Group = 1 });
                     }
                 }
             }
@@ -401,7 +409,7 @@ namespace PalaceMod.Builder.Studio.Enemies
             // Keys in the design that the model no longer has (another base or model): still listed, so they can be cleared.
             foreach (var key in EnemyStudio.Unit?.Visuals?.Colors?.Keys ?? Enumerable.Empty<string>())
                 if (seen.Add(key)) parts.Add(new Part { Key = key, Label = key == ModelRef.BodyPart ? "Body" : Schema.Words(key) });
-            return parts.OrderBy(p => p.Key == ModelRef.BodyPart ? 0 : 1).ToList();
+            return parts.OrderBy(p => p.Key == ModelRef.BodyPart ? 0 : 1).ThenBy(p => p.Group).ToList();
         }
 
         /// <summary>The level's enemy colour (the lit side), if a colour scheme is up.</summary>

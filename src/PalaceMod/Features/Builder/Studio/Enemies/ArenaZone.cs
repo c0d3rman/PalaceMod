@@ -30,6 +30,8 @@ namespace PalaceMod.Builder.Studio.Enemies
         public const int Cells = 44;
         /// <summary>Searches within this of the centre (horizontally) count as inside the arena.</summary>
         public const float Reach = 80f;
+        /// <summary>How far above the stage's ground the platform stands.</summary>
+        public const float Lift = 8f;
 
         private static GameObject root;
         private static GridGraph graph;
@@ -70,7 +72,9 @@ namespace PalaceMod.Builder.Studio.Enemies
                 if (level == null) level = b; else { var x = level.Value; x.Encapsulate(b); level = x; }
             }
             var box = level ?? new Bounds(Vector3.zero, Vector3.one * 200f);
-            Center = new Vector3(box.max.x + Reach + 40f, height, box.center.z);
+            // Raised above the stage's height: maps lay wide ground and water planes around themselves, and a floor
+            // level with them flickers (z-fighting).
+            Center = new Vector3(box.max.x + Reach + 40f, height + Lift, box.center.z);
 
             root = new GameObject("PalaceBuilder Enemy arena");
             if (scene.IsValid()) SceneManager.MoveGameObjectToScene(root, scene);
@@ -79,6 +83,7 @@ namespace PalaceMod.Builder.Studio.Enemies
             floor.transform.SetParent(root.transform, false);
             floor.transform.position = Center - new Vector3(0f, 1f, 0f);
             floor.transform.localScale = new Vector3(Cells + 2f, 2f, Cells + 2f);
+            floor.transform.position = Center - new Vector3(0f, 1f, 0f);
             int ground = LayerMask.NameToLayer("Ground");
             if (ground >= 0) floor.layer = ground;
             var stone = SceneryLibrary.LiveMaterial("Mountain");

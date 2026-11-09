@@ -43,8 +43,8 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("icon")] public string Icon { get; set; }
         /// <summary>Multiplies the unit's body colour, "#rrggbb": a subtle shift (the shade keeps the scheme's colour).</summary>
         [JsonProperty("tint")] public string Tint { get; set; }
-        /// <summary>Replaces colours outright, by part: "body" (the unit's body material: the enemy or troop colour)
-        /// or a material name as the Enemy Studio lists them (e.g. "Metal"), each "#rrggbb". The lit colour becomes
+        /// <summary>Replaces colours outright, by part, each "#rrggbb": a piece of the model by its renderer's name ("Bow"),
+        /// a material by name, or "body" (every body material: the enemy or troop colour); the most specific wins. The lit colour becomes
         /// this and the shade follows it the way the game's own scheme pairs them. Elites keep the colour (with the
         /// elite outline).</summary>
         [JsonProperty("colors")] public Dictionary<string, string> Colors { get; set; }

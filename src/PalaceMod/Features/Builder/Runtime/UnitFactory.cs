@@ -317,6 +317,14 @@ namespace PalaceMod.Builder
         /// <summary>A material's part name, as visuals.colors keys it ("Enemy", "Metal", ...).</summary>
         internal static string PartName(Material m) => m == null ? null : m.name.Replace(" (Instance)", "").Trim();
 
+        /// <summary>A piece of the model, as visuals.colors keys it: its renderer's name ("Bow", "Helmet"), or null for
+        /// unnamed or the mod's own attached model.</summary>
+        internal static string PieceName(Renderer r)
+        {
+            string n = r == null ? null : r.name.Replace("(Clone)", "").Trim();
+            return string.IsNullOrEmpty(n) || n.StartsWith("PalaceBuilder") ? null : n;
+        }
+
         /// <summary>What a recoloured material gets: a new lit colour (the shade follows it), and/or a tint.</summary>
         private sealed class Recipe
         {
@@ -338,6 +346,8 @@ namespace PalaceMod.Builder
                 if (kv.Key != null && Validator.TryParseColor(kv.Value, out var c)) colors[kv.Key.Trim()] = new Color(c.r, c.g, c.b);
             if (tint == null && colors.Count == 0) return;
             var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            // Shared across in-place applications of one design (clones is per design and pack revision there).
+            var paints = paintsByDesign.GetValue(clones, _ => new Dictionary<(Material, string), Material>());
             bool tinted = false;
             var eliteRenderers = new List<Renderer>();
             var eliteSlots = new List<int>();
@@ -353,21 +363,25 @@ namespace PalaceMod.Builder
                     if (m == null) continue;
                     bool body = IsBodyMaterial(m);
                     string part = PartName(m);
+                    // Most specific first: this piece of the model (its renderer), then the material, then "body".
                     Color? color = null;
-                    if (colors.TryGetValue(part, out var byName)) { color = byName; used.Add(part); }
-                    else if (body && colors.TryGetValue(ModelRef.BodyPart, out var byBody)) { color = byBody; used.Add(ModelRef.BodyPart); }
+                    string key = null;
+                    string piece = PieceName(renderer);
+                    if (piece != null && colors.TryGetValue(piece, out var byPiece)) { color = byPiece; key = piece; }
+                    else if (colors.TryGetValue(part, out var byName)) { color = byName; key = part; }
+                    else if (body && colors.TryGetValue(ModelRef.BodyPart, out var byBody)) { color = byBody; key = ModelRef.BodyPart; }
+                    if (key != null) used.Add(key);
                     Color? tintHere = body ? tint : null;
                     if (color == null && tintHere == null) continue;
-                    Material clone;
-                    if (clones.TryGetValue(m, out var cached)) clone = (Material)cached;
-                    else
+                    var cacheKey = (m, key);
+                    if (!paints.TryGetValue(cacheKey, out var clone))
                     {
                         clone = new Material(m) { name = m.name }; // same name: the game's elite swap looks for "Enemy"
                         var recipe = new Recipe { Color = color, Tint = tintHere };
                         Paint(clone, m, recipe);
                         recoloured.Add((m, clone, recipe));
                         owned.Add(clone);
-                        clones[m] = clone;
+                        paints[cacheKey] = clone;
                     }
                     if (tintHere != null) tinted = true;
                     mats[i] = clone;
@@ -382,7 +396,7 @@ namespace PalaceMod.Builder
                 if (changed) renderer.sharedMaterials = mats;
             }
             if (tint != null && !tinted) notes.Add("tint: no body material found");
-            foreach (var key in colors.Keys.Where(k => !used.Contains(k))) notes.Add($"colors: no \"{key}\" material on this model");
+            foreach (var k in colors.Keys.Where(k => !used.Contains(k))) notes.Add($"colors: no \"{k}\" part or material on this model");
             if (eliteRenderers.Count > 0)
             {
                 var look = go.GetComponent<BuilderEliteLook>() ?? go.AddComponent<BuilderEliteLook>();
@@ -396,6 +410,7 @@ namespace PalaceMod.Builder
         /// level's colour scheme on level start and re-tints their outlines with the daylight, so clones follow.</summary>
         private static readonly List<(Material source, Material clone, Recipe recipe)> recoloured = [];
         private static readonly Dictionary<Material, Material> eliteTwins = [];
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Dictionary<Object, Object>, Dictionary<(Material, string), Material>> paintsByDesign = new();
 
         private static void Paint(Material clone, Material source, Recipe r)
         {

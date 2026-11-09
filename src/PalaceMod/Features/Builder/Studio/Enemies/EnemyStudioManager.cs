@@ -205,7 +205,7 @@ namespace PalaceMod.Builder.Studio.Enemies
     {
         internal const string Usage =
             "builder-enemy open [unit] | library [unit] | level [unit] | new [base] | state | dock | press <tile|row> | set <field> <value> | color <part> <#hex|-> | parts | picker | look <ref|base> | fit <scale|-> " +
-            "| offset <x> <y> <z> | rot <x> <y> <z> | material own|unit | motion auto|bob|none | walk on|off | fight [n] | stop | readout | portrait | orbit <yaw> <pitch> <dist> | spin <deg> " +
+            "| offset <x> <y> <z> | rot <x> <y> <z> | material own|unit | motion auto|bob|none | walk on|off | fight [n] | stop | elite on|off | arena | readout | portrait | orbit <yaw> <pitch> <dist> | spin <deg> " +
             "| tab <palette tab> <panel tab> | select <unit> | undo | redo | save | back   the Enemy Studio";
 
         private static string Arg(string[] a, int i) => i < a.Length ? a[i] : throw new ArgumentException("missing argument " + i);
@@ -329,6 +329,18 @@ namespace PalaceMod.Builder.Studio.Enemies
                     if (rest != null) EnemyArena.Count = int.Parse(rest, CultureInfo.InvariantCulture);
                     return EnemyArena.Start(EnemyStudio.Draft.Pack, EnemyStudio.UnitId);
                 case "stop": EnemyArena.Clear(); return "stopped";
+                case "elite": EnemyArena.Elite = rest == "on"; return "arena elite " + EnemyArena.Elite;
+                case "arena":
+                {
+                    // Where the fight is and who can see whom: the arena's units, and whether the king is in any of their sight.
+                    var units = UnityEngine.Object.FindObjectsOfType<BuilderArenaUnit>();
+                    var king = TagManager.instance != null && TagManager.instance.Players.Count > 0 ? TagManager.instance.Players[0] : null;
+                    return $"zone {(ArenaZone.Active ? ArenaZone.Center.ToString() : "none")}; units {units.Length}, all inside: {units.All(u => ArenaZone.Inside(u.transform.position))}; " +
+                        $"king at {(king != null ? king.transform.position.ToString() : "-")} inside: {(king != null && ArenaZone.Inside(king.transform.position))}; stage visible: {EnemyStage.Model != null && EnemyStage.Model.activeInHierarchy}; " +
+                        "enemy looks: " + string.Join(" | ", units.Where(u => u.enemy).Take(2).Select(u => string.Join(",", u.GetComponentsInChildren<MeshRenderer>().Take(2).Select(r =>
+                            r.sharedMaterial == null ? "-" : r.sharedMaterial.name + " #" + (r.sharedMaterial.HasProperty("_BaseColor") ? ColorUtility.ToHtmlStringRGB(r.sharedMaterial.GetColor("_BaseColor")) : "?") +
+                            " outline #" + (r.sharedMaterial.HasProperty("_OutlineColor") ? ColorUtility.ToHtmlStringRGB(r.sharedMaterial.GetColor("_OutlineColor")) : "?")))));
+                }
                 case "readout": return EnemyArena.Describe();
                 case "portrait":
                 {

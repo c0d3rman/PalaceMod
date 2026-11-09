@@ -1116,8 +1116,10 @@ settings-shaped page. Code: `Features/Builder/Studio/Enemies/`. An enemy is stil
   under the top-down camera, stayed the scheme's red; and elites lost it to the shared elite material.
 - `visuals.colors` (`{"body": "#3a6ee8", "<material>": "#rrggbb"}`) replaces a part's colour: `_BaseColor` becomes it and
   `_ColorDim` the shade the scheme would pair with it (`ColorMath.ShadeFor`: the source pair's brightness ratio,
-  saturation change and hue turn, scaled by how colourful the new colour is, so a grey stays grey). Parts are the
-  model's materials: "body" is the body material (`Enemy`, `Player*`, `Ally*`), any other key a material by name. The
+  saturation change and hue turn, scaled by how colourful the new colour is, so a grey stays grey). Keys, most
+  specific first: a piece of the model by its renderer's name ("Bow", "Helmet"; vanilla enemies draw every piece with
+  the one `Enemy` material, so pieces are how an archer gets a gold bow), a material by name, then "body" (every body
+  material: `Enemy`, `Player*`, `Ally*`). The Look tab lists Body, other materials, then each named piece. The
   clones keep their source's name; `BuilderEliteLook` swaps an elite's shared elite material for the recoloured clone's
   elite twin (same colours, yellow outline) on Start and fixes the hit flash's remembered material. Clones are
   re-painted after every scheme change and daylight outline update (`UnitFactory.ResyncTints`).
@@ -1185,6 +1187,9 @@ settings-shaped page. Code: `Features/Builder/Studio/Enemies/`. An enemy is stil
   and the level's troops and towers never see the fight. The turntable is hidden during the fight and the camera frames
   the platform; Stop, an edit that rebuilds the template, or Back removes the units, the graph and the platform, shows
   the turntable and frames the model again. The level's own graphs are never rescanned.
+  Checked headless on Nordfels from a Level Studio: the platform at (223, 8, -31), every arena unit inside it, the king
+  where he stood and outside it, the turntable hidden during the fight and back after Stop; 3 elite purple Racers kept
+  their colour with the yellow elite outline.
 - Fight (F5, or the button) spawns `count` (1-50) copies 16 m from the defenders, made like the game's `Spawn` makes
   them (the arena difficulty on hit points and damage, the elite material; no coins), and the chosen defenders
   (catalog player units, default 3 swordsmen and 3 archers) in an arc. Every arena unit gets a `BuilderArenaUnit`
