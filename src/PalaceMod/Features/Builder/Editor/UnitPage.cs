@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using PalaceMod.Builder.Model;
+using PalaceMod.Builder.Model.Logic;
 
 namespace PalaceMod.Builder.Editor
 {
@@ -103,7 +104,9 @@ namespace PalaceMod.Builder.Editor
 
         private static bool Referenced(DesignPack pack, string unitId) =>
             pack.WaveSets.Any(w => w.Nights.Any(n => n.Spawns.Any(s => IsRef(pack, s.Unit, unitId))) || (w.Troops?.Any(t => IsRef(pack, t?.Unit, unitId)) ?? false)) ||
-            pack.Units.Any(o => o.Behaviours?.Any(b => IsRef(pack, b.GetString("unit"), unitId)) == true);
+            pack.Units.Any(o => LogicRefs.TemplateRefs(o).Any(r => IsRef(pack, r, unitId))) ||
+            (pack.Entities ?? []).Any(o => LogicRefs.TemplateRefs(o).Any(r => IsRef(pack, r, unitId))) ||
+            (pack.Levels ?? []).Any(l => l.Logic != null && LogicRefs.TemplateValues(Newtonsoft.Json.Linq.JObject.FromObject(l.Logic)).Any(v => IsRef(pack, (string)v, unitId)));
 
         /// <summary>Whether a unit ref names this pack's unit: "id", "unit:id" or "&lt;this pack&gt;/id".</summary>
         private static bool IsRef(DesignPack pack, string reference, string unitId)
@@ -119,8 +122,9 @@ namespace PalaceMod.Builder.Editor
                 if (IsRef(pack, s.Unit, from)) s.Unit = to;
             foreach (var t in pack.WaveSets.SelectMany(w => w.Troops ?? []).Where(t => t != null))
                 if (IsRef(pack, t.Unit, from)) t.Unit = to;
-            foreach (var b in pack.Units.Where(o => o.Behaviours != null).SelectMany(o => o.Behaviours))
-                if (IsRef(pack, b.GetString("unit"), from)) b.Params["unit"] = to;
+            string Map(string r) => IsRef(pack, r, from) ? to : null;
+            foreach (var o in pack.Units) LogicRefs.Rewrite(o, Map);
+            foreach (var o in pack.Entities ?? []) LogicRefs.Rewrite(o, Map);
         }
 
         internal static IEnumerable<Picker.Item> BaseItems(DesignPack pack, string side)
@@ -392,45 +396,30 @@ namespace PalaceMod.Builder.Editor
 
         // ---- Behaviours --------------------------------------------------------------------------------------------
 
-        /// <summary>Parameters of each behaviour module, for its fields. Unknown modules show their raw type.</summary>
-        private static readonly Dictionary<string, (string Name, string Help)> BehaviourInfo = new()
-        {
-            [BehaviourTypes.SpawnOnDeath] = ("Spawns on death", "When this unit dies, another unit appears where it fell (like the game's slimes)."),
-        };
+        private const string SpawnOnDeathHelp = "When this unit dies, another unit appears where it fell (like the game's slimes).";
 
+        /// <summary>The simple "spawns on death" ability: the unit's lowered spawn-on-death rule (LogicLowering). Other
+        /// rules are edited in the Behaviour tab.</summary>
         private void BuildBehaviours(ModPage page, UnitDef u)
         {
             page.Header("Behaviours");
-            var list = u.Behaviours ?? [];
-            if (list.Count == 0) page.Text(Dim("None. Behaviours add abilities, like splitting into smaller enemies on death."));
-            for (int j = 0; j < list.Count; j++)
+            string spawn = LogicLowering.LoweredSpawnOnDeath(u);
+            int index = LogicLowering.LoweredRuleIndex(u);
+            int others = (u.Rules?.Count ?? 0) - (index >= 0 ? 1 : 0);
+            if (spawn == null && others == 0) page.Text(Dim("None. Behaviours add abilities, like splitting into smaller enemies on death."));
+            if (spawn != null)
             {
-                int k = j;
-                string bp = $"{P}.behaviours[{j}]";
-                var b = list[j];
-                string name = b?.Type != null && BehaviourInfo.TryGetValue(b.Type, out var info) ? info.Name : b?.Type ?? "?";
-                if (b?.Type == BehaviourTypes.SpawnOnDeath)
-                {
-                    Marked(page, name, () => EditorCatalog.UnitName(Pack, Unit?.Behaviours?[k]?.GetString("unit")),
-                        BehaviourInfo[BehaviourTypes.SpawnOnDeath].Help + " Apply to choose the unit.", bp,
-                        () => Picker.One("Spawns on Death", WavePage.UnitItems(Draft, exclude: Unit.Id), Unit.Behaviours[k].GetString("unit"),
-                            id => Edit("Change spawned unit", unit => unit.Behaviours[k].Params["unit"] = id, structural: true)));
-                }
-                else Marked(page, name, () => Dim("not editable here"), "This behaviour isn't known to this version of PalaceMod.", bp, null);
-                page.Button($"Remove \"{name}\"", () => Edit("Remove behaviour", unit =>
-                {
-                    unit.Behaviours.RemoveAt(k);
-                    if (unit.Behaviours.Count == 0) unit.Behaviours = null;
-                }, structural: true), "Deletes this behaviour.");
+                Marked(page, "Spawns on death", () => EditorCatalog.UnitName(Pack, LogicLowering.LoweredSpawnOnDeath(Unit)),
+                    SpawnOnDeathHelp + " Apply to choose the unit.", $"{P}.rules[{index}]",
+                    () => Picker.One("Spawns on Death", WavePage.UnitItems(Draft, exclude: Unit.Id), LogicLowering.LoweredSpawnOnDeath(Unit),
+                        id => Edit("Change spawned unit", unit => LogicLowering.SetSpawnOnDeath(unit, id), structural: true)));
+                page.Button("Remove \"Spawns on death\"", () => Edit("Remove behaviour", unit => LogicLowering.SetSpawnOnDeath(unit, null), structural: true),
+                    "Deletes this behaviour.");
             }
-            page.Button("Add: spawns on death", () => Picker.One("Spawns on Death", WavePage.UnitItems(Draft, exclude: Unit.Id), null, id =>
-                Edit("Add behaviour", unit =>
-                {
-                    unit.Behaviours ??= [];
-                    var bh = new BehaviourDef { Type = BehaviourTypes.SpawnOnDeath };
-                    bh.Params["unit"] = id;
-                    unit.Behaviours.Add(bh);
-                }, structural: true)), BehaviourInfo[BehaviourTypes.SpawnOnDeath].Help);
+            if (others > 0) page.Text(Dim($"{others} more rule{(others == 1 ? "" : "s")} (Behaviour tab)."));
+            if (spawn == null)
+                page.Button("Add: spawns on death", () => Picker.One("Spawns on Death", WavePage.UnitItems(Draft, exclude: Unit.Id), null, id =>
+                    Edit("Add behaviour", unit => LogicLowering.SetSpawnOnDeath(unit, id), structural: true)), SpawnOnDeathHelp);
         }
 
         // ---- Actions -----------------------------------------------------------------------------------------------

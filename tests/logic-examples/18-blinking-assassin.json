@@ -1,0 +1,103 @@
+{
+ "example": 18,
+ "title": "An assassin that blinks away below half health",
+ "doc": "Expressiveness check 18",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex18",
+  "name": "Example 18: Blinking assassin",
+  "units": [
+   {
+    "id": "assassin",
+    "base": "vanilla:E Dark Warrior",
+    "name": "Assassin",
+    "rules": [
+     {
+      "when": {
+       "on": "hpBelow",
+       "pct": 0.5
+      },
+      "once": true,
+      "do": [
+       {
+        "do": "effect",
+        "fx": "smoke",
+        "at": "self"
+       },
+       {
+        "do": "teleport",
+        "at": "pointNear(castle, 10)"
+       },
+       {
+        "do": "heal",
+        "amount": "self.maxHp * 0.3"
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "levels": [
+   {
+    "id": "ex18",
+    "name": "Example 18: Blinking assassin",
+    "host": "Nordfels",
+    "logic": {
+     "vars": {
+      "blinks": 0
+     },
+     "rules": [
+      {
+       "note": "fixture observer",
+       "when": {
+        "on": "hpBelow",
+        "of": "is:assassin",
+        "pct": 0.5
+       },
+       "do": [
+        {
+         "do": "addVar",
+         "name": "blinks",
+         "value": 1
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "cmd": "night"
+   },
+   {
+    "do": [
+     {
+      "do": "spawn",
+      "entity": "assassin",
+      "at": "vec(-4, -70)"
+     }
+    ]
+   },
+   {
+    "wait": 1
+   },
+   {
+    "do": [
+     {
+      "do": "damage",
+      "target": "all('is:assassin')",
+      "amount": "it.maxHp * 0.6"
+     }
+    ]
+   },
+   {
+    "expect": "count('is:assassin', 15) >= 0 and nearest('is:assassin', 300).dist(castle) < 16",
+    "within": 3
+   }
+  ]
+ }
+}

@@ -670,10 +670,16 @@ namespace PalaceMod.Builder.Model
                     foreach (var s in n?.Spawns ?? []) if (s != null) s.Unit = Map(s.Unit);
                 foreach (var t in ws?.Troops ?? []) if (t != null) t.Unit = Map(t.Unit);
             }
-            foreach (var u in pack.Units ?? [])
-                foreach (var b in u?.Behaviours ?? [])
-                    foreach (var key in (b?.Params?.Keys ?? []).ToList())
-                        if (b.Params[key]?.Type == JTokenType.String) b.Params[key] = Map((string)b.Params[key]);
+            foreach (var u in pack.Units ?? []) Logic.LogicRefs.Rewrite(u, r => Map(r));
+            foreach (var e in pack.Entities ?? []) Logic.LogicRefs.Rewrite(e, r => Map(r));
+            foreach (var lv in pack.Levels ?? [])
+                if (lv?.Logic != null)
+                {
+                    var logic = JObject.FromObject(lv.Logic, Newtonsoft.Json.JsonSerializer.Create(new Newtonsoft.Json.JsonSerializerSettings { NullValueHandling = Newtonsoft.Json.NullValueHandling.Ignore }));
+                    var values = Logic.LogicRefs.TemplateValues(logic).ToList();
+                    foreach (var v in values) v.Value = Map((string)v);
+                    if (values.Count > 0) lv.Logic = logic.ToObject<Logic.LogicDef>();
+                }
         }
 
         private static void RewriteStrings(DesignPack pack, Func<string, string> map)
@@ -744,9 +750,7 @@ namespace PalaceMod.Builder.Model
             {
                 var r = ContentRef.Parse(queue.Dequeue());
                 if (r.Kind != RefKind.LocalUnit || find(r.Id) is not { } unit || !keep.Add(r.Id)) continue;
-                foreach (var b in unit.Behaviours ?? [])
-                    foreach (var v in b?.Params?.Values ?? [])
-                        if (v?.Type == JTokenType.String) queue.Enqueue((string)v);
+                foreach (var r2 in Logic.LogicRefs.TemplateRefs(unit)) queue.Enqueue(r2);
             }
             return keep;
         }

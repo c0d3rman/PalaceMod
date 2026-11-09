@@ -21,7 +21,7 @@ namespace PalaceMod.Tests
             Units =
             [
                 new UnitDef { Id = "grunt", Base = "vanilla:E Racer", Name = "Grunt" },
-                new UnitDef { Id = "boss", Base = "vanilla:E Ogre", Behaviours = [new BehaviourDef { Type = "SpawnOnDeath", Params = { ["unit"] = "minion" } }] },
+                new UnitDef { Id = "boss", Base = "vanilla:E Ogre", Rules = [PalaceMod.Builder.Model.Logic.LogicLowering.SpawnOnDeath("minion")] },
                 new UnitDef { Id = "minion", Base = "vanilla:E Racer" },
                 new UnitDef { Id = "unused", Base = "vanilla:E Racer" },
             ],
