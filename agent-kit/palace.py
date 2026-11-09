@@ -4015,7 +4015,17 @@ def cmd_sandbox(env, args):
     time.sleep(2.5)
     if args.no_infinite:
         g.agent("infinitegold off")
-    out({"status": g.status(), "loadWarnings": g.log_since(mark, features=["Builder"], min_level="warn")})
+    result = {}
+    if args.at:
+        # The king is dropped a few frames after the level loads; confirm he's there.
+        x, z = args.at
+        near = lambda s: (s.get("king") or {}).get("pos") and math.hypot(s["king"]["pos"][0] - x, s["king"]["pos"][-1] - z) < 3
+        try:
+            g.wait(lambda s: s.get("sandbox") and near(s), 10, f"the king at ({x:g}, {z:g})")
+            result["at"] = "ok"
+        except Fail:
+            result["at"] = "the king isn't at --at (fell off the map or the spot is outside the level?); see status.king.pos"
+    out({**result, "status": g.status(), "loadWarnings": g.log_since(mark, features=["Builder"], min_level="warn")})
 
 
 def cmd_enemy(env, args):
