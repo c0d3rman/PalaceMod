@@ -67,6 +67,9 @@
  "play": {
   "steps": [
    {
+    "cmd": "agent build castle"
+   },
+   {
     "do": [
      {
       "do": "spawn",

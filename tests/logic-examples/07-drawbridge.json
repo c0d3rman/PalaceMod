@@ -136,6 +136,9 @@
  "play": {
   "steps": [
    {
+    "cmd": "agent build castle"
+   },
+   {
     "raise": "interact",
     "on": "@lever",
     "other": "king"
