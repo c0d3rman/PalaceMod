@@ -848,6 +848,11 @@ class Ops:
         self.env, self.ref, self.data = env, ref, data
         self.level_id = level_id
         self.log = []
+        # Read-only caches. ground_y runs once per placed thing; decoding the level's terrain (and the host's grid) each
+        # time made prop-heavy ops files take minutes. A decoded terrain is reused while its encoded content is unchanged.
+        self._terrain_ro = {}
+        self._grids = {}
+        self._prop_ids = None
 
     def level(self, op):
         # "level" names the level; the water op's numeric "level" is its water height, not a level id.
@@ -867,19 +872,39 @@ class Ops:
         the host's ground, made absolute here from the reference's sampled ground."""
         return Terrain(lv["terrain"], host=None if lv.get("base") == "flat" else self.host_ground(lv))
 
+    def grid(self, host):
+        if host not in self._grids:
+            g = self.ref.map(host).get("grid")
+            self._grids[host] = Grid(g) if g else None
+        return self._grids[host]
+
+    def terrain_ro(self, level):
+        """The level's terrain for reading only (never edit or store it): Terrain(t) on a flat base, else terrain_of.
+        Cached on the terrain's encoded content, so an edit in between is always seen."""
+        t = level["terrain"]
+        w = t.get("water") or {}
+        small = json.dumps({k: v for k, v in t.items() if k not in ("heights", "materials", "blocked", "water")}, sort_keys=True)
+        key = (level.get("base") == "flat", level.get("host"), small, t.get("heights"), t.get("materials"), t.get("blocked"),
+               w.get("cells"), w.get("level"))
+        hit = self._terrain_ro.get(id(t))
+        if hit is None or hit[0] != key:
+            hit = (key, Terrain(t) if key[0] else self.terrain_of(level))
+            self._terrain_ro[id(t)] = hit
+        return hit[1]
+
     def ground_y(self, level, x, z):
         t = level.get("terrain")
         if t and level.get("base") == "flat":
-            y = Terrain(t).height_at(x, z)
+            y = self.terrain_ro(level).height_at(x, z)
             if y is not None:
                 return round(y, 2)
         if t and t.get("heights"):
-            T = self.terrain_of(level)
+            T = self.terrain_ro(level)
             if T.sculpted_at(x, z):
                 return round(T.height_at(x, z), 2)
-        g = self.ref.map(level["host"]).get("grid")
-        if g:
-            y = Grid(g).height(x, z)
+        grid = self.grid(level["host"])
+        if grid:
+            y = grid.height(x, z)
             if y is not None:
                 return round(y, 2)
         castle = next((s for s in self.ref.map(level["host"])["slots"] if s.get("castle")), None)
@@ -902,6 +927,8 @@ class Ops:
             fn = getattr(self, "op_" + str(name), None)
             if fn is None:
                 raise Fail(f"ops[{i}]: unknown op {name!r}; ops: {', '.join(sorted(n[3:] for n in dir(self) if n.startswith('op_')))}")
+            if name != "add_prop":
+                self._prop_ids = None
             try:
                 r = fn(op)
             except Fail as e:
@@ -1257,7 +1284,7 @@ class Ops:
         lv = self.level(op)
         props = ensure(lv, "props", [])
         pid = op.get("id") or self.new_prop_id(props, op["mesh"])
-        if any(p.get("id") == pid for p in props):
+        if pid in self.prop_ids(props)[2]:
             raise Fail(f"prop {pid!r} exists (to re-apply a whole ops file, `apply --fresh`)")
         base = self.prop_base(lv, op["mesh"])
         prop = {"id": pid, "base": base, "pos": self.pos(lv, op), "rotY": float(op.get("rotY", 0)),
@@ -1265,15 +1292,33 @@ class Ops:
         if (colors := self.prop_colors(lv, base, op.get("colors"))) is not None:
             prop["colors"] = colors
         props.append(prop)
+        self.note_prop(props, pid)
         return f"prop {pid}"
 
-    @staticmethod
-    def new_prop_id(props, mesh):
+    def prop_ids(self, props):
+        """The ids in a level's props list, kept across consecutive add_prop ops (run() drops it before any other op,
+        which may rename or remove props): (ids, lowest free number per id stem)."""
+        c = self._prop_ids
+        if c is None or c[0] is not props or c[1] != len(props):
+            c = self._prop_ids = [props, len(props), {p.get("id") for p in props}, {}]
+        return c
+
+    def note_prop(self, props, pid):
+        """After props.append(...) of a prop with this id."""
+        c = self._prop_ids
+        if c is not None and c[0] is props and c[1] == len(props) - 1:
+            c[2].add(pid)
+            c[1] += 1
+        else:
+            self._prop_ids = None
+
+    def new_prop_id(self, props, mesh):
         stem = re.sub(r"[^a-z0-9]+", "-", mesh.lower().replace("mesh:", "")).strip("-")[:40] or "prop"
-        used = {p.get("id") for p in props}
-        n = 1
+        _, _, used, free = self.prop_ids(props)
+        n = free.get(stem, 1)
         while f"{stem}-{n}" in used:
             n += 1
+        free[stem] = n
         return f"{stem}-{n}"
 
     def op_remove_prop(self, op):
@@ -1319,6 +1364,7 @@ class Ops:
             if (colors := self.prop_colors(lv, base, op.get("colors"))) is not None:
                 prop["colors"] = colors
             props.append(prop)
+            self.note_prop(props, prop["id"])
             placed.append((x, z))
             added += 1
         return f"scattered {added} props"
@@ -1702,11 +1748,11 @@ class Terrain:
         self.hts = [0] * nc
         if t.get("heights"):
             raw = b64inflate(t["heights"], nc * 2)
+            hts = self.hts
             prev = 0
-            for i, (d,) in enumerate(struct.iter_unpack("<h", raw)):
-                v = ((prev + d + 32768) % 65536) - 32768
-                self.hts[i] = v
-                prev = v
+            for i, d in enumerate(struct.unpack(f"<{nc}h", raw)):
+                prev = ((prev + d + 32768) & 0xFFFF) - 32768
+                hts[i] = prev
         # A map's own ground: heights are stored as offsets from the host's ground; work on absolute ones.
         self.host = None
         if host is not None:
@@ -1726,22 +1772,30 @@ class Terrain:
         if t.get("materials"):
             res = 1 if fmt == 1 else int(t.get("paintRes", R))
             raw = b64inflate(t["materials"], self.w * res * self.h * res)
-            row = self.w * res
-            for pz in range(self.ph):
-                for px in range(self.pw):
-                    v = raw[(pz * res // R) * row + px * res // R]
-                    self.materials[pz * self.pw + px] = v if v <= 6 else 0
+            if res == R:
+                self.materials = bytearray(raw.translate(self._MATERIAL_CLAMP))
+            else:
+                row = self.w * res
+                for pz in range(self.ph):
+                    for px in range(self.pw):
+                        v = raw[(pz * res // R) * row + px * res // R]
+                        self.materials[pz * self.pw + px] = v if v <= 6 else 0
         self.blocked = self.unbits(t.get("blocked"), n)
         w = t.get("water") or {}
         self.water_level = float(w.get("level", -1.0))
         self.water = self.unbits(w.get("cells"), n)
+
+    # Unknown material ids read as ground (0); one byte -> its 8 bits, lowest first.
+    _MATERIAL_CLAMP = bytes(v if v <= 6 else 0 for v in range(256))
+    _BITS = [bytes((v >> k) & 1 for k in range(8)) for v in range(256)]
 
     @staticmethod
     def unbits(s, n):
         if not s:
             return bytearray(n)
         raw = b64inflate(s, (n + 7) // 8)
-        return bytearray((raw[i >> 3] >> (i & 7)) & 1 for i in range(n))
+        bits = Terrain._BITS
+        return bytearray(b"".join(bits[v] for v in raw)[:n])
 
     @staticmethod
     def bits(cells):
