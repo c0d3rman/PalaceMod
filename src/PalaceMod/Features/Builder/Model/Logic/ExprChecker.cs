@@ -199,6 +199,9 @@ namespace PalaceMod.Builder.Model.Logic
                 case "it":
                     if (!scope.HasIt) Err(n, "\"it\" is only defined inside where(), best(), forEach, targeting, or an action applied to a set");
                     return LType.Entity;
+                case "outer":
+                    if (!scope.HasIt) Err(n, "\"outer\" (the `it` one scope out) is only defined where `it` is: inside where(), best(), forEach, targeting, or an action applied to a set");
+                    return LType.Entity;
             }
             return LType.Entity;
         }
@@ -416,6 +419,10 @@ namespace PalaceMod.Builder.Model.Logic
                         Issues.Add(new ExprIssue(col, $"nothing is named \"{f.Arg}\"" + Suggest(f.Arg.Substring(1), scope.Names, "@")));
                     return;
                 case "type": return;
+                case "include":
+                    if (!Filter.Includes.Contains(f.Arg))
+                        Issues.Add(new ExprIssue(col, $"include: takes {string.Join(", ", Filter.Includes)}, not \"{f.Arg}\"" + Suggest(f.Arg, Filter.Includes)));
+                    return;
             }
             if (PlainTerms.Contains(f.Term) || LogicSchema.Tags.Contains(f.Term)) return;
             var lower = LogicSchema.Tags.FirstOrDefault(t => string.Equals(t, f.Term, StringComparison.OrdinalIgnoreCase));

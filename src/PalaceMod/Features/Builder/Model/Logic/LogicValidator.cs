@@ -98,7 +98,11 @@ namespace PalaceMod.Builder.Model.Logic
             public Walker(DesignPack original, DesignPack pack, IValidationContext game, List<ValidationIssue> issues)
             {
                 this.original = original; this.pack = pack; this.game = game; this.issues = issues;
+                names = game as ILogicNamesContext;
             }
+
+            /// <summary>The game's effect and sound names, when the validator runs with the game (null offline).</summary>
+            private readonly ILogicNamesContext names;
 
             private void Error(string path, string msg) => issues.Add(new ValidationIssue(Severity.Error, path, msg));
             private void Warn(string path, string msg) => issues.Add(new ValidationIssue(Severity.Warning, path, msg));
@@ -465,10 +469,17 @@ namespace PalaceMod.Builder.Model.Logic
             {
                 bool isString = v.Type == JTokenType.String;
                 string s = isString ? (string)v : null;
+                // How the game reads it (ParamForms: the runtime's own rule). `src` is the expression without its `=`.
+                var form = ParamForms.Classify(ps.Type, ps.Name, v, out string src);
+                if (isString && form == ParamForm.Expression && ps.Type is "color" or "fx" or "sound" or "enum")
+                {
+                    Expression(src, p, scope, LType.Text, ps.Name);
+                    return;
+                }
                 switch (ps.Type)
                 {
                     case "number": case "int":
-                        if (isString) Expression(s.StartsWith("=") ? s.Substring(1) : s, p, scope, LType.Number, ps.Name);
+                        if (isString) Expression(src, p, scope, LType.Number, ps.Name);
                         else if (v.Type == JTokenType.Integer || v.Type == JTokenType.Float)
                         {
                             double d = (double)v;
@@ -479,7 +490,7 @@ namespace PalaceMod.Builder.Model.Logic
                         else Error(p, "must be a number or an expression");
                         break;
                     case "bool":
-                        if (isString) Expression(s, p, scope, LType.Bool, ps.Name);
+                        if (isString) Expression(src, p, scope, LType.Bool, ps.Name);
                         else if (v.Type != JTokenType.Boolean) Error(p, "must be true, false or an expression");
                         break;
                     case "text":
@@ -488,18 +499,18 @@ namespace PalaceMod.Builder.Model.Logic
                         else Error(p, "must be text");
                         break;
                     case "position":
-                        if (isString) Expression(s, p, scope, LType.Position, ps.Name);
+                        if (isString) Expression(src, p, scope, LType.Position, ps.Name);
                         else if (v is JArray arr) { if (arr.Count < 2 || arr.Count > 3 || arr.Any(x => x.Type != JTokenType.Integer && x.Type != JTokenType.Float)) Error(p, "must be [x, z] or [x, y, z]"); }
                         else Error(p, "must be an expression (an entity or vec(...)) or [x, y, z]");
                         break;
                     case "entity":
-                        if (isString) Expression(s, p, scope, LType.Entity, ps.Name);
+                        if (isString) Expression(src, p, scope, LType.Entity, ps.Name);
                         else Error(p, "must be a selector expression (self, other, @name, nearest('foe', 10)...)");
                         break;
                     case "entities":
                         if (!isString) { Error(p, "must be a selector expression"); break; }
-                        if (action?.Do == "signal" && s == "all") break;
-                        Expression(s, p, scope, LType.Set, ps.Name);
+                        if (form == ParamForm.Literal) break;   // signal's to: "all"
+                        Expression(src, p, scope, LType.Set, ps.Name);
                         break;
                     case "template":
                         if (!isString) { Error(p, "must be a template id or \"=expression\""); break; }
@@ -532,6 +543,7 @@ namespace PalaceMod.Builder.Model.Logic
                     }
                     case "signal": case "label":
                         if (!isString || string.IsNullOrWhiteSpace(s)) Error(p, $"must be a {ps.Type} name");
+                        else Text(s, p, scope);
                         break;
                     case "enum":
                     {
@@ -553,7 +565,16 @@ namespace PalaceMod.Builder.Model.Logic
                             if (ent != null && ent.StartsWith("=")) vars = anyEntityVars;
                             inner = scope.With(x => { x.HasSpawned = true; x.SpawnedVars = vars; if (action?.Do == "launch" && ps.Name == "onImpact" && x.Event?.Other == null) x.ExtraRoles = new() { ["other"] = LType.Entity }; });
                         }
-                        if (action?.Do == "forEach") inner = scope.With(x => x.HasIt = true);
+                        if (action?.Do == "forEach")
+                        {
+                            string loopVar = action.GetString("as");
+                            inner = scope.With(x =>
+                            {
+                                x.HasIt = true;
+                                if (loopVar != null && Expr.IsIdentifier(loopVar))
+                                    x.ExtraRoles = new Dictionary<string, LType>(x.ExtraRoles ?? new Dictionary<string, LType>()) { [loopVar] = LType.Entity };
+                            });
+                        }
                         Actions(list, p, inner, owner, sends);
                         break;
                     }
@@ -578,7 +599,7 @@ namespace PalaceMod.Builder.Model.Logic
                         CheckMovement(v.ToObject<MovementDef>(Serializer), p, owner, scope);
                         break;
                     case "any":
-                        if (isString) Expression(s.StartsWith("=") ? s.Substring(1) : s, p, scope, LType.Any);
+                        if (isString) Expression(src, p, scope, LType.Any);
                         break;
                     case "for":
                         if (isString && (s == "night" || s == "day")) break;
@@ -589,9 +610,9 @@ namespace PalaceMod.Builder.Model.Logic
                         Param(new ParamSpec { Name = ps.Name, Type = "int", Min = 1 }, v, p, scope, owner, action);
                         break;
                     case "slot":
-                        if (!isString) { Error(p, "must be @name, a selector or a Studio key (\"slot:Tower 3\")"); break; }
-                        if (s.StartsWith("slot:") || s.StartsWith("add:") || s == "castle") break;
-                        Expression(s, p, scope, LType.Entity, "slot");
+                        if (!isString) { Error(p, "must be an expression giving a slot (@name, it, nearest(...)) or a Studio key (\"slot:Tower 3\")"); break; }
+                        if (form == ParamForm.Literal) break;   // a Studio key
+                        Expression(src, p, scope, LType.Entity, "slot");
                         break;
                     case "types":
                         if (v is not JArray ta || ta.Any(x => x.Type != JTokenType.String)) Error(p, "must be a list of labels, e.g. [\"fire\"]");
@@ -601,10 +622,23 @@ namespace PalaceMod.Builder.Model.Logic
                             Error(p, $"must be a list of {string.Join(", ", ps.Options ?? [])}");
                         break;
                     case "color":
-                        if (!isString || (!s.StartsWith("=") && !Validator.TryParseColor(s, out _))) Error(p, "must be \"#rrggbb\"");
+                        if (ps.Name == "glow" && v.Type is JTokenType.Boolean or JTokenType.Integer or JTokenType.Float) break;   // on/off or a strength
+                        if (!isString || !ParamForms.TryParseColor(s, out _, out _, out _, out _)) Error(p, "must be a colour: " + ParamForms.ColorHelp + ", or \"=expression\"");
                         break;
                     case "fx": case "sound":
-                        if (!isString || string.IsNullOrWhiteSpace(s)) Error(p, $"must be a {(ps.Type == "fx" ? "effect" : "sound")} name");
+                    {
+                        string what = ps.Type == "fx" ? "effect" : "sound";
+                        if (!isString || string.IsNullOrWhiteSpace(s)) { Error(p, $"must be a {what} name"); break; }
+                        // Game names: the game's own list when the validator runs in it (or palace.py with a ref cache).
+                        var known = ps.Type == "fx" ? names?.Effects : names?.Sounds;
+                        if (known != null && !(ps.Type == "sound" && s.StartsWith("asset:")) && !known.Any(k => string.Equals(k, s, StringComparison.OrdinalIgnoreCase)))
+                            Error(p, $"no game {what} \"{s}\"" + ExprChecker.Suggest(s, known) + $" (`palace.py ref {what}s` lists them)");
+                        break;
+                    }
+                    case "local":
+                        if (!isString || !Expr.IsIdentifier(s)) Error(p, "must be a plain name (letters, digits and '_')");
+                        else if (Expr.Roles.Contains(s) || LogicSchema.RoleAliases.ContainsKey(s) || LogicSchema.Globals.ContainsKey(s) || LogicSchema.Functions.ContainsKey(s) || s is "true" or "false" or "and" or "or" or "not")
+                            Error(p, $"\"{s}\" is already a name in expressions; pick another");
                         break;
                 }
             }
@@ -784,7 +818,7 @@ namespace PalaceMod.Builder.Model.Logic
                 if (e.MaxAlive is int ma && (ma < 1 || ma > LogicCapsDef.Max.PerTemplate)) Error(p + ".maxAlive", $"must be 1..{LogicCapsDef.Max.PerTemplate}");
                 if (e.Visual != null)
                 {
-                    if (e.Visual.Tint != null && !Validator.TryParseColor(e.Visual.Tint, out _)) Error(p + ".visual.tint", "must be \"#rrggbb\"");
+                    if (e.Visual.Tint != null && !ParamForms.TryParseColor(e.Visual.Tint, out _, out _, out _, out _)) Error(p + ".visual.tint", "must be a colour: " + ParamForms.ColorHelp);
                     if (e.Visual.Mesh != null && ModelRef.Kind(e.Visual.Mesh) == ModelKind.Invalid)
                         Error(p + ".visual.mesh", "must be \"asset:<key>\", \"mesh:<scenery mesh>\" or \"vanilla:<unit id>\"");
                     else if (game != null && ModelRef.Kind(e.Visual.Mesh, out string uid) == ModelKind.Unit && !game.HasVanillaUnit(uid, null)) Error(p + ".visual.mesh", $"no vanilla unit \"{uid}\"");
@@ -846,7 +880,7 @@ namespace PalaceMod.Builder.Model.Logic
                         Error(p + ".area.shape.polygon.points", "must be at least 3 [x, z] points");
                     if (ar.Watch != null) FilterString(ar.Watch, p + ".area.watch", scope);
                     Enum(ar.Show, p + ".area.show", "none", "outline", "fill");
-                    if (ar.Color != null && !Validator.TryParseColor(ar.Color, out _)) Error(p + ".area.color", "must be \"#rrggbb\"");
+                    if (ar.Color != null && !ParamForms.TryParseColor(ar.Color, out _, out _, out _, out _)) Error(p + ".area.color", "must be a colour: " + ParamForms.ColorHelp);
                     Num(ar.Tick, p + ".area.tick", scope, 0.1, 600);
                     switch (ar.Surface)
                     {
@@ -929,7 +963,7 @@ namespace PalaceMod.Builder.Model.Logic
                 }
                 for (int i = 0; i < (s.Flags?.Count ?? 0); i++)
                     if (!LogicSchema.Flags.ContainsKey(s.Flags[i])) Error($"{p}.flags[{i}]", $"unknown flag \"{s.Flags[i]}\"" + ExprChecker.Suggest(s.Flags[i], LogicSchema.Flags.Keys));
-                if (s.Visual?.Tint != null && !Validator.TryParseColor(s.Visual.Tint, out _)) Error(p + ".visual.tint", "must be \"#rrggbb\"");
+                if (s.Visual?.Tint != null && !ParamForms.TryParseColor(s.Visual.Tint, out _, out _, out _, out _)) Error(p + ".visual.tint", "must be a colour: " + ParamForms.ColorHelp);
                 CheckRules(owner);
             }
 
