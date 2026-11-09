@@ -62,6 +62,12 @@ namespace PalaceMod.Builder.Studio.Enemies
             TakeCamera();
         }
 
+        /// <summary>Shows or hides the turntable and its model (hidden while the arena fights).</summary>
+        public static void SetVisible(bool on)
+        {
+            if (root != null) root.SetActive(on);
+        }
+
         public static void Leave()
         {
             ReleaseCamera();

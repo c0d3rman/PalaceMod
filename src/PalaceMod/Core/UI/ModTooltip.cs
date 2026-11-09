@@ -66,6 +66,13 @@ namespace PalaceMod
 
         public static bool Visible => panel != null && panel.gameObject.activeSelf;
 
+        /// <summary>
+        /// Where a screen wants its tooltips instead of beside the element: given what the tooltip describes, a screen
+        /// rectangle (pixels) to put it in, or null for the usual place. The Enemy Studio uses it so tooltips of a side
+        /// panel go over the opposite panel instead of over the stage. Set it while the screen is up, clear it after.
+        /// </summary>
+        public static Func<RectTransform, Rect?> Zone;
+
         /// <summary>Dev: the shown tooltip's text and what it's beside, or null.</summary>
         internal static string Describe() => Visible ? $"\"{title.text}\" / \"{body.text}\" beside {(anchor != null ? anchor.name : "nothing")}" : null;
 
@@ -90,7 +97,24 @@ namespace PalaceMod
             var size = panel.rect.size;
             var bounds = canvas.rect;
             Vector2 pos;
-            if (near != null)
+            Rect? zone = null;
+            if (near != null && Zone != null)
+            {
+                try { zone = Zone(near); }
+                catch (Exception e) { Log.Core.Caught("Tooltip zone failed", e); Zone = null; }
+            }
+            if (zone is Rect z)
+            {
+                // The zone is in screen pixels (the overlay canvas); the tooltip goes at its top, at the element's
+                // height when that fits, against the zone's left or right edge (whichever is nearer the screen's edge).
+                var corners = new Vector3[4];
+                near.GetWorldCorners(corners);
+                Vector2 zMin = canvas.InverseTransformPoint(new Vector3(z.xMin, z.yMin)), zMax = canvas.InverseTransformPoint(new Vector3(z.xMax, z.yMax));
+                float top = ((Vector2)canvas.InverseTransformPoint(corners[1])).y;
+                bool left = (zMin.x + zMax.x) / 2f < bounds.center.x;
+                pos = new Vector2(left ? zMin.x : zMax.x - size.x, Mathf.Clamp(top, zMin.y + size.y, zMax.y));
+            }
+            else if (near != null)
             {
                 var corners = new Vector3[4];
                 near.GetWorldCorners(corners);

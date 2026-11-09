@@ -51,6 +51,44 @@ namespace PalaceMod
             }
         }
 
+        /// <summary>While the Enemy Studio's arena exists, every position-based target search (TargetPriority's and
+        /// TagManager's Find* methods) remembers where it searches from, so the filter below can keep the arena's
+        /// fight and the level apart (ArenaZone).</summary>
+        [HarmonyPatch]
+        private static class ArenaSearch
+        {
+            private static IEnumerable<MethodBase> TargetMethods()
+            {
+                foreach (var t in new[] { typeof(TargetPriority), typeof(TagManager) })
+                    foreach (var m in t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly))
+                    {
+                        var ps = m.GetParameters();
+                        if (m.Name.StartsWith("Find") && ps.Length > 0 && ps[0].ParameterType == typeof(Vector3)) yield return m;
+                    }
+            }
+
+            private static void Prefix(Vector3 __0, out Vector3? __state)
+            {
+                __state = ArenaZone.SearchFrom;
+                if (ArenaZone.Active) ArenaZone.SearchFrom = __0;
+            }
+
+            private static Exception Finalizer(Exception __exception, Vector3? __state)
+            {
+                ArenaZone.SearchFrom = ArenaZone.Active ? __state : null;
+                return __exception;
+            }
+        }
+
+        [HarmonyPatch(typeof(TagManager), nameof(TagManager.FindAllTaggedObjectsWithTags))]
+        private static class ArenaSearchFilter
+        {
+            private static void Postfix(List<TaggedObject> _listToPolulate)
+            {
+                if (ArenaZone.SearchFrom is Vector3 from) ArenaZone.Filter(_listToPolulate, from);
+            }
+        }
+
         /// <summary>Arena units' attacks run in the day (AutoAttack.Update and every override).</summary>
         [HarmonyPatch]
         private static class ArenaAttackPatch
@@ -166,8 +204,8 @@ namespace PalaceMod.Builder.Studio.Enemies
     internal static class EnemyDev
     {
         internal const string Usage =
-            "builder-enemy open [unit] | library [unit] | level [unit] | new [base] | state | dock | press <tile|row> | set <field> <value> | look <ref|base> | fit <scale|-> " +
-            "| offset <x> <y> <z> | rot <x> <y> <z> | material own|unit | motion auto|bob|none | walk on|off | fight [n] | stop | readout | portrait | orbit <yaw> <pitch> <dist> | spin <deg> " +
+            "builder-enemy open [unit] | library [unit] | level [unit] | new [base] | state | dock | press <tile|row> | set <field> <value> | color <part> <#hex|-> | parts | picker | look <ref|base> | fit <scale|-> " +
+            "| offset <x> <y> <z> | rot <x> <y> <z> | material own|unit | motion auto|bob|none | walk on|off | fight [n] | stop | elite on|off | arena | readout | portrait | orbit <yaw> <pitch> <dist> | spin <deg> " +
             "| tab <palette tab> <panel tab> | select <unit> | undo | redo | save | back   the Enemy Studio";
 
         private static string Arg(string[] a, int i) => i < a.Length ? a[i] : throw new ArgumentException("missing argument " + i);
@@ -235,6 +273,32 @@ namespace PalaceMod.Builder.Studio.Enemies
                     }, structural: true);
                     return EnemyStudio.Describe();
                 }
+                case "color":
+                {
+                    Require();
+                    string part = Arg(args, 1), hex = args.Length > 2 ? args[2] : "-";
+                    EnemyStudio.EditVisuals("Colour " + part, v =>
+                    {
+                        v.Colors ??= new Dictionary<string, string>();
+                        if (hex == "-") v.Colors.Remove(part); else v.Colors[part] = hex;
+                        if (v.Colors.Count == 0) v.Colors = null;
+                    }, structural: true);
+                    return "colors: " + string.Join(", ", (EnemyStudio.Unit?.Visuals?.Colors ?? []).Select(kv => kv.Key + "=" + kv.Value));
+                }
+                case "parts":
+                {
+                    Require();
+                    var model = EnemyStage.Model;
+                    if (model == null) return "no model";
+                    return string.Join("; ", model.GetComponentsInChildren<Renderer>(true).Where(r => r is MeshRenderer || r is SkinnedMeshRenderer)
+                        .Select(r => r.name + ": " + string.Join(",", r.sharedMaterials.Where(m => m != null).Select(m =>
+                            UnitFactory.PartName(m) + (m.HasProperty("_BaseColor") ? " #" + ColorUtility.ToHtmlStringRGB(m.GetColor("_BaseColor")) : "") +
+                            (m.HasProperty("_ColorDim") ? "/#" + ColorUtility.ToHtmlStringRGB(m.GetColor("_ColorDim")) : "")))));
+                }
+                case "picker":
+                    Require();
+                    ModColorPicker.Open("Test colour", Color.red, c => Log.For<BuilderManager>().Info($"picked {c}"));
+                    return "picker open";
                 case "look":
                     Require();
                     EnemyStudio.EditVisuals("Set model", v => v.Mesh = rest == "base" ? null : rest, structural: true);
@@ -265,6 +329,18 @@ namespace PalaceMod.Builder.Studio.Enemies
                     if (rest != null) EnemyArena.Count = int.Parse(rest, CultureInfo.InvariantCulture);
                     return EnemyArena.Start(EnemyStudio.Draft.Pack, EnemyStudio.UnitId);
                 case "stop": EnemyArena.Clear(); return "stopped";
+                case "elite": EnemyArena.Elite = rest == "on"; return "arena elite " + EnemyArena.Elite;
+                case "arena":
+                {
+                    // Where the fight is and who can see whom: the arena's units, and whether the king is in any of their sight.
+                    var units = UnityEngine.Object.FindObjectsOfType<BuilderArenaUnit>();
+                    var king = TagManager.instance != null && TagManager.instance.Players.Count > 0 ? TagManager.instance.Players[0] : null;
+                    return $"zone {(ArenaZone.Active ? ArenaZone.Center.ToString() : "none")}; units {units.Length}, all inside: {units.All(u => ArenaZone.Inside(u.transform.position))}; " +
+                        $"king at {(king != null ? king.transform.position.ToString() : "-")} inside: {(king != null && ArenaZone.Inside(king.transform.position))}; stage visible: {EnemyStage.Model != null && EnemyStage.Model.activeInHierarchy}; " +
+                        "enemy looks: " + string.Join(" | ", units.Where(u => u.enemy).Take(2).Select(u => string.Join(",", u.GetComponentsInChildren<MeshRenderer>().Take(2).Select(r =>
+                            r.sharedMaterial == null ? "-" : r.sharedMaterial.name + " #" + (r.sharedMaterial.HasProperty("_BaseColor") ? ColorUtility.ToHtmlStringRGB(r.sharedMaterial.GetColor("_BaseColor")) : "?") +
+                            " outline #" + (r.sharedMaterial.HasProperty("_OutlineColor") ? ColorUtility.ToHtmlStringRGB(r.sharedMaterial.GetColor("_OutlineColor")) : "?")))));
+                }
                 case "readout": return EnemyArena.Describe();
                 case "portrait":
                 {

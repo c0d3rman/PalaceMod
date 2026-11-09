@@ -248,13 +248,32 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
 
 ```jsonc
 { "id": "brute", "side": "enemy", "base": "vanilla:E Ogre", "name": "Brute", "description": "...",
-  "visuals": { "tint": "#c9a227", "scale": 1.3 },
+  "visuals": { "colors": { "body": "#c9a227" }, "scale": 1.3 },
   "stats": { "maxHp": 300, "moveSpeed": 4, "attackCooldown": 1.6, "attackRange": 3, "keepDistance": 0, "aggroTime": 5 },
   "weapon": { "base": "inherit", "damageMult": 1.5,
               "damage": [{ "tags": [], "add": 6 }, { "tags": ["Building"], "mult": 3 }] },   // replaces the list
   "tags": { "add": ["ArmoredAgainstRanged"], "remove": [] },     // not Flying/LargeUnit: pick a base that has them
   "behaviours": [{ "type": "SpawnOnDeath", "unit": "vanilla:E Slime" }] }
 ```
+
+**Colours.** `visuals.colors` replaces colours outright, per part: `"body"` is the unit's body (the enemy colour, all
+of it), any other key is one piece of the model (`"Bow"`, `"Helmet"`: its renderer's name) or one of its materials
+by name; the most specific wins. `builder-enemy parts` through the bridge lists the pieces, their materials and colours
+while the Enemy Studio is open. The lit side becomes the colour and the shaded side follows it the way the
+level's colour scheme pairs them; elites keep it with the elite outline. `visuals.tint` only multiplies the body's lit
+colour (a subtle shift): use `colors` for a new colour.
+
+```jsonc
+"visuals": { "colors": { "body": "#3a6ee8", "Bow": "#e8c23a" } }   // an archer base: blue, with a gold bow
+```
+
+**Ranged attacks.** A unit attacks with its weapon: a ranged one fires a projectile that homes on its target, a melee
+one hits at once. To make a ranged enemy, start from a ranged base (`ref enemies`: archers, mages) or set
+`weapon.base` to a ranged unit's weapon (`ref enemies` lists each base's weapon). Then `stats.attackRange` is how far
+it picks targets (metres), `weapon.projectileSpeed` how fast its shots fly, `stats.attackCooldown` the seconds between
+shots, `weapon.damage` the damage by target, and `stats.keepDistance` how close it walks before it stops (keep it
+below the range, or it stops out of reach). What it targets and how it moves come from the base unit (each vanilla
+enemy has its own target lists); they aren't editable yet.
 
 Stats are absolute (difficulty, elite and perks still multiply them). Ranges: maxHp 1-100000, moveSpeed 0-100,
 attackCooldown 0.05-120. Gold is set per spawn group, not per unit. `palace.py ref enemies` gives every base's stats
