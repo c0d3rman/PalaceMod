@@ -56,6 +56,7 @@ namespace PalaceMod.Builder.Level
                     }
                 }
                 foreach (var r in Extra) if (r != null) ShowForScan(r, restore);
+                LowerMinRegion(astar, restore);
                 astar.Scan();
             }
             finally
@@ -65,6 +66,24 @@ namespace PalaceMod.Builder.Level
             PruneIslands();
             MinimapRefresh.Rebuild();
             return sw.ElapsedMilliseconds;
+        }
+
+        /// <summary>Most maps bake with a huge recast `minRegionSize` (Totend: 300000 voxels, 12000 m² at 0.2 m), which
+        /// drops every connected walkable area smaller than that. A level whose walkable ground is a maze of lanes and
+        /// clearings (or a small island) falls under it and its graphs come out empty: every route "blocked". The
+        /// rescan keeps small areas instead (only specks under MinRegionVoxels go) and PruneIslands drops what isn't
+        /// joined to the castle or a spawn line.</summary>
+        private const int MinRegionVoxels = 400;
+
+        private static void LowerMinRegion(AstarPath astar, List<System.Action> restore)
+        {
+            foreach (var g in astar.data.graphs)
+            {
+                if (g is not RecastGraph rg || g.name == "Enemy Units Air" || rg.minRegionSize <= MinRegionVoxels) continue;
+                float old = rg.minRegionSize;
+                rg.minRegionSize = MinRegionVoxels;
+                restore.Add(() => rg.minRegionSize = old);
+            }
         }
 
         // The baked graphs' walkable node centres per graph, taken before the first rescan in a scene.

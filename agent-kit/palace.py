@@ -3533,7 +3533,7 @@ def cmd_play(env, args):
     g = Game(env)
     _, data = load_pack(env, args.pack)
     find_level(data, args.level)
-    v = g.agent(f"validate {data['id']}")
+    v = g.agent(f"validate {data['id']} {args.level}")
     if not v.get("ok"):
         out(v)
         raise Fail("the game's validator found errors (above)")
@@ -3822,7 +3822,7 @@ def cmd_test(env, args):
 
 
 def cmd_play_quiet(g, data, level, timeout):
-    v = g.agent(f"validate {data['id']}")
+    v = g.agent(f"validate {data['id']} {level}")
     if not v.get("ok"):
         out(v)
         raise Fail("the game's validator found errors (above)")
@@ -3847,7 +3847,7 @@ def cmd_sandbox(env, args):
     g = Game(env)
     _, data = load_pack(env, args.pack)
     find_level(data, args.level)
-    v = g.agent(f"validate {data['id']}")
+    v = g.agent(f"validate {data['id']} {args.level}")
     if not v.get("ok"):
         out(v)
         raise Fail("the game's validator found errors (above)")
