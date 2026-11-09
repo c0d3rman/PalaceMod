@@ -116,7 +116,8 @@ namespace PalaceMod.Builder.Studio.Enemies
             SearchFrom = null;
             if (graph != null)
             {
-                try { AstarPath.active?.data.RemoveGraph(graph); }
+                // Only from the pathfinding it was added to (a scene change takes that, and the graph, with it).
+                try { if (AstarPath.active != null && Array.IndexOf(AstarPath.active.data.graphs ?? [], graph) >= 0) AstarPath.active.data.RemoveGraph(graph); }
                 catch (Exception e) { Log.For<BuilderManager>().Warn($"Enemy Studio: couldn't remove the arena graph: {e.Message}"); }
                 graph = null;
             }
