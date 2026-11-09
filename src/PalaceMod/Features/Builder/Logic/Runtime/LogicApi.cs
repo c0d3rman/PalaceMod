@@ -116,8 +116,11 @@ namespace PalaceMod.Builder.Logic
         public JObject Def;                  // the template/place JSON the entity was built from (components), or null
         public object Ext;                   // free slot for L2 (component state), not touched by the core
 
-        /// <summary>Compiled rules (the engine's own; set by the world).</summary>
-        internal List<CompiledRule> Rules = [];
+        /// <summary>Status flags in force ("stunned", "silenced", "untargetable", ...); L2's statuses maintain it.</summary>
+        public readonly HashSet<string> Flags = new(StringComparer.Ordinal);
+
+        /// <summary>The entity's rules with their per-owner state (the world's own).</summary>
+        internal List<RuleInstance> Rules = [];
 
         public bool Exists => !Destroyed && (Body == null || Body.Exists);
         public bool Alive => Exists && (Body == null || Body.Alive);
@@ -189,6 +192,19 @@ namespace PalaceMod.Builder.Logic
 
         public static bool IsRegistered(string name) => Handlers.ContainsKey(name);
         public static IEnumerable<string> Names => Handlers.Keys;
+
+        internal static readonly Dictionary<string, Func<LogicEntity, LogicEvent, bool>> Inputs = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// A built-in input: a signal name an entity answers without a listener rule (movers' `start`/`open`, areas'
+        /// `show`, ...). The handler returns true if the entity handled it (e.g. it has a mover). Several handlers may
+        /// share a name; the core tries them in registration order. `enable`/`disable`/`toggle`/`destroy` are the core's.
+        /// </summary>
+        public static void RegisterInput(string name, Func<LogicEntity, LogicEvent, bool> handler)
+        {
+            if (Inputs.TryGetValue(name, out var prev)) Inputs[name] = (e, ev) => prev(e, ev) || handler(e, ev);
+            else Inputs[name] = handler;
+        }
     }
 
     /// <summary>
@@ -269,17 +285,26 @@ namespace PalaceMod.Builder.Logic
 
     // ------------------------------------------------------------------ services L2 installs
 
-    /// <summary>Makes entities from templates (L2: Bodies/EntityFactory.cs). Returns null and an error when it can't.</summary>
+    /// <summary>
+    /// Makes game objects for entities (L2: Bodies/EntityFactory.cs). The core describes the entity first (id,
+    /// template, team, owner, Def, vars) and checks the caps; Build makes its object and calls
+    /// <c>LogicGame.Register(e, go)</c>, which compiles its rules and raises `spawn`. Actions spawn through
+    /// <see cref="LogicWorld.Spawn"/>, never Build directly.
+    /// </summary>
     public interface IEntityFactory
     {
-        /// <param name="team">"player" | "enemy" | "neutral", or null for the template's own.</param>
-        LogicEntity Spawn(string template, Vec pos, float rotY, string team, LogicEntity owner, out string error);
+        /// <summary>Build the object for <paramref name="e"/> (e.Template, e.Def: the template JSON merged with a place's
+        /// inline fields; e.Team already resolved). False + error if it can't; the core then drops the entity.</summary>
+        bool Build(LogicEntity e, Vec pos, float rotY, out string error);
         /// <summary>Remove an entity's game object (destroy action, lifetime end, session end).</summary>
         void Despawn(LogicEntity e, bool effects, bool drops);
         /// <summary>Whether a template id exists in the session (units[] or entities[] or vanilla).</summary>
         bool HasTemplate(string template);
         /// <summary>"unit" or "projectile" (counted against those caps) or "entity".</summary>
         string CapClass(string template);
+        /// <summary>An `attach` entry on an existing object (slot, prop, line, castle) was registered: add the
+        /// components its JSON carries (area, interact, attacks, ...). e.Def is the attach JSON; e.Game the object.</summary>
+        void Attach(LogicEntity e);
     }
 
     /// <summary>A stat change: one of Set/Add/Mult, optional key (same key replaces), optional filters.</summary>
@@ -361,6 +386,11 @@ namespace PalaceMod.Builder.Logic
         public static IAreas Areas;
         public static ISpatial Spatial;
         public static IGameState Game;
+        /// <summary>`.target`: the entity's current attack/move target (L2), or null.</summary>
+        public static Func<LogicEntity, LogicEntity> TargetOf;
+        /// <summary>Extra selector/`near` candidates beyond the registry and the game's tagged objects (L2: vanilla
+        /// projectiles in flight). Called with (center, radius, into); radius &lt;= 0 = everywhere.</summary>
+        public static Action<Vec, float, List<LogicEntity>> ExtraCandidates;
     }
 
     // ------------------------------------------------------------------ savestates
