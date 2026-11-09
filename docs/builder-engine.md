@@ -955,7 +955,7 @@ limits), and `reference.md` gets the generated schema.
   panel, not ModPopups: popups can't scroll, and lists of 50 actions must. Esc closes the picker, then the editor.
 - **Fields**: numbers step with the arrows and take a typed number or formula; formulas and filters are checked as
   you type by the engine's `ExprChecker` (the error shows under the field, with its column); entity fields offer the
-  event's roles, `@names`, Pick on the map (names the thing if it has no name), Nearest / Every… within / Random /
+  event's roles, `@names`, Pick on the map (gives the thing a name such as `tower-3` if it has none; place ids are `counter1`, `pressure-plate1`), Nearest / Every… within / Random /
   Weakest / Strongest / Farthest (a team + kind + extra-terms filter builder), and a typed formula.
 - **Params come from `LogicSchema`** (`LogicSchemaBridge`): the Studio keeps only phrasing, picker categories and
   which fields a card shows; an event or action only the registry has still gets a plain card.

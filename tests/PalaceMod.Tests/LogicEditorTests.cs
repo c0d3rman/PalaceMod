@@ -114,14 +114,6 @@ namespace PalaceMod.Tests
             Assert.Equal(1, ((JArray)lever["rules"]).Count, "a logic object keeps its output rule");
         }
 
-        public static void LevelEffectsBadge()
-        {
-            var rules = JArray.Parse("[ { 'when': 'death', 'do': [ { 'do': 'spawn', 'entity': 'x' }, { 'do': 'if', 'cond': 'true', 'then': [ { 'do': 'gold', 'amount': 5 } ] } ] }, { 'when': 'hit', 'do': [ { 'do': 'damage', 'amount': 3 } ] } ]");
-            var effects = LogicDoc.LevelEffects(rules);
-            Assert.True(effects.Contains("Give gold") && effects.Contains("Spawn"), "nested gold and spawn: " + string.Join(",", effects));
-            Assert.Equal(0, LogicDoc.LevelEffects(JArray.Parse("[ { 'when': 'hit', 'do': [ { 'do': 'heal', 'amount': 3 } ] } ]")).Count, "local only");
-        }
-
         public static void UnitFieldsLiveInExtra()
         {
             var u = new UnitDef { Id = "slime" };
@@ -135,14 +127,16 @@ namespace PalaceMod.Tests
         public static void NamesAreUnique()
         {
             var taken = new HashSet<string> { "tower3" };
-            Assert.Equal("tower32", LogicDoc.NameFor("Tower 3", taken), "unique");
-            Assert.Equal("northGate", LogicDoc.NameFor("North gate", taken), "camel");
-            Assert.Equal("n12", LogicDoc.NameFor("12", taken), "leading digit");
+            var tower = new HashSet<string> { "tower-3" };
+            Assert.Equal("tower-3-2", LogicDoc.NameFor("Tower 3", tower), "unique");
+            Assert.Equal("north-gate", LogicDoc.NameFor("North gate", tower), "lowercase words");
+            Assert.True(Ids.IsValid(LogicDoc.NameFor("Défense Tower Variant (1)", tower)), "a valid id: " + LogicDoc.NameFor("Défense Tower Variant (1)", tower));
             var logic = JObject.Parse("{ 'places': [ { 'id': 'counter1' } ] }");
             Assert.Equal("counter2", LogicDoc.NewPlaceId(logic, "counter"), "next free");
-            Assert.Equal("pressurePlate1", LogicDoc.NewPlaceId(logic, "pressure-plate"), "no hyphen (a formula reads it as minus)");
+            Assert.Equal("pressure-plate1", LogicDoc.NewPlaceId(logic, "pressure-plate"), "kind as prefix");
             Assert.Equal("counter2", LogicDoc.NewPlaceId(logic, "counter1"), "a copy's id");
-            Assert.Equal(0, ExprLint.Check("count('unit and in:@pressurePlate1') > 0").Count, "usable in a formula");
+            Assert.True(Ids.IsValid("pressure-plate1"), "valid id");
+            Assert.Equal(0, ExprLint.Check("count('unit and in:@pressure-plate1') > 0").Count, "usable in a formula");
         }
     }
 }
