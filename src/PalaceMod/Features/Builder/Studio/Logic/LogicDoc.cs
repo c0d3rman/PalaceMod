@@ -188,28 +188,39 @@ namespace PalaceMod.Builder.Studio.Logic
             return set;
         }
 
-        /// <summary>A name made from a display name ("Tower 3" → "tower3"), unique in the level.</summary>
+        /// <summary>A valid id (Ids: lowercase a-z, 0-9, '-') from a display name, unique in the level: "Tower 3" →
+        /// "tower-3", "North gate" → "north-gate". Formulas name it as @tower-3.</summary>
         public static string NameFor(string display, ISet<string> taken)
         {
-            var sb = new System.Text.StringBuilder();
-            bool up = false;
-            foreach (char c in display ?? "")
-            {
-                if (char.IsLetterOrDigit(c)) { sb.Append(sb.Length == 0 ? char.ToLowerInvariant(c) : up ? char.ToUpperInvariant(c) : c); up = false; }
-                else up = sb.Length > 0;
-            }
-            string root = sb.Length == 0 ? "thing" : sb.ToString();
-            if (char.IsDigit(root[0])) root = "n" + root;
+            string root = Slug(display);
             if (!taken.Contains(root)) return root;
-            for (int i = 2; ; i++) if (!taken.Contains(root + i)) return root + i;
+            for (int i = 2; ; i++) if (!taken.Contains($"{root}-{i}")) return $"{root}-{i}";
         }
 
-        /// <summary>A unique place id ("timer1"): letters and digits only, so formulas can name it (@timer1; a hyphen
-        /// would read as a minus).</summary>
+        private static string Slug(string display)
+        {
+            var sb = new System.Text.StringBuilder();
+            bool gap = false;
+            foreach (char c in display ?? "")
+            {
+                if (c < 128 && char.IsLetterOrDigit(c))
+                {
+                    if (gap && sb.Length > 0) sb.Append('-');
+                    sb.Append(char.ToLowerInvariant(c));
+                    gap = false;
+                }
+                else gap = true;
+                if (sb.Length >= 48) break;
+            }
+            return sb.Length == 0 ? "thing" : sb.ToString();
+        }
+
+        /// <summary>A unique place id from a kind or another id: "counter" → "counter1", "pressure-plate" →
+        /// "pressure-plate1", a copy of "counter1" → "counter2".</summary>
         public static string NewPlaceId(JObject logic, string prefix)
         {
             var taken = Names(logic);
-            string root = NameFor(prefix, new HashSet<string>()).TrimEnd('0', '1', '2', '3', '4', '5', '6', '7', '8', '9');
+            string root = Slug(prefix).TrimEnd('0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-');
             if (root.Length == 0) root = "thing";
             for (int i = 1; ; i++) if (!taken.Contains(root + i)) return root + i;
         }
@@ -352,26 +363,5 @@ namespace PalaceMod.Builder.Studio.Logic
                         foreach (var n in AllActions(opt["do"] as JArray)) yield return n;
             }
         }
-
-        /// <summary>Whether a set of rules can change things beyond its owner (gold, nights, the level's end, other
-        /// entities by signal to all): the "affects the level" badge for shared enemies.</summary>
-        public static List<string> LevelEffects(JArray rules)
-        {
-            var found = new List<string>();
-            foreach (var rule in rules?.OfType<JObject>() ?? [])
-            {
-                if (rule["preset"] != null) continue;
-                foreach (var a in AllActions(rule["do"] as JArray))
-                {
-                    string name = (string)a["do"];
-                    var ui = LogicCatalog.Action(name);
-                    bool wide = ui?.LevelWide == true || (name == "signal" && (string)a["to"] == "all") || (name is "setVar" or "addVar" && IsLevelVar(a));
-                    if (wide && !found.Contains(ui?.Label ?? name)) found.Add(ui?.Label ?? name);
-                }
-            }
-            return found;
-        }
-
-        private static bool IsLevelVar(JObject a) => (string)a["target"] == "level" || ((string)a["name"])?.StartsWith("$") == true;
     }
 }
