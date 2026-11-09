@@ -10,6 +10,10 @@ namespace PalaceMod
     {
         private const int MaxSpikeLinesPerWindow = 20;
 
+        /// <summary>Extra lines other features add to each frame-time summary (e.g. the behaviour engine's "Logic"
+        /// line); each returns null to skip. They should report rates since their previous call.</summary>
+        public static readonly List<Func<string>> SummaryLines = [];
+
         private readonly FrameStats stats = new();
         private readonly PlayerLoopTimer loopTimer = new();
         private int lastGcCount;
@@ -50,6 +54,13 @@ namespace PalaceMod
                     $"display {DisplayRefreshRate():0.#} Hz, focused {Application.isFocused}, battery {PowerState.OnBattery}, " +
                     $"low power {PowerState.LowPowerMode}, thermal {PowerState.ThermalState}, {DescribeRendering()}, " +
                     $"mono used {Profiler.GetMonoUsedSizeLong() / 1048576}/{Profiler.GetMonoHeapSizeLong() / 1048576} MB");
+                foreach (var line in SummaryLines)
+                {
+                    string s;
+                    try { s = line(); }
+                    catch (System.Exception e) { s = $"summary line failed: {e.Message}"; }
+                    if (s != null) Log.For<PerformanceManager>().Debug(s);
+                }
             }
             stats.Reset();
             pacer.ResetStats();

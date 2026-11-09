@@ -90,7 +90,7 @@ namespace PalaceMod.Builder.Studio.Logic
                     if (!world.Level.Vars.TryGetValue(name, out var old)) return;
                     var next = Parse(typed, old);
                     if (next.IsNone) { Notify.Show($"${name} is a {old.Kind}; that isn't one", NotifyKind.Info, 2f, "logic"); return; }
-                    world.Level.Vars[name] = next;
+                    world.SetVar(world.Level, name, next);
                 }, () => "Live: type a new value to try it.", 80);
             }
         }
@@ -175,11 +175,27 @@ namespace PalaceMod.Builder.Studio.Logic
             Notify.Show($"{owner.Title}: back in the Studio (F5) to edit this rule", NotifyKind.Info, 2.5f, "logic");
         }
 
+        /// <summary>The budget: what's alive against the limits, this frame's firings, and the totals that went wrong.</summary>
         private static void Entities(ModPage page, LogicWorld world)
         {
-            int n = world.Entities.Count(x => x.Spawned && x.Exists);
-            StudioDock.SmallHeader(page, "Alive");
-            StudioDock.Compact(page.Row("Spawned things", n.ToString(), "Things rules made that are still around."), false, 60f, page.Size.x);
+            var b = world.Budget();
+            var c = b.Caps ?? new LogicCaps();
+            StudioDock.SmallHeader(page, "Budget");
+            void Meter(string label, int used, int cap, string tip)
+            {
+                float f = cap <= 0 ? 0f : used / (float)cap;
+                string value = $"{used} / {cap}";
+                if (f >= 0.8f) value = LogicFields.Tint(value, f >= 1f ? LogicFields.ErrorColor : LogicFields.WarnColor);
+                StudioDock.Compact(page.Row(label, value, tip), false, 90f, page.Size.x);
+            }
+            Meter("Things alive", b.LiveEntities, c.Entities, "Spawned things at once, against the level's limit.");
+            Meter("Units alive", b.LiveUnits, c.Units, null);
+            Meter("Shots in flight", b.LiveProjectiles, c.Projectiles, null);
+            Meter("Firings this frame", b.FiringsThisFrame, c.FiringsPerFrame, "Rule firings in the last frame; more wait for the next.");
+            int trouble = b.Throttled + b.Dropped + b.CappedSpawns + b.Errors;
+            if (trouble > 0)
+                StudioDock.Compact(page.Row(LogicFields.Tint("Held back", LogicFields.ErrorColor), $"{b.Throttled} throttled · {b.Dropped} dropped · {b.CappedSpawns} capped · {b.Errors} errors",
+                    "Since the level started. Throttled: waited a frame. Dropped: a chain too deep or a rule firing too often. Capped: a spawn over a limit."), false, 90f, page.Size.x);
         }
 
         // ---- Pips --------------------------------------------------------------------------------------------------
