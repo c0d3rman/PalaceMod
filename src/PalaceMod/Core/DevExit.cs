@@ -9,12 +9,9 @@ using UnityEngine;
 /*
     How dev.py stops a dev launch without a "Thronefall quit unexpectedly" dialog.
 
-    Unity's own quit (SIGTERM, Cmd+Q, Application.Quit) tears the player down while a CVDisplayLink thread is still
-    firing, and that thread then calls into freed memory (EXC_BAD_ACCESS in CVDisplayLink::performIO, after the job
-    workers and the Finalizer thread are gone). ReportCrash writes a crash report and macOS shows the dialog. It hit
-    -batchmode instances most, but it's Unity teardown, not our code.
-
-    So dev launches never go through that teardown. On request, this runs what a quit would persist (the
+    A normal quit (SIGTERM, Cmd+Q, Application.Quit) runs Unity's whole teardown, and anything native still running
+    then can crash it, which macOS shows as a dialog (the mod's own CVDisplayLink did: see DisplayLink.cs). Dev
+    launches are stopped dozens of times a day, so they never go through that teardown. On request, this runs what a quit would persist (the
     Application.quitting handlers, PlayerPrefs.Save), flushes the logs and ends the process with _exit(0): no atexit
     handlers, no native teardown, no crash report. The game's own OnApplicationQuit (ObjectPools) only frees memory.
 
@@ -118,6 +115,21 @@ namespace PalaceMod
             }
             try { Console.Out.Flush(); } catch { }
             try { Console.Error.Flush(); } catch { }
+        }
+
+        private const string ObjC = "/usr/lib/libobjc.A.dylib";
+        [DllImport(ObjC)] private static extern IntPtr objc_getClass(string name);
+        [DllImport(ObjC)] private static extern IntPtr sel_registerName(string name);
+        [DllImport(ObjC, EntryPoint = "objc_msgSend")] private static extern IntPtr Send(IntPtr receiver, IntPtr selector);
+        [DllImport(ObjC, EntryPoint = "objc_msgSend")] private static extern void Send(IntPtr receiver, IntPtr selector, IntPtr arg);
+
+        /// <summary>`exit appkit`: [NSApp terminate:nil], the path Cmd+Q and the Dock's Quit take, for testing Unity's
+        /// teardown the way players quit.</summary>
+        internal static void TerminateThroughAppKit()
+        {
+            if (!mac) throw new InvalidOperationException("macOS only");
+            IntPtr app = Send(objc_getClass("NSApplication"), sel_registerName("sharedApplication"));
+            Send(app, sel_registerName("terminate:"), IntPtr.Zero);
         }
 
         [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "_exit")]

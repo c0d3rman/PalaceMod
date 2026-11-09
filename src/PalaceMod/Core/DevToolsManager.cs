@@ -38,7 +38,7 @@ namespace PalaceMod
             "timescale <x>          set Time.timeScale",
             "resolutions            list the current and available display modes",
             "setres <w> <h> <hz>    switch display mode (keeps the fullscreen mode)",
-            "exit                   quit the game without Unity's teardown (what dev.py stop does; see DevExit)",
+            "exit [unity|appkit]    quit without Unity's teardown (what dev.py stop does; see DevExit); unity: Application.Quit; appkit: [NSApp terminate:] like Cmd+Q",
         ];
 
         internal static bool IsBuiltIn(string name) =>
@@ -249,6 +249,17 @@ namespace PalaceMod
                         new RefreshRate { numerator = uint.Parse(args[3]), denominator = 1 });
                     return "";
                 case "exit":
+                    if (args.Length > 1 && args[1] == "appkit")
+                    {
+                        DevExit.TerminateThroughAppKit();
+                        return "quitting through AppKit";
+                    }
+                    if (args.Length > 1 && args[1] == "unity")
+                    {
+                        // Unity's own quit path (what Cmd+Q does), for testing its teardown.
+                        Application.Quit();
+                        return "quitting through Unity";
+                    }
                     DevExit.RequestFromCommand();
                     return "exiting";
                 case "help":
