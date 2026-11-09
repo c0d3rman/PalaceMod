@@ -84,6 +84,7 @@ namespace PalaceMod
         {
             Surfaces.Clear();
             Walkables.Clear();
+            Spaces.Clear();
             VanillaProjectiles.Clear();
             Drifts.Clear();
             BodyFilter.ClearCache();
@@ -123,13 +124,31 @@ namespace PalaceMod
         [HarmonyPatch(typeof(PathfindMovementEnemy), "Start")]
         private static class EnemyStart
         {
-            private static void Postfix(PathfindMovementEnemy __instance) { if (LogicWorld.Current != null && Surfaces.Any) Surfaces.Apply(__instance.gameObject); }
+            // Before Start copies the seeker's graphs into its masks and snaps to the navmesh: a unit spawned in a
+            // space must be able to snap there.
+            private static void Prefix(Component __instance) { if (LogicWorld.Current != null && Spaces.Any) Spaces.ApplySeeker(__instance.gameObject); }
+
+            private static void Postfix(PathfindMovementEnemy __instance)
+            {
+                if (LogicWorld.Current == null) return;
+                if (Spaces.Any) Spaces.Apply(__instance.gameObject);
+                if (Surfaces.Any) Surfaces.Apply(__instance.gameObject);
+            }
         }
 
         [HarmonyPatch(typeof(PathfindMovementPlayerunit), "Start")]
         private static class PlayerUnitStart
         {
-            private static void Postfix(PathfindMovementPlayerunit __instance) { if (LogicWorld.Current != null && Surfaces.Any) Surfaces.Apply(__instance.gameObject); }
+            // Before Start copies the seeker's graphs into its masks and snaps to the navmesh: a unit spawned in a
+            // space must be able to snap there.
+            private static void Prefix(Component __instance) { if (LogicWorld.Current != null && Spaces.Any) Spaces.ApplySeeker(__instance.gameObject); }
+
+            private static void Postfix(PathfindMovementPlayerunit __instance)
+            {
+                if (LogicWorld.Current == null) return;
+                if (Spaces.Any) Spaces.Apply(__instance.gameObject);
+                if (Surfaces.Any) Surfaces.Apply(__instance.gameObject);
+            }
         }
 
         // A seeker limited to some tags may find its target behind tags it can't cross: walk as near as it can instead
