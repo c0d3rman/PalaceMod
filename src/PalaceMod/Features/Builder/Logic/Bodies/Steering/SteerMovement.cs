@@ -27,6 +27,8 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
         internal static readonly AccessTools.FieldRef<PathfindMovementEnemy, float> E_slowedFor = AccessTools.FieldRefAccess<PathfindMovementEnemy, float>("slowedFor");
         internal static readonly AccessTools.FieldRef<PathfindMovementEnemy, float> E_speedSlowed = AccessTools.FieldRefAccess<PathfindMovementEnemy, float>("speedWhenSlowed");
         internal static readonly AccessTools.FieldRef<PathfindMovementEnemy, float> E_repath = AccessTools.FieldRefAccess<PathfindMovementEnemy, float>("recalculatePathCooldown");
+        internal static readonly AccessTools.FieldRef<PathfindMovementEnemy, List<Vector3>> E_path = AccessTools.FieldRefAccess<PathfindMovementEnemy, List<Vector3>>("path");
+        internal static readonly AccessTools.FieldRef<PathfindMovementPlayerunit, List<Vector3>> P_path = AccessTools.FieldRefAccess<PathfindMovementPlayerunit, List<Vector3>>("path");
         internal static readonly AccessTools.FieldRef<PathfindMovementEnemy, float> E_agroTime = AccessTools.FieldRefAccess<PathfindMovementEnemy, float>("remainingPlayerAgroTime");
         // PathfindMovementPlayerunit internals
         internal static readonly AccessTools.FieldRef<PathfindMovementPlayerunit, bool> P_walkingHome = AccessTools.FieldRefAccess<PathfindMovementPlayerunit, bool>("currentlyWalkingHome");
@@ -261,6 +263,14 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
                 slot = lp + d.normalized * m.Spacing;
             }
             return Ground(st, slot);
+        }
+
+        /// <summary>follow: how far behind its slot a follower may fall before it hurries (`catchUp`): 15% of its spacing
+        /// (or of its offset's length), at least 0.3 m. A formation holds within about that while it walks.</summary>
+        public static float FollowTolerance(MovementDef m)
+        {
+            float span = m.Offset != null ? new Vector2(m.Offset[0], m.Offset[1]).magnitude : m.Spacing;
+            return Mathf.Max(0.3f, 0.15f * span);
         }
 
         /// <summary>When the game found nothing (walking home), wander instead if the block says so.</summary>

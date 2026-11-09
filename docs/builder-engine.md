@@ -323,6 +323,15 @@ a gliding deck: a pathing unit on it is carried but snaps back to the ground gra
 riders that must stay put should `hold`. A carried unit's anchors move with it (the game's home and hold position,
 a Builder hold or wander point), so a holding unit stays on the deck instead of walking back.
 
+**Riding decks.** A walkable body linked as a moving part (`follow` rigid or position: a howdah on an elephant, the back
+of a walking colossus) is kept off the ground graphs (`Walkables.UpdateRiding`; it comes back when unlinked). The
+graphs can't move with it, and under a rasterized deck the parent's own ground has no clearance, so the parent would
+stand in a hole and never walk (it used to: 0 m in 6 s). Its collider still carries the king. Units on its top ride
+it (`DeckCarrier.Riding`): their movement doesn't run (the game's navmesh snap would drop them), they still attack, and
+they're carried with it; one that leaves it (teleported off, or the deck is gone) is set on the ground under it and
+walks again. `teleport` onto a riding deck's top puts a unit on it as given (no ground snap), which is how a ladder
+area puts climbers aboard.
+
 **Placing a deck.** A deck whose top is under the ground somewhere in its footprint (a bridge placed at the river
 bed's height, a raft whose ends lie on the banks) is raised so its top rests on the highest ground under it
 (`Walkables.LiftOutOfGround`, logged); a place over terrain water sits on the water's surface (`LogicManager.MakePlace`,
@@ -470,8 +479,10 @@ attack, vanilla towers and troops included (`setTargeting` on `all('player and T
 `"mode": "follow"` walks in formation: `"leader": "self.parent"` (an entity expression, re-read 10 times a second),
 `"spacing": 1.6` (metres behind the leader, along the line from the leader to the follower: a trail, so a chain
 snakes) or `"offset": [x, z]` (a slot in the leader's frame, x right, z ahead: beside or behind), and `"catchUp": 1.5`
-(speed multiplier while it's more than `max(spacing, 1.5)` m from its slot). It walks there with the game's A* and
-avoidance, and re-paths when the slot moves 0.4 m. A trail slot is always behind the leader (by its model's
+(speed multiplier while it's more than 15% of its spacing (or offset length), at least 0.3 m, behind its slot). It
+walks there with the game's A* and avoidance, re-paths when the slot moves 0.4 m, and its path's end rides on the
+moving slot every frame. (A threshold of a whole spacing let a walking trail stretch to twice its spacing: at the
+leader's speed a follower never closes a gap below the threshold.) A walking formation holds within about 25%. A trail slot is always behind the leader (by its model's
 heading): a follower that finds itself in front walks round. Without a live leader (none, dead, unlinked) `then` applies:
 `pathfind` (on its own: it becomes a leader), `hold` or `destroy`; a new leader is picked up again as soon as the
 expression names one.
@@ -1652,7 +1663,8 @@ three (projectiles in flight, surfaces and spaces above), with no feature coded 
 
 - **Movement physics is limited.**
   - Riders are carried by any moving deck (Riding), but the graphs don't glide with a deck: pathing units on a gliding
-    deck snap back to the ground graphs when they walk (riders should hold).
+    mover deck snap back to the ground graphs when they walk (riders should hold). Units on a riding deck (a moving
+    linked part) ride without walking; nothing paths onto one (it's off the graphs): put them aboard with `teleport`.
   - A walkable body made or destroyed at runtime rebuilds the ground graphs round it (30-100 ms on tiled graphs,
     about 340 ms on one-tile ones; the validator notes it). A body switched off or a pose not taken is hidden by a
     cut, not removed: a deck over walkable ground hides that ground in both states, and its ramps stay.

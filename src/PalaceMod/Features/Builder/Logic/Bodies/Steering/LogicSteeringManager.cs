@@ -489,7 +489,13 @@ namespace PalaceMod
                 {
                     var slot = SteerMovement.FollowSlot(st, leader, pos);
                     if (SteerMovement.Flat(slot, fd) > 0.4f) SteerMovement.Repath(st);
-                    if (SteerMovement.Flat(pos, slot) > Mathf.Max(1.5f, st.Move.Spacing)) orderSpeed = baseSpeed * Mathf.Max(1f, st.Move.CatchUp);
+                    // The path's end rides on the moving slot every frame (as the game's own chase does), so it doesn't
+                    // stop at where the slot was when the path was asked for.
+                    var path = en != null ? SteerMovement.E_path(en) : SteerMovement.P_path(pu);
+                    if (path != null && path.Count > 0 && SteerMovement.Flat(path[path.Count - 1], slot) < 1.5f) path[path.Count - 1] = slot;
+                    // Hurry as soon as it's a little behind its slot (not a whole spacing behind: that let a walking trail
+                    // stretch to twice its spacing, since at the leader's own speed it never closes the gap).
+                    if (SteerMovement.Flat(pos, slot) > SteerMovement.FollowTolerance(st.Move)) orderSpeed = baseSpeed * Mathf.Max(1f, st.Move.CatchUp);
                 }
                 float speed = orderSpeed ?? baseSpeed;
                 if (st.Move.Mode == "direct")

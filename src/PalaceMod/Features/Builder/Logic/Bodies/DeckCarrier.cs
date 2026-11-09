@@ -8,6 +8,9 @@ using UnityEngine;
     that rises lifts them). So a deck on a mover path, a spinning platform, a teleported raft, or a walkable part linked
     to a walking colossus all carry their riders. Units walking the navmesh are carried too, but the graphs don't move
     with a gliding deck: a unit that paths off it snaps back to the ground graphs (riding troops should hold).
+    A riding deck (a walkable part linked to a moving parent) isn't on the graphs at all, so the units on its top ride
+    it: they don't walk (the game's movement would snap them to the ground) but still attack, and are carried with it.
+    One that leaves it (teleported off, or the deck is gone) walks again from the ground under it.
 */
 namespace PalaceMod.Builder.Logic.Bodies
 {
@@ -22,6 +25,11 @@ namespace PalaceMod.Builder.Logic.Bodies
         /// <summary>Total riders moved (dev status).</summary>
         public static int Carried;
 
+        /// <summary>Units (game object ids) aboard a riding deck now: their movement Update is skipped.</summary>
+        internal static readonly HashSet<int> Riding = [];
+        private static readonly Dictionary<int, PathfindMovement> aboard = [];
+        private readonly Dictionary<int, PathfindMovement> stillAboard = [];
+
         public static void Ensure()
         {
             if (instance != null) return;
@@ -31,17 +39,54 @@ namespace PalaceMod.Builder.Logic.Bodies
 
         private void LateUpdate()
         {
-            if (LogicWorld.Current == null) { last.Clear(); return; }
-            foreach (var deck in Walkables.LiveDecks())
+            if (LogicWorld.Current == null) { last.Clear(); Riding.Clear(); aboard.Clear(); return; }
+            stillAboard.Clear();
+            foreach (var (deck, offGraph) in Walkables.LiveDecks())
             {
                 if (deck == null || !deck.gameObject.activeInHierarchy) continue;
                 var now = deck.localToWorldMatrix;
-                if (!last.TryGetValue(deck, out var before)) { last[deck] = now; continue; }
+                if (!last.TryGetValue(deck, out var before)) { last[deck] = now; before = now; }
                 last[deck] = now;
-                if (Same(before, now)) continue;
-                Carry(deck, before, now);
+                if (!Same(before, now)) Carry(deck, before, now);
+                if (offGraph) Aboard(now);
             }
+            // Units that left a riding deck walk again, from the ground under them.
+            foreach (var kv in aboard)
+                if (!stillAboard.ContainsKey(kv.Key) && kv.Value != null && kv.Value.isActiveAndEnabled) Land(kv.Value);
+            aboard.Clear();
+            Riding.Clear();
+            foreach (var kv in stillAboard) { aboard[kv.Key] = kv.Value; Riding.Add(kv.Key); }
             if (last.Count > 64) { var dead = new List<Transform>(); foreach (var k in last.Keys) if (k == null) dead.Add(k); foreach (var k in dead) last.Remove(k); }
+        }
+
+        /// <summary>The units on a riding deck's top now (after this frame's carry).</summary>
+        private void Aboard(Matrix4x4 now)
+        {
+            var inv = now.inverse;
+            Vector3 c = now.MultiplyPoint3x4(new Vector3(0f, 0.5f, 0f));
+            Vector3 half = new(now.GetColumn(0).magnitude / 2f + 0.5f, 1.5f, now.GetColumn(2).magnitude / 2f + 0.5f);
+            var rot = Quaternion.LookRotation(now.GetColumn(2), now.GetColumn(1));
+            int n = Physics.OverlapBoxNonAlloc(c + Vector3.up, half, overlap, rot, ~0, QueryTriggerInteraction.Collide);
+            for (int i = 0; i < n; i++)
+            {
+                var m = overlap[i].GetComponentInParent<PathfindMovement>();
+                if (m == null || !OnTop(inv, m.transform.position)) continue;
+                int id = m.gameObject.GetInstanceID();
+                if (!stillAboard.ContainsKey(id) && !aboard.ContainsKey(id)) m.ClearCurrentPath();
+                stillAboard[id] = m;
+            }
+        }
+
+        private static void Land(PathfindMovement m)
+        {
+            var p = m.transform.position;
+            try
+            {
+                m.transform.position = m is PathfindMovementEnemy en ? en.GetNearestGroundPosition(p)
+                    : m is PathfindMovementPlayerunit pu ? pu.GetNearestGroundPosition(p) : p;
+            }
+            catch (System.NullReferenceException) { m.transform.position = BodyNav.UnitGround(p); }
+            m.ClearCurrentPath();
         }
 
         private static bool Same(Matrix4x4 a, Matrix4x4 b)
