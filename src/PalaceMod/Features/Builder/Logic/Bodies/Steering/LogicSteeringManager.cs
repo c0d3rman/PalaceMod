@@ -244,6 +244,10 @@ namespace PalaceMod
 
         private static readonly List<TaggedObject> picks = [];
 
+        /// <summary>A parameterless method declared on the type itself (an override), or null; quiet when absent.</summary>
+        private static MethodInfo Declared(Type t, string name) =>
+            t.GetMethod(name, BindingFlags.DeclaredOnly | BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null);
+
         internal static float AttackRange(AutoAttack a)
         {
             float r = 0;
@@ -258,7 +262,7 @@ namespace PalaceMod
             {
                 yield return AccessTools.Method(typeof(AutoAttack), nameof(AutoAttack.FindAutoAttackTarget), Type.EmptyTypes);
                 foreach (var t in typeof(AutoAttack).Assembly.GetTypes().Where(t => t.IsSubclassOf(typeof(AutoAttack))))
-                    if (AccessTools.DeclaredMethod(t, nameof(AutoAttack.FindAutoAttackTarget), Type.EmptyTypes) is { } m) yield return m;
+                    if (Declared(t, nameof(AutoAttack.FindAutoAttackTarget)) is { } m) yield return m;
             }
 
             private static bool Prefix(AutoAttack __instance, ref TaggedObject __result)
@@ -318,7 +322,7 @@ namespace PalaceMod
             {
                 yield return AccessTools.Method(typeof(AutoAttack), nameof(AutoAttack.Update));
                 foreach (var t in typeof(AutoAttack).Assembly.GetTypes().Where(t => t.IsSubclassOf(typeof(AutoAttack))))
-                    if (AccessTools.DeclaredMethod(t, nameof(AutoAttack.Update), Type.EmptyTypes) is { } m) yield return m;
+                    if (Declared(t, nameof(AutoAttack.Update)) is { } m) yield return m;
             }
 
             private static bool Prefix(AutoAttack __instance) => suppressed.Count == 0 || !suppressed.Contains(__instance.GetInstanceID());
