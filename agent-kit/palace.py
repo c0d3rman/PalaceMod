@@ -250,8 +250,14 @@ class Game:
         if text.startswith(self.LOADS):
             # A scene change can't start while another is running (e.g. right after `menu`).
             deadline = time.time() + 60
-            while time.time() < deadline and json.loads(self.raw("agent status", timeout)).get("loading"):
+            while True:
+                st = json.loads(self.raw("agent status", timeout))
+                if not st.get("loading") or time.time() >= deadline:
+                    break
                 time.sleep(0.5)
+            # The level loads the game has done so far: wait_level_day waits for the next one, not the level still
+            # showing from before (replaying a level looks loaded until its transition starts).
+            self.loads_before = st.get("loads")
         result = self.raw("agent " + text, timeout)
         try:
             return json.loads(result)
@@ -276,8 +282,11 @@ class Game:
         raise Fail(f"Timed out after {timeout} s waiting for {what}; last status: {json.dumps(last)}")
 
     def wait_level_day(self, timeout=90):
-        time.sleep(1.0)
-        return self.wait(lambda s: s.get("inLevel") and not s.get("loading") and s.get("time") == "day", timeout, "the level to load")
+        before = getattr(self, "loads_before", None)
+        if before is None:
+            time.sleep(1.0)   # an older mod without the load counter
+        return self.wait(lambda s: s.get("inLevel") and not s.get("loading") and s.get("time") == "day"
+                         and (before is None or (s.get("loads") or 0) > before), timeout, "the level to load")
 
     def log_size(self):
         try:

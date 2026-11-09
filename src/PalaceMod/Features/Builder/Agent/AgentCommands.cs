@@ -30,7 +30,15 @@ namespace PalaceMod.Builder.Agent
             "gold <n> | god on|off | invulnerable on|off | speed <x> | fast on|off [fps] | kill | heal | teleport <x> <z> | paths [rescan] | reach <x1> <z1> <x2> <z2> | " +
             "share code <pack> [clipboard] | share export <pack> [path] | capture <file> [pixels] | screenshot <file>   agent bridge: JSON state, level tests, map dumps (see agent-kit/)";
 
-        internal static void Register() => DevCommands.Register("agent", Usage, Run);
+        internal static void Register()
+        {
+            DevCommands.Register("agent", Usage, Run);
+            // Counts level loads, so a client can wait for the load it asked for, not the level still showing from
+            // before (replaying the same level looks loaded until the transition starts).
+            SceneManager.sceneLoaded += (_, _) => levelLoads++;
+        }
+
+        private static int levelLoads;
 
         /// <summary>Per frame while the bridge (or a dev launch) is running: records nights.</summary>
         internal static void Tick() => NightRecorder.Tick();
@@ -263,6 +271,7 @@ namespace PalaceMod.Builder.Agent
                 ["scene"] = SceneManager.GetActiveScene().name,
                 ["loading"] = SceneTransitionManager.instance != null && SceneTransitionManager.instance.SceneTransitionIsRunning,
                 ["inLevel"] = DebugActions.InLevel,
+                ["loads"] = levelLoads,
             };
             var session = BuilderServices.Sessions?.Current;
             o["session"] = session == null ? null : new JObject
