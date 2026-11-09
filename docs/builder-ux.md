@@ -121,7 +121,7 @@ or the edge.
 | Move | G | Grab: the selection follows the cursor. Click commits; Esc or a right click (without a drag) cancels. X/Z lock an axis, and arrow keys nudge by theking <x> <z> | walk <dx> <dz> <s> | probe <x> <z> [y] [r] | snap | scan | grid | encode | save <pack> | clear`.
 `host` puts a sculptable grid on the map's own ground; `walk` moves the king through his CharacterController (what he
 can climb); `probe` lists the colliders he meets around a point. `save` writesstep (Shift ×5). |
-| Rotate | R | Turns the selection about its centre by mouse. `,` and `.` step by the turn step (they also work in Select). |
+| Rotate | R | Turns the selection about its centre by mouse. `,` and `.` step by the turn step (they also work in Select). X switches to Tilt and Z to Roll (again, or Esc, back to Turn; the status line shows it): dragging or `,`/`.` then tips scenery about its own sideways (Tilt) or forward (Roll) axis, in place; slots and lines don't tilt. The Inspector has Tilt and Roll fields for scenery. |
 | Place | (palette) | A ghost of the kind follows the cursor. Click places. Shift keeps placing. `,`/`.` turn the ghost. |
 | Link | K | Click dependents (or use the selection), then click their prerequisite: a slot or the castle. See "Requirements". |
 | Terrain | T | The terrain brushes (see "Terrain"). |

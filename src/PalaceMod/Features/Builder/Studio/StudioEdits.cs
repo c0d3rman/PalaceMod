@@ -233,7 +233,7 @@ namespace PalaceMod.Builder.Studio
             public string Base;      // host slot name (slots) or PropDef base (props)
             public bool IsProp;
             public Vector3 Offset;
-            public float Yaw, Scale = 1f;
+            public float Yaw, TiltX, TiltZ, Scale = 1f;
             public bool Solid = true;
             public string Colors;
             public List<UpgradeEdit> Upgrades;
@@ -258,7 +258,7 @@ namespace PalaceMod.Builder.Studio
                 {
                     var d = lv?.Props?.FirstOrDefault(p => p?.Id == i.Id);
                     if (d == null) continue;
-                    clips.Add(new Clip { Base = d.Base, IsProp = true, Offset = i.Pos - center, Yaw = i.Yaw, Scale = d.Scale, Solid = d.Solid, Colors = d.Colors });
+                    clips.Add(new Clip { Base = d.Base, IsProp = true, Offset = i.Pos - center, Yaw = i.Yaw, TiltX = d.RotX, TiltZ = d.RotZ, Scale = d.Scale, Solid = d.Solid, Colors = d.Colors });
                 }
                 else
                 {
@@ -306,7 +306,7 @@ namespace PalaceMod.Builder.Studio
                         lv.Props ??= [];
                         string id = UniqueId("prop", lv, made);
                         made.Add(id);
-                        lv.Props.Add(new PropDef { Id = id, Base = c.Base, Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(c.Yaw, 360f)), Scale = c.Scale, Solid = c.Solid, Colors = c.Colors });
+                        lv.Props.Add(new PropDef { Id = id, Base = c.Base, Pos = LayoutScene.FromVector(pos), RotY = LayoutScene.Round(Mathf.Repeat(c.Yaw, 360f)), RotX = c.TiltX, RotZ = c.TiltZ, Scale = c.Scale, Solid = c.Solid, Colors = c.Colors });
                         keys.Add("prop:" + id);
                     }
                     else
@@ -376,6 +376,22 @@ namespace PalaceMod.Builder.Studio
         }
 
         public static PropDef PropDef(StudioItem item) => Studio.Level?.Props?.FirstOrDefault(p => p?.Id == item.Id);
+
+        /// <summary>A tilt angle as stored: -180..180, rounded like poses.</summary>
+        public static float TiltAngle(float degrees) => LayoutScene.Round(Mathf.DeltaAngle(0f, degrees));
+
+        /// <summary>Tilts props (others are skipped) in one undo step: axis 1 about their own x, 2 about their own z.</summary>
+        public static void SetTilts(IReadOnlyList<(StudioItem item, float tiltX, float tiltZ)> tilts, string label, string coalesce = null)
+        {
+            var props = tilts.Where(t => t.item.Kind == StudioItemKind.Prop).ToDictionary(t => t.item.Id, t => (TiltAngle(t.tiltX), TiltAngle(t.tiltZ)));
+            if (props.Count < tilts.Count) Notify.Show("Only scenery tilts", NotifyKind.Info, 2f, "builder-studio");
+            if (props.Count == 0) { StudioScene.Reconcile(Studio.Level); return; }
+            Studio.Edit(label, lv =>
+            {
+                foreach (var d in lv.Props ?? [])
+                    if (d?.Id != null && props.TryGetValue(d.Id, out var t)) (d.RotX, d.RotZ) = t;
+            }, coalesce);
+        }
 
         public static void SetProps(IReadOnlyList<StudioItem> items, string label, Action<PropDef> change, string coalesce = null)
         {
