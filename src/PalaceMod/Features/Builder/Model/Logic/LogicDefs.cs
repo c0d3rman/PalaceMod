@@ -516,8 +516,12 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("repeat")] public bool? Repeat { get; set; }
         /// <summary>Level variables paid too (items): [{ "var": "$bread", "amount": 1 }].</summary>
         [JsonProperty("pay")] public List<PayDef> Pay { get; set; }
-        /// <summary>Up to 4 choices shown in the game's upgrade-choice popup.</summary>
+        /// <summary>The choices shown in the game's upgrade-choice popup (up to 4 at once; a longer pool with `offer`
+        /// or per-choice `if`).</summary>
         [JsonProperty("choices")] public List<ChoiceDef> Choices { get; set; }
+        /// <summary>Expression giving a list of choice ids: which choices the popup shows, in that order (up to 4);
+        /// evaluated on each press, e.g. "$offers" set by a dawn rule to "['a','b','c','d'].sample(3)".</summary>
+        [JsonProperty("offer")] public string Offer { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
@@ -529,6 +533,8 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("cost")] public LNum Cost { get; set; }
         [JsonProperty("pay")] public List<PayDef> Pay { get; set; }
         [JsonProperty("icon")] public string Icon { get; set; }
+        /// <summary>Bool expression: the choice is shown only while it holds (checked on each press).</summary>
+        [JsonProperty("if")] public string If { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 

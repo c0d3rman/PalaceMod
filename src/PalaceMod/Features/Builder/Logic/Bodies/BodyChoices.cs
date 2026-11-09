@@ -1,11 +1,14 @@
 using System.Collections.Generic;
+using System.Linq;
 using HarmonyLib;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 
 /*
-    `interact.choices` (docs/builder-engine.md, "interact"): up to 4 { id, label, cost, description, icon } shown in the
-    game's own upgrade-choice popup (ChoiceManager). The popup reads each choice's name and description through a
+    `interact.choices` (docs/builder-engine.md, "interact"): { id, label, cost, description, icon, if } shown in the
+    game's own upgrade-choice popup (ChoiceManager), up to 4 at once. The list is built on every press: `interact.offer`
+    (an expression giving a list of choice ids) picks which and in what order, and a choice's `if` hides it while
+    false, so one interactable can offer a different (e.g. random daily) handful of a longer pool. The popup reads each choice's name and description through a
     build slot's localisation ids; while ours are up, those ids are "PalaceBuilder/choice/<n>" and UnitFactory's text
     table answers them. The picked choice's cost (it replaces the top-level one; may be "=expr") is paid at once, then
     `interact` fires with event.choice = its id. Esc cancels without paying.
@@ -25,9 +28,9 @@ namespace PalaceMod.Builder.Logic.Bodies
             ours.Clear();
             var list = new List<Choice>();
             var meta = new Dictionary<Choice, (string id, int price, List<BuilderInteractor.PayItem> pays)>();
-            foreach (var t in defs)
+            foreach (var c in Offered(owner, defs))
             {
-                if (t is not JObject c || list.Count >= 4) continue;
+                if (list.Count >= 4) break;
                 string id = (string)c["id"] ?? $"choice{list.Count + 1}";
                 int price = owner.Price(c["cost"]);
                 var pays = owner.Pays(c["pay"]);
@@ -40,7 +43,12 @@ namespace PalaceMod.Builder.Logic.Bodies
                 list.Add(choice);
                 meta[choice] = (id, price, pays);
             }
-            if (list.Count == 0) return false;
+            if (list.Count == 0)
+            {
+                Notify.Show("Nothing to choose right now", NotifyKind.Info, 3f, "builder-interact");
+                return false;
+            }
+            shown = list.Select(c => meta[c].id).ToList();
             manager.PresentChoices(list, origin, picked =>
             {
                 if (picked != null && meta.TryGetValue(picked, out var m) && owner != null) owner.Chosen(player, m.id, m.price, m.pays);
@@ -49,12 +57,48 @@ namespace PalaceMod.Builder.Logic.Bodies
             return true;
         }
 
+        /// <summary>The choices on offer right now, in order: `offer`'s ids (unknown ids skipped) or every choice, minus
+        /// those whose `if` is false.</summary>
+        public static List<JObject> Offered(BuilderInteractor owner, JArray defs)
+        {
+            var all = defs.OfType<JObject>().ToList();
+            var result = all;
+            if ((string)owner.Def["offer"] is { Length: > 0 } offer)
+            {
+                result = [];
+                Value v;
+                try { v = LogicExpr.Compile(offer)(LogicExpr.Context(owner.Entity)); }
+                catch (LogicError e)
+                {
+                    Log.For<LogicBodiesManager>().Warn($"interact.offer \"{offer}\" on {owner.Entity?.Id}: {e.Message}");
+                    v = Value.List([]);
+                }
+                var ids = v.Kind == ValueKind.List ? v.AsList.Select(Values.Format) : v.Kind == ValueKind.Text ? [v.Str] : [];
+                foreach (string id in ids)
+                {
+                    var c = all.Find(x => ((string)x["id"] ?? "") == id);
+                    if (c != null && !result.Contains(c)) result.Add(c);
+                }
+            }
+            return result.FindAll(c => (string)c["if"] is not { Length: > 0 } cond || (BuilderInteractor.EvalNumber(cond, owner.Entity) ?? 0) != 0);
+        }
+
         private static Sprite Icon(JObject c)
         {
             string icon = (string)c["icon"];
             if (icon == null) return null;
             var entry = EntityFactory.PackEntry;
             return entry != null ? BuilderServices.Assets.GetSprite(entry, icon) : null;
+        }
+
+        private static List<string> shown = [];
+
+        /// <summary>Dev: the ids of our open popup's choices, in order.</summary>
+        public static string Shown()
+        {
+            var manager = ChoiceManager.instance;
+            if (manager == null || !manager.ChoiceCoroutineRunning || ours.Count == 0) return "no choice popup";
+            return string.Join(" | ", shown);
         }
 
         /// <summary>Dev: pick choice n (0-based) in the open popup.</summary>

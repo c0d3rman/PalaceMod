@@ -238,6 +238,19 @@ namespace PalaceMod.Tests
             Assert.Equal("Souls 0/10", ExprCompiler.CompileText("Souls {$r}/10", "t")(ctx), "interpolation");
             Assert.Equal(true, Values.ToBool(E("nearest('#nosuch') == none")), "none literal");
             Assert.Equal(true, Values.ToBool(E("other == none")), "an absent role is none");
+            // .sample(k): k distinct items at random; no k shuffles; a set stays a set.
+            for (int i = 0; i < 20; i++)
+            {
+                var s = E("['a', 'b', 'c', 'd', 'e'].sample(3)").AsList;
+                Assert.Equal(3, s.Count, "sample(3) count");
+                Assert.Equal(3, s.Select(Values.Format).Distinct().Count(), "sample items are distinct");
+            }
+            Assert.Equal(5, E("['a', 'b', 'c', 'd', 'e'].sample()").AsList.Count, "sample() shuffles all");
+            Assert.Equal(2, E("['a', 'b'].sample(9)").AsList.Count, "sample(k) caps at the length");
+            Assert.Equal(ValueKind.Set, E("all('foe').sample(1)").Kind, "a set's sample is a set");
+            var seen = new HashSet<string>();
+            for (int i = 0; i < 40; i++) seen.Add(Values.Format(E("['a', 'b', 'c'].sample(1).first")));
+            Assert.Equal(3, seen.Count, "sample reaches every item");
             LogicServices.IsElite = e => e.Labels.Contains("boss");
             Assert.Equal(1.0, E("count('elite')").Num, "elite filter term");
             Assert.Equal(true, Values.ToBool(E("@c.elite")), ".elite");

@@ -415,6 +415,25 @@ namespace PalaceMod.Tests
             Assert.True(!issues.Any(i => i.Message.Contains("fires on")), string.Join("\n", issues));
         }
 
+        /// <summary>interact.offer / a choice's if make choices a pool (up to 32; 4 shown); without them, 4 at most.</summary>
+        public static void InteractChoicesPoolAndOffer()
+        {
+            string Choices(int n, string extra = "") => string.Join(", ", Enumerable.Range(1, n).Select(i => $@"{{ ""id"": ""c{i}""{extra} }}"));
+            var issues = ValidateLevel($@"{{ ""vars"": {{ ""offers"": {{ ""type"": ""list"" }} }}, ""places"": [
+                {{ ""id"": ""a"", ""kind"": ""prop"", ""pos"": [0,0,0], ""interact"": {{ ""offer"": ""$offers"", ""choices"": [{Choices(6)}] }} }},
+                {{ ""id"": ""b"", ""kind"": ""prop"", ""pos"": [0,0,0], ""interact"": {{ ""choices"": [{Choices(6)}] }} }},
+                {{ ""id"": ""c"", ""kind"": ""prop"", ""pos"": [0,0,0], ""interact"": {{ ""choices"": [{Choices(5, @", ""if"": ""night > 1""")}] }} }},
+                {{ ""id"": ""d"", ""kind"": ""prop"", ""pos"": [0,0,0], ""interact"": {{ ""offer"": ""night"", ""choices"": [{Choices(1, @", ""if"": ""nite""")}] }} }},
+                {{ ""id"": ""e"", ""kind"": ""prop"", ""pos"": [0,0,0], ""interact"": {{ ""offer"": ""['c1']"" }} }}] }}");
+            string all = string.Join("\n", issues);
+            Assert.True(!all.Contains("places[0].interact"), "a pool of 6 with offer validates:\n" + all);
+            Has(issues, "levels[0].logic.places[1].interact.choices: 1 to 4 choices");
+            Assert.True(!all.Contains("places[2].interact"), "a pool of 5 with if validates:\n" + all);
+            Has(issues, "levels[0].logic.places[3].interact.offer");
+            Has(issues, "levels[0].logic.places[3].interact.choices[0].if");
+            Has(issues, "levels[0].logic.places[4].interact.offer: offer picks from choices");
+        }
+
         public static void UnknownFieldsAndBodyTags()
         {
             var issues = ValidateLevel(@"{ ""bogus"": 1, ""places"": [{ ""id"": ""t"", ""kind"": ""prop"", ""pos"": [0,0,0], ""body"": { ""hitable"": true, ""hittable"": true, ""tags"": [""Biulding""] } }] }");
