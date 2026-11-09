@@ -24,12 +24,12 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
         // the plainest unit of each side and role, tried in order before any other catalog match
         private static readonly Dictionary<string, string[]> Preferred = new()
         {
-            ["player/melee"] = ["Swordsman", "P Melee", "Militia"],
-            ["player/ranged"] = ["Archer", "P Ranged", "Hunter"],
-            ["player/flying"] = ["Flyer", "P Flying"],
+            ["player/melee"] = ["P Melee"],
+            ["player/ranged"] = ["P Archer"],
+            ["player/flying"] = ["P Firewing"],
             ["enemy/melee"] = ["E Melee"],
-            ["enemy/ranged"] = ["E Archer", "E Ranged"],
-            ["enemy/flying"] = ["E Flying", "E Bat", "E Flyer"],
+            ["enemy/ranged"] = ["E Archer"],
+            ["enemy/flying"] = ["E Flyer"],
         };
 
         public static string Role(GameObject go)

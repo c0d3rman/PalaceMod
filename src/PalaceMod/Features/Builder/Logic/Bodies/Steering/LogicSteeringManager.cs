@@ -65,6 +65,15 @@ namespace PalaceMod
 
         internal static SteerState Get(Component c) => c == null ? null : Get(c.gameObject);
 
+        /// <summary>An attack's state: its own object's, else its unit's or building's (a tower's attack sits on a child).</summary>
+        internal static SteerState ForAttack(AutoAttack a)
+        {
+            if (a == null || states.Count == 0 || !Live()) return null;
+            if (states.TryGetValue(a.gameObject.GetInstanceID(), out var st)) return st;
+            var owner = a.GetComponentInParent<TaggedObject>();
+            return owner != null && states.TryGetValue(owner.gameObject.GetInstanceID(), out st) ? st : null;
+        }
+
         /// <summary>The state for an entity's object, made on first use (null for an entity without a game object).</summary>
         internal static SteerState For(LogicEntity e, GameObject go = null)
         {
@@ -223,7 +232,7 @@ namespace PalaceMod
             private static bool Prefix(AutoAttack __instance, ref TaggedObject __result)
             {
                 if (states.Count == 0) return true;
-                var st = Get(__instance);
+                var st = ForAttack(__instance);
                 if (st?.Targeting == null) return true;
                 if (!TargetChooser.Choose(st, __instance.transform.position, AttackRange(__instance), 0, 1, picks)) return true;
                 __result = picks.Count > 0 ? picks[0] : null;
@@ -239,7 +248,7 @@ namespace PalaceMod
             private static bool Prefix(AutoAttackTower __instance)
             {
                 if (states.Count == 0) return true;
-                var st = Get(__instance);
+                var st = ForAttack(__instance);
                 if (st?.Targeting == null) return true;
                 if (!TargetChooser.Choose(st, __instance.transform.position, AttackRange(__instance), 0, Mathf.Max(1, __instance.simultaneousProjectiles), picks)) return true;
                 var list = targets(__instance);
@@ -261,7 +270,7 @@ namespace PalaceMod
             private static bool Prefix(AutoAttack __instance, TaggedObject[] outAttacks)
             {
                 if (states.Count == 0) return true;
-                var st = Get(__instance);
+                var st = ForAttack(__instance);
                 if (st?.Targeting == null) return true;
                 if (!TargetChooser.Choose(st, __instance.transform.position, AttackRange(__instance), 0, outAttacks.Length, picks)) return true;
                 for (int i = 0; i < outAttacks.Length; i++) outAttacks[i] = i < picks.Count ? picks[i] : null;

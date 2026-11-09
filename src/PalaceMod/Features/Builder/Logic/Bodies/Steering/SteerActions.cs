@@ -54,7 +54,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             if (pm != null)
             {
                 pm.ClearCurrentPath();
-                if (LogicSteeringManager.Get(go) is { } st) SteerMovement.Repath(st);
+                if (LogicSteeringManager.Get(go) is { } st) { st.HoldPoint = null; st.WanderPoint = null; SteerMovement.Repath(st); }
                 else if (pm is PathfindMovementEnemy en2) SteerMovement.E_repath(en2) = 0;
                 else if (pm is PathfindMovementPlayerunit pu2) SteerMovement.P_repath(pu2) = 0;
             }

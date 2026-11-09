@@ -1,4 +1,5 @@
 using System.Linq;
+using HarmonyLib;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 
@@ -104,7 +105,15 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
                         string tgt = st.Targeting == null ? "game" : string.Join(" > ", st.Targeting.Effective(LogicWorld.Current.Time, out bool tail).Select(r => r.Filter)) + (tail ? " > game" : "");
                         string seek = st.Enemy != null ? SteerMovement.E_seekObj(st.Enemy)?.name : st.Player != null ? SteerMovement.P_seekObj(st.Player)?.name : null;
                         var attacks = go.GetComponents<BuilderAttack>();
-                        return $"{e.Id} team={e.Team} at {pos} mode={m.Mode} path={st.PathIndex}/{st.PathPoints?.Count ?? 0}{(st.PathDone ? " done" : "")} moveTo={(st.MoveTo != null ? st.MoveTo.Point.ToString("F1") : "-")} " +
+                        // what the game's own attack would pick now (through the patched finders)
+                        string picks = "-";
+                        if (go.GetComponentInChildren<AutoAttackTower>() is { } tower)
+                        {
+                            tower.FindAutoAttackTargets();
+                            picks = string.Join(",", Traverse.Create(tower).Field<System.Collections.Generic.List<TaggedObject>>("attackTargets").Value.Select(t => t != null ? t.name : "null"));
+                        }
+                        else if (go.GetComponentInChildren<AutoAttack>() is { } aa) picks = aa.FindAutoAttackTarget()?.name ?? "none";
+                        return $"{e.Id} attackPick={picks} team={e.Team} at {pos} mode={m.Mode} path={st.PathIndex}/{st.PathPoints?.Count ?? 0}{(st.PathDone ? " done" : "")} moveTo={(st.MoveTo != null ? st.MoveTo.Point.ToString("F1") : "-")} " +
                                $"kite={(st.KiteUntil > LogicWorld.Current.Time)} flee={st.Fleeing} targeting=[{tgt}] taunt={st.Targeting?.Taunt?.Id ?? "-"} seek={seek ?? "-"} attacks={attacks.Length}";
                     }
                 case "units":
