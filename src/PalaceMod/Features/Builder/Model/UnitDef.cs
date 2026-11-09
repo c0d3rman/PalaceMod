@@ -45,6 +45,10 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("attacks")] public List<AttackDef> Attacks { get; set; }
         /// <summary>Statuses it starts with.</summary>
         [JsonProperty("statuses")] public List<string> Statuses { get; set; }
+        /// <summary>The king can use it (prompt, cost, pay, when, choices), like a placed entity's interact.</summary>
+        [JsonProperty("interact")] public InteractDef Interact { get; set; }
+        /// <summary>Entities spawned and linked to it when it appears (weak points, riders, ladders).</summary>
+        [JsonProperty("parts")] public List<PartDef> Parts { get; set; }
         /// <summary>The template `convert` turns it into (default: the other side's unit with the same role).</summary>
         [JsonProperty("counterpart")] public string Counterpart { get; set; }
         /// <summary>When / If / Then rules (and preset uses). Replaces version 2's "behaviours".</summary>

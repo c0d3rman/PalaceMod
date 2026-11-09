@@ -501,6 +501,51 @@
       "since": "1.0.0"
     },
     {
+      "name": "linked",
+      "group": "Links",
+      "description": "It was linked to a parent (`link`, a template's parts). `other` is the parent.",
+      "params": [],
+      "other": "parent",
+      "owners": [
+        "any"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "unlinked",
+      "group": "Links",
+      "description": "It was unlinked from its parent (`unlink`, or the parent died with onParentDeath drop/stay). `other` is the old parent.",
+      "params": [],
+      "other": "parent",
+      "owners": [
+        "any"
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "interactRefused",
+      "group": "King",
+      "description": "(interactables) The king tried to use it but was short of gold or a `pay` item. event.name lists what was short.",
+      "params": [],
+      "other": "king",
+      "value": "number",
+      "valueMeaning": "the gold cost",
+      "fields": {
+        "name": "text"
+      },
+      "owners": [
+        "unit",
+        "building",
+        "prop",
+        "projectile",
+        "area",
+        "pickup",
+        "logic",
+        "king"
+      ],
+      "since": "1.0.0"
+    },
+    {
       "name": "targetChanged",
       "group": "Combat",
       "description": "Its attack or move target changes.",
@@ -1539,6 +1584,111 @@
             "home"
           ],
           "description": "The order."
+        }
+      ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "link",
+      "group": "Links",
+      "description": "Links it to a parent as a part: it moves (and turns) with the parent every frame, may share its damage, and follows onParentDeath when the parent dies. Re-linking moves it to the new parent.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "to",
+          "type": "entity",
+          "required": true,
+          "description": "The parent."
+        },
+        {
+          "name": "offset",
+          "type": "position",
+          "description": "Where it sits in the parent's frame: [x, y, z], x right, y up, z ahead (default: where it is now)."
+        },
+        {
+          "name": "rotY",
+          "type": "number",
+          "description": "Its yaw relative to the parent's (default: as it is now)."
+        },
+        {
+          "name": "follow",
+          "type": "enum",
+          "default": "rigid",
+          "options": [
+            "rigid",
+            "position",
+            "none"
+          ],
+          "description": "rigid: moves and turns with the parent every frame; position: moves, keeps its own yaw; none: a relation only (it moves on its own, e.g. movement follow)."
+        },
+        {
+          "name": "onParentDeath",
+          "type": "enum",
+          "default": "die",
+          "options": [
+            "die",
+            "drop",
+            "stay"
+          ],
+          "description": "When the parent dies: die with it, drop (unlinked, set on the ground) or stay (unlinked, left where it is)."
+        },
+        {
+          "name": "damageToParent",
+          "type": "number",
+          "default": 0,
+          "min": 0.0,
+          "description": "This much of every hit it takes is dealt to the parent too (2 = double: a weak point)."
+        },
+        {
+          "name": "damageToGroup",
+          "type": "number",
+          "default": 0,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "This fraction of every hit is shared evenly by its whole linked group, itself included (1 = one shared pool)."
+        },
+        {
+          "name": "damageKept",
+          "type": "number",
+          "default": 1,
+          "min": 0.0,
+          "description": "The fraction it takes itself, before the group share (0 = a pure proxy hitbox)."
+        }
+      ],
+      "example": "{ \"do\": \"link\", \"target\": \"spawned\", \"to\": \"self\", \"offset\": [1.5, 4, 0], \"damageToParent\": 2 }",
+      "since": "1.0.0"
+    },
+    {
+      "name": "unlink",
+      "group": "Links",
+      "description": "Unlinks it from its parent (or, with children, unlinks its parts).",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "release",
+          "type": "enum",
+          "default": "drop",
+          "options": [
+            "drop",
+            "stay"
+          ],
+          "description": "drop: set it on the ground; stay: leave it where it is."
+        },
+        {
+          "name": "children",
+          "type": "bool",
+          "default": false,
+          "description": "Unlink its parts instead of itself."
         }
       ],
       "since": "1.0.0"
@@ -2865,6 +3015,30 @@
     },
     {
       "on": "entity",
+      "name": "parent",
+      "returns": "entity",
+      "description": "The entity it is linked to (link, parts), or none."
+    },
+    {
+      "on": "entity",
+      "name": "children",
+      "returns": "set",
+      "description": "The entities linked to it (its parts)."
+    },
+    {
+      "on": "entity",
+      "name": "root",
+      "returns": "entity",
+      "description": "The top of its link tree (itself when unlinked)."
+    },
+    {
+      "on": "entity",
+      "name": "group",
+      "returns": "set",
+      "description": "Its whole linked group: the root and every part below it, itself included."
+    },
+    {
+      "on": "entity",
       "name": "id",
       "returns": "text",
       "description": "Its entity id."
@@ -3500,12 +3674,16 @@
         "movement",
         "attacks",
         "statuses",
+        "interact",
+        "parts",
         "counterpart",
         "rules"
       ],
       "children": {
         "movement": "movement",
-        "attacks[]": "attack"
+        "attacks[]": "attack",
+        "interact": "interact",
+        "parts[]": "part"
       }
     },
     "level": {
@@ -3547,6 +3725,7 @@
         "area",
         "pickup",
         "interact",
+        "parts",
         "attacks",
         "targeting",
         "movement",
@@ -3562,7 +3741,8 @@
         "pickup": "pickup",
         "interact": "interact",
         "attacks[]": "attack",
-        "movement": "movement"
+        "movement": "movement",
+        "parts[]": "part"
       }
     },
     "place": {
@@ -3592,6 +3772,7 @@
         "area",
         "pickup",
         "interact",
+        "parts",
         "attacks",
         "targeting",
         "movement",
@@ -3608,7 +3789,8 @@
         "pickup": "pickup",
         "interact": "interact",
         "attacks[]": "attack",
-        "movement": "movement"
+        "movement": "movement",
+        "parts[]": "part"
       }
     },
     "visual": {
@@ -3755,10 +3937,12 @@
         "when",
         "radius",
         "repeat",
+        "pay",
         "choices"
       ],
       "children": {
-        "choices[]": "choice"
+        "choices[]": "choice",
+        "pay[]": "pay"
       }
     },
     "choice": {
@@ -3767,7 +3951,33 @@
         "label",
         "description",
         "cost",
+        "pay",
         "icon"
+      ],
+      "children": {
+        "pay[]": "pay"
+      }
+    },
+    "pay": {
+      "fields": [
+        "var",
+        "amount",
+        "label"
+      ],
+      "children": {}
+    },
+    "part": {
+      "fields": [
+        "entity",
+        "offset",
+        "rotY",
+        "team",
+        "name",
+        "follow",
+        "onParentDeath",
+        "damageToParent",
+        "damageToGroup",
+        "damageKept"
       ],
       "children": {}
     },
@@ -3807,6 +4017,10 @@
         "flee",
         "wander",
         "home",
+        "leader",
+        "spacing",
+        "offset",
+        "catchUp",
         "surfaces"
       ],
       "children": {
@@ -3902,6 +4116,7 @@
         "area",
         "pickup",
         "interact",
+        "parts",
         "attacks",
         "targeting",
         "movement",

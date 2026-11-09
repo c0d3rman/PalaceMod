@@ -674,6 +674,9 @@ stat, flag, filter term and built-in preset with its parameters. `palace.py logi
   `@gate1` (a placed object by name).
 - **Statuses** are timed, stacking modifier sets with their own rules: buffs, debuffs, auras, damage over time,
   shields, stuns, invisibility.
+- **Links** make multi-part things: any entity can be a part of another (weak points on a colossus, a rider, the
+  links of a chain). Parts move and turn with their parent every frame, can pass their damage on, and die or drop off
+  with it (12.7, "Links").
 - **Signals** wire objects together: any rule can `signal` a name to an entity, a set or everyone; `signal` rules
   listen. Every entity also takes built-in inputs (`enable`, `disable`, `toggle`, `destroy`, and per component
   `open`/pose names, `start`, `stop`, `reverse`, `show`, `hide`, `lock`, `unlock`).
@@ -762,7 +765,7 @@ One small, pure language everywhere: conditions, numbers, selectors, positions.
   entity variable), globals (`night`, `isNight`, `isDay`, `time`, `nightTime`, `nightProgress`, `gold`, `income`,
   `enemiesAlive`, `difficulty`, `nights`).
 - **Properties**: `.hp .maxHp .hpPct .alive .elite .pos .x .y .z .facing .team .kind .template .labels .level .cost
-  .buildingType .age .target .owner .id` (`.maxHp` is the live value, after the night's difficulty and elite; `@@x.hp`
+  .buildingType .age .target .owner .id`, links `.parent .children .root .group` (12.7) (`.maxHp` is the live value, after the night's difficulty and elite; `@@x.hp`
   is the template's catalog value), every stat by name (`.moveSpeed`, `.damageMult`, `.income`...), methods
   `.is('filter')`, `.dist(e)`, `.inside(@area)`, `.stacks('status')`; lists and sets: `.len .first .last .at(i)
   .has(x)`.
@@ -800,6 +803,7 @@ runs once per member and the other params are evaluated per member with `it` bou
 | Health | `damage` (`amount`, `source` credited, `types` like `["fire"]`), `heal`, `kill`, `revive`, `setHp` |
 | Stats | `setStat` (`stat`, one of `value`/`add`/`mult`, `for` seconds or `"night"`/`"day"`), `applyStatus`, `removeStatus` |
 | Team, move | `convert` (switch side), `teleport`, `push` (knockback), `drift` (continuous pull/wind), `moveTo`, `setMovement`, `setTargeting` (`prepend`, `remove`, `for`), `taunt`, `command` (player units: follow/hold/home) |
+| Links | `link` (`to` a parent, `offset`, `follow`, `onParentDeath`, `damageToParent`, `damageToGroup`, `damageKept`), `unlink` (`release` drop/stay, `children`) |
 | Logic | `signal`, `setVar`, `addVar`, `listAdd`/`listRemove`/`listClear`, `addLabel`/`removeLabel`, `enableRule`/`disableRule`, `enable`/`disable`/`toggle`, `wait`, `if` (`cond`, `then`, `else`), `repeat` (`times`, `every`, `actions`), `forEach` (`in`, `actions`, `limit`), `choose` (`options: [{weight, do}]`), `stop` |
 | World | `gold` (give/take), `dropCoins`, `building` (build, upgrade, knockOut, repair, demolish, lock, unlock, setCost, setIncome a slot), `waves` (addSpawn, removeUnit, scaleCount, scaleHp, clearRemaining, startNight, endNight, skipNight), `endLevel` |
 | Show | `effect`, `sound`, `message`, `floatText`, `setVisual`, `hud`, `shake`, `marker` |
@@ -821,12 +825,33 @@ runs once per member and the other params are evaluated per member with `it` bou
 | `mover` | moving props | `path` (`@path` or points), `mode` loop/pingpong/once, `speed`, `wait`, `spin`, `swing`, `running`, `pose` (or `poses`) {name: {`offset` [x,y,z] or world `pos`, `rotY`}}, `turnSpeed` (deg/s, 90); inputs `start stop reverse goto` and each pose's name; events `arrive`, `end`. A walkable mover snaps between poses |
 | `area` | zones | `shape` (`circle {radius}` / `rect {size: [w, d]}` / `polygon {points}`), `watch` (filter), `show`, `color`, `tick`, `surface` (below); events `enter exit inside empty occupied`; filters `in:@area` |
 | `pickup` | collectibles | `by` (filter, e.g. `king`), `radius`, `magnet`, `consume`; event `pickup` |
-| `interact` | king-usable | `prompt` (`{cost}` shows the cost), `cost`, `when` day/night/always, `radius`, `repeat`, `choices` (up to 4 `{id, label, description, cost, icon}`: the game's upgrade-choice popup; the chosen cost is paid and `event.choice` is its id); event `interact` |
+| `interact` | king-usable (props, places, attached slots, and **units**: templates, placed, spawned and wave units; the prompt follows a walking unit) | `prompt` (`{cost}` shows the cost), `cost` (gold), `pay` (items: `[{"var": "$bread", "amount": 1, "label": "bread"}]`, level variables paid with the gold, all at once; refused with a notice and `interactRefused` when any is short), `when` day/night/always, `radius`, `repeat`, `choices` (up to 4 `{id, label, description, cost, pay, icon}`: the game's upgrade-choice popup; the chosen cost is paid and `event.choice` is its id); event `interact` |
+| `parts` | any template, units too | `[{ "entity", "offset" [x,y,z], "rotY", "name" (a label), "team", "follow", "onParentDeath", "damageToParent", "damageToGroup", "damageKept" }]`: spawned and linked when it appears (Links, below) |
 | `attacks` | turrets, units | `[{ "cooldown", "range", "targeting", "launch": {"entity", "from"} \| "weapon", "do", "replace", "when" }]`; the unit's base attacks stay unless `replace` |
 | `targeting` | attackers | ordered list of filters or `{filter, range, prefer, score}`; works on vanilla towers too (`setTargeting`) |
-| `movement` | units | `mode` pathfind/direct/hold/path, `path`, `then`, `speed`, `keepDistance`, `kite`, `flee`, `wander`, `home`, `surfaces` |
+| `movement` | units | `mode` pathfind/direct/hold/path/follow, `path`, `then`, `speed`, `keepDistance`, `kite`, `flee`, `wander`, `home`, `surfaces`; for `follow`: `leader` (an entity expression, e.g. `"self.parent"`), `spacing` (m behind it, a trail; default 2), `offset` [x, z] (a slot in the leader's frame: x right, z ahead), `catchUp` (speed × while behind; 1.5) |
 
 A number field may be an expression evaluated when the entity appears: `"hp": "=100 * night"`.
+
+**Links (multi-part entities).** A part is a real entity of its own (its own hitbox, hp, rules, look), hung on a
+parent. Make one with a template's `parts` (spawned and linked when the parent appears) or the `link` action (`target`
+the part, `to` the parent; `unlink` to let go):
+
+- `offset` [x, y, z] in the parent's frame (x right, y up, z ahead; default: where it is now), `rotY` relative yaw.
+- `follow`: `rigid` (default: placed at its offset and turned with the parent every frame; a unit part doesn't walk,
+  but still attacks), `position` (moves, keeps its own yaw), `none` (a relation only; it moves on its own, e.g. with
+  `movement: {"mode": "follow", "leader": "self.parent"}` to walk behind it).
+- `onParentDeath`: `die` (default), `drop` (unlinked and set on the ground; it resumes its own movement) or `stay`.
+- Damage, applied inside the game's own hit: `damageToParent` × each hit it takes is dealt to its parent too, credited
+  to the same attacker (2 = a weak point that doubles the hit); `damageToGroup` of each hit is shared evenly by its
+  whole linked group (the root and all parts, itself included; 1 = one shared pool); `damageKept` is the part of the
+  rest it takes itself (0 with `damageToParent: 1` = a pure proxy hitbox).
+- Read them with `.parent`, `.children` (a set), `.root`, `.group` (a set); events `linked` / `unlinked` on the part
+  (`other` the parent). Selector example: `count('#link and where(it.root == self.root)')`.
+- An enemy-team `hittable` body is a real target for vanilla towers, troops and the king (weak points work); only
+  `countsAsEnemy: true` makes it hold the night open.
+- Keep moving parts not `solid` (a moving cut re-paths the map). The king can't be a part; standing on a moving part
+  is the riding feature's.
 
 **Surfaces (who may walk where).** An area with `"surface": "mud"` or `{"name": "ladder", "allow": "melee", "cost": 1}`
 becomes a named pathfinding surface: only units matching `allow` path through it, and `cost` multiplies its path cost
@@ -914,6 +939,9 @@ with `{"op": "rule", "on": "unit:<id>", ...}`.
      `logic do '{"do":"spawn","entity":"necromancer","at":"vec(-4,-14)"}'`.
    - `logic fire <signal> [to]`, `logic raise <event> <on> [other] [name] [value]` (selector arguments without spaces),
      `logic set <var> <expr>`, `logic king <1-3>`.
+   - `game cmd "logic-l2 interact <@name|id> [frames]"` makes the king use an interactable for real (focus, press,
+     hold: costs and `pay` are paid or refused); `logic raise interact ...` only fires the event. `game cmd
+     "logic-links"` lists linked parts (parent, offset, how far from their slot).
 3. Test a mechanic deliberately: spawn what it needs with `logic do`, wait, assert with `logic eval`.
 
 ### 12.13 Limits (what the engine can't do)
@@ -923,6 +951,8 @@ with `{"op": "rule", "on": "unit:<id>", ...}`.
   path through. Walkable movers snap between poses; they don't carry units while gliding. Terrain height doesn't
   change at runtime.
 - Three teams; vanilla units never attack `neutral` things (Builder targeting can).
+- A rigid part is placed every frame, not simulated: it goes wherever its parent goes. A template's parts come back
+  from a savestate rebuilt (full hp); links made by `link` are kept.
 - Game tags are a fixed set; your own labels work through Builder targeting and filters.
 - No new scenes, lighting or arbitrary code. Pending `wait`s and Builder projectiles in flight aren't kept by
   savestates; keep state that matters in variables.
@@ -1013,6 +1043,29 @@ jumping back).
 
 **Day/night shapeshifter**: `{"when": "dusk", "do": [{"do": "replace", "with": "werewolf", "keep": ["hp", "vars"]}]}`, and
 the mirror rule at `dawn` on the werewolf.
+
+**Colossus with weak points** (parts on a walking unit; the body itself shrugs off hits):
+
+```jsonc
+{"op": "entity", "id": "weak-point", "kind": "prop", "team": "enemy", "visual": {"mesh": "mesh:Rock A", "meshScale": 0.4, "tint": "#ff5030"},
+ "body": {"radius": 0.8, "height": 1.2, "hittable": true, "hp": 60}}
+{"op": "unit", "id": "colossus", "base": "vanilla:E Ogre", "visuals": {"scale": 2.2}, "stats": {"maxHp": 600}, "statuses": ["towering"],
+ "parts": [{"entity": "weak-point", "name": "left", "offset": [-1.6, 0.5, 0], "damageToParent": 3},
+           {"entity": "weak-point", "name": "right", "offset": [1.6, 0.5, 0], "damageToParent": 3}]}
+```
+
+`towering` is a status with `damageTaken` × 0: only hits on the weak points (×3, credited to the real attacker)
+hurt it; when it dies, the weak points die with it.
+
+**Shieldbearer chain** (links that walk in file and share one pool): on the link template, `"movement": {"mode":
+"follow", "leader": "self.parent", "spacing": 1.6}` and a `spawn` rule on the head that spawns the next link with
+`then: [{"do": "link", "target": "spawned", "to": "self", "follow": "none", "onParentDeath": "drop",
+"damageToGroup": 1}]`. Every hit is split over the live chain; killing a middle link drops the links behind it, whose
+first one, without a leader, walks on as a new head.
+
+**Bribe a unit with an item**: on a unit template, `"interact": {"prompt": "Give {cost}", "pay": [{"var": "$bread",
+"amount": 1, "label": "bread"}], "when": "day"}` and a rule `interact → convert team player`. Without bread the king
+gets "Not enough: 1 bread needed" and nothing happens.
 
 **Toll gate**: a door place with `"interact": {"prompt": "Pay {cost} to open", "cost": 5, "when": "day"}` and rules
 `interact → signal open to self`, `dusk → signal closed to self`.

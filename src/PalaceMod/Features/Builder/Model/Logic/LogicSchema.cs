@@ -255,6 +255,10 @@ namespace PalaceMod.Builder.Model.Logic
                 ps: [P("status", "status", "Only this status.")], aliases: A("applier", "other"), fields: new() { ["name"] = LType.Text });
             Ev("statusTick", "Statuses", "Every `tick` seconds of a status (in a status's own rules: of that status).", other: "applier", value: LType.Number, valueMeaning: "stacks",
                 ps: [P("status", "status", "Only this status.")], aliases: A("applier", "other"), fields: new() { ["name"] = LType.Text });
+            Ev("linked", "Links", "It was linked to a parent (`link`, a template's parts). `other` is the parent.", other: "parent");
+            Ev("unlinked", "Links", "It was unlinked from its parent (`unlink`, or the parent died with onParentDeath drop/stay). `other` is the old parent.", other: "parent");
+            Ev("interactRefused", "King", "(interactables) The king tried to use it but was short of gold or a `pay` item. event.name lists what was short.", other: "king", value: LType.Number, valueMeaning: "the gold cost", owners: unitish,
+                fields: new() { ["name"] = LType.Text });
             Ev("targetChanged", "Combat", "Its attack or move target changes.", other: "target", aliases: A("target", "other"));
             Ev("built", "Buildings", "(build slots) The player builds it.", value: LType.Number, valueMeaning: "the level", owners: ["building"], ps: [P("level", "int", "Only this level.")]);
             Ev("upgraded", "Buildings", "(build slots) The player upgrades it.", value: LType.Number, valueMeaning: "the new level", owners: ["building"], ps: [P("level", "int", "Only this level.")]);
@@ -375,6 +379,24 @@ namespace PalaceMod.Builder.Model.Logic
             Act("taunt", "Move", "Forces aggro onto an entity (the game's agro mechanism).",
                 [P("toward", "entity", "Who they go for.", req: true), P("for", "number", "Seconds.", def: 5)], targeted: true);
             Act("command", "Move", "Orders player units as the king's own commands.", [P("order", "enum", "The order.", req: true, opts: ["follow", "hold", "home"])], targeted: true);
+
+            // ---- Links ----------------------------------------------------------------------------------------
+            Act("link", "Links", "Links it to a parent as a part: it moves (and turns) with the parent every frame, may share its damage, and follows onParentDeath when the parent dies. Re-linking moves it to the new parent.",
+            [
+                P("to", "entity", "The parent.", req: true),
+                P("offset", "position", "Where it sits in the parent's frame: [x, y, z], x right, y up, z ahead (default: where it is now)."),
+                P("rotY", "number", "Its yaw relative to the parent's (default: as it is now)."),
+                P("follow", "enum", "rigid: moves and turns with the parent every frame; position: moves, keeps its own yaw; none: a relation only (it moves on its own, e.g. movement follow).", def: "rigid", opts: ["rigid", "position", "none"]),
+                P("onParentDeath", "enum", "When the parent dies: die with it, drop (unlinked, set on the ground) or stay (unlinked, left where it is).", def: "die", opts: ["die", "drop", "stay"]),
+                P("damageToParent", "number", "This much of every hit it takes is dealt to the parent too (2 = double: a weak point).", def: 0, min: 0),
+                P("damageToGroup", "number", "This fraction of every hit is shared evenly by its whole linked group, itself included (1 = one shared pool).", def: 0, min: 0, max: 1),
+                P("damageKept", "number", "The fraction it takes itself, before the group share (0 = a pure proxy hitbox).", def: 1, min: 0),
+            ], targeted: true, owner: "L1", example: "{ \"do\": \"link\", \"target\": \"spawned\", \"to\": \"self\", \"offset\": [1.5, 4, 0], \"damageToParent\": 2 }");
+            Act("unlink", "Links", "Unlinks it from its parent (or, with children, unlinks its parts).",
+            [
+                P("release", "enum", "drop: set it on the ground; stay: leave it where it is.", def: "drop", opts: ["drop", "stay"]),
+                P("children", "bool", "Unlink its parts instead of itself.", def: false),
+            ], targeted: true, owner: "L1");
 
             // ---- Logic (L1) -----------------------------------------------------------------------------------
             Act("signal", "Logic", "Sends a named signal (optionally with a number) to entities or everyone.",
@@ -508,6 +530,10 @@ namespace PalaceMod.Builder.Model.Logic
             Prop(LType.Entity, "age", LType.Number, "Seconds since it appeared.");
             Prop(LType.Entity, "target", LType.Entity, "Its current attack/move target.");
             Prop(LType.Entity, "owner", LType.Entity, "Who spawned or launched it.");
+            Prop(LType.Entity, "parent", LType.Entity, "The entity it is linked to (link, parts), or none.");
+            Prop(LType.Entity, "children", LType.Set, "The entities linked to it (its parts).");
+            Prop(LType.Entity, "root", LType.Entity, "The top of its link tree (itself when unlinked).");
+            Prop(LType.Entity, "group", LType.Set, "Its whole linked group: the root and every part below it, itself included.");
             Prop(LType.Entity, "id", LType.Text, "Its entity id.");
             foreach (var s in Stats.Values)
                 if (Property(LType.Entity, s.Name) == null) Prop(LType.Entity, s.Name, LType.Number, s.Description + " (with modifiers)");
@@ -699,9 +725,9 @@ namespace PalaceMod.Builder.Model.Logic
                 d[name] = c;
             }
             var template = new[] { ("visual", "visual"), ("body", "body"), ("projectile", "projectile"), ("mover", "mover"), ("area", "area"),
-                ("pickup", "pickup"), ("interact", "interact"), ("attacks[]", "attack"), ("movement", "movement") };
+                ("pickup", "pickup"), ("interact", "interact"), ("attacks[]", "attack"), ("movement", "movement"), ("parts[]", "part") };
             C("pack", typeof(DesignPack), ("units[]", "unit"), ("entities[]", "entity"), ("statuses[]", "status"), ("presets[]", "preset"), ("levels[]", "level"));
-            C("unit", typeof(UnitDef), ("movement", "movement"), ("attacks[]", "attack"));
+            C("unit", typeof(UnitDef), ("movement", "movement"), ("attacks[]", "attack"), ("interact", "interact"), ("parts[]", "part"));
             C("level", typeof(LevelDef), ("logic", "logic"));
             C("entity", typeof(EntityDef), template);
             C("place", typeof(PlaceDef), template);
@@ -717,8 +743,10 @@ namespace PalaceMod.Builder.Model.Logic
             C("rect", typeof(RectDef));
             C("polygon", typeof(PolygonDef));
             C("pickup", typeof(PickupDef));
-            C("interact", typeof(InteractDef), ("choices[]", "choice"));
-            C("choice", typeof(ChoiceDef));
+            C("interact", typeof(InteractDef), ("choices[]", "choice"), ("pay[]", "pay"));
+            C("choice", typeof(ChoiceDef), ("pay[]", "pay"));
+            C("pay", typeof(PayDef));
+            C("part", typeof(PartDef));
             C("attack", typeof(AttackDef), ("launch", "launch"));
             C("launch", typeof(LaunchDef));
             C("movement", typeof(MovementDef), ("kite", "kite"), ("flee", "flee"), ("wander", "wander"));

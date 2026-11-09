@@ -136,7 +136,26 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
                 return true;
             }
 
-            // 4. path
+            // 4. follow a leader (formation): its slot, or `then` without one
+            if (m.Mode == "follow")
+            {
+                var leader = FollowLeader(st, now);
+                if (leader != null)
+                {
+                    var slot = FollowSlot(st, leader, pos);
+                    st.FollowDest = slot;
+                    dest = Flat(pos, slot) <= 0.3f ? pos : slot;
+                    walkingHome = true;
+                    return true;
+                }
+                st.FollowDest = null;
+                if (m.Then == "hold") { st.HoldPoint ??= pos; dest = st.HoldPoint.Value; walkingHome = Flat(pos, dest) > 0.5f; return true; }
+                if (m.Then == "destroy") { LogicSteeringManager.DestroySilently(st.Entity, st.Go); dest = pos; return true; }
+                // pathfind: on its own (targeting below, or the game's choice)
+            }
+            else st.FollowDest = null;
+
+            // 5. path
             if (m.Mode == "path" && !st.PathDone)
             {
                 if (st.PathPoints == null)
@@ -174,7 +193,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
                 }
             }
 
-            // 5. hold (mode, or a finished path with then: hold)
+            // 6. hold (mode, or a finished path with then: hold)
             if (m.Mode == "hold" || (m.Mode == "path" && st.PathDone && m.Then == "hold"))
             {
                 st.HoldPoint ??= pos;
@@ -183,7 +202,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
                 return true;
             }
 
-            // 6. targeting (player units do this in FindTargetPosition)
+            // 7. targeting (player units do this in FindTargetPosition)
             if (!playerUnit && st.Targeting != null)
             {
                 bool handled = TargetChooser.Choose(st, pos, float.PositiveInfinity, 0, 1, one);
@@ -201,6 +220,44 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
                 return true;
             }
             return false;
+        }
+
+        /// <summary>follow: the leader expression's entity (re-read 10 times a second); null when none or dead.</summary>
+        public static LogicEntity FollowLeader(SteerState st, double now)
+        {
+            var m = st.Move;
+            if (m.Leader == null) return null;
+            if (now - st.FollowEvalAt >= 0.1 || (st.FollowLeader != null && !st.FollowLeader.Alive))
+            {
+                st.FollowEvalAt = now;
+                LogicEntity l = null;
+                try
+                {
+                    var v = SteerExpr.Expr(m.Leader)(new LogicContext { World = LogicWorld.Current, Self = st.Entity, Subject = st.Entity });
+                    l = v.Kind == ValueKind.Entity ? v.AsEntity : v.Kind == ValueKind.Set && v.AsSet.Count > 0 ? v.AsSet[0] : null;
+                }
+                catch (LogicError ex) { SteerLog.Once($"leader {st.Entity?.Id}", $"{st.Entity?.Id}: movement leader: {ex.Message}"); }
+                if (l == st.Entity || l != null && !l.Alive) l = null;
+                if (l != st.FollowLeader) { st.FollowLeader = l; Repath(st); }
+            }
+            return st.FollowLeader != null && st.FollowLeader.Alive ? st.FollowLeader : null;
+        }
+
+        /// <summary>follow: where the follower belongs by its leader: `offset` in the leader's frame, or `spacing`
+        /// metres behind the leader along the line from the leader to it (a trail).</summary>
+        public static Vector3 FollowSlot(SteerState st, LogicEntity leader, Vector3 pos)
+        {
+            var m = st.Move;
+            var lp = leader.Position.ToVector3();
+            Vector3 slot;
+            if (m.Offset != null) slot = lp + Quaternion.Euler(0f, Heading.Yaw(leader), 0f) * new Vector3(m.Offset[0], 0f, m.Offset[1]);
+            else
+            {
+                var d = pos - lp; d.y = 0;
+                if (d.sqrMagnitude < 0.01f) d = -(Quaternion.Euler(0f, Heading.Yaw(leader), 0f) * Vector3.forward);
+                slot = lp + d.normalized * m.Spacing;
+            }
+            return Ground(st, slot);
         }
 
         /// <summary>When the game found nothing (walking home), wander instead if the block says so.</summary>

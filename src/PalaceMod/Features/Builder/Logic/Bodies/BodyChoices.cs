@@ -24,25 +24,26 @@ namespace PalaceMod.Builder.Logic.Bodies
             if (manager == null || origin == null || manager.ChoiceCoroutineRunning) return false;
             ours.Clear();
             var list = new List<Choice>();
-            var meta = new Dictionary<Choice, (string id, int price)>();
+            var meta = new Dictionary<Choice, (string id, int price, List<BuilderInteractor.PayItem> pays)>();
             foreach (var t in defs)
             {
                 if (t is not JObject c || list.Count >= 4) continue;
                 string id = (string)c["id"] ?? $"choice{list.Count + 1}";
                 int price = owner.Price(c["cost"]);
+                var pays = owner.Pays(c["pay"]);
                 var choice = new Choice(id, (string)c["description"] ?? "", Icon(c));
                 string key = UnitFactory.LocaPrefix + "choice/" + (++serial);
                 ours[choice] = key;
                 string label = BuilderInteractor.EvalText((string)c["label"] ?? id, owner.Entity);
-                UnitFactory.Texts[key] = price > 0 ? $"{label} ({price} gold)" : label;
+                UnitFactory.Texts[key] = price > 0 || pays.Count > 0 ? $"{label} ({BuilderInteractor.CostText(price, pays, goldWord: true)})" : label;
                 UnitFactory.Texts[key + " Description"] = BuilderInteractor.EvalText((string)c["description"] ?? "", owner.Entity);
                 list.Add(choice);
-                meta[choice] = (id, price);
+                meta[choice] = (id, price, pays);
             }
             if (list.Count == 0) return false;
             manager.PresentChoices(list, origin, picked =>
             {
-                if (picked != null && meta.TryGetValue(picked, out var m) && owner != null) owner.Chosen(player, m.id, m.price);
+                if (picked != null && meta.TryGetValue(picked, out var m) && owner != null) owner.Chosen(player, m.id, m.price, m.pays);
                 ours.Clear();
             });
             return true;
