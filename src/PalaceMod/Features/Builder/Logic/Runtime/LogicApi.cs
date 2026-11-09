@@ -435,6 +435,8 @@ namespace PalaceMod.Builder.Logic
         /// <summary>During a `damage` action's Hp.TakeDamage: the credited source entity (it may have no body, so the
         /// game gets no TaggedObject). L2 Stats installs it; the hit/kill hook uses it when the game's source is null.</summary>
         public static Func<LogicEntity> CurrentDamageSource;
+        /// <summary>`.elite` and the `elite` filter term: whether the entity is an elite enemy (L1 installs it: Hp.Elite).</summary>
+        public static Func<LogicEntity, bool> IsElite;
         /// <summary>Extra selector/`near` candidates beyond the registry and the game's tagged objects (L2: vanilla
         /// projectiles in flight). Called with (center, radius, into); radius &lt;= 0 = everywhere.</summary>
         public static Action<Vec, float, List<LogicEntity>> ExtraCandidates;

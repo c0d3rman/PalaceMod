@@ -274,7 +274,7 @@ namespace PalaceMod
 
         private void RegisterDevCommands()
         {
-            DevCommands.Register("savestate", "savestate save [name] | quick | load <id|name|quick|last> | list | dump | delete <id|name> | menu | gold <n> | build [n] | defeat   savestates (gold/build/defeat: test setup)", args =>
+            DevCommands.Register("savestate", "savestate save [name] | quick | load <id|name|quick|last> | list | dump | delete <id|name> | forget <id|name> | menu | gold <n> | build [n] | defeat   savestates (gold/build/defeat: test setup)", args =>
             {
                 string sub = args.Length > 0 ? args[0].ToLowerInvariant() : "list";
                 string rest = string.Join(" ", args.Skip(1));
@@ -297,6 +297,14 @@ namespace PalaceMod
                     case "delete":
                     {
                         var state = Resolve(rest);
+                        SaveStates.Delete(state);
+                        return $"deleted {state}";
+                    }
+                    case "forget":
+                    {
+                        // delete if it exists (palace.py test replaces its resume states; the first run has none yet)
+                        var state = rest.Length > 0 ? SaveStates.Find(rest) : null;
+                        if (state == null) return "none";
                         SaveStates.Delete(state);
                         return $"deleted {state}";
                     }
