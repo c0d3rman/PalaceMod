@@ -859,7 +859,9 @@ One small, pure language everywhere: conditions, numbers, selectors, positions.
 A filter is a string: `"foe and Building and not Wall"`, `"#lantern"`, `"in:@moat"`. Terms: teams `foe ally player
 enemy neutral` (foe/ally relative to `self`); kinds `unit building prop projectile area pickup coin king castle line
 point path logic self`; `melee ranged alive dead elite`; any game tag, case-sensitive (`Tower`, `Flying`, `Wall`, `Boss`,
-`Undead`...; see `logic-reference.md`); `#label`; `is:<template>`; `in:@area` / `in:self` (inside an area); `has:<status>`;
+`Undead`...; see `logic-reference.md`); `#label`; `is:<template>`; `in:@area` / `in:self` (inside an area;
+`in:@<area template>` is inside any area made from that template, e.g. any of a snail's spawned slime pools, judged
+from where it stands now, so a tower's `targeting: ["foe and not in:@slime-pool"]` never lags the slime); `has:<status>`;
 `type:<building kind>` (`type:Mill`); `lit` (standing in the light, 12.7a); `where(<expression over it>)`; the visibility terms `disabled unbuilt` and
 `include:<dead|disabled|unbuilt|self>` (12.4, "What a selector sees"). Combine with `and or not ( )`.
 
@@ -889,7 +891,8 @@ runs once per member and the other params are evaluated per member with `it` bou
 swing but do nothing) or `"base"` (the weapon it started with). The attack range follows the weapon (a melee unit
 given a bow shoots from the bow's range; `range` overrides), and so does a unit's keep distance. `for` (seconds,
 `"night"`, `"day"`) gives back what it had before. On the king it swaps his auto attack (the equipped weapon's
-passive half). `palace.py game cmd logic-weapons` lists every weapon id with its damage types.
+passive half). `palace.py game cmd logic-weapons` lists every weapon id with its damage types. Savestates (and
+retry day) keep every swap, its `base` and a running `for`.
 
 `repeat` and `forEach` take their body as `actions` (the key `do` already names the action); `forEach` also takes
 `limit` and `as` (a name for the member, 12.4). `setVar`/`addVar` write
@@ -930,7 +933,7 @@ ground (the touched cells are then drawn by the terrain). Savestates keep the ch
 | `lifetime`, `maxAlive` | any | seconds before `expire` + destroy; cap on live copies |
 | `projectile` | flying things | `speed`, `homing` 0..1, `arc`, `gravity`, `spin`, `face`, `hits` (filter), `hitRadius`, `pierce`, `onGround`, `range`; events `impact`, `expire` |
 | `mover` | moving props | `path` (`@path` or points), `mode` loop/pingpong/once, `speed`, `wait`, `spin`, `swing`, `running`, `pose` (or `poses`) {name: {`offset` [x,y,z] or world `pos`, `rotY`}}, `turnSpeed` (deg/s, 90); inputs `start stop reverse goto` and each pose's name; events `arrive`, `end`. A walkable mover snaps between poses |
-| `area` | zones | `shape` (`circle {radius}` / `rect {size: [w, d]}` / `polygon {points}` / `sector {radius, angle}`: a cone along its facing), `watch` (filter), `show`, `color`, `tick`, `surface` (below); events `enter exit inside empty occupied`; filters `in:@area` |
+| `area` | zones | `shape` (`circle {radius}` / `rect {size: [w, d]}` / `polygon {points}` / `sector {radius, angle}`: a cone along its facing), `watch` (filter), `show`, `color`, `tick`, `surface` (below); events `enter exit inside empty occupied`; filters `in:@area`, `in:@<area template>`. `enter` comes in the same frame as the entry (spawned into it, the area laid under it, or walked in), so a status applied on `enter` is on before any tower's next shot; `inside` first fires one full `tick` later, so a "while in the zone" status is applied on `enter` and refreshed on `inside` |
 | `light` | anything that shines | `color`, `range` (m it lights), `intensity` (1), `cone` (degrees: a beam along its facing; none = all round), `aim`, `height` (3; lower = longer beam), `flicker`, `on`; also on units (`unit` op) and attaches (12.7a) |
 | `pickup` | collectibles | `by` (filter, e.g. `king`), `radius`, `magnet`, `consume`; event `pickup` |
 | `interact` | king-usable (props, places, attached slots, and **units**: templates, placed, spawned and wave units; the prompt follows a walking unit) | `prompt` (`{cost}` shows the cost), `cost` (gold), `pay` (items: `[{"var": "$bread", "amount": 1, "label": "bread"}]`, level variables paid with the gold, all at once; refused with a notice and `interactRefused` when any is short), `when` day/night/always, `radius`, `repeat`, `choices` (up to 4 `{id, label, description, cost, pay, icon}`: the game's upgrade-choice popup; the chosen cost is paid and `event.choice` is its id); event `interact` |
@@ -1029,6 +1032,10 @@ points, buildings and the castle included (`setStat` on `castle` with `"for": "n
 weapon's id (`vanilla:P Fire Archer`, so any weapon can be told apart), and `fire` for weapons that leave burning
 ground (fire archers, the Fire Spire, Firewing, potion vials) or that the game marks as fire or explosion damage
 (exploders, the fire snail's blast); the burning ground's ticks are `fire` too, credited to the shooter.
+`stalemate` is the game's stalled-night tiebreaker: once a night has gone 30 s with nothing left to spawn, no enemy
+dying, no building falling and no `Boss` alive, it drains the first enemy at about 5 HP/s (no attacker) until
+something changes. A rooted keeper or dummy holding a night open (`holdNight`) gets drained by it; a status
+`{"damageTaken": {"mult": 0, "types": ["stalemate"]}}` (or the `Boss` tag) exempts it.
 
 A status's rules also hear the carrier's own events (`damaged`, `signal`, `attack`...), so a status can end itself:
 `{"when": "damaged", "do": [{"do": "removeStatus", "status": "asleep"}]}` (see "Sleeping enemies" in the cookbook).

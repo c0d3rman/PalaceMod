@@ -109,7 +109,7 @@ Names an expression can use for entities in a rule.
 | Event | Params | other | event.value | Fires when |
 |---|---|---|---|---|
 | `near` | `filter`*, `range`*, `edge` | entity |  | A matching entity comes within (or leaves) a range of it. |
-| `enter` (area) |  | entrant (entrant = other) |  | (areas) An entity matching the area's watch filter enters. |
+| `enter` (area) |  | entrant (entrant = other) |  | (areas) An entity matching the area's watch filter enters. Same frame: an entity spawned into the area, an area laid under one, and one walking in (checked every frame) get it in that same frame, so a status applied on enter is on before the next frame's attacks. `inside` first fires one full tick after entering: pair it with enter for a status that holds while inside. |
 | `exit` (area) |  | entity |  | (areas) An entity leaves. |
 | `inside` (area) |  | entity |  | (areas) For each entity inside, after every full `tick` it has spent inside. |
 | `empty` (area) |  |  |  | (areas) The last watched entity left. |
@@ -917,7 +917,7 @@ Combine with `and`, `or`, `not` and parentheses.
 - `path`: Paths.
 - `#label`: Has a label (#"two words" for a label with spaces).
 - `is:<template>`: Made from a template (is:goblin, is:vanilla:Ogre, is:'vanilla:E Ogre').
-- `in:@area`: Inside an area (in:self inside this area).
+- `in:@area`: Inside an area (in:self inside this area). @<area template>: inside any area made from it (e.g. any of many spawned pools), checked live.
 - `has:<status>`: Has a status.
 - `type:<Kind>`: A building of that kind (type:Mill, type:"Defense Tower").
 - `include:<what>`: Matches everything, but lets a selector also see what it skips by default: include:dead, include:disabled, include:unbuilt, include:self (repeat it for more).

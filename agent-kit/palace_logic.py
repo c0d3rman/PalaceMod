@@ -1518,7 +1518,8 @@ class _Checker:
             if not f.arg.startswith("@"):
                 self.issues.append((col, f'in: takes @name or self, not "{f.arg}"'))
                 return
-            if s.names is not None and f.arg[1:] not in s.names:
+            # @name (a place or attach) or @template (inside any area made from it)
+            if s.names is not None and f.arg[1:] not in s.names and not (s.templates is not None and f.arg[1:] in s.templates):
                 self.issues.append((col, f'nothing is named "{f.arg}"' + suggest(f.arg[1:], s.names, "@")))
             return
         if term == "type":

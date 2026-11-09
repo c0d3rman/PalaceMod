@@ -47,6 +47,9 @@ namespace PalaceMod.Builder.Logic
         public static event Action<LogicWorld> Ending;
         /// <summary>Every polling step (10 Hz of game time), after the core's `near` polling: L2's area poller.</summary>
         public static event Action<LogicWorld, double> Polled;
+        /// <summary>Every drain, once its queue is empty (at least once a frame): L2's same-frame area entries. Events
+        /// raised here are delivered in the same drain.</summary>
+        public static event Action<LogicWorld> Settled;
 
         internal static void RaiseStarted(LogicWorld w) => Started?.Invoke(w);
         internal static void RaiseEnding(LogicWorld w) => Ending?.Invoke(w);
@@ -681,17 +684,29 @@ namespace PalaceMod.Builder.Logic
             }
         }
 
-        /// <summary>Drain the queue (events actions raise land at the back and run now too), up to the budget.</summary>
+        /// <summary>
+        /// Drain the queue (events actions raise land at the back and run now too), up to the budget. Once it's empty,
+        /// <see cref="Settled"/> lets L2 raise what the drain's actions caused at once (an entity spawned into an area,
+        /// an area laid under one: `enter`), and those events run in the same drain, so their effects (a status
+        /// applied on `enter`) are in place before the game's next Update.
+        /// </summary>
         public void Drain()
         {
-            while (queue.Count > 0)
+            for (int pass = 0; ; pass++)
             {
-                if (firingsThisFrame >= Caps.FiringsPerFrame)
+                while (queue.Count > 0)
                 {
-                    if (!throttledThisFrame) { throttledThisFrame = true; throttled++; TraceAdd("?", null, null, queue.Peek().Name, TraceOutcome.Throttled, $"over {Caps.FiringsPerFrame} rule firings this frame; {queue.Count} events wait for the next", 0, null); }
-                    return;
+                    if (firingsThisFrame >= Caps.FiringsPerFrame)
+                    {
+                        if (!throttledThisFrame) { throttledThisFrame = true; throttled++; TraceAdd("?", null, null, queue.Peek().Name, TraceOutcome.Throttled, $"over {Caps.FiringsPerFrame} rule firings this frame; {queue.Count} events wait for the next", 0, null); }
+                        return;
+                    }
+                    Deliver(queue.Dequeue());
                 }
-                Deliver(queue.Dequeue());
+                if (pass >= 4 || Settled == null || Current != this) return;
+                try { Settled(this); }
+                catch (Exception ex) { TraceAdd("level", null, null, "settle", TraceOutcome.Error, ex.Message, 0, null); return; }
+                if (queue.Count == 0) return;
             }
         }
 

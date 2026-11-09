@@ -415,8 +415,9 @@ namespace PalaceMod.Builder.Model.Logic
                 case "in":
                     if (f.Arg == "self") return;
                     if (!f.Arg.StartsWith("@")) { Issues.Add(new ExprIssue(col, $"in: takes @name or self, not \"{f.Arg}\"")); return; }
-                    if (scope.Names != null && !scope.Names.Contains(f.Arg.Substring(1)))
-                        Issues.Add(new ExprIssue(col, $"nothing is named \"{f.Arg}\"" + Suggest(f.Arg.Substring(1), scope.Names, "@")));
+                    // @name (a place or attach) or @template (inside any area made from it)
+                    if (scope.Names != null && !scope.Names.Contains(f.Arg.Substring(1)) && !(scope.Templates?.Contains(f.Arg.Substring(1)) ?? false))
+                        Issues.Add(new ExprIssue(col, $"nothing is named \"{f.Arg}\"" +Suggest(f.Arg.Substring(1), scope.Names, "@")));
                     return;
                 case "type": return;
                 case "include":

@@ -115,6 +115,30 @@ namespace PalaceMod.Tests
 
         private static double Num(LogicWorld w, string var) => w.GetVar(w.Level, var).Num;
 
+        /// <summary>LogicWorld.Settled (L2's same-frame area entries) runs once the queue is empty, and what it raises
+        /// is delivered in the same drain (so a status applied on `enter` is on before the game's next frame).</summary>
+        public static void SettledEventsRunInTheSameDrain()
+        {
+            var w = NewWorld("""{ "vars": { "n": 0, "seen": -1 }, "rules": [ { "when": { "on": "signal", "name": "entered" }, "do": [ { "do": "addVar", "name": "$n", "value": 1 } ] } ] }""");
+            w.BeginLevel();
+            int calls = 0;
+            Action<LogicWorld> settle = x =>
+            {
+                calls++;
+                if (calls == 1) x.Raise("signal", x.Level, null, 0, null, "entered");
+                // a handler that keeps raising is cut off after a few passes
+                if (calls > 1) x.Raise("signal", x.Level, null, 0, null, "other");
+            };
+            LogicWorld.Settled += settle;
+            try
+            {
+                w.Drain();
+                Assert.Equal(1.0, Num(w, "n"), "the settle's event ran in the same drain");
+                Assert.True(calls <= 5, $"bounded passes ({calls})");
+            }
+            finally { LogicWorld.Settled -= settle; }
+        }
+
         public static void EveryTimerFiresOnFixedSteps()
         {
             var w = NewWorld("""{ "vars": { "n": 0 }, "rules": [ { "when": { "on": "every", "seconds": 1 }, "do": [ { "do": "addVar", "name": "$n", "value": 1 } ] } ] }""");

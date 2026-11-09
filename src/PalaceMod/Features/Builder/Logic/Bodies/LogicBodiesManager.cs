@@ -25,6 +25,7 @@ namespace PalaceMod
             LogicServices.Factory = EntityFactory.Instance;
             LogicServices.ExtraCandidates = (c, r, into) => VanillaProjectiles.Query(c.ToVector3(), r, into);
             LogicWorld.Polled += (w, t) => { corePolledAt = Time.time; Poll(t); };
+            LogicWorld.Settled += AreaPoller.Settle;
             // Cleared when a world ends, never when one starts: Started fires after the level's places are built, and
             // clearing then dropped every placed walkable deck, surface and space before its scan.
             LogicWorld.Ending += _ => { SessionChanged(); cleared = true; };
