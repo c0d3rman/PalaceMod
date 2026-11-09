@@ -86,7 +86,7 @@ Names an expression can use for entities in a rule.
 | `death` |  | killer (killer = other, victim = subject) |  | It dies (a unit) or is knocked out (a building or the king). `other` is the killer (may be none). |
 | `damaged` | `min` | attacker (attacker = other) | number: the damage taken | It takes damage (not when modifiers reduce it to 0). |
 | `healed` |  | healer (healer = other) | number: the amount healed | It is healed. |
-| `hpBelow` | `pct`* |  | number: hpPct | Its hp crosses below a fraction (edge-triggered; re-arms when healed above). |
+| `hpBelow` | `pct`* |  | number: hpPct | Its hp crosses below a fraction (edge-triggered; re-arms when healed above). Only its own hp: no `of`. |
 | `attack` | `attack` | target (target = other) |  | It attacks (any attack, vanilla ones included). |
 | `hit` |  | victim (victim = other) | number: the damage dealt | Its attack, projectile or damage action damaged something. |
 | `kill` |  | victim (victim = other) |  | Something it damaged died from that damage. |

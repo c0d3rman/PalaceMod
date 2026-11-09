@@ -12,6 +12,9 @@
     "id": "ghost",
     "base": "vanilla:E Ghost",
     "name": "Lantern ghost",
+    "movement": {
+     "mode": "hold"
+    },
     "rules": [
      {
       "when": {
