@@ -682,6 +682,8 @@ namespace PalaceMod.Builder.Model.Logic
             Fn("inside", LType.Bool, "Whether it is inside an area.", ["entity"], method: true, onlyOn: LType.Entity);
             Fn("at", LType.Any, "The item at index i (0-based).", ["number"], method: true, onlyOn: LType.List);
             Fn("has", LType.Bool, "Whether the list or set contains x.", ["any"], method: true, onlyOn: LType.List);
+            Fn("sample", LType.List, "k distinct items of the list or set picked at random (the level's seeded random), in random order; no k: all of them, shuffled. A set gives a set.", ["number?"], method: true, onlyOn: LType.List,
+                example: "['tax', 'walls', 'haste', 'scouts'].sample(3)");
 
             // ---- Filter terms ---------------------------------------------------------------------------------
             foreach (var (n, d) in new[]

@@ -746,6 +746,7 @@ Selector functions anchor at `self`; call them as methods (`castle.count('enemy'
 | `<entity>.inside(entity)` | bool | Whether it is inside an area. |
 | `<list>.at(number)` | any | The item at index i (0-based). |
 | `<list>.has(any)` | bool | Whether the list or set contains x. |
+| `<list>.sample(number?)` | list | k distinct items of the list or set picked at random (the level's seeded random), in random order; no k: all of them, shuffled. A set gives a set. e.g. `['tax', 'walls', 'haste', 'scouts'].sample(3)` |
 
 ## Properties
 
@@ -834,8 +835,8 @@ What each JSON block accepts (a field not listed draws an "unknown field" warnin
 - **rect**: `size`
 - **polygon**: `points`
 - **pickup**: `by`, `radius`, `magnet`, `consume`
-- **interact**: `prompt`, `cost`, `when`, `radius`, `repeat`, `pay`, `choices` (blocks: `choices[]` → choice, `pay[]` → pay)
-- **choice**: `id`, `label`, `description`, `cost`, `pay`, `icon` (blocks: `pay[]` → pay)
+- **interact**: `prompt`, `cost`, `when`, `radius`, `repeat`, `pay`, `choices`, `offer` (blocks: `choices[]` → choice, `pay[]` → pay)
+- **choice**: `id`, `label`, `description`, `cost`, `pay`, `icon`, `if` (blocks: `pay[]` → pay)
 - **pay**: `var`, `amount`, `label`
 - **part**: `entity`, `offset`, `rotY`, `team`, `name`, `follow`, `onParentDeath`, `damageToParent`, `damageToGroup`, `damageKept`
 - **attack**: `id`, `replace`, `cooldown`, `jitter`, `range`, `minRange`, `when`, `targeting`, `launch`, `weapon`, `do` (blocks: `launch` → launch)

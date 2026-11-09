@@ -3404,6 +3404,17 @@
       "description": "Whether the list or set contains x.",
       "method": true,
       "onlyOn": "list"
+    },
+    {
+      "name": "sample",
+      "args": [
+        "number?"
+      ],
+      "returns": "list",
+      "description": "k distinct items of the list or set picked at random (the level's seeded random), in random order; no k: all of them, shuffled. A set gives a set.",
+      "method": true,
+      "onlyOn": "list",
+      "example": "['tax', 'walls', 'haste', 'scouts'].sample(3)"
     }
   ],
   "properties": [
@@ -4542,7 +4553,8 @@
         "radius",
         "repeat",
         "pay",
-        "choices"
+        "choices",
+        "offer"
       ],
       "children": {
         "choices[]": "choice",
@@ -4556,7 +4568,8 @@
         "description",
         "cost",
         "pay",
-        "icon"
+        "icon",
+        "if"
       ],
       "children": {
         "pay[]": "pay"
