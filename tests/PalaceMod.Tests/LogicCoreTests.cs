@@ -391,6 +391,25 @@ namespace PalaceMod.Tests
             Assert.True(w.FindNamed("hero") == f, "@name moves to the new entity");
         }
 
+        public static void LevelBoundRefsResolveAgainstTheLevelOrErrorNamingTheTemplate()
+        {
+            var w = NewWorld("""{ "vars": { "next": 2 }, "places": [ { "id": "route", "kind": "path" } ] }""", """{ "pillar": { "kind": "logic" } }""");
+            var p = Place(w, """{ "id": "p1" }""", new Vec(0, 0, 0), "pillar");
+            var ctx = new LogicContext { World = w, Self = p };
+            Value E(string s) => ExprCompiler.Compile(s, "test")(ctx);
+            Assert.Equal(2.0, E("$next").Num, "the level's var");
+            Assert.Equal(true, Values.ToBool(E("@route == none")), "a declared name with nothing behind it is none");
+            string Err(string s) { try { E(s); return null; } catch (LogicError e) { return e.Message; } }
+            string a = Err("$wind");
+            Assert.True(a != null && a.Contains("\"$wind\"") && a.Contains("template \"pillar\""), "missing var names the var and template: " + a);
+            string b = Err("@snail-route.pos");
+            Assert.True(b != null && b.Contains("\"@snail-route\"") && b.Contains("template \"pillar\""), "missing name: " + b);
+            var lv = new LogicContext { World = w, Self = w.Level };
+            string c = null;
+            try { ExprCompiler.Compile("$wind", "t")(lv); } catch (LogicError e) { c = e.Message; }
+            Assert.True(c != null && !c.Contains("template"), "the level's own script gets no template note: " + c);
+        }
+
         public static void CompileErrorsAreTracedNotThrown()
         {
             var w = NewWorld("""{ "rules": [ { "when": "levelStart", "if": "1 +", "do": [] }, { "when": "levelStart", "do": [ { "do": "nosuch" } ] } ] }""");

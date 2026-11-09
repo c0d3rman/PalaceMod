@@ -250,8 +250,14 @@ class Game:
         if text.startswith(self.LOADS):
             # A scene change can't start while another is running (e.g. right after `menu`).
             deadline = time.time() + 60
-            while time.time() < deadline and json.loads(self.raw("agent status", timeout)).get("loading"):
+            while True:
+                st = json.loads(self.raw("agent status", timeout))
+                if not st.get("loading") or time.time() >= deadline:
+                    break
                 time.sleep(0.5)
+            # The level loads the game has done so far: wait_level_day waits for the next one, not the level still
+            # showing from before (replaying a level looks loaded until its transition starts).
+            self.loads_before = st.get("loads")
         result = self.raw("agent " + text, timeout)
         try:
             return json.loads(result)
@@ -276,8 +282,11 @@ class Game:
         raise Fail(f"Timed out after {timeout} s waiting for {what}; last status: {json.dumps(last)}")
 
     def wait_level_day(self, timeout=90):
-        time.sleep(1.0)
-        return self.wait(lambda s: s.get("inLevel") and not s.get("loading") and s.get("time") == "day", timeout, "the level to load")
+        before = getattr(self, "loads_before", None)
+        if before is None:
+            time.sleep(1.0)   # an older mod without the load counter
+        return self.wait(lambda s: s.get("inLevel") and not s.get("loading") and s.get("time") == "day"
+                         and (before is None or (s.get("loads") or 0) > before), timeout, "the level to load")
 
     def log_size(self):
         try:
@@ -440,6 +449,8 @@ class LibraryRef:
         self.origin = origin
         self.snapshot = {}
         self.meta = {}
+        self.renames = []   # (folder, old id, new id): shared items renamed by ops; save_library moves their pictures
+        self.skipped = []   # warnings for library files that could not be read (skipped)
 
     def exists(self):
         return True
@@ -502,13 +513,29 @@ LOGIC_KINDS = ("entities", "statuses", "presets")
 LOGIC_KIND_NAME = {"entities": "entity", "statuses": "status", "presets": "preset"}
 
 
+def _read_item(ref, f, kind):
+    """One library file as pack JSON, or None (and a note in ref.skipped) when it can't be read: one broken file never
+    stops the rest of the library from loading."""
+    try:
+        item = migrate_pack(json.loads(f.read_text(encoding="utf-8")))
+        if not isinstance(item, dict):
+            raise ValueError("not a JSON object")
+        return item
+    except (OSError, ValueError, AttributeError, TypeError) as e:
+        ref.skipped.append({"severity": "warning", "file": f"{kind}/{f.name}", "path": "",
+                            "message": f"can't be read, so it's skipped (levels that use it will miss it): {e}"})
+        return None
+
+
 def load_library(ref):
     data = {"format": "palace-builder", "version": PACK_VERSION, "id": LIBRARY_ID, "name": "My library", "assets": {},
             "units": [], "waveSets": [], "levels": [], "entities": [], "statuses": [], "presets": []}
     # The behaviour engine's shared definitions: library/<entities|statuses|presets>/<id>.json, one item each.
     for kind in LOGIC_KINDS:
         for f in _item_files(ref.root, kind):
-            item = migrate_pack(json.loads(f.read_text(encoding="utf-8")))
+            item = _read_item(ref, f, kind)
+            if item is None:
+                continue
             d = (item.get(kind) or [None])[0]
             if not isinstance(d, dict):
                 continue
@@ -518,7 +545,9 @@ def load_library(ref):
             ref.meta[(kind, f.stem)] = item.get("library") or {}
     for kind in ("levels", "enemies"):
         for f in _item_files(ref.root, kind):
-            item = migrate_pack(json.loads(f.read_text(encoding="utf-8")))
+            item = _read_item(ref, f, kind)
+            if item is None:
+                continue
             meta = item.get("library") or {}
             if kind == "levels":
                 if ref.origin and meta.get("origin") != ref.origin:
@@ -606,6 +635,11 @@ def save_library(ref, data):
             prefix = {"levels": "level", "enemies": "enemy"}.get(kind, kind)
             os.replace(f, ref.root / "trash" / f"{prefix}-{iid}-{stamp}.json")
         del ref.snapshot[key]
+    for folder, old, new in ref.renames:
+        png, to = ref.root / folder / (old + ".png"), ref.root / folder / (new + ".png")
+        if png.exists() and not to.exists():
+            os.replace(png, to)
+    ref.renames = []
     assets = json.dumps(data.get("assets") or {}, sort_keys=True)
     if assets != ref.snapshot.get("assets"):
         _write_json(ref.root / "assets.json", data.get("assets") or {})
@@ -918,6 +952,8 @@ class Ops:
         self._terrain_ro = {}
         self._grids = {}
         self._prop_ids = None
+        self.store = None       # the LibraryRef (or pack.json path) being edited, for ops that rename library files
+        self.edited = set()     # ids of shared items (units, entities, statuses, presets) the ops changed
 
     def level(self, op):
         # "level" names the level; the water op's numeric "level" is its water height, not a level id.
@@ -1099,11 +1135,18 @@ class Ops:
         return f"set {path}"
 
     def walk(self, path, create=False):
-        parts = re.findall(r"[^.\[\]]+|\[\d+\]", path)
+        # [3] indexes a list; [id=fire] is the list item with that id (the form check and apply report items in).
+        parts = re.findall(r"\[id=[^\]]+\]|[^.\[\]]+|\[\d+\]", path)
         cur = self.data
         for idx, p in enumerate(parts):
             last = idx == len(parts) - 1
-            key = int(p[1:-1]) if p.startswith("[") else p
+            if p.startswith("[id="):
+                want = p[4:-1]
+                key = next((i for i, x in enumerate(cur if isinstance(cur, list) else []) if isinstance(x, dict) and x.get("id") == want), None)
+                if key is None:
+                    raise Fail(f"{path}: no item with id {want!r}")
+            else:
+                key = int(p[1:-1]) if p.startswith("[") else p
             if last:
                 return cur, key
             nxt = cur[key] if isinstance(cur, list) else cur.get(key)
@@ -1703,6 +1746,7 @@ class Ops:
         units = ensure(self.data, "units", [])
         units[:] = [x for x in units if x.get("id") != u["id"]]
         units.append(u)
+        self.edited.add(u["id"])
         return f"unit {u['id']}"
 
     # ---- behaviour engine (level-building.md, "Behaviour"; logic-schema.json) -------------------------------------
@@ -1724,6 +1768,7 @@ class Ops:
         d = {k: v for k, v in op.items() if k not in ("op", "level")}
         if not ID_RE.match(str(d.get("id", ""))):
             raise Fail(f"{what} needs an \"id\" (1-64 of a-z 0-9 . _ -)")
+        self.edited.add(d["id"])
         return f"{what} {d['id']} " + self._upsert(ensure(self.data, kind, []), d)
 
     def op_entity(self, op):
@@ -1742,6 +1787,148 @@ class Ops:
         """{"op":"preset","id":"my-trap","name":"...","params":{"dmg":{"type":"number","default":10}},"rules":[...]}:
         adds or replaces a pack preset (used as {"preset": id, "with": {...}} in rules, or a place's "preset")."""
         return self._def(op, "presets", "preset")
+
+    # ---- shared items: delete and rename ---------------------------------------------------------------------------
+
+    _SHARED_OPS = {"unit": "units", "entity": "entities", "status": "statuses", "preset": "presets"}
+    # Fields whose whole value is a name or prose, never a reference: a rename doesn't touch them.
+    _PROSE = {"id", "name", "description", "labels", "label"}
+
+    def _containers(self):
+        """(label, json) for every level (with its nights) and shared item."""
+        sets = {w.get("id"): w for w in self.data.get("waveSets") or []}
+        for lv in self.data.get("levels") or []:
+            yield f"level {lv.get('id')}", [lv, sets.get(lv.get("waveSet"))]
+        for f in SHARED:
+            for x in self.data.get(f) or []:
+                if isinstance(x, dict):
+                    yield f"{LOGIC_KIND_NAME.get(f, 'unit')} {x.get('id')}", x
+
+    def users(self, field, iid):
+        """Where a shared item is named (levels and other shared items), as "level gorge", "entity slime-pool"..."""
+        found = []
+        for label, tree in self._containers():
+            own = isinstance(tree, dict) and tree.get("id") == iid and any(tree is x for x in self.data.get(field) or [])
+            if not own and iid in mentions(tree):
+                found.append(label)
+        return found
+
+    def _shared_item(self, op, verb):
+        kind = op["op"][len(verb) + 1:]
+        field = self._SHARED_OPS[kind]
+        return kind, field
+
+    def _remove_shared(self, op):
+        kind, field = self._shared_item(op, "remove")
+        iid = op["id"]
+        lst = self.data.get(field) or []
+        if not any(isinstance(x, dict) and x.get("id") == iid for x in lst):
+            raise Fail(f"no {kind} {iid!r} in the {'library' if isinstance(self.store, LibraryRef) else 'pack'}")
+        if isinstance(self.store, LibraryRef) and self.store.origin:
+            raise Fail("open the whole library (pack \"library\") to delete shared items: other levels may use it")
+        users = self.users(field, iid)
+        if users and not op.get("force"):
+            raise Fail(f"{kind} {iid!r} is used by {', '.join(users)}: change those first, or add \"force\": true to delete it anyway "
+                       "(their references then break)")
+        self.data[field] = [x for x in lst if not (isinstance(x, dict) and x.get("id") == iid)]
+        self.edited.add(iid)
+        return f"removed {kind} {iid}" + (f" (still named by {', '.join(users)})" if users else "") + (" (to library/trash)" if isinstance(self.store, LibraryRef) else "")
+
+    def op_remove_unit(self, op):
+        """{"op":"remove_unit","id":"brute"} (also remove_entity, remove_status, remove_preset): deletes a shared item.
+        Refuses while a level or another item names it, listing them, unless "force": true. Library files go to
+        library/trash."""
+        return self._remove_shared(op)
+
+    op_remove_entity = op_remove_unit
+    op_remove_status = op_remove_unit
+    op_remove_preset = op_remove_unit
+
+    @staticmethod
+    def _rewrite_text(s, old, new, field):
+        """Rewrites the id inside text: is:/@@ (units, entities), has: (statuses) and quoted literals."""
+        o = re.escape(old)
+        if field in ("units", "entities"):
+            s = re.sub(r"(\bis:|@@)" + o + r"(?![a-z0-9._-])", lambda m: m.group(1) + new, s)
+        if field == "statuses":
+            s = re.sub(r"(\bhas:)" + o + r"(?![a-z0-9._-])", lambda m: m.group(1) + new, s)
+        return re.sub(r"(['\"])" + o + r"\1", lambda m: m.group(1) + new + m.group(1), s)
+
+    def _rewrite(self, tree, old, new, field, key=None):
+        if isinstance(tree, dict):
+            for k in list(tree):
+                tree[k] = self._rewrite(tree[k], old, new, field, k)
+            return tree
+        if isinstance(tree, list):
+            for i, x in enumerate(tree):
+                tree[i] = self._rewrite(x, old, new, field, key)
+            return tree
+        if not isinstance(tree, str) or key == "id":
+            return tree
+        if key not in self._PROSE:
+            for pre in ("", "=", "unit:" if field == "units" else None):
+                if pre is not None and tree.strip() == pre + old:
+                    return pre + new
+        return self._rewrite_text(tree, old, new, field)
+
+    def _residue(self, tree, old, where, path=""):
+        """JSON paths in tree that still name old (outside prose fields)."""
+        if isinstance(tree, dict):
+            for k, v in tree.items():
+                if k not in self._PROSE:
+                    self._residue(v, old, where, f"{path}.{k}" if path else k)
+        elif isinstance(tree, list):
+            for i, v in enumerate(tree):
+                self._residue(v, old, where, f"{path}[{i}]")
+        elif isinstance(tree, str) and old in mentions(tree):
+            where.append(path)
+
+    def op_rename_unit(self, op):
+        """{"op":"rename_unit","from":"brute","to":"ogre-brute"} (also rename_entity, rename_status, rename_preset):
+        changes a shared item's id and every reference to it in every level and shared item (spawns, waves, `entity`,
+        `status`, `preset`, is:/@@/has: and quoted ids in expressions). Refuses, listing them, if any reference it
+        can't rewrite safely remains. Display names don't change."""
+        kind, field = self._shared_item(op, "rename")
+        old, new = op["from"], op["to"]
+        if not ID_RE.match(str(new)):
+            raise Fail(f"\"to\" {new!r}: 1-64 of a-z 0-9 . _ -")
+        if isinstance(self.store, LibraryRef) and self.store.origin:
+            raise Fail("open the whole library (pack \"library\") to rename shared items: other levels may use it")
+        lst = self.data.get(field) or []
+        item = next((x for x in lst if isinstance(x, dict) and x.get("id") == old), None)
+        if item is None:
+            raise Fail(f"no {kind} {old!r}")
+        clash = ("units", "entities") if field in ("units", "entities") else (field,)
+        for f in clash:
+            if any(isinstance(x, dict) and x.get("id") == new for x in self.data.get(f) or []):
+                raise Fail(f"{new!r} is already a{'n' if f == 'entities' else ''} {LOGIC_KIND_NAME.get(f, 'unit')} id")
+        same = [f for f in SHARED if f != field and any(isinstance(x, dict) and x.get("id") == old for x in self.data.get(f) or [])]
+        if same:
+            raise Fail(f"can't rename {kind} {old!r}: a{'n' if same[0] == 'entities' else ''} {LOGIC_KIND_NAME.get(same[0], 'unit')} has the same id, "
+                       f"so its references can't be told apart; rename or remove that one first")
+        users = self.users(field, old)
+        for label, tree in self._containers():
+            self._rewrite(tree, old, new, field)
+        item["id"] = new
+        left = []
+        for label, tree in self._containers():
+            where = []
+            self._residue(tree, old, where)
+            left += [f"{label}: {w}" for w in where]
+        if left:
+            raise Fail(f"can't rename {kind} {old!r}: these still name it in a way the rename can't rewrite safely (another kind "
+                       f"with the same id, or text): {'; '.join(left[:20])}. Nothing was changed.")
+        if isinstance(self.store, LibraryRef):
+            folder = SHARED_FOLDER[field]
+            if (folder, old) in self.store.meta:
+                self.store.meta[(folder, new)] = self.store.meta[(folder, old)]
+            self.store.renames.append((folder, old, new))
+        self.edited |= {old, new}
+        return f"renamed {kind} {old} -> {new}" + (f" (rewrote references in {', '.join(users)})" if users else "")
+
+    op_rename_entity = op_rename_unit
+    op_rename_status = op_rename_unit
+    op_rename_preset = op_rename_unit
 
     def op_place(self, op):
         """{"op":"place","id":"plate1","entity":"<template>" | "preset":"timer","with":{...} | "kind":"area"|"path"|"point"|"logic"|...,
@@ -4338,17 +4525,160 @@ def scope_levels(data, level_ids):
     return dict(data, levels=levels, waveSets=[w for w in data.get("waveSets") or [] if w.get("id") in sets])
 
 
+# ---- Shared items checked where they're used (the mod's Model/Logic/LevelScope.cs) ------------------------------
+# Units, entities, statuses and presets are shared by every library level, and a template may name the level it runs
+# in ($vars, @names). So a level is checked with the shared items it uses (named anywhere in the level, its nights, or
+# an item it uses, transitively), each template in that level's context; items no level uses are checked alone, their
+# level references unchecked. One level's template never breaks another level.
+
+SHARED = ("units", "entities", "statuses", "presets")
+SHARED_FOLDER = {"units": "enemies", "entities": "entities", "statuses": "statuses", "presets": "presets"}
+_IN_TEXT = re.compile(r"(?:\bis:|@@|\bhas:)([a-z0-9._-]+)|['\"]([a-z0-9._-]+)['\"]")
+
+
+def mentions(tree):
+    """Every id a JSON tree names: whole strings (a leading '=' or 'unit:' dropped) and ids written in text (is:, @@,
+    has:, quoted literals in expressions)."""
+    found = set()
+    stack = [tree]
+    while stack:
+        t = stack.pop()
+        if isinstance(t, dict):
+            stack.extend(t.values())
+        elif isinstance(t, list):
+            stack.extend(t)
+        elif isinstance(t, str):
+            s = t.strip()
+            found.add(s[1:].strip() if s.startswith("=") else s)
+            if s.startswith("unit:"):
+                found.add(s[5:])
+            for m in _IN_TEXT.finditer(s):
+                found.add(m.group(1) or m.group(2))
+    return found
+
+
+def _shared_index(data):
+    idx = {}
+    for f in SHARED:
+        idx[f] = {}
+        for x in data.get(f) or []:
+            if isinstance(x, dict) and isinstance(x.get("id"), str) and x["id"] not in idx[f]:
+                idx[f][x["id"]] = x
+    return idx
+
+
+def level_uses(data, lv, index=None):
+    """{field: set of ids} of the shared items a level uses."""
+    index = index or _shared_index(data)
+    used = {f: set() for f in SHARED}
+    queue = [lv] + [w for w in data.get("waveSets") or [] if lv.get("waveSet") and w.get("id") == lv.get("waveSet")]
+    while queue:
+        for i in mentions(queue.pop()):
+            for f in SHARED:
+                if i in index[f] and i not in used[f]:
+                    used[f].add(i)
+                    queue.append(index[f][i])
+    return used
+
+
+def level_scope(data, level_id):
+    """The pack as one library level is checked: that level, its nights and the shared items it uses."""
+    lv = find_level(data, level_id)
+    used = level_uses(data, lv)
+    out_ = dict(data, levels=[lv], waveSets=[w for w in data.get("waveSets") or [] if lv.get("waveSet") and w.get("id") == lv.get("waveSet")])
+    for f in SHARED:
+        out_[f] = [x for x in data.get(f) or [] if isinstance(x, dict) and x.get("id") in used[f]]
+    return out_
+
+
+def unused_scope(data):
+    """The shared items no level uses, with no levels."""
+    index = _shared_index(data)
+    used = {f: set() for f in SHARED}
+    for lv in data.get("levels") or []:
+        for f, ids in level_uses(data, lv, index).items():
+            used[f] |= ids
+    out_ = dict(data, levels=[], waveSets=[])
+    for f in SHARED:
+        out_[f] = [x for x in data.get(f) or [] if isinstance(x, dict) and x.get("id") not in used[f]]
+    return out_
+
+
+_ITEM_PATH = re.compile(r"^(units|entities|statuses|presets|levels|waveSets)\[(\d+)\]")
+
+
+def attribute(scoped, issue, level=None):
+    """An issue of a scoped pack as the library reports it: the item named by id (units[id=snail].movement.path; a
+    level's own paths start with `level.`, its nights' with `nights.`, as the set op takes them) and "file", the library
+    file it comes from. A shared item's issue found in a level's context also says "level"."""
+    m = _ITEM_PATH.match(issue.get("path") or "")
+    if not m:
+        return issue
+    field, i, rest = m.group(1), int(m.group(2)), issue["path"][m.end():]
+    items = scoped.get(field) or []
+    iid = items[i].get("id") if i < len(items) and isinstance(items[i], dict) else None
+    if iid is None:
+        return issue
+    if field == "levels":
+        return {"severity": issue["severity"], "file": f"levels/{iid}.json", "path": "level" + rest, "message": issue["message"]}
+    if field == "waveSets":
+        owner = next((l.get("id") for l in scoped.get("levels") or [] if l.get("waveSet") == iid), None)
+        return {"severity": issue["severity"], **({"file": f"levels/{owner}.json"} if owner else {}),
+                "path": ("nights" if owner else f"waveSets[id={iid}]") + rest, "message": issue["message"]}
+    return {"severity": issue["severity"], "file": f"{SHARED_FOLDER[field]}/{iid}.json", **({"level": level} if level else {}),
+            "path": f"{field}[id={iid}]{rest}", "message": issue["message"]}
+
+
+def library_check(ref, data, level_ids=None, only_files=None, skipped=()):
+    """check_pack per library level (with the shared items it uses), then the unused items alone; attributed and
+    without duplicates. level_ids limits it to those levels (and skips the unused items); only_files keeps the issues
+    of those files (and checks every level, to find where those items are used)."""
+    issues, seen = list(skipped), set()
+
+    def add(i):
+        key = (i["severity"], i.get("file"), i.get("path"), i["message"])
+        if key not in seen and (only_files is None or i.get("file") in only_files):
+            seen.add(key)
+            issues.append(i)
+    for lv in data.get("levels") or []:
+        if level_ids is not None and lv.get("id") not in level_ids:
+            continue
+        scoped = level_scope(data, lv["id"])
+        for i in check_pack(ref, scoped):
+            add(attribute(scoped, i, level=lv["id"]))
+    if level_ids is None:
+        rest = unused_scope(data)
+        for i in check_pack(ref, rest):
+            if i.get("path") in ("format", "id"):
+                continue
+            add(attribute(rest, i))
+    return issues
+
+
 def cmd_apply(env, args):
     ref = Ref(env)
     path, data = load_pack(env, args.pack)
     if args.fresh:
         fresh_level(env, ref, data, args.level)
     ops = Ops(env, ref, data, args.level)
+    ops.store = path
     ops_list = read_ops(args.ops)
     ops.run(ops_list)
-    # In the library, only the edited levels (and the nights and enemies they use) are checked: the rest is other work.
-    touched = {o.get("level") or args.level for o in ops_list} - {None} if isinstance(path, LibraryRef) else set()
-    issues = [] if args.no_check else check_pack(ref, scope_levels(data, touched) if touched else data)
+    if args.no_check:
+        issues = []
+    elif isinstance(path, LibraryRef):
+        # In the library, only the edited levels are checked, each with the shared items it uses (a template that
+        # names another level's $vars or @places is fine there). Ops that edit only shared items check those items,
+        # in every level that uses them.
+        touched = {o.get("level") if isinstance(o.get("level"), str) else args.level for o in ops_list} - {None}
+        if touched:
+            issues = library_check(ref, data, level_ids={l for l in touched if any(x.get("id") == l for x in data.get("levels") or [])}, skipped=path.skipped)
+        else:
+            files = {f"{SHARED_FOLDER[f]}/{x['id']}.json" for f in SHARED for x in data.get(f) or []
+                     if isinstance(x, dict) and x.get("id") in ops.edited}
+            issues = library_check(ref, data, only_files=files, skipped=path.skipped)
+    else:
+        issues = check_pack(ref, data)
     errors = [i for i in issues if i["severity"] == "error"]
     if not args.dry_run:
         save_pack(path, data)
@@ -4361,7 +4691,10 @@ def cmd_check(env, args):
     path, data = load_pack(env, args.pack)
     if args.level:
         find_level(data, args.level)
-    issues = check_pack(ref, scope_levels(data, {args.level}) if args.level else data)
+    if isinstance(path, LibraryRef):
+        issues = library_check(ref, data, level_ids={args.level} if args.level else None, skipped=path.skipped)
+    else:
+        issues = check_pack(ref, scope_levels(data, {args.level}) if args.level else data)
     result = {"pack": data.get("id"), "offline": issues}
     if args.live:
         g = Game(env)
@@ -5094,11 +5427,16 @@ def cmd_logic(env, args):
     if sub == "check":
         if not rest:
             raise Fail("logic check <pack> [level]")
-        _, data = load_pack(env, rest[0])
+        lpath, data = load_pack(env, rest[0])
         if len(rest) > 1:
             find_level(data, rest[1])
-            data = scope_levels(data, {rest[1]})
-        issues = logic_issues(data)
+            if isinstance(lpath, LibraryRef):
+                scoped = level_scope(data, rest[1])
+                issues = [attribute(scoped, i, level=rest[1]) for i in logic_issues(scoped)]
+            else:
+                issues = logic_issues(scope_levels(data, {rest[1]}))
+        else:
+            issues = logic_issues(data)
         ok = not any(i["severity"] == "error" for i in issues)
         out({"ok": ok, "errors": [i for i in issues if i["severity"] == "error"], "warnings": [i for i in issues if i["severity"] == "warning"]})
         if not ok:

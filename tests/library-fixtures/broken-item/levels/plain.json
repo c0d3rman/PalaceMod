@@ -1,0 +1,16 @@
+{
+  "format": "palace-builder",
+  "version": 3,
+  "id": "plain",
+  "name": "Plain",
+  "levels": [
+    {
+      "id": "plain",
+      "name": "Plain",
+      "host": "Nordfels",
+      "logic": { "rules": [ { "when": "dusk", "do": [ { "do": "message", "text": "Night falls" } ] } ] }
+    }
+  ],
+  "waveSets": [],
+  "library": { "created": "2026-11-09T05:00:00Z", "kind": "level" }
+}
