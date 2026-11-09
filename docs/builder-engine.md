@@ -806,7 +806,7 @@ Each behaviour below is pure data in the format above. Unit bases and meshes are
 **2. Kills convert the victim** (the user's example)
 
 ```jsonc
-{ "when": "kill", "if": "other.is('unit and not king')", "do": [{ "do": "convert", "target": "other", "team": "self.team", "hpPct": 0.5 }] }
+{ "when": "kill", "if": "other.is('unit and not king')", "do": [{ "do": "convert", "target": "other", "team": "=self.team", "hpPct": 0.5 }] }
 ```
 
 **3. A unit that multiplies every 8 s** (the user's example, capped)
