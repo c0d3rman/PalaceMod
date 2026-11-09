@@ -14,10 +14,14 @@ namespace PalaceMod.Builder.Model
         public Severity Severity { get; }
         public string Path { get; }
         public string Message { get; }
+        /// <summary>For a library item: the file it comes from, relative to the library ("entities/fire.json").</summary>
+        public string File { get; set; }
+        /// <summary>For a shared item checked in a level's context (LevelScope): that level's id.</summary>
+        public string Level { get; set; }
 
         public ValidationIssue(Severity severity, string path, string message) { Severity = severity; Path = path; Message = message; }
 
-        public override string ToString() => $"{(Severity == Severity.Error ? "error" : "warning")} {Path}: {Message}";
+        public override string ToString() => $"{(Severity == Severity.Error ? "error" : "warning")} {(File != null ? File + " " : "")}{Path}: {Message}{(Level != null ? $" (in level {Level})" : "")}";
     }
 
     /// <summary>What the validator needs to know about the game; ICatalog implements it. Null skips game checks.</summary>
