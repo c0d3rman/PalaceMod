@@ -37,7 +37,7 @@ namespace PalaceMod.Tests
         }
 
         /// <summary>TagManager.ETag as of game 2.14, spelled out because Assembly-CSharp isn't loadable from tests.</summary>
-        private static readonly string[] GameTags =
+        internal static readonly string[] GameTags =
         [
             "NONE", "PlayerOwned", "EnemyOwned", "Player", "CastleCenter", "MeeleFighter", "RangedFighter", "Flying", "PlayerUnit",
             "Building", "SiegeWeapon", "AUTO_Alive", "AUTO_KnockedOutAndHealOnDawn", "Wall", "InfrastructureEconomy",
@@ -64,7 +64,7 @@ namespace PalaceMod.Tests
             foreach (var key in new[] { "Flying", "LargeUnit", "Elite", "Solid", "StartDeactivated", "ActivatorUpgradesThis",
                          "canSpawnFlying", "canSpawnSmallGround", "canSpawnBigGround", "Upgrades ≤ castle level" })
                 Assert.NotNull(Descriptions.For(DescKind.Flag, key), $"flag {key}");
-            Assert.NotNull(Descriptions.For(DescKind.Behaviour, BehaviourTypes.SpawnOnDeath), "SpawnOnDeath");
+            Assert.NotNull(Descriptions.For(DescKind.Behaviour, "SpawnOnDeath"), "SpawnOnDeath");
             Assert.NotNull(Descriptions.For(DescKind.Weapon, "inherit"), "inherit weapon");
             foreach (var kind in new[] { "Castle", "Economy", "Military", "Wall", "Special", "Spawn", "Scenery", "Income", "Spawn line" })
                 Assert.NotNull(Descriptions.For(DescKind.SlotKind, kind), $"slot kind {kind}");

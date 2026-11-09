@@ -1,0 +1,86 @@
+{
+ "example": 23,
+ "title": "A war horn king action",
+ "doc": "Expressiveness check 23",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex23",
+  "name": "Example 23: War horn",
+  "levels": [
+   {
+    "id": "ex23",
+    "name": "Example 23: War horn",
+    "host": "Nordfels",
+    "logic": {
+     "vars": {
+      "horns": 0
+     },
+     "kingActions": [
+      {
+       "id": "horn",
+       "name": "War horn",
+       "when": "day",
+       "uses": {
+        "count": 1,
+        "per": "day"
+       }
+      }
+     ],
+     "rules": [
+      {
+       "when": {
+        "on": "kingAction",
+        "action": "horn"
+       },
+       "do": [
+        {
+         "do": "command",
+         "target": "all('player and unit', 20)",
+         "order": "follow"
+        },
+        {
+         "do": "setStat",
+         "target": "all('player and unit', 20)",
+         "stat": "moveSpeed",
+         "mult": 1.2,
+         "for": "night"
+        },
+        {
+         "do": "addVar",
+         "name": "horns",
+         "value": 1
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "do": [
+     {
+      "do": "spawn",
+      "entity": "vanilla:P Melee",
+      "count": 3,
+      "at": "pointNear(king, 3)",
+      "team": "player"
+     }
+    ]
+   },
+   {
+    "raise": "kingAction",
+    "on": "level",
+    "other": "king",
+    "name": "horn"
+   },
+   {
+    "expect": "$horns == 1",
+    "within": 3
+   }
+  ]
+ }
+}
