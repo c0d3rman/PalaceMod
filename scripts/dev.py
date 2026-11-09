@@ -136,6 +136,50 @@ def claim_game():
     OWNER.write_text(json.dumps({"root": str(ROOT), "started": stamp()}) + "\n")
 
 
+# Unity's own quit (SIGTERM, Cmd+Q) crashes during teardown often enough (a CVDisplayLink thread calls into freed
+# memory) that every stop used to risk a "Thronefall quit unexpectedly" dialog. A dev launch's mod (Core/DevExit.cs)
+# instead persists what a quit would (Application.quitting handlers, PlayerPrefs), flushes the logs and _exits on
+# request. Never SIGTERM a dev launch.
+EXIT_WAIT = 12
+
+
+def wait_gone(pids_fn, pids, seconds):
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        if not set(pids) & set(pids_fn()):
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def request_exit(game, pids_fn):
+    """Ask a dev launch to exit through DevExit. True once it's gone, False if it didn't exit in time, None if its
+    mod isn't listening (still starting, not a dev launch, an old build)."""
+    folder = game / "BepInEx/PalaceMod-dev"
+    ready = folder / "exit.ready"
+    pids = pids_fn()
+    try:
+        listening = int(ready.read_text().strip())
+    except (OSError, ValueError):
+        return None
+    if listening not in pids:
+        return None
+    (folder / "exit.request").write_text("dev.py stop\n")
+    gone = wait_gone(pids_fn, [listening], EXIT_WAIT)
+    if gone:
+        ready.unlink(missing_ok=True)
+        (folder / "exit.request").unlink(missing_ok=True)
+    return gone and not pids_fn()
+
+
+def kill_game(pids_fn):
+    """SIGKILL: no teardown, so no crash report; loses at most the last ~2 s of BepInEx log."""
+    for pid in pids_fn():
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(pid, signal.SIGKILL)
+    wait_gone(pids_fn, pids_fn(), 10)
+
+
 def stop_game(force=False):
     check_owner(force)
     pids = game_pids()
@@ -144,18 +188,23 @@ def stop_game(force=False):
         restore_display()
         OWNER.unlink(missing_ok=True)
         return
-    for pid in pids:
-        os.kill(pid, signal.SIGTERM)
-    for _ in range(30):
-        if not game_pids():
-            print("Thronefall stopped.")
-            break
-        time.sleep(0.5)
+    exited = request_exit(game_root(), game_pids)
+    if exited:
+        print("Thronefall stopped.")
+    elif exited is False:
+        kill_game(game_pids)
+        print("Thronefall force-stopped (it didn't exit on request).")
     else:
+        # Not a listening dev launch (the player's own game under --force, or still starting): quit it the normal
+        # way, so the game itself saves its settings, and kill it if that hangs.
         for pid in game_pids():
-            os.kill(pid, signal.SIGKILL)
-        time.sleep(1)
-        print("Thronefall force-stopped.")
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGTERM)
+        if wait_gone(game_pids, pids, 15):
+            print("Thronefall stopped.")
+        else:
+            kill_game(game_pids)
+            print("Thronefall force-stopped.")
     restore_display()
     OWNER.unlink(missing_ok=True)
 
@@ -1181,22 +1230,17 @@ def pool_lock():
 
 
 def stop_instance(instance):
-    pids = instance.pids()
-    if not pids:
+    """Every pool stop (stop, lease expiry, relaunch, instances reset/remove) goes through here: DevExit, else
+    SIGKILL. Never SIGTERM: Unity's quit is what crashes (see EXIT_WAIT)."""
+    if not instance.pids():
         return
-    for pid in pids:
-        with contextlib.suppress(ProcessLookupError):
-            os.kill(pid, signal.SIGTERM)
-    for _ in range(30):
-        if not instance.pids():
-            print(f"Stopped Thronefall on pool {instance}.")
-            return
-        time.sleep(0.5)
-    for pid in instance.pids():
-        with contextlib.suppress(ProcessLookupError):
-            os.kill(pid, signal.SIGKILL)
-    time.sleep(1)
-    print(f"Force-stopped Thronefall on pool {instance}.")
+    exited = request_exit(instance.game, instance.pids)
+    if exited:
+        print(f"Stopped Thronefall on pool {instance}.")
+        return
+    kill_game(instance.pids)
+    why = "it didn't exit on request" if exited is False else "its mod wasn't listening for an exit request yet"
+    print(f"Killed Thronefall on pool {instance} ({why}).")
 
 
 def pool_reap():

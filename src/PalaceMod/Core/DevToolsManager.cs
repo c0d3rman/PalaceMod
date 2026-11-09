@@ -38,6 +38,7 @@ namespace PalaceMod
             "timescale <x>          set Time.timeScale",
             "resolutions            list the current and available display modes",
             "setres <w> <h> <hz>    switch display mode (keeps the fullscreen mode)",
+            "exit                   quit the game without Unity's teardown (what dev.py stop does; see DevExit)",
         ];
 
         internal static bool IsBuiltIn(string name) =>
@@ -73,12 +74,14 @@ namespace PalaceMod
             File.Delete(CommandRequest);
             foreach (string stale in Directory.GetFiles(DevDir, "command-*.response*")) File.Delete(stale);
             RegisterCommands();
+            DevExit.Start(DevDir);
             Log.Info("Dev tools enabled");
         }
 
         public override void Update()
         {
             if (!enabled) return;
+            DevExit.Poll();
             UpdateFakeInput();
 
             if (Time.unscaledTime < nextPoll) return;
@@ -245,6 +248,9 @@ namespace PalaceMod
                     Screen.SetResolution(int.Parse(args[1]), int.Parse(args[2]), Screen.fullScreenMode,
                         new RefreshRate { numerator = uint.Parse(args[3]), denominator = 1 });
                     return "";
+                case "exit":
+                    DevExit.RequestFromCommand();
+                    return "exiting";
                 case "help":
                     return "\n" + string.Join("\n", BuiltIns.Concat(DevCommands.All.Select(c => c.Usage)));
                 default:
