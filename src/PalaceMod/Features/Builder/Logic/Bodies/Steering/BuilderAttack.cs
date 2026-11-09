@@ -119,13 +119,14 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             if (cooldown > 0) return;
 
             var st = LogicSteeringManager.Get(gameObject);
+            float range = Range * (float)StatsService.Instance.Factor(Entity, "attackRange");
             // the attack's own rules, else the unit's override (then "foe" where it defers to the game), else "foe"
             var who = st ?? Self();
-            if (Targeting != null) TargetChooser.Choose(who, transform.position, Range, MinRange, 1, picks, Targeting);
-            else if (st?.Targeting == null || !TargetChooser.Choose(st, transform.position, Range, MinRange, 1, picks))
-                TargetChooser.Choose(who, transform.position, Range, MinRange, 1, picks, DefaultRules);
+            if (Targeting != null) TargetChooser.Choose(who, transform.position, range, MinRange, 1, picks, Targeting);
+            else if (st?.Targeting == null || !TargetChooser.Choose(st, transform.position, range, MinRange, 1, picks))
+                TargetChooser.Choose(who, transform.position, range, MinRange, 1, picks, DefaultRules);
             if (picks.Count == 0) { cooldown += 0.5f; return; }
-            cooldown += Cooldown * (1f + (1f - 2f * Random.value) * Jitter);
+            cooldown += Cooldown * (float)StatsService.Instance.Factor(Entity, "attackCooldown") * (1f + (1f - 2f * Random.value) * Jitter);
             Fire(picks[0]);
         }
 

@@ -60,8 +60,18 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             if (!st.BaseWritten)
             {
                 st.BaseWritten = true;
-                if (m.Speed is float s) { if (st.Enemy) st.Enemy.movementSpeed = s; if (st.Player) st.Player.movementSpeed = s; }
-                if (m.KeepDistance is float k) { if (st.Enemy) st.Enemy.keepDistanceOf = k; if (st.Player) st.Player.keepDistanceOf = k; }
+                if (m.Speed is float s)
+                {
+                    if (st.Enemy) st.Enemy.movementSpeed = s;
+                    if (st.Player) st.Player.movementSpeed = s;
+                    if (st.Entity != null) StatsService.Instance.BaseChanged(st.Entity, "moveSpeed");   // modifiers re-apply on the new base
+                }
+                if (m.KeepDistance is float k)
+                {
+                    if (st.Enemy) st.Enemy.keepDistanceOf = k;
+                    if (st.Player) st.Player.keepDistanceOf = k;
+                    if (st.Entity != null) StatsService.Instance.BaseChanged(st.Entity, "keepDistance");
+                }
             }
             if (!st.HomeApplied && Started(st))
             {

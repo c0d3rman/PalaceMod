@@ -443,7 +443,9 @@ namespace PalaceMod
                 else if (st.PathPoints != null && !st.PathDone && st.PathIndex < st.PathPoints.Count && SteerMovement.Flat(pos, st.PathPoints[st.PathIndex]) <= 1.5f) SteerMovement.Repath(st);
 
                 float baseSpeed = en != null ? en.movementSpeed : pu.movementSpeed;
-                float speed = st.MoveTo?.Speed ?? baseSpeed;
+                // a moveTo speed still feels slows and haste (the stat factor), like the game's own speed field
+                float? orderSpeed = st.MoveTo?.Speed * (float)StatsService.Instance.Factor(st.Entity, "moveSpeed");
+                float speed = orderSpeed ?? baseSpeed;
                 if (st.Move.Mode == "direct")
                 {
                     if (en != null && en.IsSlowed) speed *= SteerMovement.E_speedSlowed(en);
@@ -453,7 +455,7 @@ namespace PalaceMod
                     SteerMovement.DirectUpdate(st, speed, keep, rvo, Time.deltaTime);
                     return false;
                 }
-                if (st.MoveTo?.Speed is float s)
+                if (orderSpeed is float s)
                 {
                     __state = baseSpeed;
                     if (en != null) en.movementSpeed = s; else pu.movementSpeed = s;
