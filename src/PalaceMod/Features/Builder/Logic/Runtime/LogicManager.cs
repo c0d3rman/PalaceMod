@@ -349,7 +349,8 @@ namespace PalaceMod.Builder.Logic
             if (t.Outcome is not (TraceOutcome.Error or TraceOutcome.Throttled or TraceOutcome.Dropped or TraceOutcome.Capped)) return;
             string key = $"{t.Outcome}|{t.Path ?? t.Owner}|{t.Message}";
             if (!loggedTrace.Add(key) || loggedTrace.Count > 200) return;
-            string line = $"Behaviour {t.Outcome.ToString().ToLowerInvariant()}: {t.Owner} {t.Rule} ({t.Event}) {t.Path}: {t.Message}";
+            string where = t.Path != null && t.Message != null && t.Message.StartsWith(t.Path) ? "" : $" {t.Path}";
+            string line = $"Behaviour {t.Outcome.ToString().ToLowerInvariant()}: {t.Owner} {t.Rule} ({t.Event}){where}: {t.Message}";
             // A creator's mistake is a warning, not a mod error.
             Log.Warn(line);
         }
