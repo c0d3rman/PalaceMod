@@ -24,6 +24,20 @@ namespace PalaceMod.Builder.Logic.Bodies
             return any ? mask : GraphMask.everything;
         }
 
+        /// <summary>Where a unit spawned at a point stands: the nearest walkable ground node (host graphs and spaces)
+        /// within 20 m, else the point itself.</summary>
+        public static Vector3 UnitGround(Vector3 p)
+        {
+            var astar = AstarPath.active;
+            if (astar == null) return p;
+            var nn = NearestNodeConstraint.Walkable;
+            nn.graphMask = GroundMask();
+            var hit = astar.GetNearest(p, nn);
+            if (hit.node == null) return p;
+            var flat = new Vector2(hit.position.x - p.x, hit.position.z - p.z);
+            return flat.sqrMagnitude < 400f ? hit.position : p;
+        }
+
         /// <summary>Moving cuts follow at most 4 times a second (docs/builder-engine.md, "Movers").</summary>
         public static void UseMoverRate()
         {

@@ -40,6 +40,8 @@ namespace PalaceMod
                     "signal" => BodyDev.Signal(args.Skip(1).ToArray()),
                     "events" => BodyDev.Events(),
                     "vp" => BodyDev.Vanilla(args.Skip(1).ToArray()),
+                    "interact" => BodyDev.Interact(args.Skip(1).ToArray()),
+                    "pick" => BodyChoices.Pick(int.Parse(args.ElementAtOrDefault(1) ?? "0")),
                     _ => "logic-l2 status | nav ... | act ... | build ... | signal ...",
                 };
             });
@@ -111,6 +113,17 @@ namespace PalaceMod
         private static class ProjectileGone
         {
             private static void Prefix(AimbotProjectile __instance) => VanillaProjectiles.Released(__instance);
+        }
+
+        [HarmonyPatch(typeof(BuildSlot), nameof(BuildSlot.GET_LOCIDENTIFIER_CHOICENAME))]
+        private static class ChoiceName
+        {
+            private static bool Prefix(Choice choice, ref string __result)
+            {
+                if (!BodyChoices.TryKey(choice, out var key)) return true;
+                __result = key;
+                return false;
+            }
         }
 
         // ---- surfaces ------------------------------------------------------------------------------------------
