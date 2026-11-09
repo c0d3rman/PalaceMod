@@ -17,6 +17,7 @@ namespace PalaceMod.Builder.Logic.Bodies
         {
             LogicActions.Register("spawn", Spawn);
             LogicActions.Register("launch", Launch);
+            LogicActions.Register("destroy", Destroy, ActionFlags.PerTarget);
             foreach (var name in BuilderMover.BuiltInInputs.Concat(["show", "hide", "lock", "unlock"])) RegisterInput(name);
             LogicActions.RegisterInput("enable", (e, ev) => { SetEnabled(e); return false; });
             LogicActions.RegisterInput("disable", (e, ev) => { SetEnabled(e); return false; });
@@ -68,6 +69,19 @@ namespace PalaceMod.Builder.Logic.Bodies
                 if (e == null) continue;
                 if (then != null && then.Count > 0) ctx.With(spawned: e).Run(then);
             }
+        }
+
+        // destroy: effects (true), drops (false), silent (no `death` event)
+        private static void Destroy(LogicContext ctx, ActionParams p)
+        {
+            var e = p.Target;
+            if (e == null || e.Destroyed || e.Kind == "level") return;
+            bool effects = p.Bool("effects", true), drops = p.Bool("drops", false), silent = p.Bool("silent", false);
+            // Its own death rules still run: the event is queued before the object goes (they see its last position).
+            if (!silent) ctx.Raise("death", e, ctx.Self, 0, e.Position);
+            var pos = e.Position;
+            e.StaticPos = pos;
+            LogicServices.Factory?.Despawn(e, effects, drops);
         }
 
         // launch: entity, from, toward, projectile overrides, onImpact, then
