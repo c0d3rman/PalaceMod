@@ -334,8 +334,8 @@ namespace PalaceMod.Builder.Studio.Logic
         {
             string mesh = (string)Get(owner, "visual")?["mesh"];
             string shown = mesh == null ? null : mesh.Substring(mesh.IndexOf(':') + 1);
-            if (shown != null && shown.Length > 16) shown = shown.Substring(0, 15) + "…";
-            page.Row("Model", shown == null ? Dim("none") : Esc(shown), () => (mesh ?? "No model") + "\nClick to pick a model.", () => LogicStudio.OpenSide("Model…", p => MeshPicker(p, owner)));
+            StudioDock.DetailRow(page, "Model", shown == null ? Dim("none: click to pick one") : Esc(shown), false, null, () => LogicStudio.OpenSide("Model…", p => MeshPicker(p, owner)),
+                () => (mesh ?? "No model") + "\nClick to pick a model.");
         }
 
         private static string meshFilter = "";

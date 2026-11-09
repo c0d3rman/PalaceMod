@@ -137,8 +137,13 @@ namespace PalaceMod.Builder.Studio.Logic
         {
             RuleEditor.Tick();
             static string Norm(string s) => Plain(s).Replace("\n", " / ");
+            // "Seconds#2": the second row that matches (two fields with one label).
+            int nth = 1;
+            int hash = text.LastIndexOf('#');
+            if (hash > 0 && int.TryParse(text.Substring(hash + 1), out int k) && k > 0) { nth = k; text = text.Substring(0, hash); }
             for (int pass = 0; pass < 3; pass++)
             {
+                int seen = 0;
                 bool Match(string s)
                 {
                     string n = Norm(s);
@@ -152,7 +157,7 @@ namespace PalaceMod.Builder.Studio.Logic
                 foreach (var b in Buttons())
                 {
                     var t = b.GetComponent<TMPro.TextMeshProUGUI>();
-                    if (t == null || !b.gameObject.activeInHierarchy || !Match(t.text)) continue;
+                    if (t == null || !b.gameObject.activeInHierarchy || !Match(t.text) || ++seen < nth) continue;
                     b.onApply?.Invoke();
                     return "pressed row " + Norm(t.text);
                 }
@@ -160,7 +165,7 @@ namespace PalaceMod.Builder.Studio.Logic
                 {
                     if (!tile.gameObject.activeInHierarchy) continue;
                     string label = tile.Label != null ? tile.Label.text : tile.name;
-                    if (!Match(label)) continue;
+                    if (!Match(label) || ++seen < nth) continue;
                     tile.Press();
                     return "pressed tile " + Norm(label);
                 }
