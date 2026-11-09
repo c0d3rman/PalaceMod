@@ -11,7 +11,7 @@ using UnityEngine.SceneManagement;
     and LoadSceneAsync for the next one at the same moment, and waits for all of them together. Players always go
     level -> level select -> level, so the scene being loaded is never the one being unloaded. A level started from
     inside a level (Builder play/test/sandbox, `dev.py cmd level`, retry day) unloads and loads the *same* scene at
-    once, and that crashes natively now and then (about 1 in 10-400 reloads, depending on what was running): a
+    once, and that crashes natively now and then (3 in 145 reloads of a stress test; 0 in 264 with this): a
     SIGSEGV on the main thread in EarlyUpdate.UpdatePreloading (looptrace), inside UnityPlayer while it walks a
     std::map whose node was freed (UnityPlayer.dylib +0x4ef724, `ldr x8, [x22, #8]`), followed by mono's handler
     dying in exit. This runs the same transition with the unloads finished before the load starts; everything else

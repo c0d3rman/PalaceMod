@@ -63,10 +63,10 @@ All commands print JSON. Errors go to stderr as `{"error": "..."}` with exit cod
   walk (or fly) toward the player's buildings and the castle. The night ends when every enemy is dead; then dawn.
   The run is won after the last night. It is lost when the **castle** (its center building) is destroyed.
 - **Fighting is a night thing, building a day thing.** The game's own attacks (towers, troops, houses, the castle,
-  enemies and the king's weapon) only fire at night: by day an enemy still walks to its target but hurts nothing, and
-  towers stay idle. Building and upgrading are refused at night ("Only during the day"). A night ends the moment its
-  spawning is done and no enemy is left, so anything a level wants to do "after the wave" must happen before the last
-  enemy dies or hold the night open (section 12.16).
+  enemies and the king's weapon) only fire at night: by day an enemy can stand next to a building and hurt nothing,
+  and towers stay idle. Building and upgrading are refused at night ("Only during the day"). A night ends the moment
+  its spawning is done and no enemy is left, so anything a level wants to do "after the wave" must happen before the
+  last enemy dies or hold the night open (section 12.16).
 - **Gold.** Buildings with income pay at dawn (houses +1 each, mills, mines, harbours, fields). Enemies drop gold
   (the spawn group's `gold`, spread over its enemies). A night's leftover gold carries over. Day 1 starts with the
   wave set's `startingGold`.
