@@ -1446,6 +1446,8 @@ class _Checker:
             return POSITION if first in (POSITION, ENTITY) else NUMBER
         if n.name == "at" and n.target is not None and n.target.type == SET:
             return ENTITY
+        if n.name == "sample" and n.target is not None and n.target.type == SET:
+            return SET
         return f.returns
 
     def binary(self, n):
@@ -2853,9 +2855,17 @@ class _Walker:
         self.num(_lnum(it.get("radius")), p + ".radius", scope, 0.5, 30)
         self.check_pay(_list(it.get("pay")), p + ".pay", scope)
         choices = _list(it.get("choices"))
+        offer = _s(it, "offer")
+        if offer is not None and choices is None:
+            self.error(p + ".offer", "offer picks from choices: add the choices")
         if choices is not None:
-            if len(choices) < 1 or len(choices) > 4:
-                self.error(p + ".choices", "1 to 4 choices")
+            # A dynamic list (offer, or choices with if) is a pool: the popup shows up to 4 of it at a time.
+            dynamic = offer is not None or any(isinstance(c, dict) and c.get("if") is not None for c in choices)
+            if len(choices) < 1 or len(choices) > (32 if dynamic else 4):
+                self.error(p + ".choices", "1 to 32 choices (up to 4 are shown at once)" if dynamic else
+                           "1 to 4 choices (more with offer or a choice's if: up to 4 are shown at once)")
+            if offer is not None:
+                self.expression(offer, p + ".offer", scope, LIST, "offer")
             ids = set()
             for i, c in enumerate(choices):
                 cid = _s(c, "id")
@@ -2866,6 +2876,8 @@ class _Walker:
                 self.num(_lnum(c.get("cost")) if isinstance(c, dict) else None, f"{p}.choices[{i}].cost", scope, 0, 100000)
                 if isinstance(c, dict):
                     self.check_pay(_list(c.get("pay")), f"{p}.choices[{i}].pay", scope)
+                    if _s(c, "if") is not None:
+                        self.expression(_s(c, "if"), f"{p}.choices[{i}].if", scope, BOOL, "a choice's if")
 
     def check_pay(self, pay, p, scope):
         for i, x in enumerate(pay or []):

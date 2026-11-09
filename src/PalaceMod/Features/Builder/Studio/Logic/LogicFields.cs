@@ -106,6 +106,7 @@ namespace PalaceMod.Builder.Studio.Logic
             {
                 // A value chosen from a picker (apply), with the formula typed in by Shift-click or from the picker.
                 var field = page.Stepper(label, () => Show(get(), p, scope), _ => { }, openPicker, () => tip + "\nClick to choose.");
+                field.EnableWrap();   // the problems under the value need room, not an ellipsis
                 return;
             }
             ExprField(page, label, p, get, set, scope, tip);
@@ -125,9 +126,10 @@ namespace PalaceMod.Builder.Studio.Logic
         /// <summary>A value as the field shows it, with its problems under it.</summary>
         public static string Show(JToken v, ParamUi p, ExprScope scope)
         {
+            if (v?.Type == JTokenType.String && (string)v == "" && p.Kind == ParamKind.Template) v = null;   // a fresh, unpicked slot
             string raw = Raw(v);
             string shown = v == null ? Dim(p.Default != null ? RuleText.Value(null, p, scope?.Event) : p.Required ? "choose…" : "—") : p.Kind is ParamKind.Condition or ParamKind.Expr || (p.Kind == ParamKind.Number && v.Type == JTokenType.String) ? Esc(Raw(v)) : Esc(RuleText.Value(v, p, scope?.Event));
-            return shown + IssueText(v == null ? (p.Required && p.Default == null ? Check("", p, scope) : []) : Check(raw, p, scope));
+            return shown + IssueText(v == null ? (p.Required && p.Default == null ? Check("", p, scope).Select(i => new FieldIssue { Col = 0, Message = i.Message, Warning = i.Warning }).ToList() : []) : Check(raw, p, scope));
         }
 
         /// <summary>A number: left/right step it; click types a number or a formula.</summary>

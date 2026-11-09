@@ -364,6 +364,11 @@ paid; with `cost` it uses the game's own pay-hold interaction. The prompt shows 
 coins fill a copy of a build slot's coin display. With `choices`, the game's upgrade-choice popup opens on interact
 (each choice also takes `description` and `icon`, an `asset:` sprite); the picked choice's cost is paid at once (a
 "not enough gold" notice otherwise) and `interact` fires with `event.choice`; Esc cancels without paying.
+The list is built on every press, so it can change: `"offer": "<expression>"` on the block gives a list of choice ids
+to show, in that order (unknown ids are skipped), and a choice's `"if": "<bool expression>"` hides it while false.
+With either, `choices` is a pool of up to 32 and the popup shows the first 4 on offer. Three random decrees that change
+daily: a pool of decrees, `"offer": "$offers"`, and a `dawn` (and `levelStart`) rule `setVar $offers` to
+`"['tax', 'walls', 'haste', 'scouts', 'towers'].sample(3)"`. Nothing on offer: a "Nothing to choose" notice.
 
 Costs beyond gold: `"pay": [{ "var": "$bread", "amount": 1, "label": "bread" }]` (on the block or on a choice) costs
 level variables as well as (or instead of) `cost`: inventory as data. Everything is paid at once on the press; if
@@ -658,7 +663,7 @@ properties  .hp .maxHp .hpPct .alive .pos .x .y .z .facing (deg; a unit's model)
             every stat by name (.moveSpeed .attackCooldown .damageMult .income ...), the value with modifiers
             .level .cost .buildingType (slots: e.g. 'Mill') .age (s since spawn) .target .owner .stacks('burning')
             .$var .is('filter') .dist(e) .inside(@area)
-lists       .len .at(i) .has(x) .first .last   (sets and list vars)
+lists       .len .at(i) .has(x) .first .last .sample(k)   (sets and list vars; sample: k distinct at random, no k: shuffled)
 globals     night (1-based: the current night, or the coming one by day) isNight isDay nights (total)
             daylight (0..1: the sun's light; 1 by day, about 0.34 at night, lower in an eclipse)
             time (s since level start) nightTime (s since this night began) nightProgress (0..1: the night's spawn

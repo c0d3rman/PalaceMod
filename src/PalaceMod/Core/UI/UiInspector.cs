@@ -87,7 +87,7 @@ namespace PalaceMod
                 case TextMeshProUGUI tmp:
                     string s = tmp.text ?? "";
                     if (s.Length > 30) s = s.Substring(0, 30) + "...";
-                    return $"TMP(\"{s.Replace("\n", "\\n")}\" {tmp.font?.name} mat={tmp.fontSharedMaterial?.name} {tmp.fontSize:0.#}pt {Col(tmp.color)} {tmp.alignment})";
+                    return $"TMP(\"{s.Replace("\n", "\\n")}\" {tmp.font?.name} mat={tmp.fontSharedMaterial?.name} {tmp.fontSize:0.#}pt {Col(tmp.color)} {tmp.alignment}{(tmp.enableWordWrapping ? " wrap" : "")} m={tmp.margin.x:0},{tmp.margin.y:0},{tmp.margin.z:0},{tmp.margin.w:0} lines={tmp.textInfo?.lineCount})";
                 case MPUIKIT.MPImageBasic mp:
                     return $"MPImageBasic({mp.sprite?.name ?? "none"} {Col(mp.color)} mat={mp.material?.name})";
                 case MPUIKIT.MPImage mpi:

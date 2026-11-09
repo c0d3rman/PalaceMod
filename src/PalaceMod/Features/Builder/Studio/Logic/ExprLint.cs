@@ -14,7 +14,7 @@ namespace PalaceMod.Builder.Studio.Logic
         public int Col;          // 1-based
         public string Message;
         public bool Warning;
-        public override string ToString() => $"col {Col}: {Message}";
+        public override string ToString() => Col > 0 ? $"col {Col}: {Message}" : Message;   // 0: about the whole (empty) field
     }
 
     /// <summary>What names an expression may use where it is.</summary>
