@@ -1403,7 +1403,7 @@
     {
       "name": "teleport",
       "group": "Move",
-      "description": "Moves it instantly.",
+      "description": "Moves it instantly. A building or the castle moves with its whole build slot (colliders, navmesh cut, add-ons) onto the ground at `at`; enemies repath to it, and the castle still loses the level when it falls.",
       "params": [
         {
           "name": "target",
@@ -3513,7 +3513,7 @@
       "on": "entity",
       "name": "target",
       "returns": "entity",
-      "description": "Its current attack/move target."
+      "description": "Its current attack/move target (a tower: what its last volley aimed at, while that is alive)."
     },
     {
       "on": "entity",
@@ -3787,7 +3787,7 @@
     },
     {
       "name": "income",
-      "description": "The gold the buildings paid at the last dawn (`income` stats applied), already counted when `dawn` rules run; the coins themselves land over the next seconds.",
+      "description": "The gold the buildings paid at the last dawn (`income` stats applied), already counted when `dawn` rules run; the coins themselves land over the next seconds. A building knocked out during the night pays nothing that dawn (the game's rule), and the night's wave gold (enemies' coins) isn't income.",
       "type": "number"
     },
     {

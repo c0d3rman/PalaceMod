@@ -66,7 +66,7 @@ Names an expression can use for entities in a rule.
 | `nightTime` | number | Seconds since this night began. |
 | `nightProgress` | number | 0..1: the night's spawn schedule elapsed (1 once everything has spawned). |
 | `gold` | number | The player's gold. |
-| `income` | number | The gold the buildings paid at the last dawn (`income` stats applied), already counted when `dawn` rules run; the coins themselves land over the next seconds. |
+| `income` | number | The gold the buildings paid at the last dawn (`income` stats applied), already counted when `dawn` rules run; the coins themselves land over the next seconds. A building knocked out during the night pays nothing that dawn (the game's rule), and the night's wave gold (enemies' coins) isn't income. |
 | `enemiesAlive` | number | Enemies on the map. |
 | `difficulty` | number | The run's difficulty multiplier. |
 | `daylight` | number | The level's own light, 0..1: 1 by day, about 0.34 at night, lower in an eclipse (`lighting`). |
@@ -335,7 +335,7 @@ Each action is `{"do": "<name>", ...params}`. `target` (where listed) is a selec
 
 ### Move
 
-**`teleport`**: Moves it instantly.
+**`teleport`**: Moves it instantly. A building or the castle moves with its whole build slot (colliders, navmesh cut, add-ons) onto the ground at `at`; enemies repath to it, and the castle still loses the level when it falls.
 
 - `target` (entities; default "self"): Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self.
 - `at` (position; required): Where.
@@ -770,7 +770,7 @@ Selector functions anchor at `self`; call them as methods (`castle.count('enemy'
 | entity | `.cost` | number | A slot's next build/upgrade cost. |
 | entity | `.buildingType` | text | A building's kind, e.g. 'Mill'. |
 | entity | `.age` | number | Seconds since it appeared. |
-| entity | `.target` | entity | Its current attack/move target. |
+| entity | `.target` | entity | Its current attack/move target (a tower: what its last volley aimed at, while that is alive). |
 | entity | `.owner` | entity | Who spawned or launched it. |
 | entity | `.parent` | entity | The entity it is linked to (link, parts), or none. |
 | entity | `.children` | set | The entities linked to it (its parts). |

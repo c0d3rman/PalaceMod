@@ -295,15 +295,22 @@ namespace PalaceMod.Builder.Logic.Bodies
             log.Info($"Castle hidden ({h.Renderers.Count} renderers, {h.Colliders.Count} colliders, {h.Cuts.Count} navmesh cuts)");
         }
 
+        /// <summary>The hidden castle's root is (or holds) <paramref name="go"/>.</summary>
+        internal static bool IsHidden(GameObject go) => hidden?.Root != null && go != null && (go == hidden.Root || go.transform.IsChildOf(hidden.Root.transform) || hidden.Root.transform.IsChildOf(go.transform));
+
+        /// <summary>A building moved (`teleport`): a hidden castle's area (the graphs it updates when shown) moves with it.</summary>
+        internal static void Moved(GameObject root, Vector3 delta)
+        {
+            if (IsHidden(root)) hidden.Bounds = new Bounds(hidden.Bounds.center + delta, hidden.Bounds.size);
+        }
+
         /// <summary>Switches off whatever of the castle is on (and remembers it, to switch back on).</summary>
         private static void Switch(Hidden h)
         {
             var root = h.Root;
             // The map's static meshes (the castle's included) are drawn merged by MeshFusion: take the castle's part
             // out of the merged mesh, which turns its own renderers back on for the switch below.
-            foreach (var src in root.GetComponentsInChildren<NGS.MeshFusionPro.MeshFusionSource>(true))
-                if (src.CombineStatus is NGS.MeshFusionPro.SourceCombineStatus.Combined or NGS.MeshFusionPro.SourceCombineStatus.CombinedPartially)
-                    src.UndoCombine();
+            BuildingMover.Uncombine(root);
             foreach (var g in root.GetComponentsInChildren<GPUInstanced>(true)) if (g.enabled) { g.enabled = false; h.Instanced.Add(g); }
             foreach (var r in root.GetComponentsInChildren<Renderer>(true)) if (r.enabled) { r.enabled = false; h.Renderers.Add(r); }
             foreach (var c in root.GetComponentsInChildren<Collider>(true)) if (c.enabled) { c.enabled = false; h.Colliders.Add(c); }

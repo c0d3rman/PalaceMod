@@ -526,8 +526,7 @@ working. A ranged enemy that kites and prefers towers is just `targeting` plus `
   `team` may be an expression (`self.team`). Going `neutral` keeps the unit's own brain, drops its team tags and
   gives it an empty targeting list (it attacks nothing until a rule gives it targets).
 - **Members a verb can't act on are skipped**, not errors: `command` on anything but a player troop, `push`,
-  `moveTo` and `setMovement` on anything without the game's unit movement, `teleport` on buildings, `convert` on
-  anything but a unit. So `all('player and unit', 20)` (which includes the king) works.
+  `moveTo` and `setMovement` on anything without the game's unit movement, `convert` on anything but a unit. So `all('player and unit', 20)` (which includes the king) works.
 - **`replace`** keeps nothing unless `keep` says so. `hp` keeps the hp fraction, not the absolute value. `then` runs
   with `spawned` = the new entity.
 
@@ -1147,9 +1146,17 @@ Where the build settles what the text above leaves open:
   barracks' squad spawns under its slot, and each soldier stays its own vanilla unit (a TaggedObject below the
   entity's object that isn't its body and isn't tagged Building). Selectors, events, attribution and the steering
   state lookup all use this rule.
+- **Moving buildings.** `teleport` on a building or the castle moves its whole build slot (the topmost slot that
+  isn't upgraded by an activator, so a castle add-on moves with the castle) onto the ground at `at`
+  (`Bodies/World/BuildingMover.cs`): its MeshFusion parts are uncombined first so they move, the ground graphs are
+  updated over the old and new footprints, units the new footprint traps are pushed out, every enemy repaths, and
+  `CastleCenter.CastleCenterPosition` follows. Everything that finds the castle does it through its TaggedObject or
+  the slot, so targeting, the defeat on its death and `logic.game.castle: hidden` keep working. Savestates keep moved
+  slots (`world.moved`).
 - **Dawn income.** `income` counts the amounts `CoinSpawner.TriggerCoinSpawn` is asked for between the first and the
   last dawn callback (buildings' harvests, `income` stats applied); the coins land over the next seconds, the count
-  doesn't wait for them.
+  doesn't wait for them. A building knocked out that night isn't harvested (the game's `knockedOutTonight`), so it
+  adds 0; the night's wave gold (enemies' coins, sent to the king at dawn) isn't income.
 - **Wave clones of Builder units** carry `BuilderEntity.TemplateId` (set on the template by `UnitFactory`), so they
   register in `Start` with the template's rules. They aren't "spawned" for the caps or savestates (the game restores
   them as its own enemies).
