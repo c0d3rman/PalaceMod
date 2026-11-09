@@ -873,7 +873,7 @@ namespace PalaceMod.Builder.Model.Logic
             C("preset", typeof(PresetDef), ("params{}", "presetParam"));
             C("presetParam", typeof(PresetParamDef));
             C("logic", typeof(LogicDef), ("places[]", "place"), ("attach{}", "attach"), ("hud[]", "hud"), ("kingActions[]", "kingAction"), ("caps", "caps"), ("game", "game"));
-            C("attach", typeof(AttachDef), ("light", "light"));
+            C("attach", typeof(AttachDef), ("light", "light"), ("interact", "interact"), ("pay[]", "pay"));
             C("hud", typeof(HudDef));
             C("kingAction", typeof(KingActionDef), ("uses", "uses"));
             C("uses", typeof(UsesDef));

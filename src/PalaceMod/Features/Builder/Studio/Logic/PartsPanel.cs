@@ -287,6 +287,8 @@ namespace PalaceMod.Builder.Studio.Logic
             foreach (var spec in Parts)
                 if (node[spec.Key] is JObject) PartBlock(page, owner, spec);
             Statuses(page, owner, node);
+            if (owner.Kind == OwnerKind.Attach && owner.Id != null && (owner.Id == "castle" || owner.Id.StartsWith("slot:") || owner.Id.StartsWith("add:")))
+                SlotPay(page, owner, node);
             LinkedParts(page, owner, null);
             var missing = Parts.Where(s => node[s.Key] is not JObject).ToList();
             StudioDock.SmallHeader(page, "Add a part");
@@ -522,6 +524,38 @@ namespace PalaceMod.Builder.Studio.Logic
                 if (GetPath(x, path) is not JArray arr) { SetPath(x, path, new JArray()); arr = (JArray)GetPath(x, path); }
                 arr.Add(new JObject { ["var"] = "$item", ["amount"] = 1 });
             }), "Costs a level variable too (inventory as data): paid at once with the gold, refused when short.");
+        }
+
+        /// <summary>A build slot's item costs (attach `pay`): level variables paid on its own build prompt with the gold.</summary>
+        private static void SlotPay(ModPage page, LogicOwner owner, JObject node)
+        {
+            StudioDock.SmallHeader(page, "Build costs in items");
+            var scope = owner.Scope(null);
+            var list = node["pay"] as JArray;
+            if (list == null || list.Count == 0) page.Text(Dim("None: gold only."));
+            void Edit(string label, Action<JArray> change) => owner.Edit(label, n =>
+            {
+                if (n["pay"] is not JArray a) n["pay"] = a = new JArray();
+                change(a);
+                if (a.Count == 0) n.Remove("pay");
+            });
+            for (int i = 0; i < (list?.Count ?? 0); i++)
+            {
+                int idx = i;
+                JToken Item(string f) => ((owner.Effective() ?? new JObject())["pay"] as JArray)?[idx]?[f];
+                void Set(string f, JToken v, string l) => Edit(l, a => { if (idx < a.Count && a[idx] is JObject o) { if (v == null) o.Remove(f); else o[f] = v; } });
+                LogicFields.ExprField(page, $"{i + 1}. Item", T("var", "Item", "A level variable: $wood."), () => Item("var"), (v, l) => Set("var", v, l), scope,
+                    "The level variable paid ($wood, $stone): an item count. Declare it in the level's variables.");
+                LogicFields.NumberField(page, "   Amount", N("amount", "Amount", "How many.", "1"), () => Item("amount"), (v, l) => Set("amount", v, l), scope,
+                    "How many are paid; the build is refused (nothing paid) when the king has fewer.");
+                LogicFields.ExprField(page, "   Word", T("label", "Word", "What the prompt calls it."), () => Item("label"), (v, l) => Set("label", v, l), scope,
+                    "What the build prompt calls it (default: the variable's name).");
+                LogicFields.NumberField(page, "   For level", N("level", "For level", "1 = the build; empty = every level."), () => Item("level"), (v, l) => Set("level", v, l), scope,
+                    "Which purchase it's paid for: 1 = the build, 2 = the first upgrade, and so on. Empty: every build and upgrade.");
+                LogicFields.Action(page, Dim("   Remove item"), () => Edit("Remove item cost", a => { if (idx < a.Count) a.RemoveAt(idx); }), null, "×");
+            }
+            LogicFields.Action(page, "+ item cost", () => Edit("Add item cost", a => a.Add(new JObject { ["var"] = "$item", ["amount"] = 1 })),
+                "The build prompt costs a level variable too (wood, stone): shown with the gold, refused when short, paid on the build or upgrade.");
         }
 
         // ---- Attached things (links) -------------------------------------------------------------------------------------

@@ -2879,7 +2879,7 @@ class _Walker:
                     if _s(c, "if") is not None:
                         self.expression(_s(c, "if"), f"{p}.choices[{i}].if", scope, BOOL, "a choice's if")
 
-    def check_pay(self, pay, p, scope):
+    def check_pay(self, pay, p, scope, slot=False):
         for i, x in enumerate(pay or []):
             pp = f"{p}[{i}]"
             v = _s(x, "var") if isinstance(x, dict) else None
@@ -2889,6 +2889,11 @@ class _Walker:
             if scope.level_vars is not None and v[1:] not in scope.level_vars:
                 self.error(pp + ".var", f'no level variable "{v[1:]}" (declare it in logic.vars)')
             self.num(_lnum(x.get("amount")), pp + ".amount", scope, 0, 100000)
+            lvl = x.get("level")
+            if lvl is not None and not slot:
+                self.error(pp + ".level", "level is for a build slot's pay (attach pay); an interact pays every time")
+            elif lvl is not None and (not isinstance(lvl, int) or isinstance(lvl, bool) or lvl < 1 or lvl > 10):
+                self.error(pp + ".level", "1 (the build) to 10")
 
     def check_parts(self, parts, p, scope):
         if parts is None:
@@ -3295,6 +3300,12 @@ class _Walker:
             owner = _Owner(ap, kind if kind is not None else "building", _var_set(a.get("vars")), level=lv, rules=_list(a.get("rules")))
             self.check_targeting(_list(a.get("targeting")), ap + ".targeting", owner)
             self.check_light(_dict(a.get("light")), ap + ".light", self.scope(owner, None))
+            if _dict(a.get("interact")) is not None:
+                self.check_interact(a["interact"], ap + ".interact", self.scope(owner, None))
+            if a.get("pay") is not None:
+                if not (key == "castle" or key.startswith(("slot:", "add:"))):
+                    self.error(ap + ".pay", "item costs go on a build slot (slot:, add: or castle)")
+                self.check_pay(_list(a.get("pay")), ap + ".pay", self.scope(owner, None), slot=True)
             self.check_rules(owner)
         self.check_rules(level_owner)
 

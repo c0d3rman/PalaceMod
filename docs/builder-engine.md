@@ -101,7 +101,14 @@ Everything is additive to the pack JSON; the pack version goes to 3 (see "Migrat
 
 `attach` gives rules, a name, labels and vars to objects the level already has, by their Studio item key (`slot:<name>`,
 `add:<id>`, `prop:<id>`, `line:<name>`, `castle`). That keeps the existing classes untouched: the Studio's `Edit`
-writes there, and deleting the object prunes its entry (`PackDraft.Prune`).
+writes there, and deleting the object prunes its entry (`PackDraft.Prune`). An attach also takes `light`, `interact`
+(the king's interact key on that object) and, on a build slot, `pay`: item costs on the slot's own build prompt,
+`[{ "var": "$wood", "amount": 2, "label": "wood", "level": 1 }]` (level variables, like `interact.pay`; `level` 1 =
+the build, 2 = the first upgrade...; none = every level). The game's build tooltip gets a "Costs 3 gold + 2 wood" line;
+a press while any item is short is refused before a coin is filled (a notice, and `interactRefused` on the slot with
+`event.name` = what's short), so nothing is paid; otherwise the items are taken when the build or upgrade happens
+(after the upgrade-choice popup: cancelling it costs nothing). Only the king's own purchase pays: `building` actions,
+`palace.py build` and savestates don't (`Logic/Bodies/SlotPayManager.cs`). Undoing an upgrade refunds its gold only.
 
 ### Templates
 
@@ -1240,7 +1247,7 @@ New ops (JSON, as the existing ones):
 | `remove_rule` | `on`, `id` |
 | `wire` | `from`, `event`, `to`, `input` (a built-in input or a signal name), `value`, `delay`: writes both rules |
 | `var` | `name`, `value` (level) or `on` + `name` + `value` (entity default) |
-| `attach` | `key`, `name`, `labels` |
+| `attach` | `key`, `name`, `labels`, `vars`, `statuses`, `targeting`, `light`, `interact`, `pay` (slots); any other field is an error |
 | `king_action` | `id`, `name`, `when`, `cooldown`, `uses` |
 | `remove_unit` / `_entity` / `_status` / `_preset` | `id`, `force`: refuses while anything names it (lists the users) |
 | `rename_unit` / `_entity` / `_status` / `_preset` | `from`, `to`: rewrites every reference, or refuses listing what it can't rewrite |

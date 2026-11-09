@@ -366,7 +366,7 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 | Op | Fields |
 |---|---|
 | `level` | `name`, `description`, `base` (`cleared`/`flat`/null), `waveSet`, `host`, `colors` |
-| `add_slot` | `id`, `kind` (e.g. `"House"`, `"Defense Tower"`, `"Barracks"`; copies the host's slot of that kind, or places the game's standard one, base `building:<kind>`, when the host has none) or `from` (a host slot name), `at` [x,z] or `pos`, `rotY`, `requires` (shorthand), `upgradeCap`, `costs` [per level, null keeps] |
+| `add_slot` | `id`, `kind` (e.g. `"House"`, `"Defense Tower"`, `"Barracks"`; copies the host's slot of that kind, or places the game's standard one, base `building:<kind>`, when the host has none) or `from` (a host slot name), `at` [x,z] or `pos`, `rotY`, `requires` (shorthand), `upgradeCap`, `costs` [per level, null keeps], `pay` (item costs on its build prompt, below "Item costs on a build slot") |
 | `move_slot` | `slot` (added id, host name, `castle` can't move), `at`/`pos`, `rotY` |
 | `set_slot` | `slot` (or `castle`), `requires` (null = back to the map's), `upgradeCap`, `costs` |
 | `set_units` | `slot`, `units` [[x,z] in the slot's frame, null keeps that one] or `at` [[x,z] world points]; `units: null` = back to the map's |
@@ -731,6 +731,15 @@ stat, flag, filter term and built-in preset with its parameters. `palace.py logi
 `add:<id>` (a slot you added), `prop:<id>`, `line:<spawn line name>`, `castle`. Give an attached object a `name` to
 reach it from expressions as `@name`.
 
+**Item costs on a build slot** (wood, stone, any level variable): give the slot's attach a `pay` list,
+`[{"var": "$wood", "amount": 2, "label": "wood"}, {"var": "$stone", "amount": 3, "label": "stone", "level": 2}]`
+(`level`: 1 = the build, 2 = the first upgrade, ...; none = every build and upgrade). The game's own build prompt
+shows "Costs 2 wood + 3 stone" (with the gold when the slot also costs gold); a press while any item is short is
+refused with a notice before a coin is paid (and fires `interactRefused` on the slot); otherwise the items are taken
+exactly when the build or upgrade happens. `add_slot` takes `pay` directly; for a host slot use `attach` (`"key":
+"slot:<name>"`). A slot that costs only items: `"costs": [0, 0, 0]`. Only the king's purchase pays (`build` and
+`building` actions are free).
+
 A **place** (`logic.places[]`) is `{ "id", "entity": "<template>" | "preset": "<preset>", "with": {...} | "kind":
 "<kind>" + inline fields, "pos": [x, y, z], "rotY", "scale", "name", "active", "vars", "rules" }`. Its `id` (lowercase)
 or `name` is how expressions reach it (`@plate1`). Inline fields override the template's for that copy. `"active":
@@ -933,7 +942,7 @@ ground (the touched cells are then drawn by the terrain). Savestates keep the ch
 | `lifetime`, `maxAlive` | any | seconds before `expire` + destroy; cap on live copies |
 | `projectile` | flying things | `speed`, `homing` 0..1, `arc`, `gravity`, `spin`, `face`, `hits` (filter), `hitRadius`, `pierce`, `onGround`, `range`; events `impact`, `expire` |
 | `mover` | moving props | `path` (`@path` or points), `mode` loop/pingpong/once, `speed`, `wait`, `spin`, `swing`, `running`, `pose` (or `poses`) {name: {`offset` [x,y,z] or world `pos`, `rotY`}}, `turnSpeed` (deg/s, 90); inputs `start stop reverse goto` and each pose's name; events `arrive`, `end`. A walkable mover snaps between poses |
-| `area` | zones | `shape` (`circle {radius}` / `rect {size: [w, d]}` / `polygon {points}` / `sector {radius, angle}`: a cone along its facing), `watch` (filter), `show`, `color`, `tick`, `surface` (below); events `enter exit inside empty occupied`; filters `in:@area`, `in:@<area template>`. `enter` comes in the same frame as the entry (spawned into it, the area laid under it, or walked in), so a status applied on `enter` is on before any tower's next shot; `inside` first fires one full `tick` later, so a "while in the zone" status is applied on `enter` and refreshed on `inside` |
+| `area` | zones | `shape` (`circle {radius}` / `rect {size: [w, d]}` / `polygon {points}` / `sector {radius, angle}`: a cone along its facing), `watch` (filter), `show`, `color`, `tick`, `surface` (below); events `enter exit inside empty occupied`; filters `in:@area`, `in:@<area template>`. `enter` comes in the same frame as the entry (spawned into it, the area laid under it, or walked in), so a status applied on `enter` is on before any tower's next shot; `inside` first fires one full `tick` later, so a "while in the zone" status is applied on `enter` and refreshed on `inside`. A thing is inside when its **centre** is: a big unit whose body overlaps the edge isn't. A trigger meant to catch everything walking a lane (a pressure plate in a gap) must span the whole opening plus a margin, not sit inside it: enemies spawn spread across their spawn line's width and walk their own straight-ish lane, so a 6 m plate in a 7 m gap misses about half of them |
 | `light` | anything that shines | `color`, `range` (m it lights), `intensity` (1), `cone` (degrees: a beam along its facing; none = all round), `aim`, `height` (3; lower = longer beam), `flicker`, `on`; also on units (`unit` op) and attaches (12.7a) |
 | `pickup` | collectibles | `by` (filter, e.g. `king`), `radius`, `magnet`, `consume`; event `pickup` |
 | `interact` | king-usable (props, places, attached slots, and **units**: templates, placed, spawned and wave units; the prompt follows a walking unit) | `prompt` (`{cost}` shows the cost), `cost` (gold), `pay` (items: `[{"var": "$bread", "amount": 1, "label": "bread"}]`, level variables paid with the gold, all at once; refused with a notice and `interactRefused` when any is short), `when` day/night/always, `radius`, `repeat`, `choices` (`{id, label, description, cost, pay, icon, if}`: the game's upgrade-choice popup, up to 4 at once; the chosen cost is paid and `event.choice` is its id), `offer` (an expression giving a list of choice ids: which show, in that order, worked out on every press; with `offer` or a choice's `if` (shown only while true), `choices` is a pool of up to 32, e.g. 3 random of 6 daily: `"offer": "$offers"` + a `dawn` rule `setVar $offers = "['tax','walls','haste','scouts','towers','unseen'].sample(3)"`); event `interact` |
@@ -1116,7 +1125,7 @@ number). Errors in a preset's rules are reported at the place that uses it.
 | `remove_rule` | `on`, `id` |
 | `wire` | `from` (an `on` value), `event` (default `interact`), `to` (a place id/name or attach name), `input` (signal), `value`, `delay`, `do` (the target's listener, for an input that isn't built in) |
 | `var` | `name`, `value` (a level variable), or `on` + `name` + `value` (an entity default) |
-| `attach` | `key`, `name`, `labels`, `vars`, `statuses`, `targeting`, `light` |
+| `attach` | `key`, `name`, `labels`, `vars`, `statuses`, `targeting`, `light`, `interact`, `pay` (a build slot's item costs); any other field is an error (rules: the `rule` op with `on` = the key) |
 | `king_action` | `id`, `name`, `when`, `cooldown`, `uses` |
 | `hud` | `id`, `text`, `icon`, `visible` |
 | `logic` | `seed`, `caps`, `game` (merged rule by rule; `null` puts one back to vanilla) |
