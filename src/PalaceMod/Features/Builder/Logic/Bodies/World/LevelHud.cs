@@ -41,13 +41,6 @@ namespace PalaceMod.Builder.Logic.Bodies
 
         private const float Gutter = 24f, Gap = 8f, PadX = 18f, PadY = 8f, IconSize = 26f, FontSize = 24f, MaxWidth = 420f;
 
-        /// <summary>
-        /// Evaluates a line's text ({expr} parts) and visibility in the level script's scope. L1's expression engine
-        /// replaces these (world.Interpolate / world.Evaluate); the fallbacks know level vars and a few globals.
-        /// </summary>
-        public static Func<LogicWorld, string, string> Interpolate = FallbackInterpolate;
-        public static Func<LogicWorld, string, bool> IsVisible = FallbackVisible;
-
         public static void Register()
         {
             LogicActions.Register("hud", Hud);
@@ -70,13 +63,8 @@ namespace PalaceMod.Builder.Logic.Bodies
             nextRefresh = 0f;
         }
 
-        /// <summary>The level's `logic.hud` from the session's level (kept as an unknown field until the model has it).</summary>
-        private static JToken SessionHud()
-        {
-            var level = WorldCommon.Session?.Level;
-            if (level?.Extra == null || !level.Extra.TryGetValue("logic", out var logic)) return null;
-            return (logic as JObject)?["hud"];
-        }
+        /// <summary>The level's `logic.hud`, as the world loaded it.</summary>
+        private static JToken SessionHud() => LogicWorld.Current?.LevelLogic?["hud"];
 
         private static void Hud(LogicContext ctx, ActionParams p)
         {
@@ -104,57 +92,13 @@ namespace PalaceMod.Builder.Logic.Bodies
             lines.Clear();
         }
 
-        // ------------------------------------------------------------------ evaluation fallbacks
-
-        private static string FallbackInterpolate(LogicWorld world, string text)
-        {
-            if (string.IsNullOrEmpty(text) || text.IndexOf('{') < 0) return text ?? "";
-            var sb = new System.Text.StringBuilder();
-            int i = 0;
-            while (i < text.Length)
-            {
-                int open = text.IndexOf('{', i);
-                int close = open < 0 ? -1 : text.IndexOf('}', open + 1);
-                if (open < 0 || close < 0) { sb.Append(text, i, text.Length - i); break; }
-                sb.Append(text, i, open - i);
-                sb.Append(Values.Format(FallbackValue(world, text.Substring(open + 1, close - open - 1).Trim())));
-                i = close + 1;
-            }
-            return sb.ToString();
-        }
-
-        private static Value FallbackValue(LogicWorld world, string expr)
-        {
-            if (expr.StartsWith("$") && world.Level.Vars.TryGetValue(expr.Substring(1), out var v)) return v;
-            var g = LogicServices.Game;
-            return expr switch
-            {
-                "night" when g != null => Value.Number(g.Night),
-                "nights" when g != null => Value.Number(g.Nights),
-                "gold" => Value.Number(PlayerInteraction.instance != null ? PlayerInteraction.instance.Balance : 0),
-                "enemiesAlive" when g != null => Value.Number(g.EnemiesAlive),
-                _ => throw new LogicError($"can't evaluate {{{expr}}} yet"),
-            };
-        }
-
-        private static bool FallbackVisible(LogicWorld world, string expr)
-        {
-            var parts = expr.Split(' ');
-            if (parts.Length == 3 && double.TryParse(parts[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var rhs))
-            {
-                double lhs = FallbackValue(world, parts[0]).Num;
-                return parts[1] switch { ">" => lhs > rhs, ">=" => lhs >= rhs, "<" => lhs < rhs, "<=" => lhs <= rhs, "==" => lhs == rhs, "!=" => lhs != rhs, _ => throw new LogicError($"can't evaluate \"{expr}\" yet") };
-            }
-            return FallbackValue(world, expr).Num != 0;
-        }
-
         private static bool Visible(LogicWorld world, Line l)
         {
             if (l.Visible == null || l.Visible.Type == JTokenType.Null) return true;
             if (l.Visible.Type == JTokenType.Boolean) return (bool)l.Visible;
             if (l.Visible.Type == JTokenType.Integer || l.Visible.Type == JTokenType.Float) return (double)l.Visible != 0;
-            string expr = ((string)l.Visible).TrimStart('=');
-            return IsVisible(world, expr);
+            var v = world.Evaluate((string)l.Visible);
+            return v.Kind is ValueKind.Number or ValueKind.Bool ? v.Num != 0 : !v.IsNone;
         }
 
         // ------------------------------------------------------------------ drawing
@@ -180,7 +124,7 @@ namespace PalaceMod.Builder.Logic.Bodies
                     try
                     {
                         visible = Visible(world, l);
-                        if (visible) text = Interpolate(world, l.Text);
+                        if (visible) text = world.Interpolate(l.Text);
                     }
                     catch (Exception e) when (e is LogicError or FormatException or InvalidCastException)
                     {
