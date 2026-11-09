@@ -240,7 +240,8 @@ namespace PalaceMod.Builder.Logic
 
         public readonly Stack<Frame> Frames = new();
         public string Owner, Rule, Path;
-        public double ResumeAt;
+        public double ResumeAt;              // on Clock's own time (LogicWorld.LocalTime)
+        public LogicEntity Clock;            // whose timeScale the task's waits run on: the rule's owner (self)
         public long Seq;                     // deterministic order for tasks due at the same time
     }
 
@@ -253,7 +254,7 @@ namespace PalaceMod.Builder.Logic
         internal void RunList(ActionList actions, LogicContext ctx)
         {
             if (actions == null || actions.Count == 0) return;
-            var task = new ActionCursor { Owner = ctx.Self?.Id, Rule = ctx.RuleLabel, Seq = ++taskSeq };
+            var task = new ActionCursor { Owner = ctx.Self?.Id, Rule = ctx.RuleLabel, Seq = ++taskSeq, Clock = ctx.Self };
             task.Frames.Push(new ActionCursor.Frame { List = actions, Ctx = ctx });
             Continue(task);
         }
@@ -267,7 +268,7 @@ namespace PalaceMod.Builder.Logic
                 if (f.Ctx.Stopped) { task.Frames.Clear(); return; }
                 if (f.Index >= f.List.Count)
                 {
-                    if (f.Loop != null && NextIteration(task, f)) { if (task.ResumeAt > Time) return; continue; }
+                    if (f.Loop != null && NextIteration(task, f)) { if (task.ResumeAt > LocalTime(task.Clock)) return; continue; }
                     task.Frames.Pop();
                     continue;
                 }
@@ -308,7 +309,7 @@ namespace PalaceMod.Builder.Logic
                 case "wait":
                     {
                         double s = Math.Max(0.05, bp.Number("seconds", 0.05));
-                        task.ResumeAt = Time + s;
+                        task.ResumeAt = LocalTime(task.Clock) + s;
                         waiting.Add(task);
                         return false;
                     }
@@ -391,7 +392,7 @@ namespace PalaceMod.Builder.Logic
             f.Ctx = f.Items != null ? parentCtx.With(it: f.Items[f.Iteration]) : IterationCtx(parentCtx, f.Iteration);
             if (f.Every > 0)
             {
-                task.ResumeAt = Time + f.Every;
+                task.ResumeAt = LocalTime(task.Clock) + f.Every;
                 waiting.Add(task);
             }
             return true;
@@ -409,9 +410,11 @@ namespace PalaceMod.Builder.Logic
             if (waiting.Count == 0) return;
             List<ActionCursor> due = null;
             for (int i = waiting.Count - 1; i >= 0; i--)
-                if (waiting[i].ResumeAt <= Time + 1e-9) { (due ??= []).Add(waiting[i]); waiting.RemoveAt(i); }
+                if (waiting[i].ResumeAt <= LocalTime(waiting[i].Clock) + 1e-9) { (due ??= []).Add(waiting[i]); waiting.RemoveAt(i); }
             if (due == null) return;
-            due.Sort((a, b) => a.ResumeAt != b.ResumeAt ? a.ResumeAt.CompareTo(b.ResumeAt) : a.Seq.CompareTo(b.Seq));
+            // Due order on the world's clock (each task's own due time plus its clock's lag).
+            double At(ActionCursor t) => t.ResumeAt + (t.Clock?.Lag ?? 0);
+            due.Sort((a, b) => At(a) != At(b) ? At(a).CompareTo(At(b)) : a.Seq.CompareTo(b.Seq));
             foreach (var t in due) { t.ResumeAt = 0; Continue(t); }
         }
 

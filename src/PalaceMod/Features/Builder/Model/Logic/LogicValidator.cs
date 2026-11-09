@@ -429,7 +429,7 @@ namespace PalaceMod.Builder.Model.Logic
                     {
                         string e = a.GetString("entity");
                         if (e != null && !e.StartsWith("=") && pack.FindEntity(e)?.Body?.Walkable == true)
-                            Warn(p + ".entity", $"\"{e}\" has a walkable body: spawned at runtime it costs a pathfinding rescan (about 1 s); place it in logic.places instead");
+                            Warn(p + ".entity", $"\"{e}\" has a walkable body: each time one appears or goes at runtime the pathfinding round it is rebuilt (30-100 ms); fine now and then, not many times a second (a fixed one belongs in logic.places)");
                         if (a.Do != "launch") break;
                         if (e != null && !e.StartsWith("=") && pack.FindEntity(e) is { } ent && ent.Projectile == null)
                             Warn(p + ".entity", $"\"{e}\" has no projectile block, so it flies with the defaults");

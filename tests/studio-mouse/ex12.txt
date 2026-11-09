@@ -1,0 +1,153 @@
+# Example 12: a volcano, built by mouse from an empty level: a status (Burning), two things (a fire area and a
+# lava-rock projectile, in the Entity Studio) and a point that lobs rocks at night.
+builder-studio new mouse12 Nordfels
+sleep 2
+builder-studio open mouse12 nordfels-studio
+sleep 20
+builder-studio cam -4 -40 2
+builder-studio press Logic
+# --- The status (level Behaviour tab, nothing selected).
+builder-logic tab
+sleep 1
+builder-logic press + status
+uikit type Burning
+uikit type enter
+sleep 1
+builder-logic press Lasts (s)
+uikit type 4
+uikit type enter
+builder-logic press Ticks every (s)
+uikit type 1
+uikit type enter
+builder-logic press Tint
+uikit type #ff7020
+uikit type enter
+builder-logic press + rule
+builder-logic press Search
+uikit type tick
+uikit type enter
+builder-logic press Status ticks
+builder-logic press + action
+builder-logic press Damage
+builder-logic press Amount
+uikit type 3_*_self.stacks('burning')
+uikit type enter
+builder-logic press Source
+builder-logic press Formula
+uikit type other
+uikit type enter
+builder-logic close
+builder-logic press ← This level
+sleep 1
+# --- Thing 1: the fire area (Entity Studio).
+builder-studio press + New thing
+sleep 3
+builder-entity press Area
+sleep 1
+builder-entity press Tab parts
+builder-entity press Name
+builder-entity type Fire area
+builder-entity press Lifetime (s)
+builder-entity type 5
+builder-entity press Radius (m)
+builder-entity type 3
+builder-entity press Inside every (s)
+builder-entity type 1
+builder-entity press Colour
+builder-entity type #d04010
+builder-entity press Tab behaviour
+builder-entity press + rule
+builder-logic press Search
+uikit type inside
+uikit type enter
+builder-logic press Something stays inside
+builder-logic press + action
+builder-logic press Give a status
+builder-logic press Target
+builder-logic press The one inside
+builder-logic press Status
+builder-logic press Burning
+builder-logic close
+# --- Thing 2: the lava rock.
+builder-entity press + New
+builder-entity press Projectile
+sleep 1
+builder-entity press Tab parts
+builder-entity press Name
+builder-entity type Lava rock
+builder-entity press Lifetime (s)
+builder-entity type 10
+builder-entity press Gravity
+builder-entity type 9.8
+builder-entity press Hits
+builder-logic press Filter
+uikit type unit
+uikit type enter
+builder-entity press Tab behaviour
+builder-entity press + rule
+builder-logic press Search
+uikit type shot
+uikit type enter
+builder-logic press Hits (as a shot)
+builder-logic press + action
+builder-logic press Damage
+builder-logic press Target
+builder-logic press Formula
+uikit type all('unit',_3)
+uikit type enter
+builder-logic press Amount
+uikit type 35
+uikit type enter
+builder-logic press + action
+builder-logic press Spawn
+builder-logic press Entity
+builder-logic press Fire area
+builder-logic close
+builder-entity json
+builder-entity press ← Level
+sleep 3
+# --- The volcano: a point that, every 12 s at night, launches a lava rock at a random spot within 15 m.
+builder-studio press Point
+builder-studio cursor -4 -40
+builder-studio click
+sleep 1
+builder-studio cursor off
+builder-logic tab
+builder-logic press Name
+uikit type volcano
+uikit type enter
+builder-logic press + rule
+builder-logic press Every seconds s
+builder-logic press Seconds
+uikit type 12
+uikit type enter
+builder-logic press During
+builder-logic press During
+builder-logic press + action
+builder-logic press Launch
+builder-logic press Entity
+builder-logic press Lava rock
+builder-logic press Toward
+builder-logic press Formula
+uikit type pointNear(self,_15)
+uikit type enter
+builder-logic close
+# --- Level script: count fires, for the test.
+builder-studio clear
+sleep 1
+builder-logic press + variable
+uikit type fires
+uikit type enter
+builder-logic press + rule
+builder-logic press Appears
+builder-logic press Of what
+builder-logic press Filter
+uikit type is:new-area
+uikit type enter
+builder-logic press + action
+builder-logic press Add to a variable
+builder-logic press Name
+builder-logic press $fires
+builder-logic close
+builder-studio select place:point1
+shot mouse-12-volcano-studio

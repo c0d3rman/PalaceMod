@@ -249,7 +249,12 @@ namespace PalaceMod.Builder.Studio.Logic
                 string id = s.Id;
                 StudioDock.DetailRow(page, Esc(s.Name ?? id), Esc(StatusPanel.Describe(LogicDoc.StatusNode(pack, id))), false, null, () => LogicStudio.FocusOn(LogicOwner.Status(id)), () => "Click to edit it.");
             }
-            LogicFields.Action(page, "+ status", () => { var id = StatusPanel.New(); if (id != null) LogicStudio.FocusOn(LogicOwner.Status(id)); }, "A timed modifier with its own rules (burning, warded...).");
+            page.TextInput("+ status", () => "", v =>
+            {
+                if (string.IsNullOrWhiteSpace(v)) return;
+                var id = StatusPanel.New(v.Trim());
+                if (id != null) LogicStudio.FocusOn(LogicOwner.Status(id));
+            }, () => "A timed modifier with its own rules. Its name (Burning, Warded…) also makes the id rules use (burning).", 40, () => Dim("name…"));
             StudioDock.SmallHeader(page, "Things");
             if (pack.Entities == null || pack.Entities.Count == 0) page.Text(Dim("None. Projectiles, props and pickups to place, spawn or launch."));
             foreach (var e in pack.Entities ?? [])

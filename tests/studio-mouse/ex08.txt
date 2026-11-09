@@ -1,0 +1,35 @@
+# Example 8: a shield-bearer aura, built by mouse: a new enemy in the Enemy Studio (base: defensive swordsman) whose
+# rule gives every ally within 6 m a new status, Warded (1.2 s, damage taken x0.7).
+builder-studio new mouse08 Nordfels
+sleep 2
+builder-studio open mouse08 nordfels-studio
+sleep 20
+builder-enemy level
+sleep 3
+builder-enemy tab base stats
+builder-enemy press E Defensive Melee Variant
+builder-enemy press Behaviour
+builder-logic press + rule
+builder-logic press Every seconds s
+builder-logic press + action
+builder-logic press Give a status
+builder-logic press Target
+builder-logic press Formula
+uikit type all('ally_and_unit',_6)
+uikit type enter
+builder-logic press Status
+builder-logic press + New status
+uikit type warded
+uikit type enter
+sleep 1
+builder-logic press Lasts (s)
+uikit type 1.2
+uikit type enter
+builder-logic press + change
+builder-logic press Damage taken
+sleep 0.5
+builder-logic press by
+uikit type 0.7
+uikit type enter
+builder-logic press ← New Racer
+shot mouse-08-shield-aura-enemy-studio

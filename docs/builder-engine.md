@@ -196,6 +196,38 @@ switched off or not in its current pose. Appearing, disappearing and reaching a 
 units on it are moved with it at the snap. A surface over walkable ground hides that ground while it is present in
 the scan; switched off, its footprint is a hole unless its deck is higher than a unit is tall.
 
+**Walkable surfaces as built (L2 gaps, `Logic/Bodies/Walkables.cs`, `DeckOpenings.cs`):**
+
+- **Where a deck meets the map.** The maps fence their playable ground with an invisible curtain mesh along every
+  edge, rivers included (`NavmeshBakeHelper.invisibleWalls`, shown for every `GroundGraphs.Scan`), and a Builder
+  terrain blocks water and blocked cells with columns reaching above the graphs. Both stood where a bridge's deck
+  lies, so a deck over Nordfels' river was walled off from its bank, and what was left of it beyond the curtain was
+  an island that `PruneIslands` dropped. (Before that, every placed deck was also dropped from `Walkables` when the
+  world started: `LogicBodiesManager` cleared its lists on `LogicWorld.Started`, which fires after places are built;
+  it now clears on `Ending` only.) Now, in every scan (`GroundGraphs.Rasterizing`):
+  - walls give way under a deck: the host's invisible walls and the terrain's obstacle meshes (columns, cliff and
+    field walls) are rasterized from a copy clipped by each deck's prism (its footprint, from 0.6 m below its top
+    up); solid props' blockers are left alone;
+  - each 1 m of a deck's edges is probed 0.75 m outside: on the ground the map was baked with (on a Builder field:
+    ground with no obstacle) within 2.5 m of the deck's top, the edge is open, with a ramp of 25 degrees where the
+    step is over 0.45 m (the graphs climb 0.5 m); anywhere else it gets a rail (an invisible 1.5 m wall on the
+    Obstacle layer), so units can't step off into the river or past the map's edge through the opening;
+  - the king passes the opened walls while he stands on the deck (`Physics.IgnoreCollision` per frame), and the
+    rails and ramps of a still deck have colliders. A posed mover's ghosts get rails and ramps for the graphs only.
+  - After a scan, a deck that isn't on the castle's ground on the small enemies' graph is a warning in the log.
+  Verified on Nordfels (`logic-l2 nav path`, `builder-level navdump`): a 24 x 10 m deck over the west river and a
+  10 x 16 m one 1 m above the south bank both reach the castle's area on `Enemy Units S`, `Player Units S` and
+  `Enemy Units L`; E Melee, E Archer and E Ogre walk onto the deck mid-river, the king walks across and back and is
+  stopped by its rail sideways.
+- **Runtime decks are an area update.** When the session's templates include a walkable body, the ground graphs are
+  split into 25.6 m tiles before the level-start scan (`GroundGraphs.UseTiles`; same scan cost). A deck that
+  appears or is destroyed after the first frame then rebuilds only the tiles round it (`GroundGraphs.UpdateArea`:
+  the ground graphs only, with the scan's walls, hooks, island pruning and minimap): on Nordfels 23-37 ms (min and
+  median of 5) against 500-514 ms for `GroundGraphs.Scan`, and 34 ms min, 100 ms median over 15 spawn/destroy
+  updates with the machine under heavy load (`logic-l2 nav bench`, `deckbench`). On one-tile graphs (no walkable
+  template in the session) the same update rebuilds the whole ground graphs, about 340 ms, still without the
+  fliers' graph. A destroyed deck's triangles now go too.
+
 **L2 spike results** (`logic-l2 nav`, headless pool instance, 6 instances running; A* Pathfinding Project 5.4.4):
 
 - The four baked graphs are one tile each and already have `enableNavmeshCutting` on. A box NavmeshCut added or
@@ -204,8 +236,9 @@ the scan; switched off, its footprint is a hole unless its deck is higher than a
   5 ms per graph update and left no unit off the navmesh: the game's movement snaps a unit to the nearest node every
   frame when it is within 2 m, so only a cut wider than about 4 m can trap one, and the push-out covers that case.
 - `GroundGraphs.Scan()` takes 630-680 ms on vanilla Nordfels and 0.9-1.8 s on edited maps (Caldera, Kingsclimb),
-  far over the 150 ms budget. Runtime rescans are therefore never used for logic: walkable surfaces use the
-  pre-scanned cuts above, and anything that would need a rescan is a validator error, not a rate-limited call.
+  far over the 150 ms budget (of which the fliers' graph is a third to a half: a deck never touches it). Runtime
+  rescans are therefore never used for logic: walkable surfaces use the pre-scanned cuts above, and a deck made at
+  runtime is a tile-local area update (see "Walkable surfaces as built").
 - Node tags work as per-unit walkability: a dual NavmeshCut splits the navmesh along an area's outline, a
   `GraphUpdateObject` (no physics) tags the triangles inside (under 35 ms), and a unit whose `Seeker.traversableTags`
   and snap constraint exclude that tag stops at the edge (within about 1 m: RVO avoidance pushes the front row in),
@@ -355,6 +388,18 @@ working. A ranged enemy that kites and prefers towers is just `targeting` plus `
 - **`command`**: `hold` takes an optional `at` (default: where the unit stands).
 - **`convert`**: the counterpart, when the template names none, is the plainest catalog unit of the other side
   with the same role: P Melee, P Archer or P Firewing for the player, E Melee, E Archer or E Flyer for the enemy.
+  It is only the brain (movement component, both priority lists, a weapon whose tags and splash layers fit its
+  side): the unit keeps its model (`keepLook`) and its numbers (`SteerTeams.CarryStats`): max hp, move speed, keep
+  distance, aggro time and, per attack, cooldown, range (every priority scaled so the longest is the old range) and
+  damage per hit (a damage multiplier on the new weapon: its base hit, the modifiers that need no tag but the
+  target's side, times the multiplier equals the old one's). Base values are read without Builder modifiers, so a
+  status it carries applies once. A dead unit gets its template's numbers. A named `counterpart` is taken as it is
+  (look per `keepLook`, its own numbers). In place (keeping the object and swapping tags, priorities and materials)
+  isn't used: the player and enemy movement components differ (home, hold, follow the king, daytime speed), and
+  vanilla weapons decide friend or foe by `requiredTags` and the splash FX prefabs' layer masks, which are shared
+  assets. Verified: an E Ogre converted to the player keeps 200 max hp, speed 4, cooldown 1 s, range 3 m and a 20
+  hit (a plain P Melee: 60 hp, speed 5), kills an E Melee at night and walks home at dawn; an E Archer keeps range
+  20 m and cooldown 2 s. Its projectiles are the counterpart weapon's.
   `team` may be an expression (`self.team`). Going `neutral` keeps the unit's own brain, drops its team tags and
   gives it an empty targeting list (it attacks nothing until a rule gives it targets).
 - **Members a verb can't act on are skipped**, not errors: `command` on anything but a player troop, `push`,
@@ -842,6 +887,12 @@ Where the build settles what the text above leaves open:
   `BuilderEntity`).
 - **Steps.** Timers and `wait`s run on 0.05 s steps of game time, `near` polling and `LogicWorld.Polled` (L2's areas)
   on every other step (10 Hz). Waits resume in due-time, then creation order.
+- **Own clocks (`timeScale`).** Each entity's rule timers (`every`, `after`; its status rules' too, which are attached
+  to it) and its rules' `wait`s and `repeat.every` run on its own clock: world time minus `Lag`, where every step adds
+  (1 - timeScale) x 0.05 s for each entity with a timer or a waiting task (sampled per step, so a status that comes
+  and goes is integrated). timeScale 0.5 makes `every 1` fire every 2 s, 0 holds it, 2 doubles it. The level and
+  bodiless logic objects are never scaled. Savestates keep each timer's time left on its own clock.
+  `statusTick` and status durations stay on world time. Tests: `LogicCoreTests.TimeScale*`.
 - **Bodies of `repeat`/`forEach`** are `"actions"`: `"do"` is already the action's type.
 - **`when` params.** `name`, `attack`, `status`, `action`, `line` and `result` compare `event.name`; `night` and
   `level` compare `event.value`; `min` is `event.value >= min`. `hpBelow` hears only its owner (no `of`).
@@ -948,11 +999,24 @@ limits), and `reference.md` gets the generated schema.
 
 **As built (L3, `Features/Builder/Studio/Logic/`).** Where it differs from the sketch below, this wins:
 
-- **Behaviour tab** (a right-panel tab, `Studio.AddPanel`): the selected thing's name (`@name`), labels, variables,
-  place fields (areas: shape, size, watches, shown; interactables: prompt, cost, usable; paths: points) and its rules
-  as one-line sentences ("When this dies → Spawn Slime × 2 at this"), plus its wires. With nothing selected it's the
-  level: variables, the level script, king actions, HUD lines and limits. The Inspector gets a one-row "Behaviour"
-  summary that jumps there.
+- **Behaviour tab** (a right-panel tab, `Studio.AddPanel`): the selected thing's name (`@name`), labels, its parts
+  (below), variables, path points, and its rules as one-line sentences ("When this dies → Spawn Slime × 2 at this"),
+  plus its wires. With nothing selected it's the level: variables, the level script, king actions, HUD lines, the
+  pack's statuses and things, and limits. A status or thing opened from there (or from a picker's "+ New status")
+  shows in the tab in place of the selection with a "← back" row (`LogicStudio.Focus`). The Inspector gets a one-row
+  "Behaviour" summary that jumps there.
+- **Parts** (`PartsPanel`): every component of a place or a thing, as typed fields: Look (a model picker over the
+  scenery library and unit models, scale, turn, raise, tint), Body (circle or box footprint, height, solid, walkable,
+  hittable with hp and game tags), Flight (`projectile`), Mover (path picker, mode, speed, spin, swing, and named
+  poses with turn and offset), Area (circle / rectangle / polygon, watches, shown, colour, inside tick, surface),
+  Pickup, Interact (prompt, cost, usable, reach, repeat, up to 4 choices) and starting statuses; "+ part" buttons add
+  the missing ones, each has Remove. A thing's own settings (name, kind, side, keeps-the-night-open, lifetime, most
+  alive) head it. A place made from a template shows the template's parts; editing one copies the whole component
+  onto the place first (the engine replaces components whole). Event pickers and the Wire tool offer component events
+  (an area's enter, a mover's arrive) by the parts a thing has, not only its kind.
+- **Statuses** (`StatusPanel`): name, duration, what applying again does (restart, stack with a cap, extend,
+  ignore), tick, stat changes (times / plus / set to, with an attacker filter for damage), flags, tint and effect,
+  and its rules (self = whoever has it).
 - **Rule editor**: a 620 px panel beside the right panel (the 340 px panel is too narrow for cards). When / If / Then
   top to bottom; an action row opens to its fields, nested lists (`then`, `else`, `onImpact`, `choose` options) indent
   under it. Options (once, cooldown, starts on, id, note) and Duplicate / Copy (JSON) / Save as preset / Delete at the
@@ -967,9 +1031,17 @@ limits), and `reference.md` gets the generated schema.
 - **Placed logic** (`logic.places`) are Studio items `place:<id>` through a new shell extension point,
   `Studio.AddItemSource`: picked, selected, moved, turned, duplicated and deleted like props, drawn as a coloured
   ring, an area's outline, or a stand-in box at a solid body's size.
-- **Logic palette tab** (`Studio.AddPaletteTab`): Area, Point and Path, then every built-in preset of category
-  "Logic". They are placed unpacked (kind, components, vars and rules with the params' defaults), so their cards edit
-  like any rule; outputs are rules with an empty or signal-only Then.
+- **Logic palette tab** (`Studio.AddPaletteTab`): Circle, Rectangle and Polygon areas, Point and Path, then every
+  built-in preset of category "Logic", then "This pack's things" (placed by reference, `{"entity": id}`) with
+  "+ New thing" / "Edit…" (the Entity Studio, through `LogicStudio.OpenEntityStudio`). Presets are placed unpacked
+  (kind, components, vars and rules with the params' defaults), so their cards edit like any rule; outputs are rules
+  with an empty or signal-only Then.
+- **Shapes on the map**: areas and paths are drawn with the Place tool (`StudioPlaceable.Draw`): a circle is a drag
+  from its centre, a rectangle a drag corner to corner, a polygon clicks its corners (click the first again to close),
+  a path clicks its points (click the last again to end); Esc drops the shape in progress. A selected place shows
+  handles (`PlaceHandles`, through `Studio.AddPointerHandler`, asked by the Select tool first): drag a path point, a
+  circle's edge, a rectangle's corner or a polygon's corner (one undo step on release); Ctrl-click removes a point;
+  pressing the small ring in a side's middle inserts one there and drags it.
 - **Wire tool** (J): drag (or click, click) from one thing to another; the panel lists the source's outputs, then its
   events; then the target's built-in inputs, its own "gets signal" inputs, or a new signal (which opens the target's
   new listener). Wires draw as arcs labelled "event → input", coloured by signal; all of them while the tool is
@@ -996,7 +1068,15 @@ limits), and `reference.md` gets the generated schema.
   rule's sentence, its value and other, throttles and errors in red) and the count of spawned things; rule cards show
   "fired N×"; a pip rises over a thing when its rule fires (View ▾ Rule pips).
 - **Dev**: `builder-logic state | owner | rules | open | new | act | press <text> | set | place | wire | unwire |
-  wires | json | check | rows | tab | close` drives all of it the way the mouse does.
+  wires | json | check | rows | tab | close` drives all of it the way the mouse does. `press` clicks the row or tile
+  whose text is (else starts with, else contains) the text, rule editor first; `Label#2` is the second match; type
+  into the field it opened with `uikit type <text with _ for spaces>` then `uikit type enter`. `builder-studio dragw`
+  and `cursor`/`click` draw shapes and drag handles through the Studio's own pointer path; `builder-studio json pack`
+  prints the whole draft.
+- **Built by mouse alone** (examples 21, 6, 8, 12 and 1, `tests/studio-mouse/`): each is built from an empty level
+  with only those commands (no JSON), then its pack runs headless through `palace.py logic fixture` with the
+  example's play steps: `scripts/studio_mouse.py tests/studio-mouse/ex21.txt --fixture-game <instance game dir>`.
+  Start each on a freshly launched instance (opening a second level in the Studio in one game can crash it natively).
 
 The original sketch:
 
@@ -1308,9 +1388,13 @@ three (projectiles in flight, surfaces and spaces above), with no feature coded 
 
 - **Movement physics is limited.**
   - Units ride a walkable mover only when it snaps between poses, not while it glides.
-  - Walkable bodies must exist when the level starts (places): one spawned at runtime costs a ~1 s rescan (the
-    validator warns). A body switched off or a pose not taken is hidden by a cut, not removed: a deck over walkable
-    ground hides that ground in both states.
+  - A walkable body made or destroyed at runtime rebuilds the ground graphs round it (30-100 ms on tiled graphs,
+    about 340 ms on one-tile ones; the validator notes it). A body switched off or a pose not taken is hidden by a
+    cut, not removed: a deck over walkable ground hides that ground in both states, and its ramps stay.
+  - A deck's edges are classified once, on the first scan that sees it; ground edited later doesn't re-open them.
+    An edge open to the bank needs the deck to reach 0.75 m past where the bake's ground ends (overlap banks by 1
+    m). Large enemies keep 4 m from every edge and rail, so a bridge for them must be over 8 m wide.
+  - The king passes opened walls only on a deck that doesn't move between poses (ghost rails have no colliders).
   - Per-unit walkability is by surface (31 names per level), not per triangle; RVO avoidance can push the front row
     of a blocked crowd about 1 m into a surface it may not walk.
   - Terrain height doesn't change at runtime; walkable props and blockers change where units can go.
@@ -1318,7 +1402,8 @@ three (projectiles in flight, surfaces and spaces above), with no feature coded 
 - **Projectiles in flight**: the game's own are entities only while they fly, and a redirected one still deals its
   shooter's weapon damage; it can't gain Builder `impact` rules (use an area or `near` on it instead).
 - **Team model.** There are three teams. There's no "hostile to all": Builder targeting can make a thing attack
-  both sides, but vanilla AI sees only `PlayerOwned`/`EnemyOwned`, so vanilla units never attack a neutral. A converted unit uses the other side's nearest equivalent brain.
+  both sides, but vanilla AI sees only `PlayerOwned`/`EnemyOwned`, so vanilla units never attack a neutral. A converted unit uses the other side's nearest equivalent brain with its own model and numbers; its projectiles are
+  the brain's.
 - **Game tags are a closed set** (51 `ETag`s, kept in a 64-bit field). Vanilla AI only targets by them, so labels
   work only through Builder targeting, which can be set on any attacker (Builder units, vanilla units and towers).
 - **No new scenes, no fog or lighting changes** beyond the level's colour scheme and tints (a separate arena is an

@@ -1,0 +1,60 @@
+# Example 21: a toll gate, built by mouse from an empty level.
+builder-studio new mouse21 Nordfels
+sleep 2
+builder-studio open mouse21 nordfels-studio
+sleep 20
+builder-studio cam 18 -10 2
+# Logic palette: Door, placed with a click on the map.
+builder-studio press Logic
+builder-studio press Door
+builder-studio cursor 20 -10
+builder-studio click
+sleep 1
+builder-studio cursor off
+builder-logic tab
+sleep 1
+# Its name: @toll.
+builder-logic press Name
+uikit type toll
+uikit type enter
+sleep 0.5
+# The part it lacked: Interact (prompt, cost; usable by day is the default).
+builder-logic press + Interact
+sleep 0.5
+builder-logic press Prompt
+uikit type Pay_{cost}_to_open
+uikit type enter
+sleep 0.5
+builder-logic press Cost (gold)
+uikit type 5
+uikit type enter
+sleep 0.5
+# Rule 1: when the king uses it, send "open" to it.
+builder-logic press + rule
+builder-logic press This is used by the king
+builder-logic press + action
+builder-logic press Search
+uikit type signal
+uikit type enter
+builder-logic press Send a signal
+builder-logic press Name
+builder-logic press open
+builder-logic press To
+builder-logic press This
+builder-logic close
+sleep 0.5
+# Rule 2: at dusk, send "closed" to it.
+builder-logic press + rule
+builder-logic press Dusk falls
+builder-logic press + action
+builder-logic press Search
+uikit type signal
+uikit type enter
+builder-logic press Send a signal
+builder-logic press Name
+builder-logic press closed
+builder-logic press To
+builder-logic press This
+builder-logic close
+builder-logic rules
+shot mouse-21-toll-gate-studio
