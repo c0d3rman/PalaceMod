@@ -331,6 +331,9 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("hp")] public LNum Hp { get; set; }
         /// <summary>Targeting treats it as air (the Flying tag) when hittable.</summary>
         [JsonProperty("flying")] public bool? Flying { get; set; }
+        /// <summary>Game tags (TagManager.ETag names) a hittable body carries, e.g. ["Building"] so vanilla enemies
+        /// attack it like a building (vanilla AI picks targets only by tags).</summary>
+        [JsonProperty("tags")] public List<string> Tags { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
@@ -459,6 +462,7 @@ namespace PalaceMod.Builder.Model.Logic
     {
         [JsonProperty("id")] public string Id { get; set; }
         [JsonProperty("label")] public string Label { get; set; }
+        [JsonProperty("description")] public string Description { get; set; }
         [JsonProperty("cost")] public LNum Cost { get; set; }
         [JsonProperty("icon")] public string Icon { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
