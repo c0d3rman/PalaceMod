@@ -81,7 +81,7 @@
      {
       "do": "spawn",
       "entity": "assassin",
-      "at": "vec(-4, -70)"
+      "at": "vec(30, -10)"
      }
     ]
    },
@@ -98,7 +98,7 @@
     ]
    },
    {
-    "expect": "count('is:assassin', 15) >= 0 and nearest('is:assassin', 300).dist(castle) < 16",
+    "expect": "$blinks == 1 and nearest('is:assassin', 300).dist(castle) < 16",
     "within": 3
    }
   ]

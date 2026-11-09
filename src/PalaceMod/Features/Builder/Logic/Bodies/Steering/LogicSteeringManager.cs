@@ -35,6 +35,7 @@ namespace PalaceMod
             LogicServices.Targeting = TargetingService;
             LogicServices.TargetOf = TargetOf;
             BodyEvents.UnitSpawned += OnUnitSpawned;
+            Teams.Convert = (e, go, team) => SteerTeams.Convert(e, go, team);
             SteerActions.Register();
             LogicSaveState.Register("steering", SteerSave.Capture, SteerSave.Restore);
             DevCommands.Register("logic-steer", "logic-steer apply <role> <json> | state <role> | units   steering (L2): apply a unit template's targeting/movement/attacks to live units, inspect", SteerDev.Run);
@@ -139,8 +140,15 @@ namespace PalaceMod
         /// <summary>Apply a template's `targeting`, `movement` and `attacks` to a freshly spawned unit.</summary>
         internal static void OnUnitSpawned(LogicEntity e, GameObject go)
         {
-            if (e?.Def == null || go == null || !Live()) return;
-            ApplyComponents(e, go, e.Def);
+            if (e == null || go == null || !Live()) return;
+            if (e.Def != null) ApplyComponents(e, go, e.Def);
+            // a neutral unit keeps its side's brain, whose priorities would still walk it to the player: it targets
+            // nothing until its template or a rule says what
+            if (e.Team == "neutral" && go.GetComponent<PathfindMovement>() != null)
+            {
+                var st = For(e, go);
+                if (st != null) st.Targeting ??= new TargetingState { Base = [] };
+            }
         }
 
         internal static void ApplyComponents(LogicEntity e, GameObject go, JObject def)
@@ -190,9 +198,27 @@ namespace PalaceMod
 
         // ------------------------------------------------------------------ per frame
 
+        private static readonly List<(Hp hp, float frac, int frame)> pendingHp = [];
+
+        /// <summary>Set a unit's hp fraction now and again after its Start (a new unit's Hp.Start revives it to full).</summary>
+        internal static void SetHpFraction(Hp hp, float frac)
+        {
+            frac = Mathf.Clamp(frac, 0.01f, 1f);
+            hp.HpPercentage = frac;
+            pendingHp.Add((hp, frac, Time.frameCount + 2));
+        }
+
         public override void Update()
         {
             if (!Live()) return;
+            for (int i = pendingHp.Count - 1; i >= 0; i--)
+            {
+                var (hp, frac, frame) = pendingHp[i];
+                if (hp == null) { pendingHp.RemoveAt(i); continue; }
+                if (Time.frameCount < frame) continue;
+                if (!hp.KnockedOut) hp.HpPercentage = frac;
+                pendingHp.RemoveAt(i);
+            }
             float dt = Time.deltaTime;
             if (dt <= 0) return;
             if (Drifts.Any) ApplyDrifts(dt);
@@ -443,7 +469,9 @@ namespace PalaceMod
                 else if (st.PathPoints != null && !st.PathDone && st.PathIndex < st.PathPoints.Count && SteerMovement.Flat(pos, st.PathPoints[st.PathIndex]) <= 1.5f) SteerMovement.Repath(st);
 
                 float baseSpeed = en != null ? en.movementSpeed : pu.movementSpeed;
-                float speed = st.MoveTo?.Speed ?? baseSpeed;
+                // a moveTo speed still feels slows and haste (the stat factor), like the game's own speed field
+                float? orderSpeed = st.MoveTo?.Speed * (float)StatsService.Instance.Factor(st.Entity, "moveSpeed");
+                float speed = orderSpeed ?? baseSpeed;
                 if (st.Move.Mode == "direct")
                 {
                     if (en != null && en.IsSlowed) speed *= SteerMovement.E_speedSlowed(en);
@@ -453,7 +481,7 @@ namespace PalaceMod
                     SteerMovement.DirectUpdate(st, speed, keep, rvo, Time.deltaTime);
                     return false;
                 }
-                if (st.MoveTo?.Speed is float s)
+                if (orderSpeed is float s)
                 {
                     __state = baseSpeed;
                     if (en != null) en.movementSpeed = s; else pu.movementSpeed = s;

@@ -71,14 +71,23 @@
       "do": "spawn",
       "entity": "vanilla:P Melee",
       "count": 3,
-      "at": "vec(-4, -14)",
+      "at": "vec(20, 10)",
       "spread": 1,
       "team": "player"
      },
      {
       "do": "spawn",
       "entity": "converter",
-      "at": "vec(-4, -14)"
+      "at": "vec(20, 10)"
+     }
+    ]
+   },
+   {
+    "do": [
+     {
+      "do": "setHp",
+      "target": "all('unit and player and not king', 30)",
+      "value": 4
      }
     ]
    },
@@ -90,6 +99,7 @@
     "expect": "count('enemy and unit and not is:converter', 30) >= 1",
     "within": 5
    }
-  ]
+  ],
+  "note": "The victims drop to 4 hp so the converter lands killing blows before three troops and the king wear it down."
  }
 }

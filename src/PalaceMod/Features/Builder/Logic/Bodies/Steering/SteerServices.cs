@@ -16,7 +16,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
         {
             if (e == null) return;
             var go = e.Go();
-            if (go == null) throw new LogicError($"setTargeting: {e.Id} has no body");
+            if (go == null) return;   // a body-less entity has nothing to aim: skipped
             var st = LogicSteeringManager.For(e, go) ?? throw new LogicError("setTargeting: no logic session");
             st.Targeting ??= new TargetingState();
             st.Targeting.Apply(targeting, seconds, LogicWorld.Current.Time);
@@ -100,7 +100,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
                         var st = LogicSteeringManager.Get(e.Go());
                         var go = e.Go();
                         string pos = go != null ? go.transform.position.ToString("F1") : "-";
-                        if (st == null) return $"{e.Id} team={e.Team} at {pos}: no steering";
+                        if (st == null) return $"{e.Id} team={e.Team} hp={e.Body?.Hp:0.#}/{e.Body?.MaxHp:0.#} at {pos}: no steering";
                         var m = st.Move;
                         string tgt = st.Targeting == null ? "game" : string.Join(" > ", st.Targeting.Effective(LogicWorld.Current.Time, out bool tail).Select(r => r.Filter)) + (tail ? " > game" : "");
                         string seek = st.Enemy != null ? SteerMovement.E_seekObj(st.Enemy)?.name : st.Player != null ? SteerMovement.P_seekObj(st.Player)?.name : null;
@@ -113,7 +113,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
                             picks = string.Join(",", Traverse.Create(tower).Field<System.Collections.Generic.List<TaggedObject>>("attackTargets").Value.Select(t => t != null ? t.name : "null"));
                         }
                         else if (go.GetComponentInChildren<AutoAttack>() is { } aa) picks = aa.FindAutoAttackTarget()?.name ?? "none";
-                        return $"{e.Id} attackPick={picks} team={e.Team} at {pos} mode={m.Mode} path={st.PathIndex}/{st.PathPoints?.Count ?? 0}{(st.PathDone ? " done" : "")} moveTo={(st.MoveTo != null ? st.MoveTo.Point.ToString("F1") : "-")} " +
+                        return $"{e.Id} attackPick={picks} team={e.Team} hp={e.Body?.Hp:0.#}/{e.Body?.MaxHp:0.#} at {pos} mode={m.Mode} path={st.PathIndex}/{st.PathPoints?.Count ?? 0}{(st.PathDone ? " done" : "")} moveTo={(st.MoveTo != null ? st.MoveTo.Point.ToString("F1") : "-")} " +
                                $"kite={(st.KiteUntil > LogicWorld.Current.Time)} flee={st.Fleeing} targeting=[{tgt}] taunt={st.Targeting?.Taunt?.Id ?? "-"} seek={seek ?? "-"} attacks={attacks.Length}";
                     }
                 case "units":

@@ -101,9 +101,11 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             string counterpart = (string)e?.Def?["counterpart"];
             if (counterpart != null)
             {
-                var cr = ContentRef.Parse(counterpart);
-                prefab = cr.Kind == RefKind.Vanilla ? BuilderServices.Catalog?.FindUnit(cr.Id)?.Prefab : null;
-                if (prefab == null) return (null, $"counterpart \"{counterpart}\": only vanilla units can be counterparts until the factory is on main");
+                string why = "the unit factory isn't ready";
+                prefab = BuilderServices.Units?.Resolve(BuilderServices.Sessions?.Current?.Pack, counterpart, out why);
+                if (prefab == null) return (null, $"counterpart \"{counterpart}\": {why}");
+                bool enemyPrefab = prefab.GetComponentInChildren<TaggedObject>(true)?.Tags.Contains(TagManager.ETag.EnemyOwned) == true;
+                if (enemyPrefab != (team == "enemy")) return (null, $"counterpart \"{counterpart}\" is a {(enemyPrefab ? "enemy" : "player")} unit, not {team}");
             }
             else
             {
@@ -114,6 +116,8 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             }
 
             var made = Object.Instantiate(prefab, pos, r);
+            made.name = made.name.Replace("(Clone)", "").Trim();
+            if (!made.activeSelf) made.SetActive(true);   // Builder templates are kept inactive
             if (team == "enemy") Spawn.AdjustEnemyParametersAfterSpawn(made, false);
             if (look != null && look != "vanilla:" + prefab.name)
             {
@@ -144,13 +148,13 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             var world = LogicWorld.Current;
             var go = e.Go();
             bool alive = go != null && e.Alive;
-            if (e.Kind is "building" or "castle" or "king") throw new LogicError($"convert: {e.Id} is a {e.Kind}; only units change sides");
+            if (e.Kind is not "unit") return;   // only units change sides; the king, buildings and bodies are skipped
             if (alive && e.Team == team) return;
             Vector3? at = null; Quaternion? rot = null;
             if (!alive)
             {
                 if (LogicSteeringManager.Deaths.TryGetValue(e, out var d)) { at = d.pos; rot = d.rot; }
-                else if (go == null) throw new LogicError($"convert: {e.Id} is gone and where it died isn't known");
+                else if (go == null) return;   // gone, and where it died isn't known: skipped
                 go = null;
             }
             float frac = (float)(hpPct ?? (alive && e.Body != null && e.Body.MaxHp > 0 ? e.Body.Hp / e.Body.MaxHp : 1));
@@ -181,7 +185,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             }
             e.Team = team;
             var hp = made.GetComponent<Hp>();
-            if (hp != null) { hp.HpPercentage = Mathf.Clamp(frac, 0.01f, 1f); }
+            if (hp != null) LogicSteeringManager.SetHpFraction(hp, frac);
             LogicSteeringManager.Deaths.Remove(e);
 
             // steering follows the entity: the template's components, then any runtime override it had
@@ -210,7 +214,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             float rotY = go.transform.eulerAngles.y;
             var made = SteerSpawn.Spawn(ctx, with, pos, rotY, e.Team, e.Owner);
             if (made == null) return null;
-            if (keep.Contains("hp") && e.Body != null && e.Body.MaxHp > 0 && made.Hp() is { } nh) nh.HpPercentage = Mathf.Clamp(e.Body.Hp / e.Body.MaxHp, 0.01f, 1f);
+            if (keep.Contains("hp") && e.Body != null && e.Body.MaxHp > 0 && made.Hp() is { } nh) LogicSteeringManager.SetHpFraction(nh, e.Body.Hp / e.Body.MaxHp);
             if (keep.Contains("vars")) foreach (var kv in e.Vars) made.Vars[kv.Key] = kv.Value;
             if (keep.Contains("labels")) foreach (var l in e.Labels) made.Labels.Add(l);
             if (keep.Contains("statuses") && LogicServices.Stats != null)
@@ -233,7 +237,12 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
         {
             if (template != null && template.StartsWith("@@")) template = template.Substring(2);
             if (LogicServices.Factory != null && LogicServices.Factory.HasTemplate(template))
-                return LogicWorld.Current.Spawn(template, pos.ToVec(), rotY, team, owner, ctx);   // null when capped (traced)
+            {
+                // keep the side asked for, neutral included (as `spawn` with an explicit team does)
+                EntityFactory.PendingNeutral = team == "neutral";
+                try { return LogicWorld.Current.Spawn(template, pos.ToVec(), rotY, team, owner, ctx); }   // null when capped (traced)
+                finally { EntityFactory.PendingNeutral = false; }
+            }
             var r = ContentRef.Parse(template ?? "");
             var cu = r.Kind == RefKind.Vanilla ? BuilderServices.Catalog?.FindUnit(r.Id) : null;
             if (cu?.Prefab == null) throw new LogicError($"no template \"{template}\" (Builder templates need the entity factory)");
