@@ -237,7 +237,12 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
         {
             if (template != null && template.StartsWith("@@")) template = template.Substring(2);
             if (LogicServices.Factory != null && LogicServices.Factory.HasTemplate(template))
-                return LogicWorld.Current.Spawn(template, pos.ToVec(), rotY, team, owner, ctx);   // null when capped (traced)
+            {
+                // keep the side asked for, neutral included (as `spawn` with an explicit team does)
+                EntityFactory.PendingNeutral = team == "neutral";
+                try { return LogicWorld.Current.Spawn(template, pos.ToVec(), rotY, team, owner, ctx); }   // null when capped (traced)
+                finally { EntityFactory.PendingNeutral = false; }
+            }
             var r = ContentRef.Parse(template ?? "");
             var cu = r.Kind == RefKind.Vanilla ? BuilderServices.Catalog?.FindUnit(r.Id) : null;
             if (cu?.Prefab == null) throw new LogicError($"no template \"{template}\" (Builder templates need the entity factory)");
