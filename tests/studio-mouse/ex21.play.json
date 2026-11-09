@@ -1,0 +1,8 @@
+{"steps": [
+ {"cmd": "agent build castle"},
+ {"expect": "@toll.facing < 5", "within": 3},
+ {"raise": "interact", "on": "@toll", "other": "king"},
+ {"expect": "@toll.facing > 80 and @toll.facing < 100", "within": 5},
+ {"cmd": "night"},
+ {"expect": "@toll.facing < 5 or @toll.facing > 355", "within": 10}
+]}

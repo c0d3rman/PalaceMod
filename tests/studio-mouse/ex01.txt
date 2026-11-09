@@ -1,0 +1,114 @@
+# Example 1: an enemy that hurls homing trees, built by mouse: a Treant (base Ogre) in the Enemy Studio, a "Hurled
+# tree" projectile designed in the Entity Studio (its Things mode), the treant's extra attack launching it, and level
+# observers for the test.
+builder-studio new mouse01 Nordfels
+sleep 2
+builder-studio open mouse01 nordfels-studio
+sleep 20
+builder-enemy level
+sleep 3
+builder-enemy tab base stats
+builder-enemy press E Ogre
+builder-entity press Name
+builder-entity type Treant
+# The projectile: Things > + New > Projectile, Cone Tree model at 0.4.
+builder-entity press Tab things
+builder-entity press + New
+builder-entity press Projectile
+sleep 1
+builder-entity press Tab look
+builder-entity press Filter
+builder-entity type Cone
+builder-entity press mesh:Cone Tree
+builder-entity press Tab look
+builder-entity press Scale
+builder-entity type 0.4
+builder-entity press Tab parts
+sleep 1
+builder-entity press Name
+builder-entity type Hurled tree
+builder-entity press Lifetime (s)
+builder-entity type 6
+builder-entity press Speed (m/s)
+builder-entity type 9
+builder-entity press Homing
+builder-entity type 0.6
+builder-entity press Arc
+builder-entity type 0.2
+builder-entity press Spin Z (°/s)
+builder-entity type 360
+builder-entity press Tab behaviour
+sleep 1
+builder-entity press + rule
+builder-logic press Search
+uikit type shot
+uikit type enter
+builder-logic press Hits (as a shot)
+builder-logic press + action
+builder-logic press Damage
+builder-logic press Target
+builder-logic press Formula
+uikit type all('foe',_2)
+uikit type enter
+builder-logic press Amount
+uikit type 25
+uikit type enter
+builder-logic press Source
+builder-logic press Formula
+uikit type self.owner
+uikit type enter
+builder-logic close
+builder-entity press Tab things
+builder-entity press Launch
+sleep 1
+shot mouse-01-homing-tree-launch
+# The treant's attack: every 3 s, range 18, replacing the ogre's own, launching the hurled tree.
+builder-entity press Tab enemies
+sleep 1
+builder-entity press Enemy treant
+builder-entity press Tab moves
+builder-entity press + attack
+builder-entity press Every (s)
+builder-entity type 3
+builder-entity press Range (m)
+builder-entity type 18
+builder-entity press Replaces the base's
+builder-entity press Launches
+builder-entity press Hurled tree
+# Back to the level: observers for the test (level script).
+builder-entity press ← Level
+sleep 3
+builder-studio clear
+builder-logic tab
+sleep 1
+builder-logic press + variable
+uikit type launched
+uikit type enter
+builder-logic press + variable
+uikit type impacts
+uikit type enter
+builder-logic press + rule
+builder-logic press Appears
+builder-logic press Of what
+builder-logic press Filter
+uikit type is:new-projectile
+uikit type enter
+builder-logic press + action
+builder-logic press Add to a variable
+builder-logic press Name
+builder-logic press $launched
+builder-logic close
+builder-logic press + rule
+builder-logic press Search
+uikit type shot
+uikit type enter
+builder-logic press Hits (as a shot)
+builder-logic press Of what
+builder-logic press Filter
+uikit type is:new-projectile
+uikit type enter
+builder-logic press + action
+builder-logic press Add to a variable
+builder-logic press Name
+builder-logic press $impacts
+builder-logic close
