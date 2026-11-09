@@ -1919,6 +1919,11 @@
           "min": 1.0,
           "max": 256.0,
           "description": "At most this many (max 256)."
+        },
+        {
+          "name": "as",
+          "type": "local",
+          "description": "A name for the member, readable inside (and in nested actions that rebind `it`): \"as\": \"tower\" then `tower.hp`."
         }
       ],
       "since": "1.0.0"
@@ -1991,10 +1996,15 @@
       "description": "Acts on a build slot.",
       "params": [
         {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
           "name": "slot",
           "type": "slot",
-          "required": true,
-          "description": "The slot: @name, a selector, or a Studio key (\"slot:Tower 3\")."
+          "description": "The slot: any expression giving a building or slot entity (@name, it, $var, nearest('unbuilt and type:House')...), or a Studio key (\"slot:Tower 3\", \"add:<id>\", \"castle\"). Default: the target."
         },
         {
           "name": "op",
@@ -2266,7 +2276,7 @@
         {
           "name": "glow",
           "type": "color",
-          "description": "Glow colour."
+          "description": "Glow colour; true for the default glow, false for none, or a 0-1 strength."
         },
         {
           "name": "for",
@@ -2841,7 +2851,7 @@
       "on": "entity",
       "name": "level",
       "returns": "number",
-      "description": "A building's level (0 = built, 1 = first upgrade...)."
+      "description": "A build slot's level: 0 = empty (unbuilt), 1 = built, 2 = upgraded once..."
     },
     {
       "on": "entity",
@@ -3131,6 +3141,11 @@
       "type": "entity"
     },
     {
+      "name": "outer",
+      "description": "The `it` one scope out (the forEach member while a nested target, where() or best() rebinds `it`); none at the top.",
+      "type": "entity"
+    },
+    {
       "name": "king",
       "description": "The player's king.",
       "type": "entity"
@@ -3306,15 +3321,23 @@
     },
     {
       "name": "alive",
-      "description": "Alive."
+      "description": "Alive (not dead, switched off or an unbuilt slot)."
     },
     {
       "name": "dead",
-      "description": "Dead or knocked out."
+      "description": "Dead or knocked out. Naming it lets a selector see the dead."
     },
     {
       "name": "elite",
       "description": "Elite enemies."
+    },
+    {
+      "name": "disabled",
+      "description": "Switched off (`disable`, or placed with active: false). Naming it lets a selector see switched-off things."
+    },
+    {
+      "name": "unbuilt",
+      "description": "An empty build slot (level 0). Naming it lets a selector see empty slots, which it otherwise skips."
     },
     {
       "name": "logic",
@@ -3334,11 +3357,11 @@
     },
     {
       "name": "#label",
-      "description": "Has a label."
+      "description": "Has a label (#\"two words\" for a label with spaces)."
     },
     {
       "name": "is:<template>",
-      "description": "Made from a template."
+      "description": "Made from a template (is:goblin, is:vanilla:Ogre, is:'vanilla:E Ogre')."
     },
     {
       "name": "in:@area",
@@ -3350,7 +3373,11 @@
     },
     {
       "name": "type:<Kind>",
-      "description": "A building of that kind (Mill, Tower...)."
+      "description": "A building of that kind (type:Mill, type:\"Defense Tower\")."
+    },
+    {
+      "name": "include:<what>",
+      "description": "Matches everything, but lets a selector also see what it skips by default: include:dead, include:disabled, include:unbuilt, include:self (repeat it for more)."
     },
     {
       "name": "where(expr)",
@@ -3406,13 +3433,14 @@
     "any": "an expression of any type",
     "for": "seconds, or \"night\" / \"day\" (until the next dawn / dusk)",
     "night": "a night number expression, or \"current\"",
-    "slot": "a build slot: @name, a selector, or a Studio key (\"slot:Tower 3\", \"add:<id>\", \"castle\")",
+    "slot": "a build slot: any expression giving a building or slot entity (@name, it, $var, a selector), or a Studio key (\"slot:Tower 3\", \"add:<id>\", \"castle\")",
     "types": "a list of damage-type labels ([\"fire\"])",
     "keep": "a list of the listed options",
     "fx": "a game effect name",
     "sound": "\"asset:<key>\" or a game sound",
-    "color": "\"#rrggbb\"",
-    "json": "a JSON block"
+    "color": "\"#rrggbb\" (or \"#rgb\", \"#rrggbbaa\", a colour name like \"red\"); \"=expr\" for an expression",
+    "json": "a JSON block",
+    "local": "a plain name (letters, digits, _) for a value bound inside the action's actions"
   },
   "tags": [
     "AUTO_Alive",

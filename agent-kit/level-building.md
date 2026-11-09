@@ -37,7 +37,7 @@ that pack. A folder under `packs/` (an installed pack) is read and written as be
    then the whole file runs again; ops aren't idempotent, so a plain second `apply` of the same file fails at the first
    `add_slot`). Packs reload in the game within ~2 s; reload the level (`play` again) to see changes.
 
-All commands print JSON. Errors go to stderr as `{"error": "..."}` with exit code 2; `test` exits 1 when the run is lost.
+All commands print JSON. Errors go to stderr as `{"error": "..."}` with exit code 2; `test` exits 1 when the run is lost. `apply` always answers with `{"applied", "saved", "errors", "warnings"}`: a bad op is an `errors[]` entry with its path (`"ops[3]"`), exit code 1, and nothing is saved.
 
 ## 2. Setup
 
@@ -777,13 +777,19 @@ log warns by file). Delete or rename shared items with the `remove_*` / `rename_
 
 One small, pure language everywhere: conditions, numbers, selectors, positions.
 
-- **Which fields are expressions.** A param whose type isn't text is an expression when it's a JSON string:
-  `"amount": 25` and `"amount": "night * 5"` both work; `"target": "all('foe', 3)"`. A **text** field (messages, HUD,
-  prompts) is literal text with `{expr}` parts (`"Souls {$souls}/10"`); start it with `=` to make the whole field an
-  expression. A **template** field (`spawn.entity`) is an id (`"goblin"`, `"vanilla:E Slime"`) unless it starts with
-  `=` (`"=self.template"`). Text inside an expression is quoted: `'summer'`, `count('foe')`.
+- **Which fields are expressions.** Each param's type (in `logic-reference.md`) decides how its string is read, and
+  `check` reads it exactly as the game does:
+  - number, bool, position, entity, entities and slot params: an expression (`"amount": 25` and `"amount": "night *
+    5"` both work; `"target": "all('foe', 3)"`; a leading `=` is allowed);
+  - **text** fields (messages, HUD, prompts, signal and label names): literal text with `{expr}` parts (`"Souls
+    {$souls}/10"`); start it with `=` to make the whole field an expression;
+  - names and literals: a **template** (`spawn.entity`: `"goblin"`, `"vanilla:E Slime"`), a **colour** (`"#40c0ff"`,
+    `"#4cf"`, `"#40c0ff80"` or a name like `"red"`), an effect, a sound, a status or an option (`"op": "build"`); start
+    it with `=` for an expression (`"=self.template"`, `"tint": "=$colour"`). Variable and rule names are always names.
+  Text inside an expression is quoted: `'summer'`, `count('foe')`. An expression may be up to 8192 characters, nested
+  at most 100 deep.
 - **Literals**: `12`, `0.5`, `true`, `'text'`, `vec(x, z)` (a ground position), `vec(x, y, z)`.
-- **Names**: roles (`self subject other spawned it king castle level`), per-event aliases (`killer`, `victim`,
+- **Names**: roles (`self subject other spawned it outer king castle level`), per-event aliases (`killer`, `victim`,
   `attacker`, `target`, `entrant`, `collector`, `sender`...), `event.value` / `event.pos` / `event.name` /
   `event.choice`, `@name` (a place or attached object), `@@id` (a template), `$var` (a level variable), `x.$var` (an
   entity variable), globals (`night`, `isNight`, `isDay`, `time`, `nightTime`, `nightProgress`, `gold`, `income`,
@@ -795,9 +801,20 @@ One small, pure language everywhere: conditions, numbers, selectors, positions.
   .has(x)`.
 - **Selectors**: `nearest(f, r?)`, `farthest`, `weakest`, `strongest`, `random`, `all(f, r?)` (a set, nearest first),
   `best(f, r, score)` (score is an expression over `it`), `count(f, r?)`. They anchor at `self`; call them as methods
-  to anchor elsewhere: `castle.count('enemy', 10)`, `other.nearest('ally')`. A selector never returns the anchor itself
-  or dead entities unless the filter says `self` / `dead`. No match is `none` (actions on none do nothing); test it with
-  `other != none`. A role the event doesn't have is `none` too.
+  to anchor elsewhere: `castle.count('enemy', 10)`, `other.nearest('ally')`. No match is `none` (actions on none do
+  nothing); test it with `other != none`. A role the event doesn't have is `none` too, and so is a distance to or from
+  none (`nearest('#x').dist(self)`); `none` counts as 0 in arithmetic and comparisons, so test `!= none` first.
+- **What a selector sees.** By default it skips its anchor (`self`), the dead (and knocked-out buildings), switched-off
+  entities (`disable`, or placed with `"active": false`) and empty build slots. Its filter opts in by naming them:
+  `dead`, `disabled`, `unbuilt` (or `self`) match only those, and `include:dead`, `include:disabled`,
+  `include:unbuilt`, `include:self` match everything, so they only widen the search: `nearest('#lamp and
+  include:disabled')` finds a lamp whether it's on or off; `all('unbuilt and type:House')` is every empty house slot,
+  vanilla or added, attached or not.
+- **`it` and `outer`.** `it` is rebound by every scope that walks a set: `forEach`, an action whose `target` is a set
+  (its params see each member as `it`), `where()`, `best()`, `.is()`. `outer` is the `it` one scope out (`none` at the
+  top), and `forEach` takes `"as": "name"` to name its member for everything nested inside: in `forEach in
+  all('#nest') as nest` → `spawn` → `then` → `setVar target spawned value "nest"`, `it` is the spawned thing but `nest`
+  (and here `outer`) is still the nest.
 - **Positions**: an entity is its position wherever a position is wanted. `pointNear(p, r)` (a random walkable point),
   `ahead(e, d)`, `toward(a, b, d)`, `lerp(a, b, t)`, `dir(deg)` (0 = north, 90 = east), `angle(a, b)`,
   `spawnLine('Name')`; positions add, subtract and scale (`self.pos + dir(90) * 3`).
@@ -814,7 +831,12 @@ A filter is a string: `"foe and Building and not Wall"`, `"#lantern"`, `"in:@moa
 enemy neutral` (foe/ally relative to `self`); kinds `unit building prop projectile area pickup coin king castle line
 point path logic self`; `melee ranged alive dead elite`; any game tag, case-sensitive (`Tower`, `Flying`, `Wall`, `Boss`,
 `Undead`...; see `logic-reference.md`); `#label`; `is:<template>`; `in:@area` / `in:self` (inside an area); `has:<status>`;
-`type:<building kind>` (`type:Mill`); `where(<expression over it>)`. Combine with `and or not ( )`.
+`type:<building kind>` (`type:Mill`); `where(<expression over it>)`; the visibility terms `disabled unbuilt` and
+`include:<dead|disabled|unbuilt|self>` (12.4, "What a selector sees"). Combine with `and or not ( )`.
+
+A name with spaces (or other punctuation) is quoted, with whichever quote the surrounding expression doesn't use:
+`type:"Defense Tower"`, `is:"vanilla:E Ogre"`, `#"night watch"`; inside an expression that's `nearest('type:"Defense
+Tower"')`. Template refs with a colon work unquoted too: `is:vanilla:Ogre`.
 
 ### 12.6 Actions
 
@@ -828,11 +850,12 @@ runs once per member and the other params are evaluated per member with `it` bou
 | Stats | `setStat` (`stat`, one of `value`/`add`/`mult`, `for` seconds or `"night"`/`"day"`), `applyStatus`, `removeStatus` |
 | Team, move | `convert` (switch side), `teleport`, `push` (knockback), `drift` (continuous pull/wind), `moveTo`, `setMovement`, `setTargeting` (`prepend`, `remove`, `for`), `taunt`, `command` (player units: follow/hold/home) |
 | Logic | `signal`, `setVar`, `addVar`, `listAdd`/`listRemove`/`listClear`, `addLabel`/`removeLabel`, `enableRule`/`disableRule`, `enable`/`disable`/`toggle`, `wait`, `if` (`cond`, `then`, `else`), `repeat` (`times`, `every`, `actions`), `forEach` (`in`, `actions`, `limit`), `choose` (`options: [{weight, do}]`), `stop` |
-| World | `gold` (give/take), `dropCoins`, `building` (build, upgrade, knockOut, repair, demolish, lock, unlock, setCost, setIncome a slot), `waves` (addSpawn, removeUnit, scaleCount, scaleHp, clearRemaining, startNight, endNight, skipNight), `endLevel` |
+| World | `gold` (give/take), `dropCoins`, `building` (build, upgrade, knockOut, repair, demolish, lock, unlock, setCost, setIncome a slot: `slot` is any expression giving a building or slot entity, `@name`, `it`, `$var`, `it.$slot`, `nearest('unbuilt and type:House')`, or a Studio key `"add:h1"`; without `slot` it acts on each `target`), `waves` (addSpawn, removeUnit, scaleCount, scaleHp, clearRemaining, startNight, endNight, skipNight), `endLevel` |
 | Show | `effect`, `sound`, `message`, `floatText`, `setVisual`, `hud`, `shake`, `marker` |
-| End | `destroy` (`drops`, `effects`, `silent`) |
+| End | `destroy` (`drops`, `effects`, `silent`): removes anything; a unit the logic spawned is removed outright, one of the game's own player troops is knocked out for good (no revive at dawn); buildings, the castle and the king are only knocked out |
 
-`repeat` and `forEach` take their body as `actions` (the key `do` already names the action). `setVar`/`addVar` write
+`repeat` and `forEach` take their body as `actions` (the key `do` already names the action); `forEach` also takes
+`limit` and `as` (a name for the member, 12.4). `setVar`/`addVar` write
 `self`'s variable unless `target` names another entity; a level variable is `"name": "$souls"` or `"target":
 "level"` (in the level script plain names are level variables).
 
@@ -1140,8 +1163,11 @@ moveSpeed mult 1.2 for "night"` on `all('player and unit', 20)`.
 
 - A text field is literal: `"text": "souls"` shows the word; `"text": "{$souls}"` shows the number. A non-text field
   is an expression: `"value": "summer"` is an unknown name; write `"value": "'summer'"`.
-- `foe`/`ally` are relative to `self`; in the level script they mean enemy/player. A selector skips `self` and dead
-  entities unless the filter says `self`/`dead`.
+- `foe`/`ally` are relative to `self`; in the level script they mean enemy/player. A selector skips `self`, the dead,
+  switched-off entities and empty build slots unless the filter names them (`dead`, `disabled`, `unbuilt`, or
+  `include:...`).
+- Every set-walking scope rebinds `it`, so a nested `target` set or a `spawn.then` inside a `forEach` loses the
+  member: name it with `"as"` on the `forEach`, or read `outer`.
 - The level script needs `of` for entity events; `other` exists only for events that have one (see the reference).
 - Declare variables first; set entity variables on the right `target` (`"target": "spawned"` inside `then`).
 - `@names` are place ids/names and attach names; give attached slots a `name` before wiring them.
