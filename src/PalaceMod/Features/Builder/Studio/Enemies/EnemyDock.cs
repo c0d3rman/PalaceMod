@@ -397,7 +397,7 @@ namespace PalaceMod.Builder.Studio.Enemies
 
         /// <summary>The inspector's ModDockPanel rect offsets (for panels placed beside it).</summary>
         public static (Vector2 Min, Vector2 Max) BesideInspector(float width) =>
-            (new Vector2(-G - RightW - G - width, G), new Vector2(-G - RightW - G, -(G + TopH + G)));
+            (new Vector2(-G - RightW - G - width, G + BottomH + G), new Vector2(-G - RightW - G, -(G + TopH + G)));
 
         public static void RefreshInspector() => dirtyRight = true;
 
