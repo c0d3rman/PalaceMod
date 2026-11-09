@@ -1,0 +1,11 @@
+{
+ "example": 0, "title": "Version-2 SpawnOnDeath still spawns (lowered onto the game's enemyToSpawnOnDeath)",
+ "pack": {"format": "palace-builder", "version": 2, "id": "fixture.mig", "name": "Migration check",
+  "units": [{"id": "mig-boss", "base": "vanilla:E Ogre", "name": "Boss", "behaviours": [{"type": "SpawnOnDeath", "unit": "mig-imp"}]},
+            {"id": "mig-imp", "base": "vanilla:E Racer", "name": "Imp"}],
+  "levels": [{"id": "mig", "name": "Migration check", "host": "Nordfels"}]},
+ "play": {"steps": [{"cmd": "agent build castle"}, {"cmd": "night"},
+   {"do": [{"do": "spawn", "entity": "mig-boss", "at": "vec(20, 10)"}]}, {"wait": 1},
+   {"do": [{"do": "kill", "target": "all('is:mig-boss')"}]},
+   {"expect": "count('is:mig-imp') == 1", "within": 3}]}
+}
