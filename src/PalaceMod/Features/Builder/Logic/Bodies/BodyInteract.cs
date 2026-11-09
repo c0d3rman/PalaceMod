@@ -45,6 +45,7 @@ namespace PalaceMod.Builder.Logic.Bodies
         public LogicEntity Entity;
         public JObject Def;
         public bool Locked;
+        public bool Used { get => used; set => used = value; }
         private bool used, focused, holding, paid;
         private int cost;
         private string prompt;

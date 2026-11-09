@@ -176,6 +176,27 @@ namespace PalaceMod.Builder.Logic.Bodies
             return true;
         }
 
+        // ---- savestates ---------------------------------------------------------------------------------------
+
+        public JObject Capture() => new()
+        {
+            ["index"] = index, ["dir"] = dirStep, ["wait"] = waitLeft, ["swing"] = swingPhase, ["running"] = Running, ["ended"] = ended,
+            ["home"] = new JArray(home.x, home.y, home.z), ["baseYaw"] = baseYaw,
+        };
+
+        public void Restore(JObject o)
+        {
+            index = (int?)o["index"] ?? index;
+            dirStep = (int?)o["dir"] ?? dirStep;
+            waitLeft = (float?)o["wait"] ?? 0f;
+            swingPhase = (float?)o["swing"] ?? 0f;
+            Running = (bool?)o["running"] ?? Running;
+            ended = (bool?)o["ended"] ?? false;
+            if (o["home"] is JArray h && h.Count == 3) home = new Vector3((float)h[0], (float)h[1], (float)h[2]);
+            baseYaw = (float?)o["baseYaw"] ?? baseYaw;
+            poseTarget = null;
+        }
+
         // ---- inputs --------------------------------------------------------------------------------------------
 
         public static readonly string[] BuiltInInputs = ["start", "stop", "reverse", "goto", "toggle"];

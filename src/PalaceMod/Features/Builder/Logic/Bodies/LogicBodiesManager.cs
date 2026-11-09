@@ -28,6 +28,7 @@ namespace PalaceMod
             LogicWorld.Started += _ => SessionChanged();
             LogicWorld.Ending += _ => SessionChanged();
             BodyActions.Register();
+            LogicSaveState.Register("bodies", BodySave.Capture, BodySave.Restore);
             DevCommands.Register("logic-l2", "logic-l2 status | nav ... | act <action> [json] [self=<role>] [other=<role>] | build <template> <x> <z> [rotY] | signal <entity> <input> [value]   bodies (L2): spikes, actions with literal params, entities", args =>
             {
                 string sub = args.FirstOrDefault() ?? "";
