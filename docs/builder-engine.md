@@ -727,7 +727,10 @@ Where the build settles what the text above leaves open:
 - **Night numbers.** `night` is the running night from the first spawn to dawn, else the coming one; `dusk` carries
   the coming night, `dawn` the night that ended.
 - **Caps** come from `logic.caps` (`entities`, `units`, `projectiles`, `perTemplate`, `firingsPerFrame`,
-  `actionsPerFrame`), clamped to `LogicCaps.Max`; a projectile counts only against `projectiles`.
+  `actionsPerFrame`), clamped to `LogicCaps.Max`; a projectile counts only against `projectiles`. A fixed bound of
+  10000 waiting events catches fan-out loops (each firing raising many events) that chain depth alone doesn't bound.
+- **Spawn lines.** An attached `line:` entity switched off (`disable`, or the `disable` signal) pauses its spawn groups
+  (`Spawn.Update` is skipped for them), so the night's schedule and `nightProgress` wait for it.
 - **Savestates and retry day.** The world starts only once a restore is over; a restore's state is applied to the
   freshly set-up level instead of `levelStart` (and the places' `spawn` events are dropped). A snapshot is kept at
   each dawn by wave number; a reload that starts mid-run (retry day) applies the snapshot for its wave.
