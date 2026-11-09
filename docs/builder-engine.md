@@ -739,6 +739,48 @@ limits), and `reference.md` gets the generated schema.
 └───────────────────────────────────────────────────────────────────┘
 ```
 
+**As built (L3, `Features/Builder/Studio/Logic/`).** Where it differs from the sketch below, this wins:
+
+- **Behaviour tab** (a right-panel tab, `Studio.AddPanel`): the selected thing's name (`@name`), labels, variables,
+  place fields (areas: shape, size, watches, shown; interactables: prompt, cost, usable; paths: points) and its rules
+  as one-line sentences ("When this dies → Spawn Slime × 2 at this"), plus its wires. With nothing selected it's the
+  level: variables, the level script, king actions, HUD lines and limits. The Inspector gets a one-row "Behaviour"
+  summary that jumps there.
+- **Rule editor**: a 620 px panel beside the right panel (the 340 px panel is too narrow for cards). When / If / Then
+  top to bottom; an action row opens to its fields, nested lists (`then`, `else`, `onImpact`, `choose` options) indent
+  under it. Options (once, cooldown, starts on, id, note) and Duplicate / Copy (JSON) / Save as preset / Delete at the
+  foot. Pickers (events, actions, entities, filters, templates, variables, signals, statuses, stats) open in the same
+  panel, not ModPopups: popups can't scroll, and lists of 50 actions must. Esc closes the picker, then the editor.
+- **Fields**: numbers step with the arrows and take a typed number or formula; formulas and filters are checked as
+  you type by the engine's `ExprChecker` (the error shows under the field, with its column); entity fields offer the
+  event's roles, `@names`, Pick on the map (names the thing if it has no name), Nearest / Every… within / Random /
+  Weakest / Strongest / Farthest (a team + kind + extra-terms filter builder), and a typed formula.
+- **Params come from `LogicSchema`** (`LogicSchemaBridge`): the Studio keeps only phrasing, picker categories and
+  which fields a card shows; an event or action only the registry has still gets a plain card.
+- **Placed logic** (`logic.places`) are Studio items `place:<id>` through a new shell extension point,
+  `Studio.AddItemSource`: picked, selected, moved, turned, duplicated and deleted like props, drawn as a coloured
+  ring, an area's outline, or a stand-in box at a solid body's size.
+- **Logic palette tab** (`Studio.AddPaletteTab`): Area, Point and Path, then every built-in preset of category
+  "Logic". They are placed unpacked (kind, components, vars and rules with the params' defaults), so their cards edit
+  like any rule; outputs are rules with an empty or signal-only Then.
+- **Wire tool** (J): drag (or click, click) from one thing to another; the panel lists the source's outputs, then its
+  events; then the target's built-in inputs, its own "gets signal" inputs, or a new signal (which opens the target's
+  new listener). Wires draw as arcs labelled "event → input", coloured by signal; all of them while the tool is
+  active or View ▾ Wires is on, else the selection's. A wire's row in the Behaviour tab removes both rules.
+- **Limits**: the level's `logic.caps` as number fields with the defaults; raising one marks it and shows "Raised
+  limits may lag" (the validator warns too).
+- **Shared enemies**: the Enemy Studio's Behaviour tab shows "Affects the level" when a unit's rules give gold, spawn,
+  change nights, end the level, set level variables or signal everyone.
+- **Enemy Studio**: Behaviour replaces Abilities; a Moves tab edits targeting (ordered filters with range and
+  preference), movement (mode, speed, keep away, kite, wander, flee) and extra attacks (`EnemyDock.AddTab`).
+- **Play mode**: a "Logic" play panel with live level variables (editable), Send a signal, the trace in words (the
+  rule's sentence, its value and other, throttles and errors in red) and the count of spawned things; rule cards show
+  "fired N×"; a pip rises over a thing when its rule fires (View ▾ Rule pips).
+- **Dev**: `builder-logic state | owner | rules | open | new | act | press <text> | set | place | wire | unwire |
+  wires | json | check | rows | tab | close` drives all of it the way the mouse does.
+
+The original sketch:
+
 - **Behaviour tab.** Every selected thing gets one: a slot, a prop, a line, a placed entity, an area or the castle,
   through `Studio.AddInspectorSection`. The Enemy Studio's "Abilities" tab becomes the same Behaviour tab, plus
   Targeting, Movement and Attacks sections. Rules are cards with When / If / Then rows.

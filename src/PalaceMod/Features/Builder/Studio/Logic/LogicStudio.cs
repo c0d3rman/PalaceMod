@@ -189,7 +189,7 @@ namespace PalaceMod.Builder.Studio.Logic
             }
             var place = owner.Read();
             int count = LogicDoc.Rules(place)?.Count ?? 0;
-            return count == 0 ? null : new StudioLabel { Card = count == 1 ? "1 rule" : $"{count} rules" };
+            return new StudioLabel { Name = Studio.Find(key)?.Name, Card = count == 0 ? null : count == 1 ? "1 rule" : $"{count} rules" };
         }
 
         public static IEnumerable<(string label, Action run)> ContextItems(IReadOnlyList<string> keys)

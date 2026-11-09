@@ -57,7 +57,7 @@ namespace PalaceMod.Builder.Studio.Logic
                 string clean = string.IsNullOrEmpty(v) ? null : LogicDoc.NameFor(v, new HashSet<string>());
                 owner.Edit("Rename", n => { if (clean == null) n.Remove("name"); else n["name"] = clean; });
             }, () => "Other rules reach it as @name." + (current != null ? $" Now: @{current}." : ""), 40,
-                () => current == null ? Dim("none (Pick on the map names it)") : "@" + Esc(current));
+                () => current == null ? Dim("none") : "@" + Esc(current));
         }
 
         private static void LabelsField(ModPage page, LogicOwner owner)
@@ -201,7 +201,7 @@ namespace PalaceMod.Builder.Studio.Logic
         {
             StudioDock.SmallHeader(page, title);
             var rules = owner.Rules();
-            if (rules == null || rules.Count == 0) page.Text(Dim(owner.Kind == OwnerKind.Level ? "No level rules." : "It does nothing special yet."));
+            if (rules == null || rules.Count == 0) page.Text(Dim(owner.Kind == OwnerKind.Level ? "None yet." : "None yet."));
             for (int i = 0; i < (rules?.Count ?? 0); i++)
             {
                 int index = i;
@@ -258,7 +258,6 @@ namespace PalaceMod.Builder.Studio.Logic
         {
             var level = LogicOwner.Level();
             StudioDock.SmallHeader(page, "This level");
-            page.Text(Dim("Select something to see what it does. Below: the level's own logic."));
             Variables(page, level, "Level variables", "Level-wide values every rule can read ($name) and HUD lines can show.");
             Rules(page, level, "Level script");
             KingActions(page);
@@ -270,7 +269,7 @@ namespace PalaceMod.Builder.Studio.Logic
         {
             StudioDock.SmallHeader(page, "King actions");
             var list = LogicOwner.LevelLogic()?["kingActions"] as JArray;
-            if (list == null || list.Count == 0) page.Text(Dim("None. Up to 3 keys the player can press (Level action 1-3)."));
+            if (list == null || list.Count == 0) page.Text(Dim("None (up to 3 keys)."));
             for (int i = 0; i < (list?.Count ?? 0); i++)
             {
                 int index = i;
@@ -306,7 +305,7 @@ namespace PalaceMod.Builder.Studio.Logic
         {
             StudioDock.SmallHeader(page, "HUD lines");
             var list = LogicOwner.LevelLogic()?["hud"] as JArray;
-            if (list == null || list.Count == 0) page.Text(Dim("None. Lines like \"Souls {$souls}/10\" on the player's screen."));
+            if (list == null || list.Count == 0) page.Text(Dim("None."));
             for (int i = 0; i < (list?.Count ?? 0); i++)
             {
                 int index = i;
@@ -385,7 +384,7 @@ namespace PalaceMod.Builder.Studio.Logic
                     () => "Above the defaults, busy moments can drop the frame rate on slower machines. Test with many things alive.");
                 StudioDock.Compact(row, false, 10f, page.Size.x);
             }
-            else page.Text(Dim("Safety limits keep runaway rules from freezing the game. Raise one only if your level needs it."));
+            else page.Text(Dim("Defaults keep runaway rules from freezing the game."));
             foreach (var key in LogicCaps.Keys)
             {
                 string k = key;

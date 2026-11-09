@@ -94,6 +94,8 @@ namespace PalaceMod.Builder.Studio.Logic
                     var issues = ExprLint.Check(rest, Owner().Scope(RuleEditor.IsOpen ? LogicCatalog.Event(LogicDoc.EventOf(RuleEditor.Owner.Rules()?[RuleEditor.Rule] as JObject)) : null));
                     return issues.Count == 0 ? "ok" : string.Join("\n", issues);
                 case "close": RuleEditor.Close(); return "closed";
+                case "find":
+                    return string.Join("\n", Studio.Items.Where(i => (i.Name + " " + i.TypeName).Contains(rest, StringComparison.OrdinalIgnoreCase)).Take(20).Select(i => $"{i.Key}  {i.TypeName}  ({i.Pos.x:0}, {i.Pos.z:0})"));
                 case "rows": return Rows();
                 default: throw new ArgumentException("unknown subcommand " + args[0]);
             }

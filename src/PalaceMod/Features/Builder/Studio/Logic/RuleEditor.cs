@@ -23,7 +23,7 @@ namespace PalaceMod.Builder.Studio.Logic
 {
     internal static class RuleEditor
     {
-        public const float Width = 620f;
+        public const float Width = 540f;
 
         private static readonly Dictionary<ModDock, ModDockPanel> panels = [];
         private static ModDock dock;

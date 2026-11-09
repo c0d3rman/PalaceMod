@@ -92,8 +92,49 @@ namespace PalaceMod.Builder.Studio.Logic
                     Outline = Outline(place),
                 };
                 if ((place["active"]?.Type == JTokenType.Boolean) && !(bool)place["active"]) spec.Color = Color.Lerp(spec.Color, Color.gray, 0.6f);
+                var box = place["body"]?["box"] as JArray;
+                float height = (float?)place["body"]?["height"] ?? 2f;
+                var color = spec.Color;
+                spec.Look = kind + (box != null ? box.ToString(Newtonsoft.Json.Formatting.None) + height : "");
+                if (kind != "area" && kind != "path") spec.MakeProxy = parent => Proxy(parent, kind, box, height, color);
                 yield return spec;
             }
+        }
+
+        private static Material proxyMaterial;
+
+        /// <summary>A plain stand-in in edit mode: a box at a solid body's size (doors, walls), else a small marker
+        /// shape. The engine draws the real look in play.</summary>
+        private static GameObject Proxy(Transform parent, string kind, JArray box, float height, Color color)
+        {
+            var type = box != null ? PrimitiveType.Cube : kind is "point" or "pickup" ? PrimitiveType.Sphere : kind == "logic" ? PrimitiveType.Cylinder : PrimitiveType.Cube;
+            var g = GameObject.CreatePrimitive(type);
+            UnityEngine.Object.Destroy(g.GetComponent<Collider>());
+            g.transform.SetParent(parent, false);
+            var holder = new GameObject("place proxy");
+            holder.transform.SetParent(parent, false);
+            g.transform.SetParent(holder.transform, false);
+            if (box != null && box.Count >= 2)
+            {
+                g.transform.localScale = new Vector3((float)box[0], height, (float)box[1]);
+                g.transform.localPosition = new Vector3(0f, height / 2f, 0f);
+            }
+            else
+            {
+                float s = kind == "point" ? 0.8f : 1.2f;
+                g.transform.localScale = kind == "logic" ? new Vector3(s, 0.4f, s) : Vector3.one * s;
+                g.transform.localPosition = new Vector3(0f, s / 2f, 0f);
+            }
+            proxyMaterial ??= new Material(Shader.Find("Sprites/Default"));
+            var r = g.GetComponent<Renderer>();
+            if (r != null)
+            {
+                r.sharedMaterial = proxyMaterial;
+                var block = new MaterialPropertyBlock();
+                block.SetColor("_Color", new Color(color.r, color.g, color.b, 0.75f));
+                r.SetPropertyBlock(block);
+            }
+            return holder;
         }
 
         /// <summary>An area's shape (circle, rect, polygon) relative to its position, or a path's points.</summary>

@@ -35,6 +35,7 @@ namespace PalaceMod.Builder.Studio.Logic
                 return s.StartsWith("=") ? "ƒ " + s.Substring(1) : s;
             if (p?.Kind == ParamKind.Template && !s.StartsWith("=")) return TemplateName(s.StartsWith("@@") ? s.Substring(2) : s);
             if (p?.Kind == ParamKind.Filter) return Filter(s);
+            if (p?.Kind is ParamKind.Condition) return Formula(s, ev);
             return Expr(s.StartsWith("=") ? s.Substring(1) : s, ev);
         }
 

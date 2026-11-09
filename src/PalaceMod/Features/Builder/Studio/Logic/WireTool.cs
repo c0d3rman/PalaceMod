@@ -50,9 +50,11 @@ namespace PalaceMod.Builder.Studio.Logic
         {
             Cursor = p.Ground;
             if (p.OverUI) return;
-            if (p.LeftDown && from == null && Wireable(p.HoverKey)) { from = From = p.HoverKey; return; }
+            string under = p.Ground is Vector3 at ? Studio.ItemAt(at)?.Key ?? p.HoverKey : p.HoverKey;
+            if (p.LeftDown && from == null && Wireable(under)) { from = From = under; return; }
             if (!p.LeftUp || from == null) return;
-            string target = p.HoverKey;
+            // What's under the release point (hover can lag behind a fast drag).
+            string target = p.Ground is Vector3 g ? Studio.ItemAt(g)?.Key ?? p.HoverKey : p.HoverKey;
             if (target == from || !Wireable(target))
             {
                 // A click on the source keeps it armed (click, then click the target); a drag to nowhere cancels.
@@ -278,7 +280,7 @@ namespace PalaceMod.Builder.Studio.Logic
             label.transform.position = top + Vector3.up * 0.8f;
             var cam = Camera.main;
             if (cam != null) label.transform.rotation = Quaternion.LookRotation(label.transform.position - cam.transform.position);
-            label.fontSize = Mathf.Clamp(StudioCamera.Zoom * 6f, 5f, 14f);
+            label.fontSize = Mathf.Clamp(StudioCamera.Zoom * 16f, 12f, 40f);
             label.gameObject.SetActive(true);
         }
 
