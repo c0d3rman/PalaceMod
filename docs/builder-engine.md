@@ -791,7 +791,7 @@ for agents), `reference.md` and a test that every entry has a runtime handler al
 | `nightStart`, `waveCleared` | `EnemySpawner.StartSpawning` postfix; polled: `SpawningInProgress` false and no `EnemyOwned` object left, once per night |
 | `lineSpawn` | `Spawn.Update` (the spawning group) around `TagManager.AddTaggedObject` |
 | `coinDrop` / `coinPickup` | `Coin.Start` postfix / `PlayerInteraction.AddCoin` inside `Coin.Update` |
-| `built`/`upgraded` | `BuildSlot.OnUpgrade` subscriptions at level start (and on added slots) |
+| `built`/`upgraded` | `BuildSlot.OnUpgradeChoiceComplete` prefix/postfix (level before and after), so every slot counts, whenever it was made; not `ForceManualUpgradeWithoutFeedbackEffects` (loads, previews) nor slots whose level follows their activator |
 | `death`/`repaired` (buildings) | a building's `Hp` knock-out (it has `getsKnockedOutInsteadOfDying`) / `Hp.Revive` postfix |
 | `goldChanged` | `PlayerInteraction.onBalanceGain` / `onBalanceSpend` |
 | `near`, areas | the world's spatial poller (below) |
@@ -903,7 +903,16 @@ Where the build settles what the text above leaves open:
 - **Division by zero** is 0, `pow` overflow 0: an expression never yields NaN or infinity.
 - **Attribution.** A tower's `AutoAttack` has no `TaggedObject`, so the game passes a null attacker to its arrows.
   The hooks remember the attacking component (during `OnAttack`, and per `AimbotProjectile` from `Fire` to its hit)
-  and credit `hit`/`kill` to it, without changing what the game passes (that would change aggro).
+  and credit `hit`/`kill` to it, without changing what the game passes (that would change aggro). The king's
+  `ManualAttack` is remembered the same way. Damage scripts that call `TakeDamage` with no attacker (every game method
+  whose IL calls it: hot oil, spikes, a fire archer's burning ground, the king's charge...) credit the object they sit
+  on, or the shooter of the projectile that instantiated them (`SpawnWeaponObjectOnHit`/`SpawnProjectileObjectOnHit`
+  are transpiled to record it). Only an object with a `TaggedObject` (or a Builder entity) is named, so scenery
+  hazards stay `none`. The victim's `damaged`/`death` always resolve the attacker; `hit`/`kill` wrap a vanilla
+  attacker only when something listens. A vanilla projectile entity's `owner` is its shooter the same way.
+- **Dawn income.** `income` counts the amounts `CoinSpawner.TriggerCoinSpawn` is asked for between the first and the
+  last dawn callback (buildings' harvests, `income` stats applied); the coins land over the next seconds, the count
+  doesn't wait for them.
 - **Wave clones of Builder units** carry `BuilderEntity.TemplateId` (set on the template by `UnitFactory`), so they
   register in `Start` with the template's rules. They aren't "spawned" for the caps or savestates (the game restores
   them as its own enemies).

@@ -23,7 +23,7 @@ Generated from the engine's registry (`palace.py logic doc`; schema version 1.0.
 | `enum` | one of the listed options |
 | `actions` | a nested list of actions |
 | `options` | [{ "weight": 2, "do": [actions] }, ...] |
-| `targeting` | a targeting list: filter strings or { "filter", "range", "prefer", "score" } |
+| `targeting` | a targeting list: filter strings or { "filter", "range", "prefer", "score" } (a score picks the highest-scoring match) |
 | `movement` | a movement block (mode, path, speed, keepDistance, kite, flee, wander, home) |
 | `any` | an expression of any type |
 | `for` | seconds, or "night" / "day" (until the next dawn / dusk) |
@@ -64,7 +64,7 @@ Names an expression can use for entities in a rule.
 | `nightTime` | number | Seconds since this night began. |
 | `nightProgress` | number | 0..1: the night's spawn schedule elapsed (1 once everything has spawned). |
 | `gold` | number | The player's gold. |
-| `income` | number | The last dawn's payout. |
+| `income` | number | The gold the buildings paid at the last dawn (`income` stats applied), already counted when `dawn` rules run; the coins themselves land over the next seconds. |
 | `enemiesAlive` | number | Enemies on the map. |
 | `difficulty` | number | The run's difficulty multiplier. |
 | `none` | any | No entity (what a selector gives when nothing matches, or a role the event doesn't have): `other != none`. |
@@ -84,7 +84,7 @@ Names an expression can use for entities in a rule.
 | Event | Params | other | event.value | Fires when |
 |---|---|---|---|---|
 | `death` |  | killer (killer = other, victim = subject) |  | It dies (a unit) or is knocked out (a building or the king). `other` is the killer (may be none). |
-| `damaged` | `min` | attacker (attacker = other) | number: the damage taken | It takes damage (not when modifiers reduce it to 0). |
+| `damaged` | `min` | attacker (attacker = other) | number: the damage taken | It takes damage (not when modifiers reduce it to 0). `other` is who dealt it: the king, a unit, a tower or building, a projectile's shooter, or whoever left burning ground or hot oil there; none for scenery hazards and plain `damage` actions without a source. |
 | `healed` |  | healer (healer = other) | number: the amount healed | It is healed. |
 | `hpBelow` | `pct`* |  | number: hpPct | Its hp crosses below a fraction (edge-triggered; re-arms when healed above). Only its own hp: no `of`. |
 | `attack` | `attack` | target (target = other) |  | It attacks (any attack, vanilla ones included). |
@@ -161,8 +161,8 @@ Names an expression can use for entities in a rule.
 
 | Event | Params | other | event.value | Fires when |
 |---|---|---|---|---|
-| `built` (building) | `level` |  | number: the level | (build slots) The player builds it. |
-| `upgraded` (building) | `level` |  | number: the new level | (build slots) The player upgrades it. |
+| `built` (building) | `level` |  | number: the level | (build slots, map or added) It's built: by the king, `palace.py build` or the `building` action. |
+| `upgraded` (building) | `level` |  | number: the new level | (build slots, map or added) It's upgraded (any way it's built). |
 | `repaired` (building) | `level` |  | number: the level | (build slots) It's revived at dawn. |
 
 ### Gold
@@ -637,7 +637,7 @@ Selector functions anchor at `self`; call them as methods (`castle.count('enemy'
 | entity | `.x` | number | Its x. |
 | entity | `.y` | number | Its y (height). |
 | entity | `.z` | number | Its z. |
-| entity | `.facing` | number | Its yaw in degrees (0 = north). |
+| entity | `.facing` | number | Its yaw in degrees (0 = north, clockwise): where a unit's or the king's model faces (its walking direction, or its target while attacking), else its own rotation. |
 | entity | `.team` | text | 'player', 'enemy' or 'neutral'. |
 | entity | `.kind` | text | 'unit', 'building', 'prop', 'projectile', 'area', 'pickup', 'logic', 'coin', 'king', 'line', 'point', 'path'. |
 | entity | `.template` | template | The template it was made from. |

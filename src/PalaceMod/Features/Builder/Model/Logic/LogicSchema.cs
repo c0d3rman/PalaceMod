@@ -212,7 +212,7 @@ namespace PalaceMod.Builder.Model.Logic
             Ev("spawn", "This unit", "It appears: placed ones at level start, spawned ones on creation. `other` is the spawner or launcher, if any.", other: "spawner", aliases: A("spawner", "other"));
             Ev("death", "Combat", "It dies (a unit) or is knocked out (a building or the king). `other` is the killer (may be none).", other: "killer", aliases: A("killer", "other", "victim", "subject"),
                 example: "{ \"when\": \"death\", \"do\": [{ \"do\": \"spawn\", \"entity\": \"goblin\", \"count\": 2, \"at\": \"self\" }] }");
-            Ev("damaged", "Combat", "It takes damage (not when modifiers reduce it to 0).", other: "attacker", value: LType.Number, valueMeaning: "the damage taken",
+            Ev("damaged", "Combat", "It takes damage (not when modifiers reduce it to 0). `other` is who dealt it: the king, a unit, a tower or building, a projectile's shooter, or whoever left burning ground or hot oil there; none for scenery hazards and plain `damage` actions without a source.", other: "attacker", value: LType.Number, valueMeaning: "the damage taken",
                 ps: [P("min", "number", "Only damage of at least this much.")], aliases: A("attacker", "other"));
             Ev("healed", "Combat", "It is healed.", other: "healer", value: LType.Number, valueMeaning: "the amount healed", aliases: A("healer", "other"));
             Ev("hpBelow", "Combat", "Its hp crosses below a fraction (edge-triggered; re-arms when healed above).", value: LType.Number, valueMeaning: "hpPct",
@@ -256,8 +256,8 @@ namespace PalaceMod.Builder.Model.Logic
             Ev("statusTick", "Statuses", "Every `tick` seconds of a status (in a status's own rules: of that status).", other: "applier", value: LType.Number, valueMeaning: "stacks",
                 ps: [P("status", "status", "Only this status.")], aliases: A("applier", "other"), fields: new() { ["name"] = LType.Text });
             Ev("targetChanged", "Combat", "Its attack or move target changes.", other: "target", aliases: A("target", "other"));
-            Ev("built", "Buildings", "(build slots) The player builds it.", value: LType.Number, valueMeaning: "the level", owners: ["building"], ps: [P("level", "int", "Only this level.")]);
-            Ev("upgraded", "Buildings", "(build slots) The player upgrades it.", value: LType.Number, valueMeaning: "the new level", owners: ["building"], ps: [P("level", "int", "Only this level.")]);
+            Ev("built", "Buildings", "(build slots, map or added) It's built: by the king, `palace.py build` or the `building` action.", value: LType.Number, valueMeaning: "the level", owners: ["building"], ps: [P("level", "int", "Only this level.")]);
+            Ev("upgraded", "Buildings", "(build slots, map or added) It's upgraded (any way it's built).", value: LType.Number, valueMeaning: "the new level", owners: ["building"], ps: [P("level", "int", "Only this level.")]);
             Ev("repaired", "Buildings", "(build slots) It's revived at dawn.", value: LType.Number, valueMeaning: "the level", owners: ["building"], ps: [P("level", "int", "Only this level.")]);
             Ev("coinDrop", "Gold", "A coin drops from a death (subject is the coin; listen with `of`).", other: "dead unit", owners: ["coin"], global: false);
             Ev("coinPickup", "Gold", "The king collects a coin (subject is the coin; listen with `of`).", other: "king", owners: ["coin"]);
@@ -484,7 +484,7 @@ namespace PalaceMod.Builder.Model.Logic
             Named(Globals, "nightTime", "Seconds since this night began.", LType.Number);
             Named(Globals, "nightProgress", "0..1: the night's spawn schedule elapsed (1 once everything has spawned).", LType.Number);
             Named(Globals, "gold", "The player's gold.", LType.Number);
-            Named(Globals, "income", "The last dawn's payout.", LType.Number);
+            Named(Globals, "income", "The gold the buildings paid at the last dawn (`income` stats applied), already counted when `dawn` rules run; the coins themselves land over the next seconds.", LType.Number);
             Named(Globals, "enemiesAlive", "Enemies on the map.", LType.Number);
             Named(Globals, "difficulty", "The run's difficulty multiplier.", LType.Number);
             Named(Globals, "none", "No entity (what a selector gives when nothing matches, or a role the event doesn't have): `other != none`.", LType.Any);
@@ -497,7 +497,7 @@ namespace PalaceMod.Builder.Model.Logic
             Prop(LType.Entity, "elite", LType.Bool, "An elite enemy (the game's elite flag).");
             Prop(LType.Entity, "pos", LType.Position, "Its position.");
             Prop(LType.Entity, "x", LType.Number, "Its x."); Prop(LType.Entity, "y", LType.Number, "Its y (height)."); Prop(LType.Entity, "z", LType.Number, "Its z.");
-            Prop(LType.Entity, "facing", LType.Number, "Its yaw in degrees (0 = north).");
+            Prop(LType.Entity, "facing", LType.Number, "Its yaw in degrees (0 = north, clockwise): where a unit's or the king's model faces (its walking direction, or its target while attacking), else its own rotation.");
             Prop(LType.Entity, "team", LType.Text, "'player', 'enemy' or 'neutral'.");
             Prop(LType.Entity, "kind", LType.Text, "'unit', 'building', 'prop', 'projectile', 'area', 'pickup', 'logic', 'coin', 'king', 'line', 'point', 'path'.");
             Prop(LType.Entity, "template", LType.Template, "The template it was made from.");
@@ -601,7 +601,7 @@ namespace PalaceMod.Builder.Model.Logic
             ["enum"] = "one of the listed options",
             ["actions"] = "a nested list of actions",
             ["options"] = "[{ \"weight\": 2, \"do\": [actions] }, ...]",
-            ["targeting"] = "a targeting list: filter strings or { \"filter\", \"range\", \"prefer\", \"score\" }",
+            ["targeting"] = "a targeting list: filter strings or { \"filter\", \"range\", \"prefer\", \"score\" } (a score picks the highest-scoring match)",
             ["movement"] = "a movement block (mode, path, speed, keepDistance, kite, flee, wander, home)",
             ["any"] = "an expression of any type",
             ["for"] = "seconds, or \"night\" / \"day\" (until the next dawn / dusk)",
