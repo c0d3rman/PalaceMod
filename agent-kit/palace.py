@@ -854,8 +854,34 @@ class Ops:
     # ---- pack and level ----------------------------------------------------------------------------------------------
 
     def op_set(self, op):
-        """{"op":"set","path":"waveSets[0].startingGold","value":30}: raw edit of any field."""
-        target, key = self.walk(op["path"], create=True)
+        """{"op":"set","path":"level.colors","value":"Totend"}: raw edit of any field. A path starting with `level.`
+        is in the op's level, `nights.` in that level's wave set; `levels[i]`/`waveSets[i]` index the whole pack (in
+        the library: every level the player has), so there they must name the op's own level or its nights."""
+        path = op["path"]
+        lid = op.get("level") if isinstance(op.get("level"), str) else self.level_id
+        m = re.match(r"(level|nights)(?=[.\[]|$)", path)
+        if m:
+            lv = self.level(op)
+            if m.group(1) == "level":
+                path = f"levels[{self.data['levels'].index(lv)}]" + path[m.end():]
+            else:
+                sets = self.data.get("waveSets") or []
+                ws = next((w for w in sets if w.get("id") == lv.get("waveSet")), None)
+                if ws is None:
+                    raise Fail(f"level {lv['id']} has no nights yet (add them with the waves op)")
+                path = f"waveSets[{sets.index(ws)}]" + path[m.end():]
+        else:
+            m = re.match(r"(levels|waveSets)\[(\d+)\]", path)
+            if m and lid and len(self.data.get("levels") or []) > 1:
+                lv = find_level(self.data, lid)
+                items = self.data.get(m.group(1)) or []
+                i = int(m.group(2))
+                item = items[i] if i < len(items) else None
+                own = lv if m.group(1) == "levels" else next((w for w in items if w.get("id") == lv.get("waveSet")), None)
+                if item is not own:
+                    raise Fail(f"{path} isn't level {lid}'s (this pack holds {len(self.data['levels'])} levels): write "
+                               f"`level.` or `nights.` instead of `{m.group(0)}.`")
+        target, key = self.walk(path, create=True)
         if op.get("delete"):
             if isinstance(target, list):
                 target.pop(key)
@@ -863,7 +889,7 @@ class Ops:
                 target.pop(key, None)
         else:
             target[key] = op["value"]
-        return f"set {op['path']}"
+        return f"set {path}"
 
     def walk(self, path, create=False):
         parts = re.findall(r"[^.\[\]]+|\[\d+\]", path)
@@ -883,9 +909,9 @@ class Ops:
         raise Fail("empty path")
 
     def op_level(self, op):
-        """Sets level fields: name, description, base, waveSet, host."""
+        """Sets level fields: name, description, base, waveSet, host, colors."""
         lv = self.level(op)
-        for k in ("name", "description", "waveSet", "host"):
+        for k in ("name", "description", "waveSet", "host", "colors"):
             if k in op:
                 lv[k] = op[k]
         if "base" in op:
@@ -3389,11 +3415,13 @@ def cmd_apply(env, args):
 def cmd_check(env, args):
     ref = Ref(env)
     path, data = load_pack(env, args.pack)
-    issues = check_pack(ref, data)
+    if args.level:
+        find_level(data, args.level)
+    issues = check_pack(ref, scope_levels(data, {args.level}) if args.level else data)
     result = {"pack": data.get("id"), "offline": issues}
     if args.live:
         g = Game(env)
-        result["game"] = g.agent(f"validate {data['id']}")
+        result["game"] = g.agent(f"validate {data['id']}" + (f" {args.level}" if args.level else ""))
     result["ok"] = not any(i["severity"] == "error" for i in issues) and (not args.live or result["game"].get("ok", False))
     out(result)
     if not result["ok"]:
@@ -4017,6 +4045,7 @@ def main(argv=None):
 
     p = sub.add_parser("check", help="offline checks (+ --live: the game's validator)")
     p.add_argument("pack")
+    p.add_argument("level", nargs="?", help="--live: validate only this level (and its nights)")
     p.add_argument("--live", action="store_true")
 
     for name, fn_help in (("show", "the level as it will play: slots, requirements, lines"), ("economy", "gold curve of a greedy economy player"),
