@@ -174,14 +174,14 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             {
                 e.Game = made;
                 e.Body = new GameBody(made);
-                e.Destroyed = false;
                 if (e.Spawned || made.GetComponent<BuilderEntity>() != null || e.Def != null)
                 {
                     var nb = made.GetComponent<BuilderEntity>() ?? made.AddComponent<BuilderEntity>();
                     nb.Entity = e;
                 }
                 LogicGameWorld.Index(world, made, e);
-                if (world.Find(e.Id) == null) world.Add(e, vanilla: true);   // re-index only: its rules and vars are still on it
+                // a dead unit was forgotten: bring the same entity back (id, @name, its rule instances, vars, labels)
+                if (!alive || world.Find(e.Id) != e) world.Revive(e, raiseSpawn: false);
             }
             e.Team = team;
             var hp = made.GetComponent<Hp>();
@@ -225,6 +225,8 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             // the old one's runtime steering overrides carry over too
             var old = LogicSteeringManager.Get(go);
             if (old?.Targeting != null && made.Go() is { } mg) { var ns = LogicSteeringManager.For(made, mg); ns.Targeting ??= old.Targeting; }
+            // `@name` references follow the shape: the new entity takes the old one's name
+            if (!string.IsNullOrEmpty(e.Name)) world.Rename(made, e.Name);
             LogicSteeringManager.DestroySilently(e, go);
             return made;
         }
