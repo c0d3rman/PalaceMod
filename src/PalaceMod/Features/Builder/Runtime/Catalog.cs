@@ -312,8 +312,162 @@ namespace PalaceMod.Builder
                     })),
                     ["vanillaWaves"] = JObject.Parse(JsonConvert.SerializeObject(h.VanillaWaves, new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore })),
                 })),
+                ["effects"] = new JArray(GameFx.Effects.Values.OrderBy(f => f.Id, StringComparer.OrdinalIgnoreCase).Select(f => new JObject { ["id"] = f.Id, ["from"] = f.Source })),
+                ["sounds"] = new JArray(GameFx.Sounds.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase)),
             };
             return root.ToString(Formatting.Indented);
+        }
+    }
+
+    /// <summary>
+    /// The game's visual effects and sounds, by name, for the behaviour engine's `effect` and `sound` actions
+    /// (docs/builder-engine.md, "Show"). Effects are the prefabs the game itself spawns as pure visuals (death and
+    /// revive puffs, impact and muzzle effects, coin sparkles), found through the fields that reference them; prefabs
+    /// that carry gameplay (damage, hit points, tags, spawns) are left out. Sounds are the clips of the game's AudioSet.
+    /// Ids are the prefab names (effects) and the AudioSet property names in camelCase (sounds).
+    /// </summary>
+    public static class GameFx
+    {
+        public sealed class Fx
+        {
+            public string Id;
+            public GameObject Prefab;
+            public string Source;            // the field it was found through ("Hp.fxToSpawnOnDeath")
+        }
+
+        private static Dictionary<string, Fx> effects;
+        private static Dictionary<string, Func<AudioSet, object>> sounds;
+        private static int builtFrame = -1;
+
+        public static IReadOnlyDictionary<string, Fx> Effects { get { BuildEffects(); return effects; } }
+
+        /// <summary>Sound id -> clip getter (an AudioClip or AudioSet.ClipArray).</summary>
+        public static IReadOnlyDictionary<string, Func<AudioSet, object>> Sounds { get { BuildSounds(); return sounds; } }
+
+        /// <summary>An effect by id (exact, then case-insensitive). Rescans once per frame on a miss: levels load more prefabs.</summary>
+        public static Fx FindEffect(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return null;
+            for (int pass = 0; pass < 2; pass++)
+            {
+                BuildEffects();
+                if (effects.TryGetValue(id, out var fx) && fx.Prefab != null) return fx;
+                var ci = effects.Values.FirstOrDefault(f => string.Equals(f.Id, id, StringComparison.OrdinalIgnoreCase) && f.Prefab != null);
+                if (ci != null) return ci;
+                if (pass == 1 || builtFrame == Time.frameCount) break;
+                effects = null;
+            }
+            return null;
+        }
+
+        /// <summary>A sound's clip (a random one for clip arrays), or null.</summary>
+        public static AudioClip FindSound(string id)
+        {
+            var set = ThronefallAudioManager.Instance != null ? ThronefallAudioManager.Instance.audioContent : null;
+            if (set == null || string.IsNullOrEmpty(id)) return null;
+            BuildSounds();
+            if (!sounds.TryGetValue(id, out var get))
+                get = sounds.FirstOrDefault(s => string.Equals(s.Key, id, StringComparison.OrdinalIgnoreCase)).Value;
+            return get?.Invoke(set) switch
+            {
+                AudioClip clip => clip,
+                AudioSet.ClipArray arr when arr.clips is { Length: > 0 } => arr.GetRandomClip(),
+                _ => null,
+            };
+        }
+
+        private static void BuildSounds()
+        {
+            if (sounds != null) return;
+            sounds = new Dictionary<string, Func<AudioSet, object>>(StringComparer.Ordinal);
+            foreach (var prop in typeof(AudioSet).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+            {
+                if (prop.PropertyType != typeof(AudioClip) && prop.PropertyType != typeof(AudioSet.ClipArray)) continue;
+                string id = char.ToLowerInvariant(prop.Name[0]) + prop.Name.Substring(1);
+                var p = prop;
+                sounds[id] = set => p.GetValue(set);
+            }
+        }
+
+        // Component types that make a prefab gameplay, not a visual.
+        private static readonly Type[] Gameplay = [typeof(Hp), typeof(AutoAttack), typeof(TaggedObject), typeof(AimbotProjectile), typeof(Coin),
+            typeof(PathfindMovement), typeof(BuildSlot), typeof(PlayerInteraction)];
+
+        internal static bool IsVisualOnly(GameObject go, out string reason)
+        {
+            reason = null;
+            foreach (var c in go.GetComponentsInChildren<Component>(true))
+            {
+                if (c == null) continue;
+                var t = c.GetType();
+                if (Gameplay.Any(g => g.IsAssignableFrom(t))) { reason = t.Name; return false; }
+                for (var b = t; b != null && b.Assembly.GetName().Name == "Assembly-CSharp"; b = b.BaseType)
+                {
+                    string n = b.Name;
+                    if (n.Contains("Attack") || n.Contains("Damage") || n.Contains("Spawn") || n.Contains("Weapon") || n.Contains("Projectile") || n.Contains("Knockback"))
+                    { reason = t.Name; return false; }
+                }
+            }
+            return true;
+        }
+
+        // Other fields the game spawns visuals from.
+        private static readonly (Type, string)[] MoreSources =
+        [
+            (typeof(OnDamageFeedbackHandler), "onDmgByPlayerFX"), (typeof(BlockProjectiles), "fxBlockProjectile"), (typeof(BoarChargeFX), "endFX"),
+            (typeof(CurseBlastMA), "curseBlastFX"), (typeof(CurseBlastMA), "activatePlayerFX"), (typeof(KnockbackBehavior), "staggerVFX"),
+            (typeof(Mill_ImprovementWindSpirits), "fxBlockArrow"), (typeof(ProtectionDomeVisualControl), "domeDestroyedVFX"),
+        ];
+
+        private static void BuildEffects()
+        {
+            if (effects != null) return;
+            builtFrame = Time.frameCount;
+            var found = new Dictionary<GameObject, string>();
+            void Add(GameObject go, string source)
+            {
+                if (go == null || go.scene.IsValid() || go.transform.parent != null || found.ContainsKey(go)) return;
+                if (!IsVisualOnly(go, out _)) return;
+                found[go] = source;
+            }
+            foreach (var hp in Resources.FindObjectsOfTypeAll<Hp>())
+            {
+                Add(hp.fxToSpawnOnDeath, "Hp.fxToSpawnOnDeath");
+                Add(hp.fxToSpawnOnRevive, "Hp.fxToSpawnOnRevive");
+            }
+            foreach (var w in Resources.FindObjectsOfTypeAll<Weapon>())
+            {
+                Add(w.projectileImpactVisuals, "Weapon.projectileImpactVisuals");
+                Add(w.fxSpawnOnAttacker, "Weapon.fxSpawnOnAttacker");
+                Add(w.fxSpawnOnVictim, "Weapon.fxSpawnOnVictim");
+                Add(w.spawnOnGroundWhenTargetingGround, "Weapon.spawnOnGroundWhenTargetingGround");
+                Add(w.spawnInAirWhenTargetingAir, "Weapon.spawnInAirWhenTargetingAir");
+            }
+            foreach (var p in Resources.FindObjectsOfTypeAll<AimbotProjectile>()) Add(p.spawnOnHit, "AimbotProjectile.spawnOnHit");
+            foreach (var c in Resources.FindObjectsOfTypeAll<Coin>()) Add(c.onPickUpParticles, "Coin.onPickUpParticles");
+            foreach (var p in Resources.FindObjectsOfTypeAll<PlayerInteraction>()) Add(p.coinSpendFX, "PlayerInteraction.coinSpendFX");
+            foreach (var (type, field) in MoreSources)
+            {
+                var f = HarmonyLib.AccessTools.Field(type, field);
+                if (f == null || f.FieldType != typeof(GameObject)) continue;
+                foreach (var o in Resources.FindObjectsOfTypeAll(type)) Add(f.GetValue(o) as GameObject, $"{type.Name}.{field}");
+            }
+            effects = new Dictionary<string, Fx>(StringComparer.Ordinal);
+            foreach (var pair in found.OrderBy(f => f.Key.name, StringComparer.Ordinal))
+            {
+                string id = pair.Key.name;
+                for (int n = 2; effects.ContainsKey(id); n++) id = $"{pair.Key.name} #{n}";
+                effects[id] = new Fx { Id = id, Prefab = pair.Key, Source = pair.Value };
+            }
+        }
+
+        /// <summary>Dev: every effect with the game scripts it carries.</summary>
+        internal static string Scan()
+        {
+            effects = null;
+            BuildEffects();
+            return string.Join("\n", effects.Values.Select(f => $"{f.Id} <- {f.Source}: " + string.Join(",",
+                f.Prefab.GetComponentsInChildren<Component>(true).Where(c => c != null && c.GetType().Assembly.GetName().Name == "Assembly-CSharp").Select(c => c.GetType().Name).Distinct())));
         }
     }
 }
