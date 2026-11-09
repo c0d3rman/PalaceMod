@@ -93,9 +93,6 @@
     ]
    },
    {
-    "wait": 1
-   },
-   {
     "do": [
      {
       "do": "kill",
@@ -108,7 +105,7 @@
     "within": 5
    },
    {
-    "expectLog": "The ritual is complete",
+    "expectState": "AfterMatchVictory",
     "within": 10
    }
   ]

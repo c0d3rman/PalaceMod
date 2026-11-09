@@ -31,6 +31,8 @@
     { "expr": "other.$charges", "type": "any" },
     { "expr": "other.$nothing", "error": "no template declares it" },
     { "expr": "other.hp", "type": "number" },
+    { "expr": "other != none and other.elite", "type": "bool" },
+    { "expr": "count('enemy and elite', 10)", "type": "number" },
     { "expr": "killer.hp", "type": "number" },
     { "expr": "victim.hp", "type": "number" },
     { "expr": "attacker", "error": "\"attacker\" is not defined for the event \"death\"" },

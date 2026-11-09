@@ -2634,7 +2634,18 @@ class _Walker:
             self.error(p + ".kind", f"needs a kind: {', '.join(ENTITY_KIND_TEMPLATES)}")
         elif kind is not None:
             self.enum(kind, p + ".kind", ENTITY_KIND_PLACES if place else ENTITY_KIND_TEMPLATES)
-        owner = _Owner(p, kind if kind is not None else "prop", vars_, level=level, rules=_list(e.get("rules")))
+        owner_kind = kind
+        ent = _s(e, "entity") if place else None
+        if owner_kind is None and ent is not None:
+            tmpl = next((x for x in self.pack.get("entities") or [] if isinstance(x, dict) and x.get("id") == ent), None)
+            if tmpl is not None:
+                owner_kind = _s(tmpl, "kind")
+            else:
+                ref = content_ref(ent)
+                uid = ref[1] if ref and ref[1] else ent
+                if ent.startswith("vanilla:") or any(isinstance(u, dict) and u.get("id") == uid for u in self.pack.get("units") or []):
+                    owner_kind = "unit"
+        owner = _Owner(p, owner_kind if owner_kind is not None else "prop", vars_, level=level, rules=_list(e.get("rules")))
         scope = self.scope(owner, None)
         self.check_labels(e.get("labels"), p + ".labels")
         self.check_var_decls(e.get("vars"), p + ".vars")
@@ -2661,6 +2672,12 @@ class _Walker:
                 self.error(p + ".body.box", "must be [width, depth]")
             if _lnum(body.get("hp")) is not None and _b(body, "hittable") is not True:
                 self.warn(p + ".body.hp", "hp only matters when hittable is true")
+            btags = _list(body.get("tags"))
+            for i, t in enumerate(btags or []):
+                if t not in self.schema.tag_set:
+                    self.error(f"{p}.body.tags[{i}]", f'unknown game tag "{t}"' + suggest(t, self.schema.tags))
+            if btags is not None and _b(body, "hittable") is not True:
+                self.warn(p + ".body.tags", "tags only matter when hittable is true")
         if _b(e, "countsAsEnemy") is True and (_b(body, "hittable") is not True or team != "enemy"):
             self.warn(p + ".countsAsEnemy", "only a hittable enemy-team entity keeps the night open")
         pr = _dict(e.get("projectile"))
@@ -3019,4 +3036,33 @@ def validate_logic(pack_json: dict, issues: list, library_presets=None, schema: 
     if expanded is None:
         return issues
     _Walker(pack_json, expanded, issues, sc).run()
+    unknown_fields(pack_json, "pack", "", issues, sc)
     return issues
+
+
+def unknown_fields(node, comp: str, path: str, issues: list, schema: Optional[Schema] = None):
+    """LogicValidator.UnknownFields: warns about fields no def knows, walking the schema's "components" tree."""
+    sc = _schema(schema)
+    comps = sc.data.get("components") or {}
+    spec = comps.get(comp)
+    if not isinstance(node, dict) or spec is None:
+        return
+    fields, children = spec.get("fields") or [], spec.get("children") or {}
+    for name, value in node.items():
+        here = name if not path else f"{path}.{name}"
+        if name in children:
+            unknown_fields(value, children[name], here, issues, sc)
+            continue
+        if name + "[]" in children:
+            if isinstance(value, list):
+                for i, x in enumerate(value):
+                    unknown_fields(x, children[name + "[]"], f"{here}[{i}]", issues, sc)
+            continue
+        if name + "{}" in children:
+            if isinstance(value, dict):
+                for k, x in value.items():
+                    unknown_fields(x, children[name + "{}"], f'{here}["{k}"]' if comp == "logic" and name == "attach" else f"{here}.{k}", issues, sc)
+            continue
+        if name.startswith("_") or name in fields or comp in ("pack", "unit", "level", "visual"):
+            continue
+        issues.append(("warning", here, f'unknown field "{name}"' + suggest(name, fields) + " (it's kept but does nothing)"))

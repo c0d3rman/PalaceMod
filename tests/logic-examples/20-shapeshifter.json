@@ -74,8 +74,7 @@
      {
       "do": "spawn",
       "entity": "villager",
-      "at": "vec(-4, -70)",
-      "team": "neutral"
+      "at": "vec(20, 10)"
      }
     ]
    },

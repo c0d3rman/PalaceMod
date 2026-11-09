@@ -2768,6 +2768,12 @@
     },
     {
       "on": "entity",
+      "name": "elite",
+      "returns": "bool",
+      "description": "An elite enemy (the game's elite flag)."
+    },
+    {
+      "on": "entity",
       "name": "pos",
       "returns": "position",
       "description": "Its position."
@@ -3080,6 +3086,11 @@
       "name": "difficulty",
       "description": "The run's difficulty multiplier.",
       "type": "number"
+    },
+    {
+      "name": "none",
+      "description": "No entity (what a selector gives when nothing matches, or a role the event doesn't have): `other != none`.",
+      "type": "any"
     }
   ],
   "roles": [
@@ -3291,6 +3302,10 @@
       "description": "Dead or knocked out."
     },
     {
+      "name": "elite",
+      "description": "Elite enemies."
+    },
+    {
       "name": "logic",
       "description": "Logic objects."
     },
@@ -3440,6 +3455,543 @@
     "Wall",
     "WallOrTower"
   ],
+  "components": {
+    "pack": {
+      "fields": [
+        "format",
+        "version",
+        "id",
+        "name",
+        "author",
+        "description",
+        "gameVersion",
+        "requires",
+        "assets",
+        "units",
+        "waveSets",
+        "levels",
+        "entities",
+        "statuses",
+        "presets"
+      ],
+      "children": {
+        "units[]": "unit",
+        "entities[]": "entity",
+        "statuses[]": "status",
+        "presets[]": "preset",
+        "levels[]": "level"
+      }
+    },
+    "unit": {
+      "fields": [
+        "id",
+        "side",
+        "base",
+        "name",
+        "description",
+        "visuals",
+        "stats",
+        "weapon",
+        "tags",
+        "labels",
+        "vars",
+        "targeting",
+        "movement",
+        "attacks",
+        "statuses",
+        "counterpart",
+        "rules"
+      ],
+      "children": {
+        "movement": "movement",
+        "attacks[]": "attack"
+      }
+    },
+    "level": {
+      "fields": [
+        "id",
+        "name",
+        "description",
+        "host",
+        "waveSet",
+        "base",
+        "buildSlots",
+        "spawnLines",
+        "props",
+        "terrain",
+        "colors",
+        "groups",
+        "logic"
+      ],
+      "children": {
+        "logic": "logic"
+      }
+    },
+    "entity": {
+      "fields": [
+        "id",
+        "kind",
+        "name",
+        "description",
+        "visual",
+        "body",
+        "team",
+        "countsAsEnemy",
+        "labels",
+        "vars",
+        "lifetime",
+        "maxAlive",
+        "projectile",
+        "mover",
+        "area",
+        "pickup",
+        "interact",
+        "attacks",
+        "targeting",
+        "movement",
+        "statuses",
+        "rules"
+      ],
+      "children": {
+        "visual": "visual",
+        "body": "body",
+        "projectile": "projectile",
+        "mover": "mover",
+        "area": "area",
+        "pickup": "pickup",
+        "interact": "interact",
+        "attacks[]": "attack",
+        "movement": "movement"
+      }
+    },
+    "place": {
+      "fields": [
+        "id",
+        "entity",
+        "preset",
+        "with",
+        "pos",
+        "rotY",
+        "scale",
+        "active",
+        "points",
+        "kind",
+        "name",
+        "description",
+        "visual",
+        "body",
+        "team",
+        "countsAsEnemy",
+        "labels",
+        "vars",
+        "lifetime",
+        "maxAlive",
+        "projectile",
+        "mover",
+        "area",
+        "pickup",
+        "interact",
+        "attacks",
+        "targeting",
+        "movement",
+        "statuses",
+        "rules",
+        "_preset"
+      ],
+      "children": {
+        "visual": "visual",
+        "body": "body",
+        "projectile": "projectile",
+        "mover": "mover",
+        "area": "area",
+        "pickup": "pickup",
+        "interact": "interact",
+        "attacks[]": "attack",
+        "movement": "movement"
+      }
+    },
+    "visual": {
+      "fields": [
+        "icon",
+        "tint",
+        "colors",
+        "scale",
+        "mesh",
+        "meshScale",
+        "meshRotY",
+        "meshRotX",
+        "meshRotZ",
+        "meshOffset",
+        "meshLook",
+        "motion",
+        "texture",
+        "sounds"
+      ],
+      "children": {}
+    },
+    "body": {
+      "fields": [
+        "radius",
+        "height",
+        "box",
+        "solid",
+        "walkable",
+        "hittable",
+        "hp",
+        "flying",
+        "tags"
+      ],
+      "children": {}
+    },
+    "projectile": {
+      "fields": [
+        "speed",
+        "accel",
+        "homing",
+        "arc",
+        "gravity",
+        "spin",
+        "face",
+        "hits",
+        "hitRadius",
+        "pierce",
+        "onGround",
+        "range"
+      ],
+      "children": {}
+    },
+    "mover": {
+      "fields": [
+        "path",
+        "mode",
+        "speed",
+        "wait",
+        "spin",
+        "swing",
+        "running",
+        "pose",
+        "poses",
+        "turnSpeed"
+      ],
+      "children": {
+        "swing": "swing",
+        "pose{}": "pose",
+        "poses{}": "pose"
+      }
+    },
+    "swing": {
+      "fields": [
+        "angle",
+        "speed"
+      ],
+      "children": {}
+    },
+    "pose": {
+      "fields": [
+        "offset",
+        "pos",
+        "rotY",
+        "scale"
+      ],
+      "children": {}
+    },
+    "area": {
+      "fields": [
+        "shape",
+        "watch",
+        "show",
+        "color",
+        "tick",
+        "surface"
+      ],
+      "children": {
+        "shape": "shape"
+      }
+    },
+    "shape": {
+      "fields": [
+        "circle",
+        "rect",
+        "polygon"
+      ],
+      "children": {
+        "circle": "circle",
+        "rect": "rect",
+        "polygon": "polygon"
+      }
+    },
+    "circle": {
+      "fields": [
+        "radius"
+      ],
+      "children": {}
+    },
+    "rect": {
+      "fields": [
+        "size"
+      ],
+      "children": {}
+    },
+    "polygon": {
+      "fields": [
+        "points"
+      ],
+      "children": {}
+    },
+    "pickup": {
+      "fields": [
+        "by",
+        "radius",
+        "magnet",
+        "consume"
+      ],
+      "children": {}
+    },
+    "interact": {
+      "fields": [
+        "prompt",
+        "cost",
+        "when",
+        "radius",
+        "repeat",
+        "choices"
+      ],
+      "children": {
+        "choices[]": "choice"
+      }
+    },
+    "choice": {
+      "fields": [
+        "id",
+        "label",
+        "description",
+        "cost",
+        "icon"
+      ],
+      "children": {}
+    },
+    "attack": {
+      "fields": [
+        "id",
+        "replace",
+        "cooldown",
+        "jitter",
+        "range",
+        "minRange",
+        "when",
+        "targeting",
+        "launch",
+        "weapon",
+        "do"
+      ],
+      "children": {
+        "launch": "launch"
+      }
+    },
+    "launch": {
+      "fields": [
+        "entity",
+        "from"
+      ],
+      "children": {}
+    },
+    "movement": {
+      "fields": [
+        "mode",
+        "path",
+        "then",
+        "speed",
+        "keepDistance",
+        "kite",
+        "flee",
+        "wander",
+        "home",
+        "surfaces"
+      ],
+      "children": {
+        "kite": "kite",
+        "flee": "flee",
+        "wander": "wander"
+      }
+    },
+    "kite": {
+      "fields": [
+        "below",
+        "for"
+      ],
+      "children": {}
+    },
+    "flee": {
+      "fields": [
+        "when",
+        "from",
+        "to"
+      ],
+      "children": {}
+    },
+    "wander": {
+      "fields": [
+        "radius"
+      ],
+      "children": {}
+    },
+    "status": {
+      "fields": [
+        "id",
+        "name",
+        "description",
+        "icon",
+        "duration",
+        "stacking",
+        "maxStacks",
+        "tick",
+        "mods",
+        "flags",
+        "visual",
+        "rules"
+      ],
+      "children": {
+        "mods{}": "mod",
+        "visual": "statusVisual"
+      }
+    },
+    "mod": {
+      "fields": [
+        "mult",
+        "add",
+        "value",
+        "types",
+        "from",
+        "chance",
+        "when",
+        "toward",
+        "away",
+        "dir",
+        "speed"
+      ],
+      "children": {}
+    },
+    "statusVisual": {
+      "fields": [
+        "tint",
+        "fx",
+        "glow"
+      ],
+      "children": {}
+    },
+    "preset": {
+      "fields": [
+        "id",
+        "name",
+        "description",
+        "category",
+        "kind",
+        "params",
+        "vars",
+        "labels",
+        "rules",
+        "visual",
+        "body",
+        "team",
+        "countsAsEnemy",
+        "lifetime",
+        "maxAlive",
+        "projectile",
+        "mover",
+        "area",
+        "pickup",
+        "interact",
+        "attacks",
+        "targeting",
+        "movement",
+        "statuses"
+      ],
+      "children": {
+        "params{}": "presetParam"
+      }
+    },
+    "presetParam": {
+      "fields": [
+        "type",
+        "default",
+        "min",
+        "max",
+        "options",
+        "description"
+      ],
+      "children": {}
+    },
+    "logic": {
+      "fields": [
+        "seed",
+        "vars",
+        "rules",
+        "places",
+        "attach",
+        "hud",
+        "kingActions",
+        "caps"
+      ],
+      "children": {
+        "places[]": "place",
+        "attach{}": "attach",
+        "hud[]": "hud",
+        "kingActions[]": "kingAction",
+        "caps": "caps"
+      }
+    },
+    "attach": {
+      "fields": [
+        "name",
+        "labels",
+        "vars",
+        "statuses",
+        "targeting",
+        "rules"
+      ],
+      "children": {}
+    },
+    "hud": {
+      "fields": [
+        "id",
+        "text",
+        "icon",
+        "visible"
+      ],
+      "children": {}
+    },
+    "kingAction": {
+      "fields": [
+        "id",
+        "name",
+        "icon",
+        "when",
+        "cooldown",
+        "uses"
+      ],
+      "children": {
+        "uses": "uses"
+      }
+    },
+    "uses": {
+      "fields": [
+        "count",
+        "per"
+      ],
+      "children": {}
+    },
+    "caps": {
+      "fields": [
+        "entities",
+        "units",
+        "projectiles",
+        "perTemplate",
+        "firingsPerFrame",
+        "actionsPerFrame"
+      ],
+      "children": {}
+    }
+  },
   "caps": {
     "entities": {
       "default": 300,

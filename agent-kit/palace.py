@@ -3297,6 +3297,38 @@ def check_pack(ref, data):
         ws, vanilla = level_waveset(ref, data, lv)
         if vanilla:
             warn(p + ".waveSet", "no wave set: the map's vanilla nights play (their spawn lines must exist)")
+    # Names the behaviour engine takes from the map: host slots in attach keys, scenery meshes in visuals.
+    known_meshes = {m.get("name") for m in (getattr(ref, "scenery", None) or {}).get("meshes", [])}
+    for li, lv in enumerate(data.get("levels") or []):
+        logic = lv.get("logic") or {}
+        if not ref.has_map(lv.get("host")):
+            continue
+        host = ref.map(lv["host"])
+        slot_names = {x.get("name") for x in host.get("slots") or []}
+        own_meshes = {(x.get("base") or "")[5:] for x in host.get("scenery") or []}
+        removed = set(((lv.get("buildSlots") or {}).get("remove")) or [])
+        for key in (logic.get("attach") or {}):
+            if key.startswith("slot:"):
+                name = key[5:]
+                if name not in slot_names:
+                    err(f'levels[{li}].logic.attach["{key}"]', f"no build slot {name!r} on {lv['host']}" +
+                        (f" (closest: {', '.join(sorted(slot_names, key=lambda n: _edit_distance(n.lower(), name.lower()))[:3])}; `palace.py ref slots {lv['host']}`)" if slot_names else ""))
+                elif name in removed:
+                    warn(f'levels[{li}].logic.attach["{key}"]', f"the slot {name!r} is removed by this level")
+        if known_meshes:
+            def visuals():
+                for ei, e in enumerate(data.get("entities") or [] if li == 0 else []):
+                    yield f"entities[{ei}]", e
+                for pi, pl_ in enumerate(logic.get("places") or []):
+                    yield f"levels[{li}].logic.places[{pi}]", pl_
+            for path, e in visuals():
+                mesh = ((e or {}).get("visual") or {}).get("mesh")
+                if isinstance(mesh, str) and mesh.startswith("mesh:"):
+                    name = mesh[5:].split("@")[0]
+                    if name not in known_meshes and name not in own_meshes:
+                        close = sorted(known_meshes | own_meshes, key=lambda n: _edit_distance(n.lower(), name.lower()))[:3]
+                        warn(path + ".visual.mesh", f"no scenery mesh {name!r} (closest: {', '.join(close)}; `palace.py ref scenery`); it would be invisible")
+
     # The behaviour engine's rules, entities, statuses and presets (palace_logic.py, the mod's own checks).
     try:
         issues.extend(logic_issues(data))
@@ -4778,6 +4810,12 @@ def _edit_distance(a, b):
 def cmd_logic(env, args):
     sub = args.what
     rest = list(args.rest or [])
+    if sub in ("-h", "--help", "help") or rest[:1] in (["-h"], ["--help"]):
+        out({"usage": "logic schema [kind] [name] | logic doc [file] [--kit] | logic check <pack> [level] | logic fixture <file> | "
+                      "logic status|vars [selector]|trace [n]|entities [filter]|budget|eval <expr>|do <action JSON>|fire <signal> [to] [value]|"
+                      "raise <event> <on> [other|-] [name|-] [value]|set <var> <expr>|king <1-3> (in the game)",
+             "examples": ["logic check library mylevel", "logic schema action spawn", "logic eval \"count('is:slime')\""]})
+        return
     for flag in ("--kit", "--json"):   # flags after the subcommand land in rest (argparse REMAINDER)
         if flag in rest:
             rest.remove(flag)
@@ -4912,6 +4950,12 @@ def logic_reference_markdown(schema):
         L.append(f"| `{sig}` | {f['returns']} | {_md(f['description'])}{(' e.g. `' + f['example'] + '`') if f.get('example') else ''} |")
     L += ["", "## Properties", "", "`<value>.<property>`; `.$name` reads an entity variable.", "", "| On | Property | Type | Meaning |", "|---|---|---|---|"]
     L += [f"| {p['on']} | `.{p['name']}` | {p['returns']} | {_md(p['description'])} |" for p in schema["properties"]]
+    if schema.get("components"):
+        L += ["", "## Fields of each block", "", "What each JSON block accepts (a field not listed draws an \"unknown field\" warning). "
+              "`key[]` is a list of that block, `key{}` a map of them.", ""]
+        for name, c in schema["components"].items():
+            kids = ", ".join(f"`{k}` → {v}" for k, v in (c.get("children") or {}).items())
+            L.append(f"- **{name}**: " + ", ".join(f"`{f}`" for f in c.get("fields") or []) + (f" (blocks: {kids})" if kids else ""))
     L += ["", "## Stats", "", "For `setStat` and status `mods` (`{\"mult\"}` | `{\"add\"}` | `{\"value\"}`; damageTaken/damageMult mods may add "
           "`from`, `types`, `chance`, `when`).", ""]
     L += [f"- `{x['name']}`: {_md(x['description'])}" for x in schema["stats"]]
@@ -4969,7 +5013,8 @@ def run_fixture(env, path, timeout=180):
     """Runs one tests/logic-examples fixture in the game: imports its pack into the library, plays its level (fast
     mode), runs its play steps and reports each. Steps: {"cmd": dev command}, {"do": [actions]} (run as the level
     script), {"wait": game seconds}, {"expect": "<bool expression>", "within": s}, {"raise": event, "on": selector,
-    "other": selector, "name": event.name}, {"expectLog": text, "within": s}."""
+    "other": selector, "name": event.name}, {"expectLog": text, "within": s}, {"expectState": "AfterMatchVictory", "within": s}
+    (the game state `status` reports)."""
     fx = json.loads(path.read_text())
     g = Game(env)
     level = _fixture_into_library(env, fx)
@@ -5013,7 +5058,7 @@ def run_fixture(env, path, timeout=180):
                     time.sleep(0.2)
                 if t0 is None:
                     time.sleep(float(step["wait"]))
-            elif "expect" in step or "expectLog" in step:
+            elif "expect" in step or "expectLog" in step or "expectState" in step:
                 within = float(step.get("within", 5))
                 t0 = game_time()
                 wall_end = time.time() + within * 2 + 20
@@ -5022,6 +5067,9 @@ def run_fixture(env, path, timeout=180):
                     if "expect" in step:
                         last = g.raw("logic eval " + step["expect"], timeout=30).strip()
                         passed = _truthy(last)
+                    elif "expectState" in step:
+                        last = g.status().get("state")
+                        passed = last == step["expectState"]
                     else:
                         last = None
                         passed = any(step["expectLog"] in (l.get("message") if isinstance(l, dict) else str(l)) for l in g.log_since(mark))

@@ -113,8 +113,8 @@
     "do": [
      {
       "do": "spawn",
-      "entity": "vanilla:E Ogre",
-      "count": 3,
+      "entity": "vanilla:E Melee",
+      "count": 6,
       "at": "pointNear(@northTower, 8)"
      }
     ]
