@@ -28,13 +28,14 @@ Generated from the engine's registry (`palace.py logic doc`; schema version 1.0.
 | `any` | an expression of any type |
 | `for` | seconds, or "night" / "day" (until the next dawn / dusk) |
 | `night` | a night number expression, or "current" |
-| `slot` | a build slot: @name, a selector, or a Studio key ("slot:Tower 3", "add:<id>", "castle") |
+| `slot` | a build slot: any expression giving a building or slot entity (@name, it, $var, a selector), or a Studio key ("slot:Tower 3", "add:<id>", "castle") |
 | `types` | a list of damage-type labels (["fire"]) |
 | `keep` | a list of the listed options |
 | `fx` | a game effect name |
 | `sound` | "asset:<key>" or a game sound |
-| `color` | "#rrggbb" |
+| `color` | "#rrggbb" (or "#rgb", "#rrggbbaa", a colour name like "red"); "=expr" for an expression |
 | `json` | a JSON block |
+| `local` | a plain name (letters, digits, _) for a value bound inside the action's actions |
 
 ## Roles
 
@@ -47,6 +48,7 @@ Names an expression can use for entities in a rule.
 | `other` | entity | The event's counterpart: killer, victim, attacker, entrant, collector, sender... |
 | `spawned` | entity | Inside spawn/launch/replace `then`: the new entity. |
 | `it` | entity | The current candidate: inside a filter's where(), best()'s score, forEach, or an action applied to a set. |
+| `outer` | entity | The `it` one scope out (the forEach member while a nested target, where() or best() rebinds `it`); none at the top. |
 | `king` | entity | The player's king. |
 | `castle` | entity | The castle (its build slot's building). |
 | `level` | level | The level itself (owner of level variables). |
@@ -467,6 +469,7 @@ Each action is `{"do": "<name>", ...params}`. `target` (where listed) is a selec
 - `in` (entities; required): The set.
 - `actions` (actions; required): The actions ("actions", since "do" names the action itself).
 - `limit` (int; 1..256): At most this many (max 256).
+- `as` (local): A name for the member, readable inside (and in nested actions that rebind `it`): "as": "tower" then `tower.hp`.
 
 **`choose`**: Picks one weighted option at random.
 
@@ -489,7 +492,8 @@ Each action is `{"do": "<name>", ...params}`. `target` (where listed) is a selec
 
 **`building`**: Acts on a build slot.
 
-- `slot` (slot; required): The slot: @name, a selector, or a Studio key ("slot:Tower 3").
+- `target` (entities; default "self"): Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self.
+- `slot` (slot): The slot: any expression giving a building or slot entity (@name, it, $var, nearest('unbuilt and type:House')...), or a Studio key ("slot:Tower 3", "add:<id>", "castle"). Default: the target.
 - `op` (enum; required; one of build, upgrade, knockOut, repair, demolish, lock, unlock, setCost, setIncome): What to do.
 - `value` (number): For setCost/setIncome: the amount; for demolish: gold refunded.
 - `branch` (int): For build/upgrade: the upgrade choice (0-based).
@@ -546,7 +550,7 @@ Each action is `{"do": "<name>", ...params}`. `target` (where listed) is a selec
 - `scale` (number): Size factor.
 - `mesh` (text): A model (mesh:/vanilla:/asset:).
 - `visible` (bool): Shown or hidden.
-- `glow` (color): Glow colour.
+- `glow` (color): Glow colour; true for the default glow, false for none, or a 0-1 strength.
 - `for` (number): Seconds; reverts after.
 
 **`hud`**: Changes a level HUD line (logic.hud).
@@ -642,7 +646,7 @@ Selector functions anchor at `self`; call them as methods (`castle.count('enemy'
 | entity | `.kind` | text | 'unit', 'building', 'prop', 'projectile', 'area', 'pickup', 'logic', 'coin', 'king', 'line', 'point', 'path'. |
 | entity | `.template` | template | The template it was made from. |
 | entity | `.labels` | list | Its labels. |
-| entity | `.level` | number | A building's level (0 = built, 1 = first upgrade...). |
+| entity | `.level` | number | A build slot's level: 0 = empty (unbuilt), 1 = built, 2 = upgraded once... |
 | entity | `.cost` | number | A slot's next build/upgrade cost. |
 | entity | `.buildingType` | text | A building's kind, e.g. 'Mill'. |
 | entity | `.age` | number | Seconds since it appeared. |
@@ -767,18 +771,21 @@ Combine with `and`, `or`, `not` and parentheses.
 - `self`: The rule's owner.
 - `melee`: Melee fighters.
 - `ranged`: Ranged fighters.
-- `alive`: Alive.
-- `dead`: Dead or knocked out.
+- `alive`: Alive (not dead, switched off or an unbuilt slot).
+- `dead`: Dead or knocked out. Naming it lets a selector see the dead.
 - `elite`: Elite enemies.
+- `disabled`: Switched off (`disable`, or placed with active: false). Naming it lets a selector see switched-off things.
+- `unbuilt`: An empty build slot (level 0). Naming it lets a selector see empty slots, which it otherwise skips.
 - `logic`: Logic objects.
 - `line`: Spawn lines.
 - `point`: Points.
 - `path`: Paths.
-- `#label`: Has a label.
-- `is:<template>`: Made from a template.
+- `#label`: Has a label (#"two words" for a label with spaces).
+- `is:<template>`: Made from a template (is:goblin, is:vanilla:Ogre, is:'vanilla:E Ogre').
 - `in:@area`: Inside an area (in:self inside this area).
 - `has:<status>`: Has a status.
-- `type:<Kind>`: A building of that kind (Mill, Tower...).
+- `type:<Kind>`: A building of that kind (type:Mill, type:"Defense Tower").
+- `include:<what>`: Matches everything, but lets a selector also see what it skips by default: include:dead, include:disabled, include:unbuilt, include:self (repeat it for more).
 - `where(expr)`: An expression over `it`.
 - `<Tag>`: Any game tag (TagManager.ETag, case-sensitive): Tower, Flying, Wall, ...
 

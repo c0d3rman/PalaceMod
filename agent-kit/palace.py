@@ -3333,7 +3333,7 @@ def check_pack(ref, data):
 
     # The behaviour engine's rules, entities, statuses and presets (palace_logic.py, the mod's own checks).
     try:
-        issues.extend(logic_issues(data))
+        issues.extend(logic_issues(data, ref))
     except Fail as e:
         warn("logic", str(e))
     return issues
@@ -4078,6 +4078,14 @@ def cmd_ref(env, args):
             m = ref.map(args.name)
             rows[f"on {args.name} (map's own)"] = [{"mesh": x["base"][5:], "count": x["count"], "size": x.get("size")} for x in m.get("scenery", [])]
         out(rows)
+    elif args.what in ("effects", "sounds"):
+        # The names the `effect` / `sound` actions take (check validates against this list).
+        items = ref.catalog.get(args.what) or []
+        names = [x["id"] if isinstance(x, dict) else x for x in items]
+        if args.name:
+            names = [n for n in names if args.name.lower() in n.lower()]
+        out({args.what: names, "note": "effect aliases (smoke, explosion, hit...) are listed too" if args.what == "effects" else
+             'also "asset:<key>" for a sound file in the pack'})
     elif args.what == "doc":
         path = Path(args.out or env.ref / "reference.md")
         path.write_text(reference_markdown(ref), encoding="utf-8")
@@ -4088,7 +4096,7 @@ def cmd_ref(env, args):
         routes = offline_routes(ref, {}, level, slots, castle) if castle in slots else []
         out(render(ref, {}, level, args.out or f"{args.name}.png", routes=routes, labels=args.labels))
     else:
-        raise Fail("ref build | maps | slots <map> | buildings | enemies | waves <map> | scenery [map] | render <map>")
+        raise Fail("ref build | maps | slots <map> | buildings | enemies | waves <map> | scenery [map] | effects [part] | sounds [part] | render <map>")
 
 
 def reference_markdown(ref):
@@ -5017,11 +5025,27 @@ def logic_module():
     return palace_logic
 
 
-def logic_issues(data):
-    """The behaviour engine's offline checks, as check_pack issues."""
+def game_names(ref):
+    """The game's effect and sound names from the ref cache (catalog.json), for the logic check; None without one."""
+    if ref is None:
+        return None
+    f = ref.env.ref / "catalog.json"
+    if not f.exists():
+        return None
+    try:
+        cat = ref.catalog
+    except (Fail, ValueError):
+        return None
+    effects = [e["id"] if isinstance(e, dict) else e for e in cat.get("effects") or []]
+    sounds = list(cat.get("sounds") or [])
+    return {"effects": effects or None, "sounds": sounds or None}
+
+
+def logic_issues(data, ref=None):
+    """The behaviour engine's offline checks, as check_pack issues (with the ref cache: game effect and sound names)."""
     pl = logic_module()
     raw = []
-    pl.validate_logic(data, raw)
+    pl.validate_logic(data, raw, names=game_names(ref))
     return [{"severity": sev, "path": path, "message": msg} for sev, path, msg in raw]
 
 
@@ -5097,7 +5121,7 @@ def cmd_logic(env, args):
         if len(rest) > 1:
             find_level(data, rest[1])
             data = scope_levels(data, {rest[1]})
-        issues = logic_issues(data)
+        issues = logic_issues(data, Ref(env))
         ok = not any(i["severity"] == "error" for i in issues)
         out({"ok": ok, "errors": [i for i in issues if i["severity"] == "error"], "warnings": [i for i in issues if i["severity"] == "warning"]})
         if not ok:
@@ -5499,7 +5523,7 @@ def main(argv=None):
     p.add_argument("--feature", action="append", help="log: only these [Feature] lines (e.g. Builder)")
     p.add_argument("--level", default="warn", choices=["error", "warn", "info", "debug"])
 
-    p = sub.add_parser("ref", help="reference data: build | maps | slots <map> | buildings | enemies | waves <map> | scenery [map] | render <map> | doc")
+    p = sub.add_parser("ref", help="reference data: build | maps | slots <map> | buildings | enemies | waves <map> | scenery [map] | effects [part] | sounds [part] | render <map> | doc")
     p.add_argument("what")
     p.add_argument("name", nargs="?")
     p.add_argument("--maps", help="build: comma-separated maps (default: all)")

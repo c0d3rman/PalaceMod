@@ -167,6 +167,7 @@ namespace PalaceMod.Builder.Logic
             game.NightStartedAt = game.IsNight ? Time.time : -1;
             LogicServices.Game = game;
             LogicServices.Spatial = spatial;
+            GameSlots.Install();
             world.TraceListener = OnTrace;
             LogicWorld.Current = world;
             startedScene = SceneManager.GetActiveScene();

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Newtonsoft.Json.Linq;
@@ -27,6 +28,19 @@ namespace PalaceMod.Builder.Logic
         private void RegisterDevCommands()
         {
             DevCommands.Register("logic", Usage, args =>
+            {
+                // A creator's mistake (a bad expression, an unknown name) is reported as its message: no C# stack.
+                try { return LogicCommand(args); }
+                catch (Exception e) when (e is LogicError or InvalidCastException or KeyNotFoundException or NullReferenceException or Newtonsoft.Json.JsonException)
+                {
+                    Log.Debug($"logic {string.Join(" ", args)}: {e}");
+                    throw new InvalidOperationException(e is LogicError or Newtonsoft.Json.JsonException ? e.Message : $"{e.GetType().Name}: {e.Message}");
+                }
+            });
+        }
+
+        private string LogicCommand(string[] args)
+            {
             {
                 string sub = args.Length > 0 ? args[0].ToLowerInvariant() : "status";
                 string rest = args.Length > 1 ? string.Join(" ", args.Skip(1)) : "";
@@ -145,7 +159,7 @@ namespace PalaceMod.Builder.Logic
                     default:
                         throw new ArgumentException(Usage);
                 }
-            });
+            }
         }
     }
 }

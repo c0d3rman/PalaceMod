@@ -82,12 +82,42 @@ namespace PalaceMod.Builder.Model.Logic
 
     public static class Expr
     {
-        public const int MaxLength = 512;
+        /// <summary>The longest expression or filter source: only a guard against pathological input. The parser is
+        /// recursive, so nesting has its own cap (<see cref="MaxDepth"/>).</summary>
+        public const int MaxLength = 8192;
+
+        /// <summary>The deepest an expression tree may nest (brackets, calls, chained operators).</summary>
+        public const int MaxDepth = 200;
 
         public static readonly HashSet<string> Roles = new(StringComparer.Ordinal)
         {
-            "self", "subject", "other", "spawned", "it", "king", "castle", "level", "event",
+            "self", "subject", "other", "spawned", "it", "outer", "king", "castle", "level", "event",
         };
+
+        /// <summary>A plain name: a letter or '_', then letters, digits or '_' (forEach's `as`).</summary>
+        public static bool IsIdentifier(string s)
+        {
+            if (string.IsNullOrEmpty(s) || !(char.IsLetter(s[0]) || s[0] == '_')) return false;
+            foreach (char c in s) if (!(char.IsLetterOrDigit(c) || c == '_')) return false;
+            return true;
+        }
+
+        /// <summary>The tree's depth, measured without recursion.</summary>
+        public static int Depth(ExprNode root)
+        {
+            int max = 0;
+            var stack = new Stack<(ExprNode n, int d)>();
+            if (root != null) stack.Push((root, 1));
+            while (stack.Count > 0)
+            {
+                var (n, d) = stack.Pop();
+                if (d > max) max = d;
+                if (d > MaxDepth) break;
+                if (n.Target != null) stack.Push((n.Target, d + 1));
+                foreach (var a in n.Args) if (a != null) stack.Push((a, d + 1));
+            }
+            return max;
+        }
 
         /// <summary>Parses an expression. Returns null and sets error/col on failure.</summary>
         public static ExprNode Parse(string src, out string error, out int col)
@@ -100,6 +130,7 @@ namespace PalaceMod.Builder.Model.Logic
                 var p = new Parser(src);
                 var node = p.ParseExpr();
                 p.ExpectEnd();
+                if (Depth(node) > MaxDepth) throw new ExprException($"nested more than {MaxDepth} deep (split it up with a variable)", 0);
                 return node;
             }
             catch (ExprException e)
@@ -287,7 +318,17 @@ namespace PalaceMod.Builder.Model.Logic
                 if (Peek.Kind != Tok.End) throw new ExprException($"unexpected {Peek}", Peek.Col);
             }
 
-            public ExprNode ParseExpr() => ParseCond();
+            private int nesting;
+
+            public ExprNode ParseExpr() => Deeper(ParseCond);
+
+            /// <summary>Brackets, calls, ?: and prefix operators recurse: cap it before the stack does.</summary>
+            private ExprNode Deeper(Func<ExprNode> parse)
+            {
+                if (++nesting > MaxDepth) throw new ExprException($"nested more than {MaxDepth} deep (split it up with a variable)", Peek.Col);
+                try { return parse(); }
+                finally { nesting--; }
+            }
 
             private ExprNode ParseCond()
             {
@@ -316,7 +357,7 @@ namespace PalaceMod.Builder.Model.Logic
 
             private ExprNode ParseNot()
             {
-                if (IsOp("not")) { int col = Next().Col; return new ExprNode { Kind = ExprKind.Unary, Op = "not", Args = [ParseNot()], Col = col }; }
+                if (IsOp("not")) { int col = Next().Col; return new ExprNode { Kind = ExprKind.Unary, Op = "not", Args = [Deeper(ParseNot)], Col = col }; }
                 return ParseCmp();
             }
 
@@ -350,11 +391,11 @@ namespace PalaceMod.Builder.Model.Logic
                 if (Peek.Kind == Tok.Op && Peek.Text == "-")
                 {
                     int col = Next().Col;
-                    var inner = ParseUnary();
+                    var inner = Deeper(ParseUnary);
                     if (inner.Kind == ExprKind.Number) { inner.Literal = -(double)inner.Literal; inner.Col = col; return inner; }
                     return new ExprNode { Kind = ExprKind.Unary, Op = "-", Args = [inner], Col = col };
                 }
-                if (Peek.Kind == Tok.Op && Peek.Text == "+") { Next(); return ParseUnary(); }
+                if (Peek.Kind == Tok.Op && Peek.Text == "+") { Next(); return Deeper(ParseUnary); }
                 return ParsePostfix(ParsePrimary());
             }
 
@@ -459,9 +500,9 @@ namespace PalaceMod.Builder.Model.Logic
             FilterKind.Not => "(not " + Args[0] + ")",
             _ => Term switch
             {
-                "label" => "#" + Arg,
+                "label" => "#" + Filter.QuoteArg(Arg),
                 "where" => "where(" + Where + ")",
-                "is" or "in" or "has" or "type" => Term + ":" + Arg,
+                _ when Filter.Prefixes.Contains(Term) => Term + ":" + Filter.QuoteArg(Arg),
                 _ => Term,
             },
         };
@@ -469,6 +510,25 @@ namespace PalaceMod.Builder.Model.Logic
 
     public static class Filter
     {
+        /// <summary>The prefixed terms (term:argument). `include:` widens what a selector looks at (dead, disabled,
+        /// unbuilt, self) without filtering.</summary>
+        public static readonly HashSet<string> Prefixes = new(StringComparer.Ordinal) { "is", "in", "has", "type", "include" };
+
+        /// <summary>What `include:` takes.</summary>
+        public static readonly string[] Includes = ["dead", "disabled", "unbuilt", "self"];
+
+        private static bool IsPrefix(string word) => Prefixes.Contains(word);
+
+        /// <summary>An argument as written back: quoted when it isn't a plain name.</summary>
+        public static string QuoteArg(string arg)
+        {
+            if (string.IsNullOrEmpty(arg)) return arg;
+            foreach (char c in arg)
+                if (!(char.IsLetterOrDigit(c) || c is '_' or '-' or '.' or ':' or '@'))
+                    return arg.IndexOf('"') < 0 ? "\"" + arg + "\"" : "'" + arg + "'";
+            return arg;
+        }
+
         /// <summary>Parses a filter string. Returns null and sets error/col on failure. Term names aren't checked
         /// here (ExprChecker.CheckFilter does that against LogicSchema).</summary>
         public static FilterNode Parse(string src, out string error, out int col)
@@ -529,12 +589,19 @@ namespace PalaceMod.Builder.Model.Logic
                 }
             }
 
+            private int nesting;
+
             private FilterNode Not()
             {
                 SkipWs();
                 int col = I;
-                if (Word("not")) return new FilterNode { Kind = FilterKind.Not, Args = [Not()], Col = col };
-                return Atom();
+                if (++nesting > Expr.MaxDepth) throw new ExprException($"nested more than {Expr.MaxDepth} deep", col);
+                try
+                {
+                    if (Word("not")) return new FilterNode { Kind = FilterKind.Not, Args = [Not()], Col = col };
+                    return Atom();
+                }
+                finally { nesting--; }
             }
 
             private FilterNode Atom()
@@ -554,7 +621,7 @@ namespace PalaceMod.Builder.Model.Logic
                 if (s[I] == '#')
                 {
                     I++;
-                    string label = Name();
+                    string label = Arg();
                     if (label.Length == 0) throw new ExprException("'#' needs a label", col);
                     return new FilterNode { Kind = FilterKind.Term, Term = "label", Arg = label, Col = col };
                 }
@@ -580,17 +647,34 @@ namespace PalaceMod.Builder.Model.Logic
                     if (e == null) throw new ExprException("in where(...): " + err, start + ecol);
                     return new FilterNode { Kind = FilterKind.Term, Term = "where", Where = e, Col = col };
                 }
-                if (I < s.Length && s[I] == ':' && word is "is" or "in" or "has" or "type")
+                if (I < s.Length && s[I] == ':' && IsPrefix(word))
                 {
                     I++;
-                    string arg = word == "in" && I < s.Length && s[I] == '@' ? "@" + Skip1() : Name();
+                    string arg = word == "in" && I < s.Length && s[I] == '@' ? "@" + Skip1() : Arg();
                     if (arg.Length == 0 || arg == "@") throw new ExprException($"\"{word}:\" needs a name", col);
                     return new FilterNode { Kind = FilterKind.Term, Term = word, Arg = arg, Col = col };
                 }
                 return new FilterNode { Kind = FilterKind.Term, Term = word, Col = col };
             }
 
-            private string Skip1() { I++; return Name(); }
+            private string Skip1() { I++; return Arg(); }
+
+            /// <summary>A prefixed term's argument: a name (letters, digits, _ - . and :, so is:vanilla:Ogre works), or
+            /// a quoted one for names with spaces: type:"Defense Tower", is:'vanilla:E Ogre', #"my label".</summary>
+            private string Arg()
+            {
+                if (I < s.Length && (s[I] == '"' || s[I] == '\''))
+                {
+                    char q = s[I];
+                    int start = ++I;
+                    while (I < s.Length && s[I] != q) I++;
+                    if (I >= s.Length) throw new ExprException($"unclosed {q}", start - 1);
+                    return s.Substring(start, I++ - start);
+                }
+                int from = I;
+                while (I < s.Length && (char.IsLetterOrDigit(s[I]) || s[I] is '_' or '-' or '.' or ':')) I++;
+                return s.Substring(from, I - from);
+            }
 
             private string Name()
             {
