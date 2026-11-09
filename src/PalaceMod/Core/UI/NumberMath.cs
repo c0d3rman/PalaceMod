@@ -119,8 +119,10 @@ namespace PalaceMod
         public static double Step(double value, double step, int steps, double min, double max, bool integer)
         {
             if (steps == 0 || step <= 0) return Clamp(value, min, max, integer);
+            // Within a ten-thousandth of a step counts as on the grid: a float step (0.05f is 0.0500000007) from a far
+            // min (-50) lands a hair off it, and a tighter tolerance made "up" from 0 step to 0.0000007 and back.
             double k = (value - min) / step;
-            const double eps = 1e-6;
+            const double eps = 1e-4;
             double grid = steps > 0 ? Math.Floor(k + eps) + steps : Math.Ceiling(k - eps) + steps;
             return Clamp(min + grid * step, min, max, integer);
         }
@@ -128,6 +130,10 @@ namespace PalaceMod
         /// <summary>How many steps one repeat moves after <paramref name="streak"/> repeats of a held key (about 10
         /// a second): 1, then 5 after 0.8 s, 25 after 2.4 s, 125 after 4.8 s; never more than a twentieth of the range,
         /// so short ranges stay precise.</summary>
+        /// <summary>A float as the decimal it was written as (0.05f -> 0.05, not 0.0500000007).</summary>
+        public static double Decimal(float v) =>
+            double.TryParse(v.ToString("R", CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture, out double d) ? d : v;
+
         public static int Acceleration(int streak, double min, double max, double step)
         {
             int speed = streak >= 48 ? 125 : streak >= 24 ? 25 : streak >= 8 ? 5 : 1;
