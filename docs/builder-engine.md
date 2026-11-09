@@ -719,7 +719,7 @@ which accepts an entity or a position.
 | | `launch` | `entity`, `from`, `toward` (entity or position), the `projectile` fields as overrides, `onImpact` (actions; the template's `impact` rules also run), `then` |
 | | `spawnGroup` | `unit`, `count`, `interval`, `line` (a spawn line) or `at`, `elite`, `gold`: a wave-style group now (enemies count toward the night) |
 | | `replace` | `with` (template), `keep` (`hp`, `vars`, `statuses`, `labels`): swaps the entity for another in place (morph, shapeshift) |
-| **Health** | `damage` | `amount`, `source` (credited attacker; default self), `types` (labels such as `fire`, which status modifiers test), `splash` (bool), `weapon` (apply a weapon's tag modifiers) |
+| **Health** | `damage` | `amount`, `source` (credited attacker; default self), `types` (labels such as `fire`, which status modifiers test), `splash` (bool), `weapon` (apply a weapon's tag modifiers), `scaled` (bool: scale by the source's own damageMult; otherwise the amount is exact and only the victim's damageTaken applies) |
 | | `heal` / `kill` / `revive` | `amount` / — / `hpPct` |
 | | `setHp` | `value`: sets hit points without a `damaged`/`healed` event (shared pools) |
 | **Stats** | `setStat` | `stat`, `value` \| `add` \| `mult`, `for` (a timed modifier: seconds, or `"night"`/`"day"` = until the next dawn/dusk) |

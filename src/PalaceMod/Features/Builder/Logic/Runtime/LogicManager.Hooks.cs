@@ -239,6 +239,9 @@ namespace PalaceMod.Builder.Logic
             to its hit (AimbotProjectile.Update), and TakeDamage's postfix falls back to it.
         */
         private static Component currentAttacker;
+
+        /// <summary>The game attack whose hit is being dealt now (a tower's AutoAttack, the arrow's shooter), or null.</summary>
+        internal static Component CurrentAttacker => currentAttacker;
         private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<AimbotProjectile, Component> shooterOf = new();
 
         [HarmonyPatch]

@@ -1085,7 +1085,7 @@
     {
       "name": "damage",
       "group": "Health",
-      "description": "Deals damage.",
+      "description": "Deals exactly `amount`: the victim's damageTaken and a `weapon`'s modifiers apply, the source's own damageMult only with `scaled`.",
       "params": [
         {
           "name": "target",
@@ -1121,6 +1121,12 @@
           "name": "weapon",
           "type": "text",
           "description": "Apply a weapon's tag modifiers (\"vanilla:<weapon>\")."
+        },
+        {
+          "name": "scaled",
+          "type": "bool",
+          "default": false,
+          "description": "Scale it by the source's own damageMult (its statuses and setStat), as the source's own attacks are."
         }
       ],
       "example": "{ \"do\": \"damage\", \"target\": \"all('foe', 3)\", \"amount\": 25 }",

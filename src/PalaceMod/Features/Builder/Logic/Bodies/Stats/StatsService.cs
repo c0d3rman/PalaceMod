@@ -49,6 +49,7 @@ namespace PalaceMod.Builder.Logic.Bodies
         public bool Splash;
         public LogicEntity Source;
         public string Weapon;                // "vanilla:<weapon>" when a weapon dealt it
+        public Hp ExactFor;                  // a scripted `damage` on this Hp: its source's damageMult doesn't scale it
     }
 
     internal sealed class StatsService : IStatModifiers

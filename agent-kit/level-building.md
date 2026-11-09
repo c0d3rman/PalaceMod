@@ -1041,7 +1041,11 @@ stays until `removeStatus`, the way to give something a lasting buff, curse or f
 the attacker; its `when` is an expression where `self` is the carrier, `attacker` (also `other`, `it`) who deals the
 hit, `victim` (also `subject`) who takes it, and `dist` the ground distance between them. A hit with no known attacker
 fails `from`, and `attacker` is `none` in `when`. `chance` is rolled per hit. These keys only work on the two damage
-stats.
+stats. A tower's damageMult applies to its arrows. A scripted `damage` action deals exactly its `amount` (only the
+victim's damageTaken, and a `weapon`'s tag modifiers, change it); add `"scaled": true` to scale it by its `source`'s
+damageMult like that source's own attacks. A hit that the victim's own damageTaken reduces to 0 is not shared with its
+linked parts or group either (an immune body stays immune), while a hit on a part still reaches the parent through its
+`damageToParent` whatever the parent's damageTaken.
 
 ### 12.9 Variables, HUD, king actions, caps
 
