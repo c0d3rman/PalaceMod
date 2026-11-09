@@ -425,7 +425,9 @@ namespace PalaceMod.Builder.Logic
                 {
                     var t = targets[i];
                     if (t == null) continue;
-                    var c = ctx.With(it: t);
+                    // An explicit target binds `it` to each member; the default (self) leaves the surrounding `it` alone,
+                    // so a forEach member stays `it` in an action that has no target of its own.
+                    var c = bp.Has("target") ? ctx.With(it: t) : ctx;
                     entry.Handler(c, new BoundParams(a.Params, c, t));
                 }
             }

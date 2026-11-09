@@ -37,7 +37,7 @@ that pack. A folder under `packs/` (an installed pack) is read and written as be
    then the whole file runs again; ops aren't idempotent, so a plain second `apply` of the same file fails at the first
    `add_slot`). Packs reload in the game within ~2 s; reload the level (`play` again) to see changes.
 
-All commands print JSON. Errors go to stderr as `{"error": "..."}` with exit code 2; `test` exits 1 when the run is lost.
+All commands print JSON. Errors go to stderr as `{"error": "..."}` with exit code 2; `test` exits 1 when the run is lost. `apply` always answers with `{"applied", "saved", "errors", "warnings"}`: a bad op is an `errors[]` entry with its path (`"ops[3]"`), exit code 1, and nothing is saved.
 
 ## 2. Setup
 

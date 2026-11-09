@@ -43,7 +43,11 @@ PACK_VERSION = 3
 
 
 class Fail(Exception):
-    pass
+    """A failure the user can fix; `path` (e.g. "ops[3]") says where, when known."""
+
+    def __init__(self, message="", path=None):
+        super().__init__(message)
+        self.path = path
 
 
 def out(obj):
@@ -1027,17 +1031,17 @@ class Ops:
             name = op.get("op")
             fn = getattr(self, "op_" + str(name), None)
             if fn is None:
-                raise Fail(f"ops[{i}]: unknown op {name!r}; ops: {', '.join(sorted(n[3:] for n in dir(self) if n.startswith('op_')))}")
+                raise Fail(f"ops[{i}]: unknown op {name!r}; ops: {', '.join(sorted(n[3:] for n in dir(self) if n.startswith('op_')))}", path=f"ops[{i}]")
             if name != "add_prop":
                 self._prop_ids = None
             try:
                 r = fn(op)
             except Fail as e:
-                raise Fail(f"ops[{i}] ({name}): {e}")
+                raise Fail(f"ops[{i}] ({name}): {e}", path=f"ops[{i}]")
             except (KeyError, TypeError, ValueError, IndexError) as e:
                 what = f"missing field {e.args[0]!r}" if isinstance(e, KeyError) and e.args else f"bad field: {e}"
                 usage = (fn.__doc__ or "").strip().split("\n")[0]
-                raise Fail(f"ops[{i}] ({name}): {what}" + (f". Usage: {usage}" if usage else ""))
+                raise Fail(f"ops[{i}] ({name}): {what}" + (f". Usage: {usage}" if usage else ""), path=f"ops[{i}]")
             self.log.append(r or name)
         self.resnap()
 
@@ -4348,11 +4352,21 @@ def scope_levels(data, level_ids):
 def cmd_apply(env, args):
     ref = Ref(env)
     path, data = load_pack(env, args.pack)
-    if args.fresh:
-        fresh_level(env, ref, data, args.level)
-    ops = Ops(env, ref, data, args.level)
-    ops_list = read_ops(args.ops)
-    ops.run(ops_list)
+    ops = None
+    try:
+        if args.fresh:
+            fresh_level(env, ref, data, args.level)
+        ops = Ops(env, ref, data, args.level)
+        try:
+            ops_list = read_ops(args.ops)
+        except (OSError, ValueError) as e:
+            raise Fail(f"can't read the ops: {e}", path="ops")
+        ops.run(ops_list)
+    except Fail as e:
+        # Nothing is saved; the failure is an errors[] entry like every other problem, with where it happened.
+        out({"applied": ops.log if ops else [], "saved": None, "errors": [{"severity": "error", "path": e.path or "apply", "message": str(e)}],
+             "warnings": []})
+        sys.exit(1)
     # In the library, only the edited levels (and the nights and enemies they use) are checked: the rest is other work.
     touched = {o.get("level") or args.level for o in ops_list} - {None} if isinstance(path, LibraryRef) else set()
     issues = [] if args.no_check else check_pack(ref, scope_levels(data, touched) if touched else data)

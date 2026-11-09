@@ -283,6 +283,14 @@ namespace PalaceMod.Builder.Logic.Bodies
                 if (i == 0) firstMesh = b.replacementMesh;
             }
             if (firstMesh != null && MainMeshRef(slot) != null) MainMeshRef(slot).mesh = firstMesh;
+            // Some objects an upgrade switches on remove themselves once active (a house picks its look and destroys
+            // the rest). The game never needs the list again; an empty slot's build preview walks it every frame.
+            foreach (var u in slot.OwnUpgrades)
+                foreach (var b in u.upgradeBranches)
+                {
+                    b.objectsToActivate.RemoveAll(o => o == null);
+                    b.objectsToDisable.RemoveAll(o => o == null);
+                }
             SlotLevel(slot) = 0;
             applied.Clear();
             slot.GoldIncome = 0;

@@ -165,13 +165,14 @@ namespace PalaceMod.Tests
                 [{ "do": "forEach", "in": "all('#t')", "as": "m", "actions": [
                     { "do": "listAdd", "target": "level", "name": "$seen", "value": "outer" },
                     { "do": "listAdd", "target": "level", "name": "$seen", "value": "m" },
-                    { "do": "listAdd", "target": "level", "name": "$seen", "value": "it" } ] }]
+                    { "do": "listAdd", "target": "level", "name": "$seen", "value": "it" },
+                    { "do": "listAdd", "name": "$seen", "value": "it" } ] }]
                 """), "t");
             w.RunList(list, new LogicContext { World = w, Self = self });
             w.Drain();
             var seen = w.GetVar(w.Level, "seen").AsList.Select(v => v.AsEntity?.Id ?? "none").ToList();
             // Inside listAdd (targeted at the level) `it` is the level, `outer` the forEach member, `m` the member.
-            Assert.Equal("a a level b b level", string.Join(" ", seen), "outer and as see the member");
+            Assert.Equal("a a level a b b level b", string.Join(" ", seen), "outer and as see the member; an action without a target keeps it");
         }
     }
 }

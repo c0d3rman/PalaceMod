@@ -265,6 +265,7 @@ namespace PalaceMod.Builder.Logic
                 case "enabled": return Value.Bool(e.Enabled);
                 case "elite": return Value.Bool(LogicServices.IsElite?.Invoke(e) ?? false);
             }
+            if (LogicServices.GameProperty?.Invoke(e, name) is Value game) return game;
             var stats = LogicServices.Stats;
             if (stats != null)
             {
