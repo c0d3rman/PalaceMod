@@ -1142,6 +1142,11 @@ Where the build settles what the text above leaves open:
   are transpiled to record it). Only an object with a `TaggedObject` (or a Builder entity) is named, so scenery
   hazards stay `none`. The victim's `damaged`/`death` always resolve the attacker; `hit`/`kill` wrap a vanilla
   attacker only when something listens. A vanilla projectile entity's `owner` is its shooter the same way.
+- **What belongs to a Builder entity.** An object under a Builder entity's object (`LogicGame.OwningBuilder`) is part
+  of it (an attached slot's tower and its AutoAttack, a prop's collider), except a unit living in its hierarchy: a
+  barracks' squad spawns under its slot, and each soldier stays its own vanilla unit (a TaggedObject below the
+  entity's object that isn't its body and isn't tagged Building). Selectors, events, attribution and the steering
+  state lookup all use this rule.
 - **Dawn income.** `income` counts the amounts `CoinSpawner.TriggerCoinSpawn` is asked for between the first and the
   last dawn callback (buildings' harvests, `income` stats applied); the coins land over the next seconds, the count
   doesn't wait for them.

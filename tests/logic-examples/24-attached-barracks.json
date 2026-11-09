@@ -1,0 +1,43 @@
+{
+  "example": 24,
+  "title": "Attached unit-producing slots keep their squads",
+  "doc": "Regression: an attach on a barracks put a BuilderEntity on its slot, and the squad (spawned under the slot) resolved to the slot entity, so `unit` filters saw no soldiers",
+  "pack": {
+    "format": "palace-builder",
+    "version": 3,
+    "id": "fixture.ex24",
+    "name": "Example 24: Attached barracks",
+    "levels": [
+      {
+        "id": "ex24",
+        "name": "Example 24: Attached barracks",
+        "host": "Nordfels",
+        "buildSlots": {
+          "add": [
+            { "id": "b9", "base": "scene:Outpost Variant", "pos": [-30.0, 0.0, 6.0], "rotY": 0.0, "requires": { "slot": "castle", "level": 0 } }
+          ]
+        },
+        "logic": {
+          "vars": { "units": 0 },
+          "attach": {
+            "add:b9": { "name": "barracks", "labels": ["squadmaker"] },
+            "slot:Archer Hut (1)": { "name": "hut", "labels": ["squadmaker"] },
+            "slot:Defense Tower Variant": { "name": "tower", "targeting": ["foe"] }
+          }
+        }
+      }
+    ]
+  },
+  "play": {
+    "steps": [
+      { "cmd": "agent build castle" },
+      { "do": [{ "do": "building", "slot": "@barracks", "op": "build" }] },
+      { "expect": "count('player and unit and not king') >= 3", "within": 6 },
+      { "do": [{ "do": "setVar", "name": "$units", "value": "count('player and unit and not king')" }] },
+      { "do": [{ "do": "building", "slot": "@hut", "op": "build" }] },
+      { "expect": "count('player and unit and not king') > $units", "within": 6 },
+      { "do": [{ "do": "building", "slot": "@tower", "op": "build" }] },
+      { "expect": "@barracks.kind == 'building' and @hut.kind == 'building' and @tower.kind == 'building' and count('#squadmaker') == 2", "within": 3 }
+    ]
+  }
+}

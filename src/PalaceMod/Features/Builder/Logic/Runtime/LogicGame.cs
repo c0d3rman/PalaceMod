@@ -24,6 +24,32 @@ namespace PalaceMod.Builder.Logic
         public static LogicEntity EntityOf(Component c) => c == null ? null : EntityOf(c.gameObject);
 
         /// <summary>
+        /// The BuilderEntity a game object belongs to, or null. Anything under a Builder entity's object is part of
+        /// it (a tower's AutoAttack under an attached slot, a prop's collider), except a unit living in its hierarchy:
+        /// a barracks' squad spawns under its slot, and with the slot attached each soldier is still its own
+        /// (vanilla) unit. A unit here is a TaggedObject below the entity's object, not tagged Building, that isn't
+        /// the entity's own body.
+        /// </summary>
+        public static BuilderEntity OwningBuilder(GameObject go)
+        {
+            if (go == null) return null;
+            var be = go.GetComponentInParent<BuilderEntity>(true);
+            return be != null && BelongsTo(go, be.transform, be.Entity) ? be : null;
+        }
+
+        /// <summary>Whether <paramref name="go"/>, at or under <paramref name="root"/> (the object of
+        /// <paramref name="e"/>), is part of that entity rather than a unit living in its hierarchy (see OwningBuilder).</summary>
+        public static bool BelongsTo(GameObject go, Transform root, LogicEntity e)
+        {
+            var tagged = go.GetComponentInParent<TaggedObject>(true);
+            if (tagged == null || tagged.transform == root || !tagged.transform.IsChildOf(root)) return true;
+            if (e?.Body is GameBody gb && gb.Tagged == tagged) return true;
+            return tagged.Tags.Contains(TagManager.ETag.Building);
+        }
+
+        public static BuilderEntity OwningBuilder(Component c) => c == null ? null : OwningBuilder(c.gameObject);
+
+        /// <summary>
         /// Register an entity whose game object the caller made (L2's factory; L1 for places and attaches): adds a
         /// BuilderEntity to <paramref name="go"/>, gives the entity a body over it, then <see cref="LogicWorld.Add"/>
         /// (id, name, rules, the `spawn` event). No-op outside a logic session.

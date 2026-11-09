@@ -21,7 +21,7 @@ namespace PalaceMod.Builder.Logic
         {
             Go = go;
             hp = go.GetComponentInChildren<Hp>(true);
-            tagged = hp != null ? hp.GetComponent<TaggedObject>() : go.GetComponentInChildren<TaggedObject>(true);
+            tagged = (hp != null ? hp.GetComponent<TaggedObject>() ?? hp.GetComponentInParent<TaggedObject>(true) : null) ?? go.GetComponentInChildren<TaggedObject>(true);
             _ = Position;
         }
 
@@ -96,7 +96,7 @@ namespace PalaceMod.Builder.Logic
             int key = go.GetInstanceID();
             if (idx.TryGetValue(key, out var e) && !e.Destroyed) return e;
 
-            var be = go.GetComponentInParent<BuilderEntity>(true);
+            var be = LogicGame.OwningBuilder(go);
             if (be?.Entity != null) { idx[key] = be.Entity; return be.Entity; }
 
             // A vanilla object: wrap the object that carries its TaggedObject, so a child collider or Hp maps to the same entity.
