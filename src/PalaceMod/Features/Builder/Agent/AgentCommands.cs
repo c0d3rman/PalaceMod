@@ -22,6 +22,16 @@ namespace PalaceMod.Builder.Agent
 {
     internal static class AgentCommands
     {
+        /// <summary>Loads <paramref name="scene"/> once the scene transition under way has finished.</summary>
+        private static System.Collections.IEnumerator LoadWhenFree(SceneTransitionManager transitions, string scene)
+        {
+            float until = Time.realtimeSinceStartup + 60f;
+            while (transitions != null && transitions.SceneTransitionIsRunning && Time.realtimeSinceStartup < until) yield return null;
+            if (transitions == null) yield break;
+            if (transitions.SceneTransitionIsRunning) { Log.For<BuilderManager>().Warn($"agent vanilla {scene}: the previous scene change never finished"); yield break; }
+            transitions.TransitionFromNullToLevel(scene);
+        }
+
         private static readonly Log log = Log.For<AgentBridgeManager>();
 
         private const string Usage =
@@ -156,12 +166,15 @@ namespace PalaceMod.Builder.Agent
                 {
                     string scene = string.Join(" ", args.Skip(1));
                     if (scene.Length == 0) throw new ArgumentException("usage: agent vanilla <scene>");
-                    if (BuilderServices.InSession) BuilderServices.Sessions.End();
                     var transitions = SceneTransitionManager.instance ?? throw new InvalidOperationException("the game isn't ready");
-                    if (transitions.SceneTransitionIsRunning) throw new InvalidOperationException("a scene is loading; try again");
-                    transitions.TransitionFromNullToLevel(scene);
+                    // Ending a session whose map is loaded starts a transition to level select, and so may a load
+                    // already under way: the map then loads as soon as that one is done.
+                    if (BuilderServices.InSession) BuilderServices.Sessions.End();
+                    bool queued = transitions.SceneTransitionIsRunning;
+                    if (queued) Plugin.Instance.StartCoroutine(LoadWhenFree(transitions, scene));
+                    else transitions.TransitionFromNullToLevel(scene);
                     NightRecorder.Reset();
-                    return Json(new JObject { ["loading"] = scene });
+                    return Json(new JObject { ["loading"] = scene, ["queued"] = queued });
                 }
                 case "menu":
                 {
