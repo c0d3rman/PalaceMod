@@ -24,6 +24,9 @@ namespace PalaceMod.Builder.Level
         /// <summary>Extra renderers to rasterize while scanning (the ground layer's own walls and air surface).</summary>
         public static readonly List<MeshRenderer> Extra = [];
 
+        /// <summary>minRegionSize the ground graphs are rescanned with (see Scan).</summary>
+        private const float SmallRegion = 50f;
+
         /// <summary>Rescans every graph as baked. Returns the time it took in ms, or -1 without pathfinding.</summary>
         public static long Scan()
         {
@@ -56,6 +59,18 @@ namespace PalaceMod.Builder.Level
                     }
                 }
                 foreach (var r in Extra) if (r != null) ShowForScan(r, restore);
+                // The maps' graphs drop every region under minRegionSize (300000 on Uferwind: ~12000 m² at 0.2 m cells).
+                // The bake kept the islands anyway, but a one-tile rescan doesn't: Uferwind's bridge islands vanished, and
+                // so did both banks of a river dug through a map's own ground. Keep every region here; PruneIslands
+                // then drops what the bake didn't have (rock and wall tops).
+                foreach (var g in astar.data.graphs.OfType<RecastGraph>())
+                {
+                    if (g.name == "Enemy Units Air" || g.minRegionSize <= SmallRegion) continue;
+                    var graph = g;
+                    float before = graph.minRegionSize;
+                    graph.minRegionSize = SmallRegion;
+                    restore.Add(() => graph.minRegionSize = before);
+                }
                 astar.Scan();
             }
             finally
