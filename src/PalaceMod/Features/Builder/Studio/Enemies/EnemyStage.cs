@@ -7,10 +7,18 @@ using PalaceMod.Builder.Assets;
 using PalaceMod.Builder.Library;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using NVec = System.Numerics.Vector3;
 using Object = UnityEngine.Object;
 
 /*
-    The Enemy Studio's stage: a stone turntable on the map with the enemy standing on it, and the camera that orbits it.
+    The Enemy Studio's stage: a stone turntable with the enemy standing on it, and the camera that orbits it.
+
+    Where: on a round stone platform of its own, well outside the level (Margin past the east edge of every pathfinding
+    graph and every prop, above whatever ground lies there), so no tree, rock or hill of the level can stand between
+    the camera and the model however it orbits, zooms or pans. The arena fight happens on the same spot (ArenaZone).
+    As a last guard (a level whose props reach further than its box says, a huge model zoomed far out), any of the
+    level's renderers that comes between the camera and the focus, or into the model's room on the turntable, is
+    switched off while it does and back on afterwards and on Leave.
 
     The model is a copy of the unit's template (the object the game spawns) with every script removed except the
     procedural walk, so it's inert: no AI, no tags, no hit points, nothing registered with the game. Animators stay
@@ -32,36 +40,174 @@ namespace PalaceMod.Builder.Studio.Enemies
         // Orbit.
         public static float Yaw = 200f, Pitch = 16f, Distance = 7f;
         public static Vector3 Focus;
-        public const float MinPitch = 3f, MaxPitch = 75f, MinDistance = 1.5f, MaxDistance = 60f, Fov = 30f;
+        public const float MinPitch = 3f, MaxPitch = 75f, MinDistance = 1.5f, Fov = 30f;
+        /// <summary>The zoom-out limit: 60 m, or more for a model that needs it (StageMath.MaxDistance).</summary>
+        public static float MaxDistance { get; private set; } = 60f;
         public static bool Turning = true;
         private static float spin;
 
-        private static GameObject root, disc, holder, model;
+        private static GameObject root, floor, disc, holder, model;
         private const float DiscHeight = 0.12f;
+        /// <summary>The platform's radius (room for the Entity Studio's 60 m shots and the arena).</summary>
+        public const float FloorRadius = 70f;
+        /// <summary>How far past the level's box the stage stands.</summary>
+        public const float Margin = ArenaZone.Reach + 70f;
+        /// <summary>How far above the ground under it the platform's top is (clear of sea and ground planes).</summary>
+        public const float Lift = 3f;
 
         // ---- Lifecycle ----------------------------------------------------------------------------------------------
 
-        /// <summary>Builds the stage at a ground point in the scene and takes the camera.</summary>
+        /// <summary>Builds the stage outside the level of the scene (at about the height of a ground point of it)
+        /// and takes the camera.</summary>
         public static void Enter(Scene scene, Vector3 ground)
         {
             Leave();
-            Point = Snap(ground);
+            Point = Place(Snap(ground).y);
             root = new GameObject("PalaceBuilder Enemy stage");
             if (scene.IsValid()) SceneManager.MoveGameObjectToScene(root, scene);
             root.transform.position = Point;
+            var stone = SceneryLibrary.LiveMaterial("Mountain");
+            // The platform: a stone plinth whose top is the stage's ground (Ground layer, so clicks and units find it).
+            floor = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            floor.name = "Platform";
+            Object.DestroyImmediate(floor.GetComponent<Collider>());
+            floor.AddComponent<BoxCollider>();
+            floor.transform.SetParent(root.transform, false);
+            floor.transform.localScale = new Vector3(FloorRadius * 2f, 3f, FloorRadius * 2f);
+            floor.transform.localPosition = Vector3.down * 3f;
+            int groundLayer = LayerMask.NameToLayer("Ground");
+            if (groundLayer >= 0) floor.layer = groundLayer;
+            if (stone != null) floor.GetComponent<MeshRenderer>().sharedMaterial = stone;
             disc = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             disc.name = "Turntable";
             Object.Destroy(disc.GetComponent<Collider>());
             disc.transform.SetParent(root.transform, false);
-            var stone = SceneryLibrary.LiveMaterial("Mountain");
             if (stone != null) disc.GetComponent<MeshRenderer>().sharedMaterial = stone;
             holder = new GameObject("Holder");
             holder.SetActive(false);
             holder.transform.SetParent(root.transform, false);
             spin = 0f;
             HideKing();
+            CollectOccluders();
             TakeCamera();
         }
+
+        /// <summary>The stage's centre for this scene: Margin east of the level's box (its graphs and its props, not
+        /// the sea or ground planes laid far around it), Lift above whatever is under the platform there, or above
+        /// <paramref name="height"/> when nothing is.</summary>
+        private static Vector3 Place(float height)
+        {
+            Bounds? level = null;
+            void Add(Bounds b)
+            {
+                if (level == null) level = b; else { var x = level.Value; x.Encapsulate(b); level = x; }
+            }
+            try
+            {
+                foreach (var g in AstarPath.active?.data.graphs ?? [])
+                {
+                    if (g == null || g.name == ArenaZone.GraphName) continue;
+                    Bounds b;
+                    try { b = g.bounds; } catch { continue; }
+                    if (b.size.sqrMagnitude >= 1f) Add(b);
+                }
+            }
+            catch (Exception e) { Log.For<BuilderManager>().Debug($"Enemy Studio: graph bounds: {e.Message}"); }
+            // Props: anything half as wide again as the map's graphs is a backdrop (sea, ground plane), not a prop.
+            var graphs = level;
+            float limit = graphs is Bounds gb ? Mathf.Max(gb.size.x, gb.size.z) * 1.5f : 600f;
+            foreach (var r in LevelRenderers())
+            {
+                var b = r.bounds;
+                if (StageMath.IsBackdrop(N(b.size), limit)) continue;
+                Add(b);
+            }
+            var box = level ?? new Bounds(Vector3.zero, Vector3.one * 200f);
+            var p = U(StageMath.AwayPoint(N(box.min), N(box.max), Margin, height));
+            // Level with the playable middle (a stray far-off prop shouldn't drag the stage along the edge).
+            if (graphs is Bounds middle) p.z = middle.center.z;
+            // Whatever stands under the platform out there (a ground plane, the hills of a terrain mesh): stay above it.
+            float top = float.NegativeInfinity;
+            for (int i = 0; i <= 8; i++)
+            {
+                var at = i == 0 ? p : p + Quaternion.Euler(0f, i * 45f, 0f) * Vector3.forward * FloorRadius;
+                foreach (var hit in Physics.RaycastAll(new Vector3(at.x, box.max.y + 500f, at.z), Vector3.down, box.size.y + 1500f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+                    if (!Ours(hit.collider.transform)) top = Mathf.Max(top, hit.point.y);
+            }
+            p.y = (float.IsNegativeInfinity(top) ? height : Mathf.Max(top, height - 20f)) + Lift;
+            Log.For<BuilderManager>().Info($"Enemy Studio stage at {p} (level {box.min}..{box.max})");
+            return p;
+        }
+
+        /// <summary>The level's visible renderers: not effects, and not the Enemy Studio's own stage, arena and fighters
+        /// (a stage being replaced is still there until the end of the frame).</summary>
+        private static IEnumerable<Renderer> LevelRenderers()
+        {
+            foreach (var r in Object.FindObjectsOfType<Renderer>())
+            {
+                if (r == null || !r.enabled || r is ParticleSystemRenderer || r is TrailRenderer || r is LineRenderer) continue;
+                if (!Ours(r.transform)) yield return r;
+            }
+        }
+
+        private static bool Ours(Transform t)
+        {
+            string top = t.root.name;
+            return top.StartsWith("PalaceBuilder Enemy", StringComparison.Ordinal) || top.StartsWith("PalaceBuilder arena", StringComparison.Ordinal);
+        }
+
+        // ---- Keeping the view clear ---------------------------------------------------------------------------------
+
+        // The level's renderers near enough to get in the way (none, unless the level reaches the stage), and those
+        // switched off because they're in the way now.
+        private static readonly List<Renderer> occluders = [];
+        private static readonly HashSet<Renderer> hiddenOccluders = [];
+
+        private static void CollectOccluders()
+        {
+            ShowOccluders();
+            occluders.Clear();
+            float reach = FloorRadius + 400f;
+            foreach (var r in LevelRenderers())
+            {
+                if (root != null && r.transform.IsChildOf(root.transform)) continue;
+                var b = r.bounds;
+                if (StageMath.IsBackdrop(N(b.size), 600f)) continue;
+                var c = b.ClosestPoint(Point);
+                if (new Vector2(c.x - Point.x, c.z - Point.z).magnitude < reach) occluders.Add(r);
+            }
+            Log.For<BuilderManager>().Debug($"Enemy Studio: {occluders.Count} of the level's renderers near the stage");
+        }
+
+        /// <summary>Switches off the level's renderers between the camera and the focus or in the model's room, and back
+        /// on those no longer in the way.</summary>
+        private static void ClearView(Vector3 camPos)
+        {
+            if (occluders.Count == 0 || disc == null) return;
+            var room = model != null ? ModelBounds : new Bounds(Point + Vector3.up, Vector3.one * 2f);
+            room.Encapsulate(new Bounds(Point, new Vector3(disc.transform.localScale.x, 0.5f, disc.transform.localScale.z)));
+            room.Expand(1f);
+            foreach (var r in occluders)
+            {
+                if (r == null) continue;
+                var b = r.bounds;
+                bool inWay = StageMath.SegmentHitsBox(N(camPos), N(Focus), N(b.min), N(b.max), 0.3f) || StageMath.BoxesOverlap(N(b.min), N(b.max), N(room.min), N(room.max));
+                if (inWay && r.enabled) { r.enabled = false; hiddenOccluders.Add(r); }
+                else if (!inWay && hiddenOccluders.Remove(r)) r.enabled = true;
+            }
+        }
+
+        private static void ShowOccluders()
+        {
+            foreach (var r in hiddenOccluders) if (r != null) r.enabled = true;
+            hiddenOccluders.Clear();
+        }
+
+        private static NVec N(Vector3 v) => new(v.x, v.y, v.z);
+        private static Vector3 U(NVec v) => new(v.X, v.Y, v.Z);
+
+        /// <summary>How many of the level's renderers are switched off to keep the view clear.</summary>
+        public static int HiddenCount => hiddenOccluders.Count;
 
         // The stage stands where the Level Studio's camera was, often right where the king waits: hide him (his
         // renderers only; he stays where he is) so he doesn't stand in front of the model.
@@ -91,9 +237,12 @@ namespace PalaceMod.Builder.Studio.Enemies
         public static void Leave()
         {
             ShowKing();
+            ShowOccluders();
+            occluders.Clear();
             ReleaseCamera();
             if (root != null) Object.Destroy(root);
-            root = disc = holder = model = null;
+            root = floor = disc = holder = model = null;
+            MaxDistance = 60f;
         }
 
         /// <summary>A walkable point near a ground point (the navmesh's nearest node), else the point itself.</summary>
@@ -214,8 +363,9 @@ namespace PalaceMod.Builder.Studio.Enemies
             var b = BoundsOf(model);
             ModelBounds = b;
             Focus = b.center;
-            float radius = Mathf.Max(0.5f, b.extents.magnitude);
-            Distance = Mathf.Clamp(radius / Mathf.Sin(Fov * 0.5f * Mathf.Deg2Rad) * 1.05f, MinDistance, MaxDistance);
+            float framed = StageMath.FrameDistance(Mathf.Max(0.5f, b.extents.magnitude), Fov);
+            MaxDistance = StageMath.MaxDistance(framed, 60f);
+            Distance = Mathf.Clamp(framed, MinDistance, MaxDistance);
         }
 
         public static void ResetView()
@@ -292,14 +442,22 @@ namespace PalaceMod.Builder.Studio.Enemies
             if (rig == null || main == null) return;
             Pitch = Mathf.Clamp(Pitch, MinPitch, MaxPitch);
             Distance = Mathf.Clamp(Distance, MinDistance, MaxDistance);
+            // Panning stays over the platform (and up to the model's height), so the model can always be brought back.
+            float top = model != null ? Mathf.Max(ModelBounds.max.y - Point.y, 2f) : 2f;
+            Focus = U(StageMath.ClampFocus(N(Focus), N(Point), FloorRadius, 1f, top + 2f));
             var rot = Quaternion.Euler(Pitch, Yaw, 0f);
             var camPos = Focus - rot * Vector3.forward * Distance;
+            ClearView(camPos);
             // The main camera's pose relative to the rig stays; place the rig so the camera ends up at camPos/rot.
             var local = rig.transform.worldToLocalMatrix * main.transform.localToWorldMatrix;
             var localRot = Quaternion.LookRotation(local.GetColumn(2), local.GetColumn(1));
             var rigRotation = rot * Quaternion.Inverse(localRot);
             rig.transform.rotation = rigRotation;
             rig.transform.position = camPos - rigRotation * (Vector3)local.GetColumn(3);
+            // Far enough to see all of a huge model from as far as it can zoom out.
+            float far = Distance + (model != null ? ModelBounds.extents.magnitude * 2f : 0f) + 100f;
+            foreach (var (c, _, _, _, oldFar) in cams)
+                if (c != null) c.farClipPlane = Mathf.Max(oldFar, 400f, far);
         }
 
         /// <summary>The ground point under a screen point (a plane at the stage's height).</summary>

@@ -8,9 +8,9 @@ using UnityEngine.SceneManagement;
 using Object = UnityEngine.Object;
 
 /*
-    The Enemy Studio's fight ground: a flat stone platform well outside the level (past the east edge of every
-    pathfinding graph), with a small grid graph of its own, so a test fight never touches the level's geometry, its
-    buildings or the king.
+    The Enemy Studio's fight ground: the stage's platform, well outside the level (EnemyStage.Place: past the east edge
+    of every pathfinding graph and prop), with a flat floor and a small grid graph of its own, so a test fight never
+    touches the level's geometry, its buildings or the king.
 
     - Pathfinding: a GridGraph ("PalaceBuilder Arena", flat, no collision checks) is added to AstarPath and scanned on
       its own. Every arena unit's Seeker (and its backup graph) is pointed at it before its Start, which is when the
@@ -30,8 +30,6 @@ namespace PalaceMod.Builder.Studio.Enemies
         public const int Cells = 44;
         /// <summary>Searches within this of the centre (horizontally) count as inside the arena.</summary>
         public const float Reach = 80f;
-        /// <summary>How far above the stage's ground the platform stands.</summary>
-        public const float Lift = 8f;
 
         private static GameObject root;
         private static GridGraph graph;
@@ -56,25 +54,13 @@ namespace PalaceMod.Builder.Studio.Enemies
             found.RemoveAll(t => t == null || Inside(t.transform.position) != inside);
         }
 
-        /// <summary>Builds the platform and its graph east of the level, at the height of <paramref name="height"/>.</summary>
-        public static void Create(Scene scene, float height)
+        /// <summary>Builds the floor and its graph at <paramref name="center"/> (the stage's centre, outside the
+        /// level).</summary>
+        public static void Create(Scene scene, Vector3 center)
         {
             Remove();
             var astar = AstarPath.active ?? throw new InvalidOperationException("no pathfinding in this scene");
-            // Past the level: east of every graph's bounds (and of the level's renderers if there are no graphs).
-            Bounds? level = null;
-            foreach (var g in astar.data.graphs ?? [])
-            {
-                if (g == null || g.name == GraphName) continue;
-                Bounds b;
-                try { b = g.bounds; } catch { continue; }
-                if (b.size.sqrMagnitude < 1f) continue;
-                if (level == null) level = b; else { var x = level.Value; x.Encapsulate(b); level = x; }
-            }
-            var box = level ?? new Bounds(Vector3.zero, Vector3.one * 200f);
-            // Raised above the stage's height: maps lay wide ground and water planes around themselves, and a floor
-            // level with them flickers (z-fighting).
-            Center = new Vector3(box.max.x + Reach + 40f, height + Lift, box.center.z);
+            Center = center;
 
             root = new GameObject("PalaceBuilder Enemy arena");
             if (scene.IsValid()) SceneManager.MoveGameObjectToScene(root, scene);
@@ -96,7 +82,7 @@ namespace PalaceMod.Builder.Studio.Enemies
             graph.collision.collisionCheck = false;
             graph.collision.heightCheck = false;
             astar.Scan(graph);
-            Log.For<BuilderManager>().Info($"Enemy Studio arena at {Center} (level bounds {box.min}..{box.max})");
+            Log.For<BuilderManager>().Info($"Enemy Studio arena at {Center}");
         }
 
         /// <summary>Points a unit's pathfinding at the arena's graph. Call before the unit's first Start.</summary>

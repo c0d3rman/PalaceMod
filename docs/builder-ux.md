@@ -1056,8 +1056,8 @@ settings-shaped page. Code: `Features/Builder/Studio/Enemies/`. An enemy is stil
    undo steps of the same history and the level sees them at once). Opened on its own (the library's Enemies tiles),
    it first opens a throwaway **arena**: a Studio edit session on Nordfels with the "cleared" base (an in-memory pack
    that is never saved); Back leaves the Studio.
-2. **The model is live, in the world.** A stage at a clear ground point (the Level Studio's camera pivot, or the arena's
-   castle square): a turntable disc with the enemy standing on it at its real size, lit by the level, seen by the
+2. **The model is live, in the world.** A stage on a stone platform of its own just outside the level (see "Stage and
+   camera"): a turntable disc with the enemy standing on it at its real size, lit by the level, seen by the
    Studio's orbit camera (the game camera, turned to perspective while the Enemy Studio is up). Every edit rebuilds the
    model from the same template the game spawns (`IUnitFactory.Resolve`), so what the stage shows is what a wave
    spawns, scripts stripped.
@@ -1152,8 +1152,21 @@ settings-shaped page. Code: `Features/Builder/Studio/Enemies/`. An enemy is stil
 
 ### Stage and camera
 
-- Orbit: left-drag turns (yaw and pitch, 3-75°), wheel zooms (1.5-60 m), right/middle-drag pans the focus, F frames
-  the model, Home resets.
+- **Where the stage stands** (`EnemyStage.Place`): a 70 m round stone platform (Ground layer) 150 m east of the
+  level's box (every pathfinding graph and every prop; renderers wider than 1.5x the graphs are sea and ground planes
+  and don't count), level with the graphs' middle north-south, 3 m above whatever collider lies under it there (else
+  the opening point's height). Opened from the Level Studio, from the library's arena, or as the Entity Studio, it's
+  the same place, so the camera never starts inside, or orbits behind, the level's trees and rocks. Bug it fixed: the
+  stage used to stand at the Level Studio's camera pivot (or 14 m south of the arena's castle), so in a dense level
+  (The Thornwood, ~1,900 props) the Elder Oak stood in the forest and the camera, 40 m out, sat inside the trees and
+  rocks; on Nordfels the default view started inside a cliff rock.
+- **Clear view, as a last guard:** the level's renderers within 470 m of the stage are collected on entry; each frame
+  any of them that crosses the camera-to-focus line or the model's room on the turntable is switched off, and back on
+  when it no longer does and on Back (`builder-enemy state` shows `hidden=N`).
+- Orbit: left-drag turns (yaw and pitch, 3-75°), wheel zooms (1.5 m up to 60 m, or 2.5x the framing distance for a
+  bigger model), right/middle-drag pans the focus (kept over the platform, from 1 m under its top to 2 m over the
+  model), F frames the model on its bounds (a sphere around them fills the 30° view's height: a big model is framed
+  from further away), Home resets. The far clip plane follows the zoom. Dev: `builder-enemy orbit|pan|frame`.
 - As built, the game's own camera is used: the `CameraRig` is paused and the rig itself is moved so its main camera sits
   on the orbit, and every camera of the rig switches from orthographic to a 30° perspective (stacked cameras stay
   aligned, post-processing and outlines unchanged). Back restores the projection, the rig's pose and the rig; the Level
@@ -1195,8 +1208,8 @@ settings-shaped page. Code: `Features/Builder/Studio/Enemies/`. An enemy is stil
 
 ### Arena fight
 
-- **Its own ground** (`ArenaZone`): a fight builds a flat 44 m stone platform east of every pathfinding graph's
-  bounds (so outside the level, opened from a level or from the library alike) with a `GridGraph` of its own
+- **Its own ground** (`ArenaZone`): a fight builds a flat 44 m stone floor on the stage's platform (outside the
+  level, opened from a level or from the library alike; the turntable and its platform are hidden meanwhile) with a `GridGraph` of its own
   ("PalaceBuilder Arena", flat, no collision checks), scanned alone. Every arena unit's `Seeker` and backup graph are
   pointed at it before its Start (when the movement scripts copy the mask into their nearest-node constraint), so they
   path and snap on the platform only. The game's target searches know only where the searcher stands, so while the
