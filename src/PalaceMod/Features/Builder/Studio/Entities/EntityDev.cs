@@ -42,6 +42,11 @@ namespace PalaceMod.Builder.Studio.Entities
             if (!EntityStudio.Active || !EnemyStudio.Active) throw new InvalidOperationException("the Entity Studio isn't open (builder-entity open|library)");
         }
 
+        private static void RequireStudio()
+        {
+            if (!EnemyStudio.Active) throw new InvalidOperationException("the Enemy or Entity Studio isn't open (builder-entity open|library)");
+        }
+
         private static (string id, string kind) Target(string[] args)
         {
             if (args.Length < 2) return (null, null);
@@ -90,14 +95,14 @@ namespace PalaceMod.Builder.Studio.Entities
                     if (args.Length > 3) EnemyDock.LookSource = args[3];
                     EnemyDock.RefreshAll();
                     return $"palette {EnemyDock.PaletteTab}, panel {EnemyDock.PanelTab}";
-                case "press": Require(); return Press(rest ?? throw new ArgumentException("press <text>"));
+                case "press": RequireStudio(); return Press(rest ?? throw new ArgumentException("press <text>"));
                 case "type":
                     if (!ModTextInput.Active) throw new InvalidOperationException("nothing is being typed into (press a field first)");
                     ModTextInput.DebugKey("selectall");
                     ModTextInput.DebugKey(rest ?? "");
                     ModTextInput.DebugKey("enter");
                     return "typed " + rest;
-                case "rows": Require(); return Rows();
+                case "rows": RequireStudio(); return Rows();
                 case "look":
                     Require();
                     EntityStudio.EditVisual("Set model", v => v.Mesh = rest == "none" ? null : rest, structural: true);

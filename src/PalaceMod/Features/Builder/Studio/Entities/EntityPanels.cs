@@ -199,7 +199,7 @@ namespace PalaceMod.Builder.Studio.Entities
                     string.Concat(new[] { b.Solid == true ? " · solid" : null, b.Walkable == true ? " · walkable" : null, b.Hittable == true ? $" · {N(b.Hp)} hp" : null, b.Flying == true ? " · flying" : null }.Where(x => x != null)));
             if (e.Area?.Shape is { } sh) facts.Add($"Area {Gold(sh.Circle != null ? "r " + N(sh.Circle.Radius, " m") : sh.Rect?.Size is { Length: 2 } sz ? $"{sz[0]:0.##}×{sz[1]:0.##} m" : "polygon")} watches {Gold(Esc(e.Area.Watch ?? "units and the king"))}");
             if (e.Pickup is { } pk) facts.Add($"Picked up by {Gold(Esc(pk.By ?? "king"))} within {Gold(N(pk.Radius, " m"))}");
-            facts.Add($"Side {Gold(Esc(e.Team ?? "neutral"))}   Lasts {Gold(e.Lifetime == null ? "forever" : N(e.Lifetime, " s"))}   Rules {Gold((e.Rules?.Count ?? 0).ToString())}" +
+            facts.Add($"Side {Gold(Esc(e.Team ?? "not set"))}   Lasts {Gold(e.Lifetime == null ? "forever" : N(e.Lifetime, " s"))}   Rules {Gold((e.Rules?.Count ?? 0).ToString())}" +
                 (EntityStudio.ModelError != null ? $"\n<color=#{ModStyle.Hex(ModStyle.KindColor(NotifyKind.Error))}>{Esc(EntityStudio.ModelError)}</color>" : ""));
             page.Text(string.Join("\n", facts));
             var users = ThingKinds.UsedBy(EntityStudio.Draft?.Pack, e.Id);

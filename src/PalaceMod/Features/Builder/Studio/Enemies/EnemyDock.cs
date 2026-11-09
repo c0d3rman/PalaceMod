@@ -108,7 +108,8 @@ namespace PalaceMod.Builder.Studio.Enemies
             if (fresh || title == null) BuildAll();
             if (ModTextInput.Active) return;
             if ((EnemyArena.Running && Time.unscaledTime >= readoutAt) || EnemyArena.Version != arenaVersion) { arenaVersion = EnemyArena.Version; dirtyReadout = dirtyTop = true; }
-            if ((Entities.EntityTest.Running && Time.unscaledTime >= readoutAt) || Entities.EntityTest.Version != testVersion) { testVersion = Entities.EntityTest.Version; dirtyReadout = dirtyTop = true; }
+            if (Entities.EntityTest.Version != testVersion) { testVersion = Entities.EntityTest.Version; dirtyReadout = dirtyTop = dirtyArena = true; }
+            else if (Entities.EntityTest.Running && Time.unscaledTime >= readoutAt) dirtyReadout = true;
             if (dirtyTop) { dirtyTop = false; UpdateTop(); }
             if (dirtyPalette) { dirtyPalette = false; BuildPalette(); }
             if (dirtyRight) { dirtyRight = false; BuildRight(); }
@@ -167,7 +168,8 @@ namespace PalaceMod.Builder.Studio.Enemies
             problemsTile = Button(body, "Problems", new Vector2(90f, h), Icon("warning"), "", null, "Problems", ProblemText);
             problemsTile.Place(new Vector2(x, 0f));
             fightTile = Button(body, "Fight", new Vector2(170f, h), Icon("play"), "Fight", Fight, "Fight",
-                () => $"Spawns {EnemyArena.Count} of this enemy against the defenders on the stage (F5). Again: stops it.");
+                () => Entities.EntityStudio.Active ? (Entities.EntityStudio.IsProjectile ? "Launches it at a test dummy through the behaviour engine (F5). Again: stops it." : "Spawns it on the stage with its rules running (F5). Again: stops it.")
+                    : $"Spawns {EnemyArena.Count} of this enemy against the defenders on the stage (F5). Again: stops it.");
             var fr = fightTile.Rect;
             fr.anchorMin = fr.anchorMax = fr.pivot = new Vector2(1f, 1f);
             fr.anchoredPosition = Vector2.zero;
@@ -404,7 +406,12 @@ namespace PalaceMod.Builder.Studio.Enemies
             }
             Grid(page, "Look", items, 82f, it => (it.Ref ?? "base", it.Icon, Short(it.Name), it.Badge, it.Ref == current, it.Name, it.Body), it =>
             {
-                if (thing) Entities.EntityStudio.EditVisual(it.Ref == null ? "No model" : $"Model: {it.Name}", v => Pick(v, it.Ref), structural: true);
+                if (thing) Entities.EntityStudio.EditVisual(it.Ref == null ? "No model" : $"Model: {it.Name}", v =>
+                {
+                    Pick(v, it.Ref);
+                    // A model far bigger than the thing (a 30 m rock as a projectile) starts at the thing's size.
+                    if (it.Ref != null) v.MeshScale = Entities.EntityStudio.FitScale(it.Ref, Entities.EntityStudio.Kind, 6f) ?? v.MeshScale;
+                }, structural: true);
                 else EnemyStudio.EditVisuals(it.Ref == null ? "Use the base model" : $"Model: {it.Name}", v => Pick(v, it.Ref), structural: true);
             });
             LibraryThumbs.Rendered -= OnThumbs;

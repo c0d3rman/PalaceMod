@@ -183,7 +183,9 @@ namespace PalaceMod.Builder.Studio.Entities
             var taken = new HashSet<string>(d.Pack.Units.Select(u => u?.Id).Concat(d.Pack.Entities?.Select(e => e?.Id) ?? []).Where(x => x != null));
             if (d.IsLibrary) foreach (var item in DesignLibrary.Items(DesignKind.Enemy)) taken.Add(item.Id);
             string newId = EditorIds(Ids.FromName(name), taken);
-            var def = ThingKinds.Make(k.Id, newId, name, DefaultMesh(k.Id));
+            string mesh = DefaultMesh(k.Id);
+            var def = ThingKinds.Make(k.Id, newId, name, mesh);
+            if (def.Visual != null) def.Visual.MeshScale = FitScale(mesh, k.Id, 0f);
             d.Edit("New " + k.Label.ToLowerInvariant(), p => (p.Entities ??= []).Add(def), structural: true);
             return d.Pack.FindEntity(newId) != null ? newId : null;
         }
@@ -204,6 +206,27 @@ namespace PalaceMod.Builder.Studio.Entities
             }
             catch (Exception e) { Log.For<BuilderManager>().Debug($"Entity Studio: default mesh: {e.Message}"); }
             return null;
+        }
+
+        /// <summary>The size a thing of a kind is fitted to (metres, its largest side).</summary>
+        public static float FitSize(string kind) => kind switch { "prop" => 2f, "pickup" => 0.8f, _ => 1.2f };
+
+        /// <summary>A scale that fits a scenery mesh to its kind's size when it's bigger than <paramref name="above"/>
+        /// metres (0: always), else null (as the map draws it).</summary>
+        public static float? FitScale(string meshRef, string kind, float above)
+        {
+            if (meshRef == null || !meshRef.StartsWith(SceneryCatalog.Prefix)) return null;
+            try
+            {
+                string name = meshRef.Substring(SceneryCatalog.Prefix.Length);
+                var mesh = SceneryLibrary.MeshOf(SceneryLibrary.Available.FirstOrDefault(x => x.Name == name));
+                if (mesh == null) return null;
+                var size = mesh.bounds.size;
+                float big = Mathf.Max(size.x, Mathf.Max(size.y, size.z));
+                if (big <= 0.01f || big <= above) return null;
+                return Mathf.Round(FitSize(kind) / big * 1000f) / 1000f;
+            }
+            catch (Exception e) { Log.For<BuilderManager>().Debug($"Entity Studio: fit {meshRef}: {e.Message}"); return null; }
         }
 
         /// <summary>A new thing of a kind in the open studio.</summary>
@@ -264,7 +287,17 @@ namespace PalaceMod.Builder.Studio.Entities
             if (!force && key == lastModelKey) return;
             lastModelKey = key;
             if (EntityTest.Running || EntityTest.HasResult) EntityTest.Clear();
-            if (e == null) { ModelError = null; EnemyStage.Show(null, -1f); EnemyStage.FrameModel(); EnemyDock.OnModelRebuilt(); return; }
+            if (e == null)
+            {
+                // An empty stand-in (rather than none), so the turntable is sized like for a small thing.
+                ModelError = null;
+                var empty = new GameObject("PalaceBuilder entity preview") { transform = { position = new Vector3(0f, -5000f, 0f) } };
+                try { EnemyStage.Show(empty, -1f); }
+                finally { UnityEngine.Object.Destroy(empty); }
+                EnemyStage.FrameModel();
+                EnemyDock.OnModelRebuilt();
+                return;
+            }
             bool hadModel = EnemyStage.Model != null;
             var built = EntityLook.Build(e, Draft, out ModelError);
             try { EnemyStage.Show(built, -1f); }
@@ -302,10 +335,12 @@ namespace PalaceMod.Builder.Studio.Entities
         }
 
         /// <summary>A thing's saved picture, or null.</summary>
-        public static Sprite Portrait(string entityId)
+        public static Sprite Portrait(string entityId) => Draft == null ? null : PortraitFor(Draft.Pack.Id, entityId);
+
+        /// <summary>A thing's saved picture in a pack (the library's: DesignLibrary.PackId), or null.</summary>
+        public static Sprite PortraitFor(string packId, string entityId)
         {
-            if (Draft == null) return null;
-            string file = PortraitFile(Draft.Pack.Id, entityId);
+            string file = PortraitFile(packId, entityId);
             if (!File.Exists(file)) return null;
             var time = File.GetLastWriteTimeUtc(file);
             if (portraits.TryGetValue(file, out var c) && c.time == time) return c.sprite;

@@ -25,12 +25,13 @@ namespace PalaceMod.Builder.Studio.Entities
 
         private static readonly JsonSerializerSettings Json = new() { NullValueHandling = NullValueHandling.Ignore };
 
-        /// <summary>An inactive object holding the thing's look and gizmos (the caller destroys it). note: why part of
+        /// <summary>An object holding the thing's look and gizmos (the caller destroys it). note: why part of
         /// the look couldn't be made, or null.</summary>
         public static GameObject Build(EntityDef e, PackDraft draft, out string note)
         {
+            // Active (EnemyStage.Show keeps the copy's active state), far below the map until it's copied and destroyed.
             var root = new GameObject("PalaceBuilder entity preview");
-            root.SetActive(false);
+            root.transform.position = new Vector3(0f, -5000f, 0f);
             note = null;
             if (e.Visual != null)
             {
