@@ -71,6 +71,17 @@ namespace PalaceMod.Tests
         public void Restore(LogicEntity e, JToken state) { }
     }
 
+    /// <summary>World queries for the expression tests: water south of z = 0, a wall along x = 5, grass elsewhere.</summary>
+    internal sealed class FakeWorldQueries : IWorldQueries
+    {
+        public double GroundY(Vec p) => p.Z < 0 ? -2 : 0;
+        public bool Walkable(Vec p, string who, LogicEntity unit) => who == "air" || p.Z >= 0;
+        public string Ground(Vec p) => p.Z < 0 ? "water" : "grass";
+        public double WaterDepth(Vec p) => p.Z < 0 ? 1.5 : 0;
+        public double WaterLevel => -0.5;
+        public Vec? Raycast(Vec a, Vec b) => (a.X < 5) != (b.X < 5) ? new Vec(5, 1.5f, a.Z) : null;
+    }
+
     public static class LogicCoreTests
     {
         private static LogicWorld NewWorld(string logicJson = "{}", string templatesJson = "{}")
@@ -153,6 +164,34 @@ namespace PalaceMod.Tests
             Assert.Equal(2.0, Num(w, "n"), "if");
             Assert.Equal(1.0, Num(w, "m"), "once");
             Assert.Equal(3.0, Num(w, "k"), "cooldown 2 s over 5 s of 0.5 s ticks: t=0.5, 2.5, 4.5");
+        }
+
+        public static void WorldQueryFunctions()
+        {
+            var w = NewWorld();
+            var a = Place(w, """{ "id": "a", "team": "player" }""", new Vec(0, 0, 3));
+            Place(w, """{ "id": "b", "team": "enemy" }""", new Vec(8, 0, 3));
+            var ctx = new LogicContext { World = w, Self = a };
+            Value E(string s) => ExprCompiler.Compile(s, "test")(ctx);
+            WorldQueries.Service = null;
+            Assert.Equal(0.0, E("groundY(self)").Num, "no service: flat ground");
+            Assert.Equal(true, Values.ToBool(E("walkable(vec(0, -5))")), "no service: walkable");
+            WorldQueries.Service = new FakeWorldQueries();
+            try
+            {
+                Assert.Equal(-2.0, E("groundY(vec(0, -5))").Num, "groundY");
+                Assert.Equal("water", E("ground(vec(0, -5))").Str, "ground at a position");
+                Assert.Equal("grass", E("ground(self)").Str, "ground under an entity");
+                Assert.Equal(1.5, E("waterDepth(vec(1, -1))").Num, "waterDepth");
+                Assert.Equal(-0.5, E("waterLevel").Num, "waterLevel");
+                Assert.Equal(false, Values.ToBool(E("walkable(vec(0, -5))")), "walkable: default small");
+                Assert.Equal(true, Values.ToBool(E("walkable(vec(0, -5), 'air')")), "walkable: who");
+                Assert.Equal(false, Values.ToBool(E("sight(self, @b)")), "sight blocked by the wall");
+                Assert.Equal(true, Values.ToBool(E("sight(self, vec(3, 3))")), "sight clear");
+                Assert.Equal(5.0, E("raycast(self, @b).x").Num, "raycast hit");
+                Assert.Equal(true, Values.ToBool(E("raycast(self, vec(3, 3)) == none")), "raycast clear is none");
+            }
+            finally { WorldQueries.Service = null; }
         }
 
         public static void ExpressionsAndSelectors()

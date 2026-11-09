@@ -1444,7 +1444,8 @@ three (projectiles in flight, surfaces and spaces above), with no feature coded 
 ## Known limits
 
 - **Movement physics is limited.**
-  - Units ride a walkable mover only when it snaps between poses, not while it glides.
+  - Riders are carried by any moving deck (Riding), but the graphs don't glide with a deck: pathing units on a gliding
+    deck snap back to the ground graphs when they walk (riders should hold).
   - A walkable body made or destroyed at runtime rebuilds the ground graphs round it (30-100 ms on tiled graphs,
     about 340 ms on one-tile ones; the validator notes it). A body switched off or a pose not taken is hidden by a
     cut, not removed: a deck over walkable ground hides that ground in both states, and its ramps stay.
@@ -1454,7 +1455,9 @@ three (projectiles in flight, surfaces and spaces above), with no feature coded 
   - The king passes opened walls only on a deck that doesn't move between poses (ghost rails have no colliders).
   - Per-unit walkability is by surface (31 names per level), not per triangle; RVO avoidance can push the front row
     of a blocked crowd about 1 m into a surface it may not walk.
-  - Terrain height doesn't change at runtime; walkable props and blockers change where units can go.
+  - Runtime terrain changes cost an area update each (tens to ~200 ms on tiled graphs for a field-wide strip under
+    load; a few per night, not per tick). `over` animates the look; the graphs follow at the end. One water level per
+    field. Ice is flat at the water level.
   - Spaces have no fliers' graph; fliers there fly straight.
 - **Projectiles in flight**: the game's own are entities only while they fly, and a redirected one still deals its
   shooter's weapon damage; it can't gain Builder `impact` rules (use an area or `near` on it instead).

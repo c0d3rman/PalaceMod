@@ -221,6 +221,10 @@ namespace PalaceMod.Builder.Studio.Logic
                 ["slot:entity!*", "op:choice(build|upgrade|knockOut|repair|demolish|lock|unlock|setCost|setIncome)=build!*", "value:number", "branch:number"], levelWide: true);
             Act("waves", "Change the nights", "World", "Nights: {op}", "Adds, removes or scales enemies of a night, or starts/ends one.",
                 ["op:choice(addSpawn|removeUnit|scaleCount|scaleHp|clearRemaining|startNight|endNight|skipNight)=addSpawn!*", "night:expr", "unit:template", "count:number", "interval:number", "delay:number", "line:text", "gold:number", "elite:bool", "value:number"], levelWide: true);
+            Act("terrain", "Change the ground", "World", "Ground: {op}", "Raises, lowers, paints, blocks, floods, freezes or thaws the ground, or moves the water level, during play.",
+                ["op:choice(raise|lower|set|smooth|paint|block|unblock|water|dry|freeze|thaw|waterLevel)=lower!*", "at:position=self", "radius:number", "width:number", "length:number", "angle:number",
+                 "in:entity", "softness:number", "amount:number", "height:number", "material:choice(grass|highGrass|lowGrass|earth|sand|road|rock)", "level:expr",
+                 "flood:choice(connected|all|none)", "over:number"], levelWide: true);
             Act("endLevel", "End the level", "World", "End the level: {result}", "Wins or loses the run.", ["result:choice(win|lose)=win!*", "message:text"], levelWide: true);
             Act("effect", "Effect", "Show", "Effect {fx} at {at}", "Plays a game effect.", ["fx:fx!*", "at:position=self*", "scale:number"], common: true);
             Act("sound", "Sound", "Show", "Sound {sound}", "Plays a sound.", ["sound:sound!*", "at:position"]);
