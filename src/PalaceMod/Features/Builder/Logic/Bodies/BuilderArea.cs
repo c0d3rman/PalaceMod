@@ -39,10 +39,11 @@ namespace PalaceMod.Builder.Logic.Bodies
 
         private void OnDestroy() => Surfaces.Remove(this);
 
-        private void OnEnable() { All.Add(this); Redraw(); }
+        private void OnEnable() { All.Add(this); Redraw(); Surfaces.Toggled(this); }
         private void OnDisable()
         {
             All.Remove(this);
+            Surfaces.Toggled(this);
             // Switched off: everything inside leaves.
             if (Entity != null && LogicWorld.Current != null)
             {
