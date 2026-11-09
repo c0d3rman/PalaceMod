@@ -267,11 +267,31 @@ namespace PalaceMod.Builder.Level
                 g.GetNodes(n => { if (n.Walkable) walkable++; });
                 if (walkable == 0) problems.Add($"graph {g.name} is empty");
             }
-            foreach (var r in Check(scene).Where(r => !r.Reachable))
-                problems.Add($"{r.Line}: no route to the castle on {r.Graph}");
+            // Standing buildings cut the navmesh (a wall closing a road is meant to): a route check only judges the layout.
+            if (BuiltCutters(scene) == 0)
+                foreach (var r in Check(scene).Where(r => !r.Reachable))
+                    problems.Add($"{r.Line}: no route to the castle on {r.Graph}");
             foreach (var a in CheckAir(scene).Where(a => a.OffGraph))
                 problems.Add(a.Snap < 0f ? $"{a.Line}: no fliers' graph" : $"{a.Line}: {a.Snap:0} m from the fliers' graph, fliers start at its edge");
             return problems;
+        }
+
+        /// <summary>
+        /// How many standing buildings (the castle aside) cut the navmesh. The game's buildings carry NavmeshCuts that
+        /// are on while the building is alive (Hp.SetAlive), so built walls and towers close the roads they stand on and
+        /// enemies attack them instead; a route check is only about the layout while none stand (a fresh start). A
+        /// resumed run, a retried day or a loaded savestate brings its buildings back before the level-start check.
+        /// </summary>
+        public static int BuiltCutters(Scene scene)
+        {
+            if (!scene.IsValid()) return 0;
+            int n = 0;
+            foreach (var slot in LayoutScene.Slots(scene))
+            {
+                if (slot == null || slot.Level <= 0 || LayoutScene.IsCastle(slot)) continue;
+                if (slot.GetComponentsInChildren<NavmeshCut>().Any(c => c.enabled)) n++;
+            }
+            return n;
         }
 
         /// <summary>What each recast graph rasterizes (dev).</summary>

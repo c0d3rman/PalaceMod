@@ -45,6 +45,8 @@ namespace PalaceMod
         private static readonly (string section, string key, string oldDefault, string id)[] Defaults =
         [
             ("Savestates", "Automatic history", "10", "Savestates.Automatic history 40"),
+            // Studio test play's Restart was plain R, which took the game's Command Units away; now Cmd/Ctrl+R.
+            ("Keybinds", "Builder: play-restart", "R", "Keybinds.Builder: play-restart modifier"),
         ];
 
         // Menus aren't features: these lost their Enabled switch (and Upgrade info its "Pause overview" one).

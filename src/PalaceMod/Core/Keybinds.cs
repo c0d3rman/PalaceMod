@@ -144,14 +144,24 @@ namespace PalaceMod
 
         private static readonly Dictionary<string, Func<bool>> claims = [];
 
+        private static readonly HashSet<string> sparesGame = [];
+
         /// <summary>Makes <paramref name="context"/>'s keys exclusive while <paramref name="whileActive"/> returns true:
         /// any other game or mod action bound to the same input is blocked meanwhile (e.g. the camera's Zoom while the
-        /// loadout screen uses Z). Call once, typically in Awake; it's checked every frame, so keep it cheap.</summary>
-        public static void ClaimContext(string context, Func<bool> whileActive)
+        /// loadout screen uses Z). With <paramref name="blockGame"/> false only other mod keys are blocked and the game's
+        /// own actions keep their inputs: for a context over live play (Studio test play), where every game key must work
+        /// as it does in the game; the Controls screen still flags the clash. Call once, typically in Awake; it's checked
+        /// every frame, so keep it cheap.</summary>
+        public static void ClaimContext(string context, Func<bool> whileActive, bool blockGame = true)
         {
             if (string.IsNullOrEmpty(context)) throw new ArgumentException("context is required", nameof(context));
             claims[context] = whileActive ?? throw new ArgumentNullException(nameof(whileActive));
+            if (blockGame) sparesGame.Remove(context);
+            else sparesGame.Add(context);
         }
+
+        /// <summary>Whether a claimed context leaves the game's own actions on its inputs alone.</summary>
+        internal static bool SparesGame(string context) => context != null && sparesGame.Contains(context);
 
         private static readonly Dictionary<string, Func<bool>> exclusive = [];
 
