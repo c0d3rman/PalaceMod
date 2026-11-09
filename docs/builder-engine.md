@@ -329,8 +329,9 @@ graphs can't move with it, and under a rasterized deck the parent's own ground h
 stand in a hole and never walk (it used to: 0 m in 6 s). Its collider still carries the king. Units on its top ride
 it (`DeckCarrier.Riding`): their movement doesn't run (the game's navmesh snap would drop them), they still attack, and
 they're carried with it; one that leaves it (teleported off, or the deck is gone) is set on the ground under it and
-walks again. `teleport` onto a riding deck's top puts a unit on it as given (no ground snap), which is how a ladder
-area puts climbers aboard.
+walks again. `teleport` onto a riding deck's top puts a unit on it as given (no ground snap) and boards it that same
+frame, which is how a ladder area puts climbers aboard. Riders (the king too) leave the game's flat local avoidance
+(RVO) while aboard: a rider over the walking parent would otherwise sit inside its agent and shove it about.
 
 **Placing a deck.** A deck whose top is under the ground somewhere in its footprint (a bridge placed at the river
 bed's height, a raft whose ends lie on the banks) is raised so its top rests on the highest ground under it
