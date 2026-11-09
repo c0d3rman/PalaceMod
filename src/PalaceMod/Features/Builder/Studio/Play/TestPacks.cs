@@ -52,5 +52,26 @@ namespace PalaceMod.Builder.Studio.Play
             copy.Units = copy.Units.Where(u => u?.Id != null && keep.Contains(u.Id)).ToList();
             return copy;
         }
+
+        /// <summary>The pack a Studio edit load runs with (Studio.EditPack): a copy holding only the level (no wave set,
+        /// assets or requirements), so problems elsewhere in the pack never stop the layout from being edited. In the
+        /// library it keeps the units the level's own logic names (its spawns need their templates: without them every
+        /// entity that spawns a unit failed with "no template"); elsewhere no units.</summary>
+        public static DesignPack Edit(DesignPack pack, string levelId)
+        {
+            var copy = PackSerializer.Clone(pack);
+            var only = copy.FindLevel(levelId) ?? throw new ArgumentException("no such level", nameof(levelId));
+            only.WaveSet = null;
+            // Without its wave set the level would play the map's own nights, which may spawn from a line the level
+            // removes (a validation error). An edit load never applies the overlay, so the copy can keep them all.
+            if (only.SpawnLines != null) only.SpawnLines.Remove = null;
+            var used = copy.Id == LibraryStore.PackId ? Model.Logic.LevelScope.Uses(copy, only)["units"] : new HashSet<string>();
+            copy.Units = copy.Units.Where(u => u?.Id != null && used.Contains(u.Id)).ToList();
+            copy.WaveSets.Clear();
+            copy.Levels = [only];
+            copy.Requires = null;
+            copy.Assets?.Clear();
+            return copy;
+        }
     }
 }
