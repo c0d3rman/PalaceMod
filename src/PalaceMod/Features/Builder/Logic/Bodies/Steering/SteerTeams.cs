@@ -155,6 +155,14 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             {
                 if (LogicSteeringManager.Deaths.TryGetValue(e, out var d)) { at = d.pos; rot = d.rot; }
                 else if (go == null) return;   // gone, and where it died isn't known: skipped
+                if (go != null)
+                {
+                    // the corpse is destroyed at the end of this frame: it must not take the entity with it
+                    at ??= go.transform.position; rot ??= go.transform.rotation;
+                    var ob = go.GetComponent<BuilderEntity>();
+                    if (ob != null) ob.Entity = null;
+                    LogicSteeringManager.Forget(go);
+                }
                 go = null;
             }
             float frac = (float)(hpPct ?? (alive && e.Body != null && e.Body.MaxHp > 0 ? e.Body.Hp / e.Body.MaxHp : 1));
