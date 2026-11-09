@@ -338,6 +338,7 @@ namespace PalaceMod.Builder.Model.Logic
             }
             if (n.Name == "lerp") return first == LType.Position || first == LType.Entity ? LType.Position : LType.Number;
             if (n.Name == "at" && n.Target?.Type == LType.Set) return LType.Entity;
+            if (n.Name == "sample" && n.Target?.Type == LType.Set) return LType.Set;
             return f.Returns;
         }
 
