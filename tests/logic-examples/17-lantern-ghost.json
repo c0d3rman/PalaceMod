@@ -43,7 +43,7 @@
      "lantern"
     ],
     "visual": {
-     "mesh": "mesh:Lamp"
+     "mesh": "mesh:Graveyard Wall Post"
     }
    }
   ],
@@ -81,6 +81,9 @@
  },
  "play": {
   "steps": [
+   {
+    "cmd": "agent build castle"
+   },
    {
     "cmd": "night"
    },

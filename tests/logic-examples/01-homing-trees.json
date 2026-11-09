@@ -38,7 +38,7 @@
     "id": "tree-missile",
     "kind": "projectile",
     "visual": {
-     "mesh": "mesh:Tree_02",
+     "mesh": "mesh:Cone Tree",
      "meshScale": 0.4
     },
     "lifetime": 6,
@@ -119,6 +119,9 @@
  },
  "play": {
   "steps": [
+   {
+    "cmd": "agent build castle"
+   },
    {
     "cmd": "night"
    },

@@ -87,6 +87,9 @@
  "play": {
   "steps": [
    {
+    "cmd": "agent build castle"
+   },
+   {
     "do": [
      {
       "do": "gold",

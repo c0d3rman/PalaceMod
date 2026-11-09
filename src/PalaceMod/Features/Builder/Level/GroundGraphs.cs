@@ -185,7 +185,8 @@ namespace PalaceMod.Builder.Level
             LastPrune = "";
             foreach (var g in astar.data.graphs)
             {
-                if (g == null || g.name == "Enemy Units Air") continue;
+                // Off-map spaces (Logic/Bodies/Spaces.cs) have no castle or spawn of their own: keep them whole.
+                if (g == null || g.name == "Enemy Units Air" || g.name.StartsWith(Logic.Bodies.Spaces.Prefix)) continue;
                 var nn = NearestNodeConstraint.Walkable;
                 nn.graphMask = GraphMask.FromGraph(g);
                 var keep = new HashSet<uint>();

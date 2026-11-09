@@ -1,0 +1,191 @@
+using System.Collections.Generic;
+using System.Linq;
+using Pathfinding;
+using PalaceMod.Builder.Level;
+using UnityEngine;
+
+/*
+    Walkable surfaces (`body.walkable`; docs/builder-engine.md, "Walkable surfaces"). Ground graphs can't gain
+    triangles locally and a rescan costs 0.6-1.8 s, so:
+    - each walkable body gets a deck: an invisible readable box on the Ground layer (the graphs rasterize it; its
+      collider carries the king and coins), top at body.height, footprint = body.box or a square of 2 x radius;
+    - a walkable mover also leaves a ghost deck at every pose (renderer only), so one scan sees every place it can be;
+    - one GroundGraphs.Scan runs after the walkable bodies of a level start are built (coalesced);
+    - a deck that's switched off, or a pose ghost the mover isn't at, is hidden from the graphs by a non-dual
+      NavmeshCut limited to a 1.2 m band around the deck's top (cut updates, ~10 ms, not rescans).
+    A walkable mover snaps between poses and carries the units standing on it.
+*/
+namespace PalaceMod.Builder.Logic.Bodies
+{
+    internal static class Walkables
+    {
+        internal sealed class Deck
+        {
+            public BuilderBody Body;
+            public GameObject Proxy;          // the deck that moves with the body
+            public NavmeshCut Hide;           // hides the deck's triangles while switched off
+            public readonly Dictionary<string, (GameObject ghost, NavmeshCut hide)> Ghosts = [];
+            public Vector3 Size;
+            public string Pose;
+        }
+
+        private static readonly List<Deck> decks = [];
+        private static bool scanPending;
+        private static Mesh box;
+
+        public static int Count => decks.Count;
+
+        public static void Clear() { decks.Clear(); scanPending = false; }
+
+        public static void Add(BuilderBody body, BuilderMover mover)
+        {
+            var size = body.Box is Vector2 b ? new Vector3(b.x, 0.3f, b.y) : new Vector3(body.Radius * 2f, 0.3f, body.Radius * 2f);
+            var d = new Deck { Body = body, Size = size };
+            d.Proxy = MakeDeck(body.transform, size, body.Height, collider: true);
+            d.Hide = MakeHide(d.Proxy, size);
+            d.Hide.enabled = !body.isActiveAndEnabled;
+            if (mover != null)
+                foreach (var kv in mover.Poses)
+                {
+                    var (rotY, pos, offset) = kv.Value;
+                    var at = pos is Vector3 p ? new Vector3(p.x, float.IsNaN(p.y) ? body.transform.position.y : p.y, p.z) : offset is Vector3 o ? body.transform.position + o : body.transform.position;
+                    var root = new GameObject($"PalaceBuilder pose {kv.Key} of {body.name}");
+                    root.transform.SetPositionAndRotation(at, Quaternion.Euler(0f, rotY ?? body.transform.eulerAngles.y, 0f));
+                    root.transform.localScale = body.transform.lossyScale;
+                    var ghost = MakeDeck(root.transform, size, body.Height, collider: false);
+                    var hide = MakeHide(ghost, size);
+                    d.Ghosts[kv.Key] = (root, hide);
+                    // The pose it was placed in (else its first) is where it starts.
+                    if (d.Pose == null || ((root.transform.position - body.transform.position).sqrMagnitude < 0.01f && Quaternion.Angle(root.transform.rotation, body.transform.rotation) < 1f))
+                        d.Pose = kv.Key;
+                }
+            if (d.Ghosts.Count > 0)
+            {
+                // Only the ghosts are on the graphs; the moving deck just carries the king.
+                Object.Destroy(d.Proxy.GetComponent<MeshRenderer>());
+                var start = d.Ghosts[d.Pose].ghost.transform;
+                body.transform.SetPositionAndRotation(start.position, start.rotation);
+            }
+            decks.Add(d);
+            // Off the map: its own space graphs (fast); on the map: the host graphs' one coalesced scan.
+            var center = d.Ghosts.Count > 0 ? d.Ghosts.Values.First().ghost.transform.position : body.transform.position;
+            if (Spaces.Outside(center))
+            {
+                foreach (var g in d.Ghosts.Values) Spaces.Add(BodyVisual.Bounds(g.ghost));
+                if (d.Ghosts.Count == 0) Spaces.Add(new Bounds(body.transform.position + Vector3.up * body.Height, new Vector3(size.x, 1f, size.z) * body.transform.lossyScale.x));
+            }
+            else RequestScan();
+            Refresh(d);
+        }
+
+        private static GameObject MakeDeck(Transform parent, Vector3 size, float top, bool collider)
+        {
+            var go = new GameObject(LayoutScene.AddedPrefix + "walkable deck") { layer = 6 };
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = new Vector3(0f, top - size.y / 2f, 0f);
+            go.transform.localScale = size;
+            go.AddComponent<MeshFilter>().sharedMesh = Box();
+            go.AddComponent<MeshRenderer>().forceRenderingOff = true;   // enabled for the graphs, never drawn
+            if (collider) go.AddComponent<BoxCollider>();
+            return go;
+        }
+
+        private static NavmeshCut MakeHide(GameObject deck, Vector3 size)
+        {
+            var cut = deck.AddComponent<NavmeshCut>();
+            cut.type = NavmeshCut.MeshType.Rectangle;
+            cut.rectangleSize = new Vector2(1f, 1f);     // scaled by the deck's own scale
+            cut.useRotationAndScale = true;
+            cut.height = 1.2f / Mathf.Max(0.01f, size.y);
+            cut.radiusExpansionMode = NavmeshCut.RadiusExpansionMode.DontExpand;
+            cut.graphMask = BodyNav.GroundMask();
+            cut.enabled = false;
+            return cut;
+        }
+
+        public static void RequestScan() => scanPending = true;
+
+        /// <summary>Once a frame: the coalesced scan, after the level's walkable bodies exist.</summary>
+        public static void Tick()
+        {
+            long spaceMs = Spaces.Tick();
+            if (spaceMs >= 0)
+            {
+                Log.For<LogicBodiesManager>().Info($"spaces: {Spaces.Describe()}, scan {spaceMs} ms");
+                foreach (var d in decks) Refresh(d);
+            }
+            if (!scanPending || AstarPath.active == null) return;
+            scanPending = false;
+            long ms = GroundGraphs.Scan();
+            Log.For<LogicBodiesManager>().Info($"walkable surfaces: {decks.Count} decks, {decks.Sum(d => d.Ghosts.Count)} pose ghosts, scan {ms} ms");
+            foreach (var d in decks) Refresh(d);
+        }
+
+        /// <summary>Switch a deck's cuts to match its body's state and pose.</summary>
+        public static void Refresh(Deck d)
+        {
+            if (d.Body == null) return;
+            bool on = d.Body.isActiveAndEnabled;
+            var mask = BodyNav.GroundMask();
+            d.Hide.graphMask = mask;
+            foreach (var g in d.Ghosts.Values) g.hide.graphMask = mask;
+            if (d.Ghosts.Count == 0) { d.Hide.enabled = !on; return; }
+            // A posed mover: the live deck is never cut (it's off the graph while moving, units wait); the ghost of
+            // the current pose shows, every other ghost is hidden.
+            d.Hide.enabled = false;
+            foreach (var kv in d.Ghosts) kv.Value.hide.enabled = !(on && kv.Key == d.Pose);
+        }
+
+        public static void SetEnabled(BuilderBody body)
+        {
+            foreach (var d in decks.Where(d => d.Body == body)) Refresh(d);
+        }
+
+        /// <summary>A walkable mover is about to snap to a pose: carry what stands on it, then show that pose.</summary>
+        public static void Snap(BuilderMover m, string pose, Vector3 pos, Quaternion rot)
+        {
+            var d = decks.FirstOrDefault(x => x.Body != null && x.Body.gameObject == m.gameObject);
+            var before = m.transform.localToWorldMatrix;
+            var riders = d != null ? Riders(d) : [];
+            m.transform.SetPositionAndRotation(pos, rot);
+            var after = m.transform.localToWorldMatrix;
+            foreach (var r in riders)
+            {
+                var local = before.inverse.MultiplyPoint3x4(r.position);
+                r.position = after.MultiplyPoint3x4(local);
+                r.GetComponent<PathfindMovement>()?.ClearCurrentPath();
+            }
+            if (d != null) { d.Pose = pose; Refresh(d); }
+        }
+
+        public static void PoseReached(BuilderMover m) { }
+
+        private static List<Transform> Riders(Deck d)
+        {
+            var list = new List<Transform>();
+            var deck = d.Proxy.transform;
+            foreach (var m in Object.FindObjectsOfType<PathfindMovement>()) Add(m.transform);
+            if (PlayerInteraction.instance != null) Add(PlayerInteraction.instance.transform);
+            return list;
+
+            void Add(Transform t)
+            {
+                var local = deck.InverseTransformPoint(t.position);
+                if (Mathf.Abs(local.x) <= 0.5f && Mathf.Abs(local.z) <= 0.5f && local.y > -2f && local.y < 8f) list.Add(t);
+            }
+        }
+
+        private static Mesh Box()
+        {
+            if (box != null) return box;
+            var v = new Vector3[8];
+            for (int i = 0; i < 8; i++) v[i] = new Vector3((i & 1) - 0.5f, ((i >> 1) & 1) - 0.5f, ((i >> 2) & 1) - 0.5f);
+            int[] t = [0, 2, 1, 1, 2, 3, 4, 5, 6, 5, 7, 6, 0, 1, 4, 1, 5, 4, 2, 6, 3, 3, 6, 7, 0, 4, 2, 2, 4, 6, 1, 3, 5, 3, 7, 5];
+            box = new Mesh { name = "PalaceBuilder deck", vertices = v, triangles = t };
+            box.RecalculateBounds();
+            return box;
+        }
+
+        public static string Describe() => $"{decks.Count} walkable decks ({string.Join(", ", decks.Select(d => $"{d.Body?.name}{(d.Pose != null ? " @" + d.Pose : "")}{(d.Hide.enabled ? " hidden" : "")}"))})";
+    }
+}

@@ -109,6 +109,8 @@ namespace PalaceMod.Builder.Model.Logic
             public void Owner(JObject owner, string path, bool components)
             {
                 var stack = new List<string>();
+                // The owner's own rules first, so their _src paths keep their own indexes.
+                if (owner["rules"] is JArray own) owner["rules"] = ExpandRules(own, path + ".rules", owner, components, stack, 0, top: true);
                 if (owner["preset"] is JValue pv && pv.Type == JTokenType.String && owner["when"] == null)
                 {
                     string id = (string)pv;
@@ -123,7 +125,6 @@ namespace PalaceMod.Builder.Model.Logic
                         if (inst.Rules != null) owner["rules"] = Concat(ExpandRules(inst.Rules, path + $" (preset {id})", owner, components, stack, 1), owner["rules"] as JArray);
                     }
                 }
-                if (owner["rules"] is JArray rules) owner["rules"] = ExpandRules(rules, path + ".rules", owner, components, stack, 0, top: true);
             }
 
             private static JArray Concat(JArray a, JArray b)

@@ -36,6 +36,7 @@
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/Logic/*.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/PackSerializer.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/LibraryStore.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Model/LibraryStore.Logic.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Model/Requirements.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Requirements/ChainPreset.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Studio/StudioMath.cs" />
@@ -65,6 +66,8 @@
     <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Logic/RuleText.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Logic/ExprLint.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Logic/Wires.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Logic/Bodies/Stats/StatMath.cs" />
+
     <!-- Behaviour engine core (L1): the pure files of Logic/Runtime; the Unity side is excluded. -->
     <Compile Include="../../src/PalaceMod/Features/Builder/Logic/Runtime/*.cs"
              Exclude="../../src/PalaceMod/Features/Builder/Logic/Runtime/LogicGame.cs;../../src/PalaceMod/Features/Builder/Logic/Runtime/LogicGameWorld.cs;../../src/PalaceMod/Features/Builder/Logic/Runtime/BuilderEntity.cs;../../src/PalaceMod/Features/Builder/Logic/Runtime/LogicManager*.cs;../../src/PalaceMod/Features/Builder/Logic/Runtime/Game*.cs" />

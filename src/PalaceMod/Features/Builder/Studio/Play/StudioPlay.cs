@@ -46,6 +46,9 @@ namespace PalaceMod.Builder.Studio.Play
         private long readyMs = -1, loadedMs = -1;
         private float? savedCloudIn, savedCloudOut;
         private bool sandboxTouched;
+        // Inside Launcher.LaunchStudio: a custom run it replaces ends there (Launcher.Ended with the Studio off), and that
+        // must not reset the play being started (it dropped the king's start spot and left play without its draft).
+        private bool launching;
 
         private const float FastCloud = 0.12f;
 
@@ -142,7 +145,12 @@ namespace PalaceMod.Builder.Studio.Play
             arrivePending = false;
             phase = kind == StudioSessionKind.Play ? Phase.ToPlay : Phase.ToEdit;
             if (before != StudioMode.Off) Studio.SetMode(StudioMode.Loading);
-            if (!Launcher.LaunchStudio(request, kind, out string error))
+            bool launched;
+            string error;
+            launching = true;
+            try { launched = Launcher.LaunchStudio(request, kind, out error); }
+            finally { launching = false; }
+            if (!launched)
             {
                 phase = InPlay ? Phase.Playing : Phase.Idle;
                 Studio.NextLoad = beforeNext;
@@ -214,6 +222,7 @@ namespace PalaceMod.Builder.Studio.Play
         /// <summary>The Studio closed (Off) or the session ended: put back what the sandbox changed.</summary>
         internal void Reset()
         {
+            if (launching) return;
             if (phase == Phase.Idle && draft == null && !sandboxTouched) return;
             phase = Phase.Idle;
             arrivePending = teleportOnArrive = false;

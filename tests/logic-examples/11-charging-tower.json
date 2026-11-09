@@ -12,7 +12,7 @@
     "id": "bolt",
     "kind": "projectile",
     "visual": {
-     "mesh": "mesh:Spear"
+     "mesh": "mesh:Icicle Sharp"
     },
     "lifetime": 3,
     "projectile": {
@@ -100,6 +100,9 @@
  "play": {
   "setup": "Build slot:Tower 3 first (`building` action), then enemies in range.",
   "steps": [
+   {
+    "cmd": "agent build castle"
+   },
    {
     "do": [
      {
