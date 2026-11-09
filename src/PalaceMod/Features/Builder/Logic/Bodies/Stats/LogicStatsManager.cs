@@ -95,6 +95,10 @@ namespace PalaceMod
         /// coins and every event apply as for the game's own damage. For other L2 parts (projectile impacts, areas).
         /// Returns whether it killed.
         /// </summary>
+        /// <summary>The game's "caused by player" (hit flash and effect on enemies): a player-side source hitting an enemy.</summary>
+        private static bool ByPlayer(LogicEntity source, LogicEntity victim) =>
+            source?.Team == "player" && source.Kind != "level" && victim?.Team == "enemy";
+
         internal static bool Deal(LogicEntity victim, double amount, LogicEntity source, HashSet<string> types, bool splash)
         {
             var hp = HpOf(victim);
@@ -102,7 +106,7 @@ namespace PalaceMod
             if (splash) (types ??= new HashSet<string>(StringComparer.Ordinal)).Add("splash");
             var from = source?.Go() != null ? source.Tagged() ?? source.Go().GetComponentInChildren<TaggedObject>() : null;
             scope.Add(new DamageInfo { Types = types, Splash = splash, Source = source });
-            try { return hp.TakeDamage((float)amount, from, source?.Team == "player", true); }
+            try { return hp.TakeDamage((float)amount, from, ByPlayer(source, victim), true); }
             finally { scope.RemoveAt(scope.Count - 1); }
         }
 
@@ -135,7 +139,7 @@ namespace PalaceMod
             killing = true;
             var from = source?.Go() != null ? source.Tagged() : null;
             scope.Add(new DamageInfo { Source = source });
-            try { hp.TakeDamage(hp.HpValue + hp.maxHp + 1f, from, source?.Team == "player", true); }
+            try { hp.TakeDamage(hp.HpValue + hp.maxHp + 1f, from, ByPlayer(source, e), true); }
             finally { killing = false; scope.RemoveAt(scope.Count - 1); if (hp != null) hp.invulnerable = inv; }
         }
 
@@ -181,7 +185,7 @@ namespace PalaceMod
             var (seconds, until) = For(p);
             var extra = new JObject();
             foreach (var k in new[] { "from", "types", "chance", "when" }) if (p.Raw(k) is { } v) extra[k] = v.DeepClone();
-            Stats.Add(p.Target, new StatModifier
+            Stats.Add(p.Target, new Builder.Logic.StatModifier
             {
                 Stat = stat, Set = set, Add = add, Mult = mult, Key = p.Text("key"), Seconds = seconds ?? 0, Until = until,
                 Source = ctx.Self, Extra = extra.Count > 0 ? extra : null,
