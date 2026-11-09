@@ -48,6 +48,8 @@ namespace PalaceMod.Builder.Level
         /// <summary>minRegionSize the ground graphs are rescanned with (see Scan).</summary>
         private const float SmallRegion = 50f;
 
+        private const string AirGraph = "Enemy Units Air";
+
         /// <summary>Rescans every graph as baked. Returns the time it took in ms, or -1 without pathfinding.</summary>
         public static long Scan()
         {
@@ -92,7 +94,20 @@ namespace PalaceMod.Builder.Level
                     graph.minRegionSize = SmallRegion;
                     restore.Add(() => graph.minRegionSize = before);
                 }
-                astar.Scan();
+                // Blocked cells and solid props are walls for ground units only: fliers cross them. Their blockers sit on
+                // the Obstacle layer, which the fliers' graph rasterizes too, so it is scanned without them (otherwise
+                // a forest of solid trees or a blocked area cuts the fliers' surface into scraps and recast drops them).
+                var air = astar.data.graphs.Where(g => g != null && g.name == AirGraph).ToArray();
+                if (air.Length == 0) astar.Scan();
+                else
+                {
+                    astar.Scan(astar.data.graphs.Where(g => g != null && g.name != AirGraph).ToArray());
+                    var hidden = new List<MeshRenderer>();
+                    foreach (var r in Object.FindObjectsOfType<MeshRenderer>())
+                        if (r.enabled && r.gameObject.name == LayoutScene.BlockerName) { r.enabled = false; hidden.Add(r); }
+                    try { astar.Scan(air); }
+                    finally { foreach (var r in hidden) if (r != null) r.enabled = true; }
+                }
             }
             finally
             {
