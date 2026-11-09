@@ -449,7 +449,7 @@ keep rules readable.
 | `attack` | `attack` (id) | it attacks (any attack, including vanilla) | target |
 | `hit` | | its attack, projectile or `damage` action damaged something | victim / amount |
 | `kill` | | something it damaged died from that damage | victim |
-| `every` | `seconds`, `jitter`, `phase`, `during` (`night`/`day`/`always`) | periodically, from spawn | — / tick count |
+| `every` | `seconds`, `jitter` (0..1: each interval varies by up to that share), `phase`, `during` (`night`/`day`/`always`: skips ticks outside it) | periodically, on the owner's clock from spawn (not from dusk) | — / tick count |
 | `after` | `seconds` | once, that long after spawn | |
 | `near` | `filter`, `range`, `edge` (`enter`/`exit`/`both`) | a matching entity comes within or leaves the range | the entity |
 | `enter` / `exit` / `inside` / `empty` / `occupied` | | (areas) see "area" | entity |
@@ -717,6 +717,26 @@ That covers armour, dodges, "immune to arrows", "misses at long range" and "vuln
 "uses": { "count": 1, "per": "day" } }]` (at most 3; `per`: `day` | `night` | `run`). They map to three rebindable keys, "Level action 1-3" (context `BuilderLevel`,
 registered in `Awake` so they get Controls-screen rows). The key fires `kingAction` with that id, and the HUD shows
 the action with its cooldown.
+
+### Game rules
+
+`logic.game` makes the game's own rules data (GameRulesDef; LogicSchema.GameRules is the list the validators, the
+Studio's Level panel > Game rules, `palace.py logic doc` and `logic schema game` read). Each value is a literal or an
+expression over the level scope, re-read every frame, so a level switches a rule through a variable instead of an
+action per rule. Without the block every patch is a no-op (`Logic/Bodies/World/LogicGameRulesManager.cs`).
+
+| Rule | Vanilla | How it's done |
+|---|---|---|
+| `victory` (`lastNight` \| `rules`) | `lastNight` | `LocalGamestate.SetState(AfterMatchVictory)` is vetoed unless `endLevel` is the caller (`GameRules.EndingByRule`). |
+| `defeat` (`castle` \| `rules`) | `castle` | `LocalGamestate.OnVitalObjectKill` is skipped; resigning still loses. |
+| `castle` (`shown` \| `hidden`) | `shown` | Built for free if unbuilt, then renderers, colliders, navmesh cuts (area graph update) and interactors off, removed from the TagManager, skipped by selectors (`GamePhase.HiddenCastle`), damage vetoed, can't lose. |
+| `holdNight` (bool) | `false` | `DayNightCycle.Update` sees the spawner as spawning while it holds (like spawnGroup's KeepNightOpen); the last night's victory waits with it. |
+| `endNight` (bool) / `survivors` (`stay` \| `remove`) | `false` / `stay` | Edge-triggered once per night: `GameRules.EndNight` (also `waves endNight`, whose `survivors` defaults to `remove`) stops spawning, drops spawnGroups, removes or keeps the enemies left and calls `SwithToDay`. |
+| `combat` (bool) | `isNight` | `AutoAttack*.Update` and `ManualAttack.TryToAttack` run with the day/night state switched to what the rule wants (`GamePhase.Switch`, restored in a finalizer; `isNight` still reads the truth meanwhile). By day the dawn's `SetAllUnitsWithTagInvulnerable(true)` is skipped, and toggled when the rule flips mid-day. |
+| `build` (bool) | `isDay` | `BuildingInteractor.UpdateInteractionState` runs switched likewise; the dusk's forced "no prompt" is redone after `OnDusk`; prompts refresh when the rule flips. |
+| `dayLength` (number) | `0` | Night falls that many seconds after sunrise (not after the last night). |
+
+`logic-game` (dev command; `palace.py game cmd logic-game`) prints the rules as evaluated now.
 
 ### Presets
 
@@ -1448,7 +1468,7 @@ three (projectiles in flight, surfaces and spaces above), with no feature coded 
 - **No new scenes, no fog or lighting changes** beyond the level's colour scheme and tints (a separate arena is an
   off-map space on the same scene). Recording is only what
   list vars can hold: up to 256 sampled values, such as positions.
-- **King actions:** 3 keys. The day phase has no timer in Thronefall, so "shorter day" has no meaning.
+- **King actions:** 3 keys. The day phase has no timer in Thronefall; `logic.game.dayLength` adds one.
 - **No arbitrary code**, by design. A missing verb needs a mod update; the registry's `since` makes that explicit.
 - **Savestates** don't keep pending `wait`s or Builder projectiles in flight.
 

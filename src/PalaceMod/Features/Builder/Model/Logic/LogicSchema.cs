@@ -142,6 +142,8 @@ namespace PalaceMod.Builder.Model.Logic
         public static readonly Dictionary<string, string> RoleAliases = new(StringComparer.Ordinal);
         /// <summary>Built-in signal inputs every entity, or an entity with that component, accepts.</summary>
         public static readonly Dictionary<string, string[]> Inputs = new(StringComparer.Ordinal);
+        /// <summary>logic.game's rules (GameRulesDef): name, type (enum/bool/number), default, options.</summary>
+        public static readonly List<ParamSpec> GameRules = [];
 
         /// <summary>The game's tags (TagManager.ETag minus NONE), usable as filter terms; a test keeps it in step.</summary>
         public static readonly HashSet<string> Tags = new(StringComparer.Ordinal) { "PlayerOwned", "EnemyOwned", "Player", "CastleCenter", "MeeleFighter", "RangedFighter", "Flying", "PlayerUnit", "Building", "SiegeWeapon", "AUTO_Alive", "AUTO_KnockedOutAndHealOnDawn", "Wall", "InfrastructureEconomy", "TakesReducedDamageFromPlayerAttacks", "PracticeTargets", "FastMoving", "ArmoredAgainstRanged", "VulnerableVsRanged", "Monster", "House", "WallOrTower", "AUTO_Commanded", "TakesIncreasedDamageFromTowers", "Tower", "AUTO_NoReviveNextMorning", "PlayerOwnedPriorityTarget", "BlockableEnemyProjectile", "Boss", "UselessWallThatDoesNotBlockPath", "Healer", "MagicProjectile", "NaturallyVulnerableToSplash", "NaturallyHighHealthTarget", "UnreachableForBigEnemiesDueToLevelDesign", "PlayerShrine", "VodooCursed", "PlayerHeroUnit", "FireAndExplosionResistant", "Humanoid", "LargeUnit", "Exploding", "TrainingFacility", "Bridge", "Group1", "Group2", "Group3", "OnDeathEnemySpawner", "Undead", "Vampire" };
@@ -225,7 +227,7 @@ namespace PalaceMod.Builder.Model.Logic
             Ev("kill", "Combat", "Something it damaged died from that damage.", other: "victim", aliases: A("victim", "other"));
             Ev("every", "Time", "Periodically, from spawn (or level start).", value: LType.Number, valueMeaning: "the tick count (1, 2, ...)",
                 ps: [P("seconds", "number", "Seconds between firings (min 0.1).", req: true, min: 0.1),
-                     P("jitter", "number", "Random extra delay each time, 0..1 of seconds.", min: 0, max: 1),
+                     P("jitter", "number", "Each interval varies randomly by up to this share of seconds (0.2: ±20%).", min: 0, max: 1),
                      P("phase", "number", "Seconds before the first firing (default: seconds)."),
                      P("during", "enum", "Only at night, by day, or always.", def: "always", opts: ["always", "night", "day"])],
                 global: true, example: "{ \"when\": { \"on\": \"every\", \"seconds\": 8, \"during\": \"night\" }, \"do\": [...] }");
@@ -436,6 +438,7 @@ namespace PalaceMod.Builder.Model.Logic
                 P("interval", "number", "addSpawn: seconds between spawns."), P("delay", "number", "addSpawn: seconds into the night."),
                 P("line", "text", "addSpawn/clearRemaining: the spawn line."), P("gold", "int", "addSpawn: coins each."), P("elite", "bool", "addSpawn: elite."),
                 P("value", "number", "scaleCount/scaleHp: the factor."),
+                P("survivors", "enum", "endNight: the enemies left vanish (remove) or stay on the map (stay).", def: "remove", opts: ["remove", "stay"]),
             ], example: "{ \"do\": \"waves\", \"op\": \"addSpawn\", \"unit\": \"brute\", \"count\": \"night - 2\", \"line\": \"North\" }");
             Act("endLevel", "World", "Ends the run.", [P("result", "enum", "Win or lose.", req: true, opts: ["win", "lose"]), P("message", "text", "Shown on the end screen.")]);
 
@@ -490,6 +493,20 @@ namespace PalaceMod.Builder.Model.Logic
             Named(Globals, "enemiesAlive", "Enemies on the map.", LType.Number);
             Named(Globals, "difficulty", "The run's difficulty multiplier.", LType.Number);
             Named(Globals, "none", "No entity (what a selector gives when nothing matches, or a role the event doesn't have): `other != none`.", LType.Any);
+
+            // ---- Game rules (logic.game) ----------------------------------------------------------------------
+            GameRules.AddRange(new[]
+            {
+                P("victory", "enum", "How the level is won. lastNight: surviving the last night (vanilla). rules: only an endLevel action wins.", def: "lastNight", opts: ["lastNight", "rules"]),
+                P("defeat", "enum", "How the level is lost. castle: the castle falls (vanilla). rules: only an endLevel action (or resigning) loses.", def: "castle", opts: ["castle", "rules"]),
+                P("castle", "enum", "shown: the castle as usual. hidden: no castle (invisible, not solid, never targeted or hurt, and it can't lose the level).", def: "shown", opts: ["shown", "hidden"]),
+                P("holdNight", "bool", "While true, the night doesn't end, even with no enemies left (e.g. \"count('#nest') > 0\"). The last night's victory waits too.", def: false),
+                P("endNight", "bool", "When it turns true at night, the night ends at once (spawning stops; survivors decides the enemies left).", def: false),
+                P("survivors", "enum", "Enemies left when endNight ends a night (waves endNight has its own). stay: they stay (and keep the next night open until killed). remove: they vanish.", def: "stay", opts: ["stay", "remove"]),
+                P("combat", "bool", "When vanilla fighting happens: units', towers' and the king's attacks, and hits on the player's side. Vanilla: \"isNight\". \"true\": by day too.", def: "isNight"),
+                P("build", "bool", "When the king can build and upgrade. Vanilla: \"isDay\". \"true\": at night too.", def: "isDay"),
+                P("dayLength", "number", "Seconds of day before night falls by itself (0: the player calls the night).", def: 0, min: 0),
+            });
 
             // ---- Properties -----------------------------------------------------------------------------------
             Prop(LType.Entity, "hp", LType.Number, "Hit points.");
@@ -680,6 +697,7 @@ namespace PalaceMod.Builder.Model.Logic
                 ["children"] = JObject.FromObject(c.Children),
             })));
             o["caps"] = new JObject(LogicCapsDef.Defaults.Fields().Select(f => new JProperty(f.Name, new JObject { ["default"] = f.Default, ["max"] = f.Max })));
+            o["gameRules"] = new JArray(GameRules.Select(g => g.ToJson()));
             return o;
         }
 
@@ -739,12 +757,13 @@ namespace PalaceMod.Builder.Model.Logic
             C("statusVisual", typeof(StatusVisualDef));
             C("preset", typeof(PresetDef), ("params{}", "presetParam"));
             C("presetParam", typeof(PresetParamDef));
-            C("logic", typeof(LogicDef), ("places[]", "place"), ("attach{}", "attach"), ("hud[]", "hud"), ("kingActions[]", "kingAction"), ("caps", "caps"));
+            C("logic", typeof(LogicDef), ("places[]", "place"), ("attach{}", "attach"), ("hud[]", "hud"), ("kingActions[]", "kingAction"), ("caps", "caps"), ("game", "game"));
             C("attach", typeof(AttachDef));
             C("hud", typeof(HudDef));
             C("kingAction", typeof(KingActionDef), ("uses", "uses"));
             C("uses", typeof(UsesDef));
             C("caps", typeof(LogicCapsDef));
+            C("game", typeof(GameRulesDef));
             // A preset's extra fields are its components; a place's preset/with and the expansion marks are known.
             d["preset"].Fields = d["preset"].Fields.Concat(d["entity"].Fields).Distinct().ToArray();
             d["place"].Fields = d["place"].Fields.Concat(["_preset"]).ToArray();

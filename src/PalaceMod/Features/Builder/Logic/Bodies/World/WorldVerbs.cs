@@ -244,10 +244,16 @@ namespace PalaceMod.Builder.Logic.Bodies
             slot = Root(slot);
             if (!slot.CanBeUpgraded) return;
             if (ChoiceManager.instance != null && ChoiceManager.instance.ChoiceCoroutineRunning) throw new LogicError("building: the player has a choice open");
-            var upgrade = slot.Upgrades[slot.Level];
-            int count = upgrade.upgradeBranches.Count;
+            int count = slot.Upgrades[slot.Level].upgradeBranches.Count;
             int branch = p.Has("branch") ? (int)Math.Round(p.Number("branch")) : count > 1 ? (ctx.World?.Random.RangeInt(0, count - 1) ?? 0) : 0;
             if (branch < 0 || branch >= count) throw new LogicError($"building: branch must be 0-{count - 1}");
+            UpgradeFree(slot, branch);
+        }
+
+        /// <summary>Builds or upgrades a slot one level for free with a chosen branch (no popup), like the player would.</summary>
+        internal static void UpgradeFree(BuildSlot slot, int branch)
+        {
+            var upgrade = slot.Upgrades[slot.Level];
             var player = PlayerInteraction.instance;
             foreach (var child in slot.BuiltSlotsThatRelyOnThisBuilding.Where(c => c != null && c.ActivatorUpgradesThis && c.ActivatorBuilding == slot).ToList())
             {
@@ -363,7 +369,10 @@ namespace PalaceMod.Builder.Logic.Bodies
             var gs = LocalGamestate.Instance;
             if (gs == null || gs.CurrentState != LocalGamestate.State.InMatch) yield break;
             WorldCommon.log.Info($"endLevel: {(win ? "victory" : "defeat")}");
-            gs.SetState(win ? LocalGamestate.State.AfterMatchVictory : LocalGamestate.State.AfterMatchDefeat);
+            // logic.game's victory/defeat "rules" veto the game's own endings, never this one.
+            GameRules.EndingByRule = true;
+            try { gs.SetState(win ? LocalGamestate.State.AfterMatchVictory : LocalGamestate.State.AfterMatchDefeat); }
+            finally { GameRules.EndingByRule = false; }
         }
 
         /// <summary>Dev: every slot of the host with level, income, next cost, hp and lock.</summary>

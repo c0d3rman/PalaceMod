@@ -158,7 +158,7 @@
           "type": "number",
           "min": 0.0,
           "max": 1.0,
-          "description": "Random extra delay each time, 0..1 of seconds."
+          "description": "Each interval varies randomly by up to this share of seconds (0.2: ±20%)."
         },
         {
           "name": "phase",
@@ -2102,6 +2102,16 @@
           "name": "value",
           "type": "number",
           "description": "scaleCount/scaleHp: the factor."
+        },
+        {
+          "name": "survivors",
+          "type": "enum",
+          "default": "remove",
+          "options": [
+            "remove",
+            "stay"
+          ],
+          "description": "endNight: the enemies left vanish (remove) or stay on the map (stay)."
         }
       ],
       "example": "{ \"do\": \"waves\", \"op\": \"addSpawn\", \"unit\": \"brute\", \"count\": \"night - 2\", \"line\": \"North\" }",
@@ -3959,14 +3969,16 @@
         "attach",
         "hud",
         "kingActions",
-        "caps"
+        "caps",
+        "game"
       ],
       "children": {
         "places[]": "place",
         "attach{}": "attach",
         "hud[]": "hud",
         "kingActions[]": "kingAction",
-        "caps": "caps"
+        "caps": "caps",
+        "game": "game"
       }
     },
     "attach": {
@@ -4019,6 +4031,20 @@
         "actionsPerFrame"
       ],
       "children": {}
+    },
+    "game": {
+      "fields": [
+        "victory",
+        "defeat",
+        "castle",
+        "holdNight",
+        "endNight",
+        "survivors",
+        "combat",
+        "build",
+        "dayLength"
+      ],
+      "children": {}
     }
   },
   "caps": {
@@ -4047,6 +4073,79 @@
       "max": 40000
     }
   },
+  "gameRules": [
+    {
+      "name": "victory",
+      "type": "enum",
+      "default": "lastNight",
+      "options": [
+        "lastNight",
+        "rules"
+      ],
+      "description": "How the level is won. lastNight: surviving the last night (vanilla). rules: only an endLevel action wins."
+    },
+    {
+      "name": "defeat",
+      "type": "enum",
+      "default": "castle",
+      "options": [
+        "castle",
+        "rules"
+      ],
+      "description": "How the level is lost. castle: the castle falls (vanilla). rules: only an endLevel action (or resigning) loses."
+    },
+    {
+      "name": "castle",
+      "type": "enum",
+      "default": "shown",
+      "options": [
+        "shown",
+        "hidden"
+      ],
+      "description": "shown: the castle as usual. hidden: no castle (invisible, not solid, never targeted or hurt, and it can't lose the level)."
+    },
+    {
+      "name": "holdNight",
+      "type": "bool",
+      "default": false,
+      "description": "While true, the night doesn't end, even with no enemies left (e.g. \"count('#nest') > 0\"). The last night's victory waits too."
+    },
+    {
+      "name": "endNight",
+      "type": "bool",
+      "default": false,
+      "description": "When it turns true at night, the night ends at once (spawning stops; survivors decides the enemies left)."
+    },
+    {
+      "name": "survivors",
+      "type": "enum",
+      "default": "stay",
+      "options": [
+        "stay",
+        "remove"
+      ],
+      "description": "Enemies left when endNight ends a night (waves endNight has its own). stay: they stay (and keep the next night open until killed). remove: they vanish."
+    },
+    {
+      "name": "combat",
+      "type": "bool",
+      "default": "isNight",
+      "description": "When vanilla fighting happens: units', towers' and the king's attacks, and hits on the player's side. Vanilla: \"isNight\". \"true\": by day too."
+    },
+    {
+      "name": "build",
+      "type": "bool",
+      "default": "isDay",
+      "description": "When the king can build and upgrade. Vanilla: \"isDay\". \"true\": at night too."
+    },
+    {
+      "name": "dayLength",
+      "type": "number",
+      "default": 0,
+      "min": 0.0,
+      "description": "Seconds of day before night falls by itself (0: the player calls the night)."
+    }
+  ],
   "presets": [
     {
       "id": "timer",
