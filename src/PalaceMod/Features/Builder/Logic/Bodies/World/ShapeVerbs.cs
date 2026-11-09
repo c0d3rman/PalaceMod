@@ -12,7 +12,7 @@ using Object = UnityEngine.Object;
     Facing and shape at runtime (docs/builder-engine.md, "Light", "Turning and reshaping"): `.facing`, `turn` and
     `setShape`.
 
-    - Facing.Of: where a thing looks. A game unit's root never turns; its model does (RotateForwardToRVOVelocity's
+    - Facing.Of: where a thing looks (Heading.Turned, cached per object). A game unit's root never turns; its model does (RotateForwardToRVOVelocity's
       transformToRotate, turned toward its velocity and its attacks), and the king's mesh parent does
       (PlayerMovement.meshParent). Builder bodies turn their root. `.facing` reads this, so it follows a walking unit.
     - `turn`: bodies turn their root, so an area's shape, its drawn outline/fill, its surface cut, a solid footprint's
@@ -38,13 +38,9 @@ namespace PalaceMod.Builder.Logic.Bodies
             if (go == null) return null;
             int id = go.GetInstanceID();
             if (models.TryGetValue(id, out var t) && t != null) return t;
-            t = go.transform;
-            if (go.GetComponent<PlayerMovement>() is { } king && king.meshParent != null) t = king.meshParent;
-            else if (go.GetComponent<BuilderBody>() == null)
-            {
-                if (go.GetComponentInChildren<RotateForwardToRVOVelocity>() is { } r && r.transformToRotate != null) t = r.transformToRotate;
-                else if (go.GetComponentInChildren<RotateForwardToRVOVelocityRVO>() is { } r2 && r2.transformToRotate != null) t = r2.transformToRotate;
-            }
+            // Heading.Turned (Links/Heading.cs) is the shared rule; a Builder body turns its root even when its look is a
+            // unit's model (that model's rotator would otherwise be taken).
+            t = go.GetComponent<BuilderBody>() != null || go.GetComponent<BuilderArea>() != null ? go.transform : Heading.Turned(go);
             if (models.Count > 4096) models.Clear();
             models[id] = t;
             return t;
