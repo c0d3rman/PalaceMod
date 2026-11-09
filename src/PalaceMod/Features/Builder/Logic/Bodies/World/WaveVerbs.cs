@@ -48,10 +48,13 @@ namespace PalaceMod.Builder.Logic.Bodies
         {
             LogicActions.Register("waves", Waves);
             LogicActions.Register("spawnGroup", SpawnGroup);
-            WorldSession.Reset += () => { Groups.Clear(); HpMult.Clear(); edits.Clear(); };
+            WorldSession.Reset += () => { Groups.Clear(); HpMult.Clear(); edits.Clear(); holdUntil = 0f; };
         }
 
-        public static bool GroupsPending => Groups.Count > 0;
+        // A unit counts as an enemy once its TaggedObject has registered (a frame after the instantiate): the night
+        // stays open a moment past the last spawn so it doesn't end in between.
+        private static float holdUntil;
+        public static bool GroupsPending => Groups.Count > 0 || Time.time < holdUntil;
 
         // ------------------------------------------------------------------ units and lines
 
@@ -326,6 +329,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             Spawn.AdjustEnemyParametersAfterSpawn(go, g.Elite);
             if (WorldCommon.IsNight) EnemySpawner.totalEnemiesSpawnedThisWave++;
             g.Spawned++;
+            holdUntil = Time.time + 1f;
             if (g.LineName != null && LogicWorld.Current?.Find("line:" + g.LineName) is { } lineEntity)
                 LogicEvents.Raise("lineSpawn", lineEntity, LogicGame.EntityOf(go), pos: pos.ToVec());
         }
