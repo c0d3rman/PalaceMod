@@ -3297,6 +3297,11 @@ def check_pack(ref, data):
         ws, vanilla = level_waveset(ref, data, lv)
         if vanilla:
             warn(p + ".waveSet", "no wave set: the map's vanilla nights play (their spawn lines must exist)")
+    # The behaviour engine's rules, entities, statuses and presets (palace_logic.py, the mod's own checks).
+    try:
+        issues.extend(logic_issues(data))
+    except Fail as e:
+        warn("logic", str(e))
     return issues
 
 
@@ -4970,6 +4975,9 @@ def run_fixture(env, path, timeout=180):
     level = _fixture_into_library(env, fx)
     mark = g.log_size()
     g.agent(f"play {LIBRARY_ID} {level}")
+    # The previous fixture's level may still be up for a moment: wait for this one.
+    g.wait(lambda st: not st.get("loading") and st.get("inLevel") and (st.get("session") or {}).get("level") == level,
+           timeout, f"the level {level} to load")
     g.wait_level_day(timeout=timeout)
     time.sleep(2.5)
     try:
@@ -5016,7 +5024,7 @@ def run_fixture(env, path, timeout=180):
                         passed = _truthy(last)
                     else:
                         last = None
-                        passed = any(step["expectLog"] in (l.get("message") or str(l)) for l in g.log_since(mark))
+                        passed = any(step["expectLog"] in (l.get("message") if isinstance(l, dict) else str(l)) for l in g.log_since(mark))
                     t = game_time()
                     if passed or time.time() > wall_end or (t0 is not None and t is not None and t - t0 > within):
                         break

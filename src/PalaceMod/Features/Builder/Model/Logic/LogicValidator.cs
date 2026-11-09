@@ -511,8 +511,8 @@ namespace PalaceMod.Builder.Model.Logic
                     }
                     case "actions":
                     {
-                        if (v is not JArray) { Error(p, "must be a list of actions"); break; }
-                        var list = v.ToObject<List<ActionDef>>(Serializer);
+                        if (v is not JArray va) { Error(p, "must be a list of actions"); break; }
+                        var list = ActionList(va);
                         var inner = scope;
                         if (ps.Binds == "spawned")
                         {
@@ -532,14 +532,14 @@ namespace PalaceMod.Builder.Model.Logic
                         {
                             if (opts[i] is not JObject o) { Error($"{p}[{i}]", "must be { \"weight\": n, \"do\": [...] }"); continue; }
                             if (o["weight"] != null) Param(new ParamSpec { Name = "weight", Type = "number", Min = 0 }, o["weight"], $"{p}[{i}].weight", scope, owner, null);
-                            if (o["do"] is JArray d) Actions(d.ToObject<List<ActionDef>>(Serializer), $"{p}[{i}].do", scope, owner, sends);
+                            if (o["do"] is JArray d) Actions(ActionList(d), $"{p}[{i}].do", scope, owner, sends);
                             else Error($"{p}[{i}].do", "needs a list of actions");
                         }
                         break;
                     }
                     case "targeting":
-                        if (v is not JArray) { Error(p, "must be a list of filters or {\"filter\", \"range\", \"prefer\"}"); break; }
-                        CheckTargeting(v.ToObject<List<TargetingDef>>(Serializer), p, owner, scope);
+                        if (v is not JArray tlist) { Error(p, "must be a list of filters or {\"filter\", \"range\", \"prefer\"}"); break; }
+                        CheckTargeting(tlist.Select(x => x.Type is JTokenType.String or JTokenType.Object ? x.ToObject<TargetingDef>(Serializer) : null).ToList(), p, owner, scope);
                         break;
                     case "movement":
                         if (v is not JObject) { Error(p, "must be a movement block"); break; }
@@ -576,6 +576,9 @@ namespace PalaceMod.Builder.Model.Logic
                         break;
                 }
             }
+
+            /// <summary>An action list as defs; an entry that isn't an object becomes null (reported as empty).</summary>
+            private static List<ActionDef> ActionList(JArray a) => a.Select(x => x is JObject o ? o.ToObject<ActionDef>(Serializer) : null).ToList();
 
             private void CheckTemplate(string s, string p, CheckScope scope)
             {

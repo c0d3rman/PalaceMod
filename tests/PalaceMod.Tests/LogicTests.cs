@@ -291,6 +291,20 @@ namespace PalaceMod.Tests
             }
         }
 
+        public static void PlaceRulesKeepTheirPathsBesideAPreset()
+        {
+            var issues = ValidateLevel(@"{ ""places"": [{ ""id"": ""t"", ""preset"": ""timer"", ""pos"": [0,0,0], ""rules"": [{ ""when"": ""dusk"", ""do"": [{ ""do"": ""nope"" }] }] }] }");
+            Has(issues, "levels[0].logic.places[0].rules[0].do[0].do: unknown action \"nope\"");
+        }
+
+        public static void MalformedListsAreReportedNotThrown()
+        {
+            var issues = ValidateLevel(@"{ ""rules"": [{ ""when"": ""dusk"", ""do"": [{ ""do"": ""if"", ""cond"": ""true"", ""then"": [""oops""] },
+                { ""do"": ""setTargeting"", ""target"": ""all('enemy')"", ""targeting"": [3] }] }] }");
+            Has(issues, "levels[0].logic.rules[0].do[0].then[0]: is empty");
+            Has(issues, "levels[0].logic.rules[0].do[1].targeting[0]: needs a filter");
+        }
+
         // ---- Validator messages ------------------------------------------------------------------------------
 
         private static List<ValidationIssue> ValidateLevel(string logicJson, string extraPack = null)

@@ -1495,6 +1495,9 @@ class _PresetCtx:
 
     def owner(self, owner: dict, path: str, components: bool, typed_preset: bool = False):
         stack: List[str] = []
+        # The owner's own rules first, so their _src paths keep their own indexes.
+        if isinstance(owner.get("rules"), list):
+            owner["rules"] = self.expand_rules(owner["rules"], path + ".rules", owner, components, stack, 0, top=True)
         pv = owner.get("preset")
         if typed_preset and not isinstance(pv, (dict, list)):
             pv = _cs_cast_str(pv)  # PlaceDef.Preset is a string property (other owners keep it in Extra)
@@ -1513,8 +1516,6 @@ class _PresetCtx:
                     own = owner.get("rules")
                     owner["rules"] = self.expand_rules(inst.rules, path + f" (preset {id_})", owner, components, stack, 1) + \
                         (own if isinstance(own, list) else [])
-        if isinstance(owner.get("rules"), list):
-            owner["rules"] = self.expand_rules(owner["rules"], path + ".rules", owner, components, stack, 0, top=True)
 
     def expand_rules(self, rules: list, path: str, owner: dict, components: bool, stack: List[str], depth: int, top=False):
         result = []
