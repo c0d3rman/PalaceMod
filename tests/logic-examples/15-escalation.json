@@ -89,6 +89,9 @@
  "play": {
   "steps": [
    {
+    "cmd": "agent build castle"
+   },
+   {
     "cmd": "agent night 4"
    },
    {
