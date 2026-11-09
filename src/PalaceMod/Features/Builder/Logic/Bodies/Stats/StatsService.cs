@@ -633,6 +633,8 @@ namespace PalaceMod.Builder.Logic.Bodies
 
         // ------------------------------------------------------------------ debug
 
+        private static readonly HarmonyLib.AccessTools.FieldRef<AutoAttack, float> AttackCooldownLeft = HarmonyLib.AccessTools.FieldRefAccess<AutoAttack, float>("cooldown");
+
         public string Describe(LogicEntity e)
         {
             if (e == null) return "none";
@@ -650,6 +652,10 @@ namespace PalaceMod.Builder.Logic.Bodies
                 int timed = s.Mods.Count(m => m.Owner == null);
                 if (timed > 0) parts.Add($"setStat mods={timed}");
             }
+            // The game's own fields, as written (what the vanilla attack/targeting code actually reads).
+            if (e.Go() is { } go && StatWriter.Of(go) is { Attacks.Length: > 0 } p)
+                parts.Add("live=[" + string.Join("; ", p.Attacks.Where(a => a != null).Select(a =>
+                    $"{a.GetType().Name}#{a.GetInstanceID()}{(a.isActiveAndEnabled ? "" : " off")} cd={a.cooldownDuration:0.##} left={AttackCooldownLeft(a):0.##} range={string.Join("/", a.targetPriorities.Select(t => t?.range.ToString("0.#") ?? "-"))}")) + "]");
             return $"{e.Id}: {string.Join(" ", parts)}";
         }
     }

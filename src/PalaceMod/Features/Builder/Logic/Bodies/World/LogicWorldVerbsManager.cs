@@ -41,6 +41,7 @@ namespace PalaceMod
                 ["waves"] = WaveVerbs.Capture(),
                 ["hud"] = LevelHud.Capture(),
                 ["terrain"] = TerrainVerbs.Capture(),
+                ["moved"] = BuildingMover.Capture(),
             }, (_, state) =>
             {
                 WorldSession.Sync();
@@ -48,6 +49,7 @@ namespace PalaceMod
                 WaveVerbs.Restore(state?["waves"]);
                 LevelHud.Restore(state?["hud"]);
                 TerrainVerbs.Restore(state?["terrain"]);
+                BuildingMover.Restore(state?["moved"]);
             });
             DevCommands.Register("logic-world", "logic-world status | fx | sounds | hud | terrain   world and show actions (L2): state, the effect and sound catalogs", args =>
             {

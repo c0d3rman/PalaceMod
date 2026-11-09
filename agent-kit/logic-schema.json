@@ -261,7 +261,7 @@
     {
       "name": "enter",
       "group": "Areas",
-      "description": "(areas) An entity matching the area's watch filter enters.",
+      "description": "(areas) An entity matching the area's watch filter enters. Same frame: an entity spawned into the area, an area laid under one, and one walking in (checked every frame) get it in that same frame, so a status applied on enter is on before the next frame's attacks. `inside` first fires one full tick after entering: pair it with enter for a status that holds while inside.",
       "params": [],
       "other": "entrant",
       "aliases": {
@@ -1409,7 +1409,7 @@
     {
       "name": "teleport",
       "group": "Move",
-      "description": "Moves it instantly.",
+      "description": "Moves it instantly. A building or the castle moves with its whole build slot (colliders, navmesh cut, add-ons) onto the ground at `at`; enemies repath to it, and the castle still loses the level when it falls.",
       "params": [
         {
           "name": "target",
@@ -3530,7 +3530,7 @@
       "on": "entity",
       "name": "target",
       "returns": "entity",
-      "description": "Its current attack/move target."
+      "description": "Its current attack/move target (a tower: what its last volley aimed at, while that is alive)."
     },
     {
       "on": "entity",
@@ -3804,7 +3804,7 @@
     },
     {
       "name": "income",
-      "description": "The gold the buildings paid at the last dawn (`income` stats applied), already counted when `dawn` rules run; the coins themselves land over the next seconds.",
+      "description": "The gold the buildings paid at the last dawn (`income` stats applied), already counted when `dawn` rules run; the coins themselves land over the next seconds. A building knocked out during the night pays nothing that dawn (the game's rule), and the night's wave gold (enemies' coins) isn't income.",
       "type": "number"
     },
     {
@@ -4088,7 +4088,7 @@
     },
     {
       "name": "in:@area",
-      "description": "Inside an area (in:self inside this area)."
+      "description": "Inside an area (in:self inside this area). @<area template>: inside any area made from it (e.g. any of many spawned pools), checked live."
     },
     {
       "name": "has:<status>",
@@ -4579,7 +4579,8 @@
       "fields": [
         "var",
         "amount",
-        "label"
+        "label",
+        "level"
       ],
       "children": {}
     },
@@ -4784,10 +4785,14 @@
         "statuses",
         "targeting",
         "rules",
-        "light"
+        "light",
+        "interact",
+        "pay"
       ],
       "children": {
-        "light": "light"
+        "light": "light",
+        "interact": "interact",
+        "pay[]": "pay"
       }
     },
     "hud": {

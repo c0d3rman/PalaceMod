@@ -62,6 +62,32 @@ namespace PalaceMod.Builder.Logic.Bodies
         private readonly List<LogicEntity> candidates = [];
         private readonly HashSet<LogicEntity> now = [];
 
+        /// <summary>
+        /// Same-frame entries (AreaPoller.Settle, after every drain): what is inside now but wasn't raises `enter` (and
+        /// `occupied`) at once, from the shared candidate list of this settle. Exits and `inside` ticks stay on the
+        /// 10 Hz poll.
+        /// </summary>
+        public void Enter(double time, List<LogicEntity> all)
+        {
+            if (Entity == null || Entity.Destroyed || !Entity.Enabled) return;
+            var filter = BodyFilter.Compile(Watch);
+            var center = transform.position;
+            float reach = Shape.Reach * transform.lossyScale.x + 1f, r2 = reach * reach;
+            bool wasEmpty = inside.Count == 0;
+            LogicEntity first = null;
+            foreach (var c in all)
+            {
+                if (c == Entity || inside.ContainsKey(c) || !c.Alive) continue;
+                var p = c.Position;
+                float dx = p.X - center.x, dz = p.Z - center.z;
+                if (dx * dx + dz * dz > r2 || !Contains(c) || !filter(Entity, c)) continue;
+                inside[c] = time;
+                first ??= c;
+                BodyDev.Raise("enter", Entity, c);
+            }
+            if (wasEmpty && first != null) BodyDev.Raise("occupied", Entity, first);
+        }
+
         /// <summary>One 10 Hz step.</summary>
         public void Poll(double time)
         {
@@ -221,10 +247,34 @@ namespace PalaceMod.Builder.Logic.Bodies
                 if (a != null) a.Poll(time);
         }
 
+        private static readonly List<LogicEntity> settleAll = [];
+
+        /// <summary>
+        /// After every drain (LogicWorld.Settled, so at least once a frame): entries since the last look raise `enter`
+        /// now, in the same drain. A unit spawned into an area, an area laid under a unit, or a unit walking in gets
+        /// its `enter` rules (e.g. a status) before the game's next Update, so towers never see it in between.
+        /// </summary>
+        public static void Settle(LogicWorld w)
+        {
+            if (BuilderArea.All.Count == 0) return;
+            BodySpatial.Query(Vector3.zero, 0f, settleAll);
+            foreach (var a in BuilderArea.All.ToList())
+                if (a != null) a.Enter(w.Time, settleAll);
+            settleAll.Clear();
+        }
+
         public bool? Contains(LogicEntity area, LogicEntity e)
         {
             var a = area?.Go()?.GetComponent<BuilderArea>();
             return a == null ? null : a.Contains(e);
+        }
+
+        /// <summary>`in:@template`: inside any live, enabled area made from that template.</summary>
+        public bool? InAny(string template, LogicEntity e)
+        {
+            foreach (var a in BuilderArea.All)
+                if (a != null && a.Entity is { Destroyed: false, Enabled: true } ae && ae.Template == template && a.Contains(e)) return true;
+            return false;
         }
     }
 }

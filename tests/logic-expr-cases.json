@@ -59,6 +59,7 @@
     { "expr": "all('foe').len", "type": "number" },
     { "expr": "count('enemy and in:@moat') > 0", "type": "bool" },
     { "expr": "count('enemy and in:@mot')", "error": "nothing is named \"@mot\"" },
+    { "expr": "count('foe and not in:@slime')", "type": "number" },
     { "expr": "count('foe and Towr')", "error": "unknown filter term \"Towr\" (did you mean \"Tower\"?)" },
     { "expr": "count('foe and tower')", "error": "case-sensitive: \"Tower\"" },
     { "expr": "count('has:burning')", "type": "number" },

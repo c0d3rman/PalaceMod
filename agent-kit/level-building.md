@@ -366,7 +366,7 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 | Op | Fields |
 |---|---|
 | `level` | `name`, `description`, `base` (`cleared`/`flat`/null), `waveSet`, `host`, `colors` |
-| `add_slot` | `id`, `kind` (e.g. `"House"`, `"Defense Tower"`, `"Barracks"`; copies the host's slot of that kind, or places the game's standard one, base `building:<kind>`, when the host has none) or `from` (a host slot name), `at` [x,z] or `pos`, `rotY`, `requires` (shorthand), `upgradeCap`, `costs` [per level, null keeps] |
+| `add_slot` | `id`, `kind` (e.g. `"House"`, `"Defense Tower"`, `"Barracks"`; copies the host's slot of that kind, or places the game's standard one, base `building:<kind>`, when the host has none) or `from` (a host slot name), `at` [x,z] or `pos`, `rotY`, `requires` (shorthand), `upgradeCap`, `costs` [per level, null keeps], `pay` (item costs on its build prompt, below "Item costs on a build slot") |
 | `move_slot` | `slot` (added id, host name, `castle` can't move), `at`/`pos`, `rotY` |
 | `set_slot` | `slot` (or `castle`), `requires` (null = back to the map's), `upgradeCap`, `costs` |
 | `set_units` | `slot`, `units` [[x,z] in the slot's frame, null keeps that one] or `at` [[x,z] world points]; `units: null` = back to the map's |
@@ -731,6 +731,15 @@ stat, flag, filter term and built-in preset with its parameters. `palace.py logi
 `add:<id>` (a slot you added), `prop:<id>`, `line:<spawn line name>`, `castle`. Give an attached object a `name` to
 reach it from expressions as `@name`.
 
+**Item costs on a build slot** (wood, stone, any level variable): give the slot's attach a `pay` list,
+`[{"var": "$wood", "amount": 2, "label": "wood"}, {"var": "$stone", "amount": 3, "label": "stone", "level": 2}]`
+(`level`: 1 = the build, 2 = the first upgrade, ...; none = every build and upgrade). The game's own build prompt
+shows "Costs 2 wood + 3 stone" (with the gold when the slot also costs gold); a press while any item is short is
+refused with a notice before a coin is paid (and fires `interactRefused` on the slot); otherwise the items are taken
+exactly when the build or upgrade happens. `add_slot` takes `pay` directly; for a host slot use `attach` (`"key":
+"slot:<name>"`). A slot that costs only items: `"costs": [0, 0, 0]`. Only the king's purchase pays (`build` and
+`building` actions are free).
+
 A **place** (`logic.places[]`) is `{ "id", "entity": "<template>" | "preset": "<preset>", "with": {...} | "kind":
 "<kind>" + inline fields, "pos": [x, y, z], "rotY", "scale", "name", "active", "vars", "rules" }`. Its `id` (lowercase)
 or `name` is how expressions reach it (`@plate1`). Inline fields override the template's for that copy. `"active":
@@ -811,7 +820,7 @@ One small, pure language everywhere: conditions, numbers, selectors, positions.
   `attacker`, `target`, `entrant`, `collector`, `sender`, `obstacle`...), `event.value` / `event.pos` / `event.name` /
   `event.choice` / `event.types` / `event.weapon`, `@name` (a place or attached object), `@@id` (a template), `$var` (a level variable), `x.$var` (an
   entity variable), globals (`night`, `isNight`, `isDay`, `time`, `nightTime`, `nightProgress`, `gold`, `income`
-  (what the buildings paid at the last dawn, already set when `dawn` rules run), `enemiesAlive`, `difficulty`,
+  (what the buildings paid at the last dawn, already set when `dawn` rules run; a building knocked out that night pays 0, and wave gold isn't counted), `enemiesAlive`, `difficulty`,
   `nights`, `daylight`).
 - **Properties**: `.hp .maxHp .hpPct .alive .elite .pos .x .y .z .facing .team .kind .template .labels .level .cost
   .buildingType .age .target .owner .id .weapon .light .lit` (12.7a), links `.parent .children .root .group` (12.7) (`.weapon` is its weapon's id, `"vanilla:<weapon>"`: a unit's or
@@ -859,7 +868,9 @@ One small, pure language everywhere: conditions, numbers, selectors, positions.
 A filter is a string: `"foe and Building and not Wall"`, `"#lantern"`, `"in:@moat"`. Terms: teams `foe ally player
 enemy neutral` (foe/ally relative to `self`); kinds `unit building prop projectile area pickup coin king castle line
 point path logic self`; `melee ranged alive dead elite`; any game tag, case-sensitive (`Tower`, `Flying`, `Wall`, `Boss`,
-`Undead`...; see `logic-reference.md`); `#label`; `is:<template>`; `in:@area` / `in:self` (inside an area); `has:<status>`;
+`Undead`...; see `logic-reference.md`); `#label`; `is:<template>`; `in:@area` / `in:self` (inside an area;
+`in:@<area template>` is inside any area made from that template, e.g. any of a snail's spawned slime pools, judged
+from where it stands now, so a tower's `targeting: ["foe and not in:@slime-pool"]` never lags the slime); `has:<status>`;
 `type:<building kind>` (`type:Mill`); `lit` (standing in the light, 12.7a); `where(<expression over it>)`; the visibility terms `disabled unbuilt` and
 `include:<dead|disabled|unbuilt|self>` (12.4, "What a selector sees"). Combine with `and or not ( )`.
 
@@ -889,7 +900,8 @@ runs once per member and the other params are evaluated per member with `it` bou
 swing but do nothing) or `"base"` (the weapon it started with). The attack range follows the weapon (a melee unit
 given a bow shoots from the bow's range; `range` overrides), and so does a unit's keep distance. `for` (seconds,
 `"night"`, `"day"`) gives back what it had before. On the king it swaps his auto attack (the equipped weapon's
-passive half). `palace.py game cmd logic-weapons` lists every weapon id with its damage types.
+passive half). `palace.py game cmd logic-weapons` lists every weapon id with its damage types. Savestates (and
+retry day) keep every swap, its `base` and a running `for`.
 
 `repeat` and `forEach` take their body as `actions` (the key `do` already names the action); `forEach` also takes
 `limit` and `as` (a name for the member, 12.4). `setVar`/`addVar` write
@@ -930,7 +942,7 @@ ground (the touched cells are then drawn by the terrain). Savestates keep the ch
 | `lifetime`, `maxAlive` | any | seconds before `expire` + destroy; cap on live copies |
 | `projectile` | flying things | `speed`, `homing` 0..1, `arc`, `gravity`, `spin`, `face`, `hits` (filter), `hitRadius`, `pierce`, `onGround`, `range`; events `impact`, `expire` |
 | `mover` | moving props | `path` (`@path` or points), `mode` loop/pingpong/once, `speed`, `wait`, `spin`, `swing`, `running`, `pose` (or `poses`) {name: {`offset` [x,y,z] or world `pos`, `rotY`}}, `turnSpeed` (deg/s, 90); inputs `start stop reverse goto` and each pose's name; events `arrive`, `end`. A walkable mover snaps between poses |
-| `area` | zones | `shape` (`circle {radius}` / `rect {size: [w, d]}` / `polygon {points}` / `sector {radius, angle}`: a cone along its facing), `watch` (filter), `show`, `color`, `tick`, `surface` (below); events `enter exit inside empty occupied`; filters `in:@area` |
+| `area` | zones | `shape` (`circle {radius}` / `rect {size: [w, d]}` / `polygon {points}` / `sector {radius, angle}`: a cone along its facing), `watch` (filter), `show`, `color`, `tick`, `surface` (below); events `enter exit inside empty occupied`; filters `in:@area`, `in:@<area template>`. `enter` comes in the same frame as the entry (spawned into it, the area laid under it, or walked in), so a status applied on `enter` is on before any tower's next shot; `inside` first fires one full `tick` later, so a "while in the zone" status is applied on `enter` and refreshed on `inside`. A thing is inside when its **centre** is: a big unit whose body overlaps the edge isn't. A trigger meant to catch everything walking a lane (a pressure plate in a gap) must span the whole opening plus a margin, not sit inside it: enemies spawn spread across their spawn line's width and walk their own straight-ish lane, so a 6 m plate in a 7 m gap misses about half of them |
 | `light` | anything that shines | `color`, `range` (m it lights), `intensity` (1), `cone` (degrees: a beam along its facing; none = all round), `aim`, `height` (3; lower = longer beam), `flicker`, `on`; also on units (`unit` op) and attaches (12.7a) |
 | `pickup` | collectibles | `by` (filter, e.g. `king`), `radius`, `magnet`, `consume`; event `pickup` |
 | `interact` | king-usable (props, places, attached slots, and **units**: templates, placed, spawned and wave units; the prompt follows a walking unit) | `prompt` (`{cost}` shows the cost), `cost` (gold), `pay` (items: `[{"var": "$bread", "amount": 1, "label": "bread"}]`, level variables paid with the gold, all at once; refused with a notice and `interactRefused` when any is short), `when` day/night/always, `radius`, `repeat`, `choices` (`{id, label, description, cost, pay, icon, if}`: the game's upgrade-choice popup, up to 4 at once; the chosen cost is paid and `event.choice` is its id), `offer` (an expression giving a list of choice ids: which show, in that order, worked out on every press; with `offer` or a choice's `if` (shown only while true), `choices` is a pool of up to 32, e.g. 3 random of 6 daily: `"offer": "$offers"` + a `dawn` rule `setVar $offers = "['tax','walls','haste','scouts','towers','unseen'].sample(3)"`); event `interact` |
@@ -1034,6 +1046,10 @@ points, buildings and the castle included (`setStat` on `castle` with `"for": "n
 weapon's id (`vanilla:P Fire Archer`, so any weapon can be told apart), and `fire` for weapons that leave burning
 ground (fire archers, the Fire Spire, Firewing, potion vials) or that the game marks as fire or explosion damage
 (exploders, the fire snail's blast); the burning ground's ticks are `fire` too, credited to the shooter.
+`stalemate` is the game's stalled-night tiebreaker: once a night has gone 30 s with nothing left to spawn, no enemy
+dying, no building falling and no `Boss` alive, it drains the first enemy at about 5 HP/s (no attacker) until
+something changes. A rooted keeper or dummy holding a night open (`holdNight`) gets drained by it; a status
+`{"damageTaken": {"mult": 0, "types": ["stalemate"]}}` (or the `Boss` tag) exempts it.
 
 A status's rules also hear the carrier's own events (`damaged`, `signal`, `attack`...), so a status can end itself:
 `{"when": "damaged", "do": [{"do": "removeStatus", "status": "asleep"}]}` (see "Sleeping enemies" in the cookbook).
@@ -1073,7 +1089,7 @@ frame, so rules switch with a variable (`"combat": "isNight or $flipped"`); enum
 |---|---|---|
 | `victory` | `lastNight` | `rules`: surviving the last night doesn't win; only `endLevel win` does. After the last night the day goes on (a new night replays the last one). |
 | `defeat` | `castle` | `rules`: the castle falling doesn't lose; only `endLevel lose` (or resigning) does. |
-| `castle` | `shown` | `hidden`: no castle. It counts as built (slots that need it open), is invisible and not solid, nothing targets or hurts it, selectors don't see it, and it can't lose the level. |
+| `castle` | `shown` | `hidden`: no castle. It counts as built (slots that need it open), is invisible and not solid, nothing targets or hurts it, selectors don't see it, and it can't lose the level. To move it instead, `teleport` it (Limits). |
 | `holdNight` | `false` | A condition: while true the night doesn't end, even with no enemies left (`"count('#camp') > 0"`; `"$held < $goal"` keeps the last night's victory waiting). |
 | `endNight` | `false` | A condition: when it turns true at night, the night ends now, enemies alive or not (`"nightProgress >= 1 and count('is:boss') == 0"`). |
 | `survivors` | `stay` | What `endNight` does with the enemies left: `stay` (they stay on the map and count toward the next night) or `remove`. |
@@ -1118,7 +1134,7 @@ number). Errors in a preset's rules are reported at the place that uses it.
 | `remove_rule` | `on`, `id` |
 | `wire` | `from` (an `on` value), `event` (default `interact`), `to` (a place id/name or attach name), `input` (signal), `value`, `delay`, `do` (the target's listener, for an input that isn't built in) |
 | `var` | `name`, `value` (a level variable), or `on` + `name` + `value` (an entity default) |
-| `attach` | `key`, `name`, `labels`, `vars`, `statuses`, `targeting`, `light` |
+| `attach` | `key`, `name`, `labels`, `vars`, `statuses`, `targeting`, `light`, `interact`, `pay` (a build slot's item costs); any other field is an error (rules: the `rule` op with `on` = the key) |
 | `king_action` | `id`, `name`, `when`, `cooldown`, `uses` |
 | `hud` | `id`, `text`, `icon`, `visible` |
 | `logic` | `seed`, `caps`, `game` (merged rule by rule; `null` puts one back to vanilla) |
@@ -1196,7 +1212,10 @@ Write one per mechanic you want to keep working, next to your ops, and re-run it
 - A rigid part is placed every frame, not simulated: it goes wherever its parent goes. A template's parts come back
   from a savestate rebuilt (full hp); links made by `link` are kept.
 - Game tags are a fixed set; your own labels work through Builder targeting and filters.
-- The castle can be hidden (`logic.game.castle`) but not moved at runtime; place it where the level needs it.
+- The castle can't move in the layout (`move_slot`), but a rule can move it at runtime: `{"do": "teleport", "target":
+  "castle", "at": "vec(30, -20)"}` (any building too: `"target": "nearest('type:House')"`). The whole build slot moves onto the ground
+  there (building, colliders, navmesh cut, add-ons); enemies repath to it, it still loses the level when it falls, and
+  savestates keep the new spot. Moving it onto units pushes them out; keep it on open, walkable ground.
 - No new scenes, fog or arbitrary code (light: 12.7a). Pending `wait`s and Builder projectiles in flight aren't kept by
   savestates; keep state that matters in variables.
 - No world queries beyond entities: expressions can't ask for the ground height at a point (`vec(x, z).y` is 0, not

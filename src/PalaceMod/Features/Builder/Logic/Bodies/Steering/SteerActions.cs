@@ -45,7 +45,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
             var at = Need(p, "at", "teleport");
             var go = e.Go();
             if (go == null || !e.Exists) return;
-            if (e.Kind is "building" or "castle") return;   // buildings don't move (skipped, as every verb skips members it can't act on)
+            if (e.Kind is "building" or "castle") { BuildingMover.Move(go, at); return; }   // the whole slot moves
             if (go.GetComponent<PlayerMovement>() is { } king) { king.TeleportTo(at); return; }
             var pm = go.GetComponent<PathfindMovement>();
             // Onto a riding deck (off the graphs): stand on it as given, and ride it (DeckCarrier).

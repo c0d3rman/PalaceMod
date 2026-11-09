@@ -101,7 +101,14 @@ Everything is additive to the pack JSON; the pack version goes to 3 (see "Migrat
 
 `attach` gives rules, a name, labels and vars to objects the level already has, by their Studio item key (`slot:<name>`,
 `add:<id>`, `prop:<id>`, `line:<name>`, `castle`). That keeps the existing classes untouched: the Studio's `Edit`
-writes there, and deleting the object prunes its entry (`PackDraft.Prune`).
+writes there, and deleting the object prunes its entry (`PackDraft.Prune`). An attach also takes `light`, `interact`
+(the king's interact key on that object) and, on a build slot, `pay`: item costs on the slot's own build prompt,
+`[{ "var": "$wood", "amount": 2, "label": "wood", "level": 1 }]` (level variables, like `interact.pay`; `level` 1 =
+the build, 2 = the first upgrade...; none = every level). The game's build tooltip gets a "Costs 3 gold + 2 wood" line;
+a press while any item is short is refused before a coin is filled (a notice, and `interactRefused` on the slot with
+`event.name` = what's short), so nothing is paid; otherwise the items are taken when the build or upgrade happens
+(after the upgrade-choice popup: cancelling it costs nothing). Only the king's own purchase pays: `building` actions,
+`palace.py build` and savestates don't (`Logic/Bodies/SlotPayManager.cs`). Undoing an upgrade refunds its gold only.
 
 ### Templates
 
@@ -351,7 +358,13 @@ never opened a route.
 
 Events: `enter` / `exit` (`other` is the entity), `inside` (for each entity inside, after every full `tick` it has
 spent inside), `empty`, `occupied`.
-In filters, `in:@moat` tests membership. Areas poll on the world's 10 Hz steps and watch everything the selectors see,
+In filters, `in:@moat` tests membership, and `in:@<area template>` membership in any live area made from that
+template (one of many spawned slime pools), from the shape and where the entity stands now. Areas poll exits and
+`inside` ticks on the world's 10 Hz steps; entries are checked after every drain of the event queue
+(`LogicWorld.Settled`, at least once a frame, `AreaPoller.Settle`), so `enter` for an entity spawned into an area, an
+area laid under one, or one walking in runs in that same frame (a status applied on `enter` is on before the next
+frame's attacks; before, a tower could land a shot in the gap). `inside` first fires one full `tick` after entering.
+Areas watch everything the selectors see,
 including projectiles in flight (the game's own arrows too, see "Projectiles in flight"), so a field that slows,
 bends or turns arrows is an area plus `setStat timeScale`, `drift` or `taunt`.
 
@@ -543,8 +556,7 @@ working. A ranged enemy that kites and prefers towers is just `targeting` plus `
   `team` may be an expression (`self.team`). Going `neutral` keeps the unit's own brain, drops its team tags and
   gives it an empty targeting list (it attacks nothing until a rule gives it targets).
 - **Members a verb can't act on are skipped**, not errors: `command` on anything but a player troop, `push`,
-  `moveTo` and `setMovement` on anything without the game's unit movement, `teleport` on buildings, `convert` on
-  anything but a unit. So `all('player and unit', 20)` (which includes the king) works.
+  `moveTo` and `setMovement` on anything without the game's unit movement, `convert` on anything but a unit. So `all('player and unit', 20)` (which includes the king) works.
 - **`replace`** keeps nothing unless `keep` says so. `hp` keeps the hp fraction, not the absolute value. `then` runs
   with `spawned` = the new entity.
 
@@ -860,7 +872,9 @@ That covers armour, dodges, "immune to arrows", "misses at long range" and "vuln
   usual unit's, else 60 % of the range; always under 90 % of it). `"none"` is an empty weapon whose `Weapon.Attack`
   is skipped (the swing still plays). A weapon from the other side (the king's bow on an enemy) hurts its new
   wielder's foes through the game rules' WielderSide/WielderRows patches. The first swap remembers the entity's own weapon for `"base"`; `for` restores
-  what it had before the first timed swap still running. Not kept by savestates.
+  what it had before the first timed swap still running. Savestates and retry day keep the swaps (part "weapons":
+  each holder's weapon id and base ranges, the remembered base and a running `for`, by entity id; the king and
+  towers are found again by scene path).
 - **Status rules** run with `self` = the carrier and `other` = whoever applied it. `statusEnd` fires on expiry and
   on removal.
 - **Timed `setStat`s** stack independently; give `key` to make a new one replace an earlier one with the same key.
@@ -1164,9 +1178,17 @@ Where the build settles what the text above leaves open:
   barracks' squad spawns under its slot, and each soldier stays its own vanilla unit (a TaggedObject below the
   entity's object that isn't its body and isn't tagged Building). Selectors, events, attribution and the steering
   state lookup all use this rule.
+- **Moving buildings.** `teleport` on a building or the castle moves its whole build slot (the topmost slot that
+  isn't upgraded by an activator, so a castle add-on moves with the castle) onto the ground at `at`
+  (`Bodies/World/BuildingMover.cs`): its MeshFusion parts are uncombined first so they move, the ground graphs are
+  updated over the old and new footprints, units the new footprint traps are pushed out, every enemy repaths, and
+  `CastleCenter.CastleCenterPosition` follows. Everything that finds the castle does it through its TaggedObject or
+  the slot, so targeting, the defeat on its death and `logic.game.castle: hidden` keep working. Savestates keep moved
+  slots (`world.moved`).
 - **Dawn income.** `income` counts the amounts `CoinSpawner.TriggerCoinSpawn` is asked for between the first and the
   last dawn callback (buildings' harvests, `income` stats applied); the coins land over the next seconds, the count
-  doesn't wait for them.
+  doesn't wait for them. A building knocked out that night isn't harvested (the game's `knockedOutTonight`), so it
+  adds 0; the night's wave gold (enemies' coins, sent to the king at dawn) isn't income.
 - **Wave clones of Builder units** carry `BuilderEntity.TemplateId` (set on the template by `UnitFactory`), so they
   register in `Start` with the template's rules. They aren't "spawned" for the caps or savestates (the game restores
   them as its own enemies).
@@ -1244,7 +1266,7 @@ New ops (JSON, as the existing ones):
 | `remove_rule` | `on`, `id` |
 | `wire` | `from`, `event`, `to`, `input` (a built-in input or a signal name), `value`, `delay`: writes both rules |
 | `var` | `name`, `value` (level) or `on` + `name` + `value` (entity default) |
-| `attach` | `key`, `name`, `labels` |
+| `attach` | `key`, `name`, `labels`, `vars`, `statuses`, `targeting`, `light`, `interact`, `pay` (slots); any other field is an error |
 | `king_action` | `id`, `name`, `when`, `cooldown`, `uses` |
 | `remove_unit` / `_entity` / `_status` / `_preset` | `id`, `force`: refuses while anything names it (lists the users) |
 | `rename_unit` / `_entity` / `_status` / `_preset` | `from`, `to`: rewrites every reference, or refuses listing what it can't rewrite |

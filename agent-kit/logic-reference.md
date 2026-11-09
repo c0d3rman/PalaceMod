@@ -66,7 +66,7 @@ Names an expression can use for entities in a rule.
 | `nightTime` | number | Seconds since this night began. |
 | `nightProgress` | number | 0..1: the night's spawn schedule elapsed (1 once everything has spawned). |
 | `gold` | number | The player's gold. |
-| `income` | number | The gold the buildings paid at the last dawn (`income` stats applied), already counted when `dawn` rules run; the coins themselves land over the next seconds. |
+| `income` | number | The gold the buildings paid at the last dawn (`income` stats applied), already counted when `dawn` rules run; the coins themselves land over the next seconds. A building knocked out during the night pays nothing that dawn (the game's rule), and the night's wave gold (enemies' coins) isn't income. |
 | `enemiesAlive` | number | Enemies on the map. |
 | `difficulty` | number | The run's difficulty multiplier. |
 | `daylight` | number | The level's own light, 0..1: 1 by day, about 0.34 at night, lower in an eclipse (`lighting`). |
@@ -109,7 +109,7 @@ Names an expression can use for entities in a rule.
 | Event | Params | other | event.value | Fires when |
 |---|---|---|---|---|
 | `near` | `filter`*, `range`*, `edge` | entity |  | A matching entity comes within (or leaves) a range of it. |
-| `enter` (area) |  | entrant (entrant = other) |  | (areas) An entity matching the area's watch filter enters. |
+| `enter` (area) |  | entrant (entrant = other) |  | (areas) An entity matching the area's watch filter enters. Same frame: an entity spawned into the area, an area laid under one, and one walking in (checked every frame) get it in that same frame, so a status applied on enter is on before the next frame's attacks. `inside` first fires one full tick after entering: pair it with enter for a status that holds while inside. |
 | `exit` (area) |  | entity |  | (areas) An entity leaves. |
 | `inside` (area) |  | entity |  | (areas) For each entity inside, after every full `tick` it has spent inside. |
 | `empty` (area) |  |  |  | (areas) The last watched entity left. |
@@ -336,7 +336,7 @@ Each action is `{"do": "<name>", ...params}`. `target` (where listed) is a selec
 
 ### Move
 
-**`teleport`**: Moves it instantly.
+**`teleport`**: Moves it instantly. A building or the castle moves with its whole build slot (colliders, navmesh cut, add-ons) onto the ground at `at`; enemies repath to it, and the castle still loses the level when it falls.
 
 - `target` (entities; default "self"): Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self.
 - `at` (position; required): Where.
@@ -772,7 +772,7 @@ Selector functions anchor at `self`; call them as methods (`castle.count('enemy'
 | entity | `.cost` | number | A slot's next build/upgrade cost. |
 | entity | `.buildingType` | text | A building's kind, e.g. 'Mill'. |
 | entity | `.age` | number | Seconds since it appeared. |
-| entity | `.target` | entity | Its current attack/move target. |
+| entity | `.target` | entity | Its current attack/move target (a tower: what its last volley aimed at, while that is alive). |
 | entity | `.owner` | entity | Who spawned or launched it. |
 | entity | `.parent` | entity | The entity it is linked to (link, parts), or none. |
 | entity | `.children` | set | The entities linked to it (its parts). |
@@ -837,7 +837,7 @@ What each JSON block accepts (a field not listed draws an "unknown field" warnin
 - **pickup**: `by`, `radius`, `magnet`, `consume`
 - **interact**: `prompt`, `cost`, `when`, `radius`, `repeat`, `pay`, `choices`, `offer` (blocks: `choices[]` → choice, `pay[]` → pay)
 - **choice**: `id`, `label`, `description`, `cost`, `pay`, `icon`, `if` (blocks: `pay[]` → pay)
-- **pay**: `var`, `amount`, `label`
+- **pay**: `var`, `amount`, `label`, `level`
 - **part**: `entity`, `offset`, `rotY`, `team`, `name`, `follow`, `onParentDeath`, `damageToParent`, `damageToGroup`, `damageKept`
 - **attack**: `id`, `replace`, `cooldown`, `jitter`, `range`, `minRange`, `when`, `targeting`, `launch`, `weapon`, `do` (blocks: `launch` → launch)
 - **launch**: `entity`, `from`
@@ -851,7 +851,7 @@ What each JSON block accepts (a field not listed draws an "unknown field" warnin
 - **preset**: `id`, `name`, `description`, `category`, `kind`, `params`, `vars`, `labels`, `rules`, `visual`, `body`, `team`, `countsAsEnemy`, `lifetime`, `maxAlive`, `projectile`, `mover`, `area`, `pickup`, `interact`, `light`, `parts`, `attacks`, `targeting`, `movement`, `statuses` (blocks: `params{}` → presetParam)
 - **presetParam**: `type`, `default`, `min`, `max`, `options`, `description`
 - **logic**: `seed`, `vars`, `rules`, `places`, `attach`, `hud`, `kingActions`, `caps`, `game` (blocks: `places[]` → place, `attach{}` → attach, `hud[]` → hud, `kingActions[]` → kingAction, `caps` → caps, `game` → game)
-- **attach**: `name`, `labels`, `vars`, `statuses`, `targeting`, `rules`, `light` (blocks: `light` → light)
+- **attach**: `name`, `labels`, `vars`, `statuses`, `targeting`, `rules`, `light`, `interact`, `pay` (blocks: `light` → light, `interact` → interact, `pay[]` → pay)
 - **hud**: `id`, `text`, `icon`, `visible`
 - **kingAction**: `id`, `name`, `icon`, `when`, `cooldown`, `uses` (blocks: `uses` → uses)
 - **uses**: `count`, `per`
@@ -919,7 +919,7 @@ Combine with `and`, `or`, `not` and parentheses.
 - `path`: Paths.
 - `#label`: Has a label (#"two words" for a label with spaces).
 - `is:<template>`: Made from a template (is:goblin, is:vanilla:Ogre, is:'vanilla:E Ogre').
-- `in:@area`: Inside an area (in:self inside this area).
+- `in:@area`: Inside an area (in:self inside this area). @<area template>: inside any area made from it (e.g. any of many spawned pools), checked live.
 - `has:<status>`: Has a status.
 - `type:<Kind>`: A building of that kind (type:Mill, type:"Defense Tower").
 - `include:<what>`: Matches everything, but lets a selector also see what it skips by default: include:dead, include:disabled, include:unbuilt, include:self (repeat it for more).

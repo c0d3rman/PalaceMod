@@ -238,7 +238,7 @@ namespace PalaceMod.Builder.Model.Logic
             Ev("near", "Areas", "A matching entity comes within (or leaves) a range of it.", other: "entity",
                 ps: [P("filter", "filter", "What to watch for.", req: true), P("range", "number", "Metres.", req: true, min: 0),
                      P("edge", "enum", "Fire on entering, leaving, or both.", def: "enter", opts: ["enter", "exit", "both"])]);
-            Ev("enter", "Areas", "(areas) An entity matching the area's watch filter enters.", other: "entrant", owners: ["area"], aliases: A("entrant", "other"));
+            Ev("enter", "Areas", "(areas) An entity matching the area's watch filter enters. Same frame: an entity spawned into the area, an area laid under one, and one walking in (checked every frame) get it in that same frame, so a status applied on enter is on before the next frame's attacks. `inside` first fires one full tick after entering: pair it with enter for a status that holds while inside.", other: "entrant", owners: ["area"], aliases: A("entrant", "other"));
             Ev("exit", "Areas", "(areas) An entity leaves.", other: "entity", owners: ["area"]);
             Ev("inside", "Areas", "(areas) For each entity inside, after every full `tick` it has spent inside.", other: "entity", owners: ["area"]);
             Ev("empty", "Areas", "(areas) The last watched entity left.", owners: ["area"]);
@@ -371,7 +371,7 @@ namespace PalaceMod.Builder.Model.Logic
                 P("team", "text", "\"player\" | \"enemy\" | \"neutral\", or an expression such as self.team.", req: true),
                 P("keepLook", "bool", "Keep its look.", def: true), P("hpPct", "number", "Hit points as a fraction of max.", min: 0, max: 1),
             ], targeted: true, example: "{ \"do\": \"convert\", \"target\": \"other\", \"team\": \"=self.team\", \"hpPct\": 0.5 }");
-            Act("teleport", "Move", "Moves it instantly.", [P("at", "position", "Where.", req: true)], targeted: true);
+            Act("teleport", "Move", "Moves it instantly. A building or the castle moves with its whole build slot (colliders, navmesh cut, add-ons) onto the ground at `at`; enemies repath to it, and the castle still loses the level when it falls.", [P("at", "position", "Where.", req: true)], targeted: true);
             Act("push", "Move", "A one-off shove (the game's knockback), on units (flyers included).",
             [
                 P("from", "position", "Push away from here (default self)."), P("toward", "position", "Pull toward here instead."),
@@ -580,7 +580,7 @@ namespace PalaceMod.Builder.Model.Logic
             Named(Globals, "nightTime", "Seconds since this night began.", LType.Number);
             Named(Globals, "nightProgress", "0..1: the night's spawn schedule elapsed (1 once everything has spawned).", LType.Number);
             Named(Globals, "gold", "The player's gold.", LType.Number);
-            Named(Globals, "income", "The gold the buildings paid at the last dawn (`income` stats applied), already counted when `dawn` rules run; the coins themselves land over the next seconds.", LType.Number);
+            Named(Globals, "income", "The gold the buildings paid at the last dawn (`income` stats applied), already counted when `dawn` rules run; the coins themselves land over the next seconds. A building knocked out during the night pays nothing that dawn (the game's rule), and the night's wave gold (enemies' coins) isn't income.", LType.Number);
             Named(Globals, "enemiesAlive", "Enemies on the map.", LType.Number);
             Named(Globals, "difficulty", "The run's difficulty multiplier.", LType.Number);
             Named(Globals, "daylight", "The level's own light, 0..1: 1 by day, about 0.34 at night, lower in an eclipse (`lighting`).", LType.Number);
@@ -618,7 +618,7 @@ namespace PalaceMod.Builder.Model.Logic
             Prop(LType.Entity, "cost", LType.Number, "A slot's next build/upgrade cost.");
             Prop(LType.Entity, "buildingType", LType.Text, "A building's kind, e.g. 'Mill'.");
             Prop(LType.Entity, "age", LType.Number, "Seconds since it appeared.");
-            Prop(LType.Entity, "target", LType.Entity, "Its current attack/move target.");
+            Prop(LType.Entity, "target", LType.Entity, "Its current attack/move target (a tower: what its last volley aimed at, while that is alive).");
             Prop(LType.Entity, "owner", LType.Entity, "Who spawned or launched it.");
             Prop(LType.Entity, "parent", LType.Entity, "The entity it is linked to (link, parts), or none.");
             Prop(LType.Entity, "children", LType.Set, "The entities linked to it (its parts).");
@@ -698,7 +698,7 @@ namespace PalaceMod.Builder.Model.Logic
                 ("unbuilt", "An empty build slot (level 0). Naming it lets a selector see empty slots, which it otherwise skips."),
                 ("logic", "Logic objects."), ("line", "Spawn lines."), ("point", "Points."), ("path", "Paths."),
                 ("#label", "Has a label (#\"two words\" for a label with spaces)."), ("is:<template>", "Made from a template (is:goblin, is:vanilla:Ogre, is:'vanilla:E Ogre')."),
-                ("in:@area", "Inside an area (in:self inside this area)."),
+                ("in:@area", "Inside an area (in:self inside this area). @<area template>: inside any area made from it (e.g. any of many spawned pools), checked live."),
                 ("has:<status>", "Has a status."), ("type:<Kind>", "A building of that kind (type:Mill, type:\"Defense Tower\")."),
                 ("include:<what>", "Matches everything, but lets a selector also see what it skips by default: include:dead, include:disabled, include:unbuilt, include:self (repeat it for more)."),
                 ("where(expr)", "An expression over `it`."),
@@ -874,7 +874,7 @@ namespace PalaceMod.Builder.Model.Logic
             C("preset", typeof(PresetDef), ("params{}", "presetParam"));
             C("presetParam", typeof(PresetParamDef));
             C("logic", typeof(LogicDef), ("places[]", "place"), ("attach{}", "attach"), ("hud[]", "hud"), ("kingActions[]", "kingAction"), ("caps", "caps"), ("game", "game"));
-            C("attach", typeof(AttachDef), ("light", "light"));
+            C("attach", typeof(AttachDef), ("light", "light"), ("interact", "interact"), ("pay[]", "pay"));
             C("hud", typeof(HudDef));
             C("kingAction", typeof(KingActionDef), ("uses", "uses"));
             C("uses", typeof(UsesDef));

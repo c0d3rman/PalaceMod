@@ -751,7 +751,9 @@ namespace PalaceMod.Builder.Logic
                     if (arg == "self") return (ctx, c) => ctx.Self != null && Areas.Contains(ctx.Self, c);
                     {
                         string areaName = arg.StartsWith("@") ? arg.Substring(1) : arg;
-                        return (ctx, c) => ctx.World.FindNamed(areaName) is { } area && Areas.Contains(area, c);
+                        // a name (a place, an attach); else a template: inside any area made from it
+                        return (ctx, c) => ctx.World.FindNamed(areaName) is { } area ? Areas.Contains(area, c)
+                            : ctx.World.Templates.ContainsKey(areaName) && Areas.InAny(ctx.World, areaName, c);
                     }
                 case "where":
                     {
@@ -824,6 +826,16 @@ namespace PalaceMod.Builder.Logic
                 }
                 return inside;
             }
+            return false;
+        }
+
+        /// <summary>`in:@template` (no entity of that name): inside any live, enabled area made from the template,
+        /// e.g. one of many spawned slime pools. Membership is evaluated now, not from the area's last poll.</summary>
+        public static bool InAny(LogicWorld world, string template, LogicEntity e)
+        {
+            if (e.Alive && LogicServices.Areas?.InAny(template, e) is bool r) return r;
+            foreach (var a in world.Entities)
+                if (a.Template == template && a.Kind == "area" && a.Exists && a.Enabled && Contains(a, e)) return true;
             return false;
         }
     }

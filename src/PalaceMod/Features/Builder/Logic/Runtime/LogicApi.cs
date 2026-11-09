@@ -403,6 +403,9 @@ namespace PalaceMod.Builder.Logic
     {
         /// <summary>null: not an area (the core then answers from the area's `shape`).</summary>
         bool? Contains(LogicEntity area, LogicEntity e);
+        /// <summary>`in:@template`: inside any live area made from that template (null: unknown, the core then
+        /// checks the world's area entities by shape).</summary>
+        bool? InAny(string template, LogicEntity e);
     }
 
     /// <summary>
