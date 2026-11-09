@@ -142,7 +142,7 @@ namespace PalaceMod.Builder.Logic.Bodies
                         var node = astar.GetNearest(p, NearestNodeConstraint.None).node;
                         if (node != null) tags[node.Tag] = tags.TryGetValue(node.Tag, out int k) ? k + 1 : 1;
                     }
-                    var sample = Object.FindObjectsOfType<PathfindMovementEnemy>().Take(6).Select(m => $"({m.transform.position.x:0},{m.transform.position.z:0})->{(m.SeekToTargetObj != null ? m.SeekToTargetObj.name : "home")}");
+                    var sample = Object.FindObjectsOfType<PathfindMovementEnemy>().Take(6).Select(m => $"({m.transform.position.x:0},{m.transform.position.z:0})->{(m.SeekToTargetObj != null ? m.SeekToTargetObj.name : "home")} mask {m.GetComponent<Seeker>().traversableTags}");
                     return $"{inside}/{total} inside; tags under enemies: {string.Join(", ", tags.Select(t => $"{t.Key}:{t.Value}"))}; e.g. {string.Join(" ", sample)}";
                 }
                 case "walk":
