@@ -15,13 +15,14 @@ namespace PalaceMod
         public override void Awake(Plugin plugin)
         {
             base.Awake(plugin);
-            DevCommands.Register("logic-l2", "logic-l2 nav ...   world-verb spikes and checks (L2)", args =>
+            DevCommands.Register("logic-l2", "logic-l2 nav ... | act <action> [json] [self=<role>] [other=<role>]   world verbs (L2): spikes, run an action with literal params", args =>
             {
                 string sub = args.FirstOrDefault() ?? "";
                 return sub switch
                 {
                     "nav" => NavSpike.Run(args.Skip(1).ToArray()),
-                    _ => "logic-l2 nav ...",
+                    "act" => DevAct.Run(args.Skip(1).ToArray()),
+                    _ => "logic-l2 nav ... | act <action> [json] [self=<role>] [other=<role>]",
                 };
             });
         }
