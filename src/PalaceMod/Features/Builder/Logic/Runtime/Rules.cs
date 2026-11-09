@@ -35,7 +35,8 @@ namespace PalaceMod.Builder.Logic
         public string NearEdge;              // enter | exit | both
         public double Pct = -1;
 
-        public string Label => Id ?? $"rules[{Index}]";
+        /// <summary>"rules[i]": the index in its owner's own rules list as written (the trace's Rule; Path is exact).</summary>
+        public string Label => $"rules[{Index}]";
     }
 
     internal sealed class RuleInstance
@@ -89,6 +90,8 @@ namespace PalaceMod.Builder.Logic
 
         public static CompiledRule Compile(JObject json, string path, int index, List<string> errors)
         {
+            // `_src`: the rule's path in the original pack when a preset produced it (L4's expansion).
+            if (json["_src"] is JValue { Type: JTokenType.String } src) path = (string)src;
             var r = new CompiledRule { Index = index, Path = path };
             try
             {

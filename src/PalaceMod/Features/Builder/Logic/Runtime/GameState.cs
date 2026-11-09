@@ -20,7 +20,12 @@ namespace PalaceMod.Builder.Logic
 
         /// <summary>1-based: the running night, or the coming one by day (Wavenumber is -1 on day 1, n-1 during night n
         /// and the day after it).</summary>
-        public int Night => Spawner == null ? 1 : IsNight ? Spawner.Wavenumber + 1 : Spawner.Wavenumber + 2;
+        /// Between dusk and the first spawn the game is already in its night state but Wavenumber hasn't moved yet,
+        /// so "running" is tracked from StartSpawning to dawn.
+        public int Night => Spawner == null ? 1 : NightRunning ? Spawner.Wavenumber + 1 : Spawner.Wavenumber + 2;
+
+        /// <summary>From EnemySpawner.StartSpawning to dawn (LogicManager sets it).</summary>
+        public bool NightRunning;
         public int Nights => Spawner != null ? Spawner.WaveCount : 0;
         public double NightTime => IsNight && NightStartedAt >= 0 ? Time.time - NightStartedAt : 0;
 

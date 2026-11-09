@@ -59,6 +59,16 @@ namespace PalaceMod.Builder.Logic
                 startFailed = false;
             };
             SaveStates.RegisterState("logic", CaptureState, RestoreState);
+            // King action uses and cooldowns travel with the logic state (savestates and retry day).
+            LogicSaveState.Register("kingActions",
+                _ => new JObject(kingActionState.Select(kv => new JProperty(kv.Key, new JArray(kv.Value.lastUse, kv.Value.uses, kv.Value.period)))),
+                (_, tok) =>
+                {
+                    kingActionState.Clear();
+                    if (tok is JObject o)
+                        foreach (var p in o.Properties())
+                            if (p.Value is JArray a && a.Count == 3) kingActionState[p.Name] = ((double)a[0], (int)a[1], (int)a[2]);
+                });
             RegisterDevCommands();
             for (int i = 0; i < 3; i++)
                 actionKeys[i] = Keybinds.Register("Builder", $"level-action-{i + 1}", $"Level action {i + 1}",
@@ -108,7 +118,14 @@ namespace PalaceMod.Builder.Logic
             if (w == null) return;
             try { w.Tick(Time.deltaTime); }
             catch (Exception e) { Log.Error("Behaviour engine tick failed", e); }
+            if (snapshotAfterTick)
+            {
+                snapshotAfterTick = false;
+                OnDawnSnapshot();
+            }
         }
+
+        private bool snapshotAfterTick;
 
         private void StartWorld(BuilderSessionInfo session)
         {
@@ -123,16 +140,24 @@ namespace PalaceMod.Builder.Logic
             var logic = level?["logic"] as JObject;
 
             var templates = new List<(string, JObject)>();
-            foreach (var u in (pack["units"] as JArray)?.OfType<JObject>() ?? [])
-            {
-                var t = (JObject)u.DeepClone();
-                t["kind"] ??= "unit";
-                templates.Add(((string)u["id"], t));
-            }
-            foreach (var en in (pack["entities"] as JArray)?.OfType<JObject>() ?? []) templates.Add(((string)en["id"], en));
+            // "_path": where the template is in the pack, for the trace and errors.
+            if (pack["units"] is JArray units)
+                for (int i = 0; i < units.Count; i++)
+                    if (units[i] is JObject u)
+                    {
+                        var t = (JObject)u.DeepClone();
+                        t["kind"] ??= "unit";
+                        t["_path"] = $"units[{i}]";
+                        templates.Add(((string)u["id"], t));
+                    }
+            if (pack["entities"] is JArray ents)
+                for (int i = 0; i < ents.Count; i++)
+                    if (ents[i] is JObject en) { en["_path"] = $"entities[{i}]"; templates.Add(((string)en["id"], en)); }
             bool anything = logic != null || templates.Any(t => t.Item2["rules"] is JArray { Count: > 0 }) || pack["entities"] is JArray { Count: > 0 };
 
             var world = new LogicWorld();
+            game.NightRunning = game.IsNight;
+            game.NightStartedAt = game.IsNight ? Time.time : -1;
             LogicServices.Game = game;
             LogicServices.Spatial = spatial;
             world.TraceListener = OnTrace;
@@ -148,7 +173,11 @@ namespace PalaceMod.Builder.Logic
                     if (placeList[i] is JObject p && MakePlace(world, p, $"levels[{levelIndex}].logic.places[{i}]")) places++;
             if (logic?["attach"] is JObject attachList)
                 foreach (var prop in attachList.Properties())
-                    if (prop.Value is JObject a && MakeAttach(world, prop.Name, a)) attaches++;
+                    if (prop.Value is JObject a)
+                    {
+                        a["_path"] = $"levels[{levelIndex}].logic.attach[\"{prop.Name}\"]";
+                        if (MakeAttach(world, prop.Name, a)) attaches++;
+                    }
 
             HookGame(world);
             LogicWorld.RaiseStarted(world);
@@ -192,6 +221,7 @@ namespace PalaceMod.Builder.Logic
         private bool MakePlace(LogicWorld world, JObject place, string path)
         {
             string id = (string)place["id"] ?? path;
+            place["_path"] = path;
             string template = (string)place["entity"];
             if (template != null && template.StartsWith("@@")) template = template.Substring(2);
             var pos = ReadPos(place["pos"] ?? place["at"]);
@@ -425,11 +455,13 @@ namespace PalaceMod.Builder.Logic
             {
                 var w = World;
                 instance.incomeCounting = false;
+                int ended = instance.game.Night;
+                instance.game.NightRunning = false;
                 if (w == null) return;
                 // Dawn order: income is paid (buildings' own dawn callbacks run before ours), then `dawn` rules.
-                w.Raise("dawn", w.Level, null, instance.game.Night - 1, null, null);
+                w.Raise("dawn", w.Level, null, ended, null, null);
                 w.Raise("day", w.Level, null, instance.game.Night, null, null);
-                w.Defer(() => instance.OnDawnSnapshot());
+                instance.snapshotAfterTick = true;   // after the `dawn` rules have run
             }
         }
 

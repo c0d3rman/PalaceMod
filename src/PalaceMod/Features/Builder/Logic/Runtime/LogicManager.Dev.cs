@@ -12,7 +12,17 @@ namespace PalaceMod.Builder.Logic
     {
         private const string Usage =
             "logic status | vars [entity] | trace [n] | budget | entities [filter] | fire <signal> [to-selector] [value] | " +
-            "set <var|entity.var> <expr> | eval <expr> | do <action json> | king <1-3> | snapshot   the behaviour engine";
+            "set <var|entity.var> <expr> | eval <expr> | do <action json> | raise <event> <on-selector> [other-selector] [name] [value] | " +
+            "king <1-3> | snapshot   the behaviour engine";
+
+        /// <summary>Schema actions with no runtime handler yet (the interpreter's own control actions excluded).</summary>
+        private static string MissingHandlers()
+        {
+            var missing = Model.Logic.LogicSchema.Actions.Values
+                .Where(a => !ActionCompiler.Control.Contains(a.Name) && !LogicActions.IsRegistered(a.Name))
+                .Select(a => $"{a.Name} ({a.Owner})").ToList();
+            return missing.Count == 0 ? "\n  every schema action has a handler" : $"\n  no handler yet: {string.Join(", ", missing)}";
+        }
 
         private void RegisterDevCommands()
         {
@@ -35,7 +45,8 @@ namespace PalaceMod.Builder.Logic
                             return $"time {w.Time:0.0}s frame {w.Frame}, {w.Entities.Count()} entities, {w.Entities.Sum(e => e.Rules.Count) + w.Level.Rules.Count} rule instances, " +
                                 $"{w.FiringsTotal} firings, {w.ActionsTotal} action steps, pending tasks {w.PendingTasks}, queued {b.QueuedEvents}; " +
                                 $"throttled {b.Throttled}, dropped {b.Dropped}, capped spawns {b.CappedSpawns}, errors {b.Errors}, compile problems {w.CompileErrors.Count}" +
-                                (w.CompileErrors.Count > 0 ? "\n  " + string.Join("\n  ", w.CompileErrors.Take(10)) : "");
+                                (w.CompileErrors.Count > 0 ? "\n  " + string.Join("\n  ", w.CompileErrors.Take(10)) : "") +
+                                MissingHandlers();
                         }
                     case "vars":
                         {
@@ -109,6 +120,18 @@ namespace PalaceMod.Builder.Logic
                             w.Drain();
                             var newErrors = w.Trace.Where(t => t.Outcome == TraceOutcome.Error).Skip(errorsBefore).Select(t => t.Message).ToList();
                             return newErrors.Count == 0 ? $"ran {arr.Count} action(s)" : "errors: " + string.Join("; ", newErrors);
+                        }
+                    case "raise":
+                        {
+                            // A synthetic event, as if the game raised it (fixtures: "a foe died in the circle").
+                            if (args.Length < 3) throw new ArgumentException("raise <event> <on-selector> [other-selector|-] [name|-] [value]");
+                            var on = Values.ToEntity(w.Evaluate(args[2], ctx)) ?? throw new ArgumentException($"\"{args[2]}\" is no entity");
+                            var other = args.Length > 3 && args[3] != "-" ? Values.ToEntity(w.Evaluate(args[3], ctx)) : null;
+                            string name = args.Length > 4 && args[4] != "-" ? args[4] : null;
+                            double value = args.Length > 5 ? double.Parse(args[5], System.Globalization.CultureInfo.InvariantCulture) : 0;
+                            w.Raise(args[1], on, other, value, on.Position, name);
+                            w.Drain();
+                            return $"raised {args[1]} on {on.Id}" + (other != null ? $" (other {other.Id})" : "");
                         }
                     case "king":
                         {

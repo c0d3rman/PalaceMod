@@ -111,7 +111,9 @@ namespace PalaceMod.Builder.Logic
                     float dealt = __state.Hp - __instance.HpValue;
                     if (dealt <= 0f && !__result) return;   // nothing happened (skipped, invulnerable, already dead)
                     var victim = Of(__instance, __result ? "death" : "damaged");
-                    var source = _damageComingFrom != null ? Of(_damageComingFrom, __result ? "kill" : "hit") : null;
+                    Component from = _damageComingFrom != null ? _damageComingFrom : currentAttacker;
+                    var source = from == null ? null : __result ? Of(from, "kill") ?? Of(from, "hit") : Of(from, "hit");
+                    if (source == null && _damageComingFrom == null) source = LogicServices.CurrentDamageSource?.Invoke();
                     if (victim == null && source == null) return;
                     // Credit a Builder projectile's hit to its owner as well (doc: hit/kill go to a projectile's owner).
                     var credited = source?.Kind == "projectile" && source.Owner != null ? source.Owner : source;
@@ -167,6 +169,15 @@ namespace PalaceMod.Builder.Logic
 
         // ------------------------------------------------------------------ attacks
 
+        /*
+            Attribution. A tower's AutoAttack sits on a child without a TaggedObject, so the game passes a null attacker
+            to Weapon.Attack and its arrows' TakeDamage. Without changing what the game passes (that would change aggro),
+            the attacking component is remembered here: during OnAttack (direct weapons), and per projectile from Fire
+            to its hit (AimbotProjectile.Update), and TakeDamage's postfix falls back to it.
+        */
+        private static Component currentAttacker;
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<AimbotProjectile, Component> shooterOf = new();
+
         [HarmonyPatch]
         private static class AutoAttack_Patch
         {
@@ -176,12 +187,42 @@ namespace PalaceMod.Builder.Logic
                     .Select(t => t.GetMethod(nameof(AutoAttack.OnAttack), BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly, null, [typeof(TaggedObject)], null))
                     .Where(m => m != null && m.GetMethodBody() != null);
 
-            private static void Postfix(AutoAttack __instance, TaggedObject target)
+            private static void Prefix(AutoAttack __instance, out Component __state)
             {
+                __state = currentAttacker;
+                if (World != null) currentAttacker = __instance;
+            }
+
+            private static void Postfix(AutoAttack __instance, TaggedObject target, Component __state)
+            {
+                currentAttacker = __state;
                 if (!Listening("attack")) return;
                 var e = Of(__instance, "attack");
                 if (e != null) World.Raise("attack", e, target != null ? LogicGame.EntityOf(target) : null, 0, null, null);
             }
+        }
+
+        [HarmonyPatch(typeof(AimbotProjectile), nameof(AimbotProjectile.Fire))]
+        private static class ProjectileFire_Patch
+        {
+            private static void Postfix(AimbotProjectile __instance)
+            {
+                if (World == null || currentAttacker == null) return;
+                shooterOf.Remove(__instance);
+                shooterOf.Add(__instance, currentAttacker);
+            }
+        }
+
+        [HarmonyPatch(typeof(AimbotProjectile), "Update")]
+        private static class ProjectileUpdate_Patch
+        {
+            private static void Prefix(AimbotProjectile __instance, out Component __state)
+            {
+                __state = currentAttacker;
+                if (World != null && shooterOf.TryGetValue(__instance, out var c)) currentAttacker = c;
+            }
+
+            private static void Postfix(Component __state) => currentAttacker = __state;
         }
 
         [HarmonyPatch(typeof(ManualAttack), nameof(ManualAttack.Attack))]
@@ -209,6 +250,7 @@ namespace PalaceMod.Builder.Logic
                 var w = World;
                 if (w == null) return;
                 instance.waveClearedRaised = false;
+                instance.game.NightRunning = true;
                 w.Raise("nightStart", w.Level, null, __instance.Wavenumber + 1, null, null);
             }
         }
@@ -218,7 +260,18 @@ namespace PalaceMod.Builder.Logic
         [HarmonyPatch(typeof(Spawn), nameof(Spawn.Update))]
         private static class SpawnUpdate_Patch
         {
-            private static void Prefix(Spawn __instance) => currentSpawn = World != null ? __instance : null;
+            // A disabled spawn line (an attached `line:` entity switched off by `disable`) pauses its groups: their
+            // spawn timers don't run, so the night's schedule (and nightProgress) waits for it.
+            private static bool Prefix(Spawn __instance)
+            {
+                currentSpawn = null;
+                if (World == null) return true;
+                var line = __instance.spawnLine;
+                if (line != null && line.GetComponentInParent<BuilderEntity>() is { Entity: { Enabled: false } }) return false;
+                currentSpawn = __instance;
+                return true;
+            }
+
             private static void Postfix() => currentSpawn = null;
         }
 

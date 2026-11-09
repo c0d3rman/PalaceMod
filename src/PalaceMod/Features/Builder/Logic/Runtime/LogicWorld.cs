@@ -229,19 +229,21 @@ namespace PalaceMod.Builder.Logic
             Labels(tdef?["labels"]);
             Labels(e.Def?["labels"]);
             if (tdef?["rules"] is JArray tr) foreach (var r in tr) if (r is JObject ro && ro["preset"] is JValue pv && Presets.TryGetValue((string)pv ?? "", out var pre)) Vars(Logic.Presets.Vars(pre, ro["with"] as JObject), $"presets.{pv}.vars");
-            Vars(tdef?["vars"], $"templates.{e.Template}.vars");
-            Vars(place?["vars"], $"{e.Id}.vars");
+            // JSON paths for errors and the trace: the host stamps "_path" on templates and places/attaches.
+            string tpath = (string)tdef?["_path"] ?? $"templates.{e.Template}", ppath = (string)place?["_path"] ?? e.Id;
+            Vars(tdef?["vars"], $"{tpath}.vars");
+            Vars(place?["vars"], $"{ppath}.vars");
 
             if (e.Template != null && tdef != null)
             {
                 if (!templateRules.TryGetValue(e.Template, out var rules))
                 {
-                    rules = RuleCompiler.CompileAll(tdef["rules"] as JArray, $"templates.{e.Template}.rules", Presets, CompileErrors);
+                    rules = RuleCompiler.CompileAll(tdef["rules"] as JArray, $"{tpath}.rules", Presets, CompileErrors);
                     templateRules[e.Template] = rules;
                 }
                 foreach (var r in rules) AddInstance(e, r, null);
             }
-            if (place?["rules"] is JArray pr) AttachRules(e, pr, $"{e.Id}.rules");
+            if (place?["rules"] is JArray pr) AttachRules(e, pr, $"{ppath}.rules");
 
             if (e.Spawned) { liveSpawned++; CountCap(e, +1); }
             Raise("spawn", e, e.Owner, 0, null, null, 0);
@@ -401,21 +403,25 @@ namespace PalaceMod.Builder.Logic
         public void Raise(string name, LogicEntity subject, LogicEntity other, double value, Vec? pos, string text, int depth = 0)
         {
             if (depth > Caps.ChainDepth) { Drop(name, subject); return; }
+            if (queue.Count >= Caps.Queue) { Drop(name, subject, full: true); return; }
             queue.Enqueue(new LogicEvent { Name = name, Subject = subject, Other = other, Value = value, Pos = pos, Text = text, Depth = depth, Seq = ++seq });
         }
 
         public void Signal(string name, IReadOnlyList<LogicEntity> to, double value, LogicEntity sender, int depth = 0)
         {
             if (depth > Caps.ChainDepth) { Drop("signal " + name, sender); return; }
+            if (queue.Count >= Caps.Queue) { Drop("signal " + name, sender, full: true); return; }
             queue.Enqueue(new LogicEvent { Name = "signal", Text = name, Other = sender, Subject = sender, Value = value, Depth = depth, Seq = ++seq, Target = to ?? (object)Broadcast });
         }
 
         private static readonly object Broadcast = new();
 
-        private void Drop(string what, LogicEntity e)
+        private void Drop(string what, LogicEntity e, bool full = false)
         {
             dropped++;
-            if (droppedThisFrame++ == 0) TraceAdd(e?.Id ?? "?", null, null, what, TraceOutcome.Dropped, $"chain deeper than {Caps.ChainDepth} (a loop of events?); dropped", 0, null);
+            if (droppedThisFrame++ == 0)
+                TraceAdd(e?.Id ?? "?", null, null, what, TraceOutcome.Dropped,
+                    full ? $"over {Caps.Queue} events waiting (a fan-out loop?); dropped" : $"chain deeper than {Caps.ChainDepth} (a loop of events?); dropped", 0, null);
         }
 
         /// <summary>Deliver one event to every rule that hears it.</summary>

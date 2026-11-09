@@ -605,7 +605,9 @@ for agents), `reference.md` and a test that every entry has a runtime handler al
 | `healed` | `Hp.Heal` postfix |
 | `attack` | `AutoAttack.OnAttack` postfix and the overrides (`AutoAttackTower`, `...WithKnockback`, `...WithWarning`), `ManualAttack` (the king), and `BuilderAttack` |
 | `dusk`/`dawn`/`day` | one `DayNightCycle.IDaytimeSensitive` registered by the world |
-| `nightStart`, `waveCleared` | `EnemySpawner` wave number change; `SpawningInProgress` false and `NumberOfEnemiesOnTheMap == 0` |
+| `nightStart`, `waveCleared` | `EnemySpawner.StartSpawning` postfix; polled: `SpawningInProgress` false and no `EnemyOwned` object left, once per night |
+| `lineSpawn` | `Spawn.Update` (the spawning group) around `TagManager.AddTaggedObject` |
+| `coinDrop` / `coinPickup` | `Coin.Start` postfix / `PlayerInteraction.AddCoin` inside `Coin.Update` |
 | `built`/`upgraded` | `BuildSlot.OnUpgrade` subscriptions at level start (and on added slots) |
 | `death`/`repaired` (buildings) | a building's `Hp` knock-out (it has `getsKnockedOutInsteadOfDying`) / `Hp.Revive` postfix |
 | `goldChanged` | `PlayerInteraction.onBalanceGain` / `onBalanceSpend` |
@@ -691,6 +693,48 @@ throttles per second.
   rules use `once`/vars, not waits, for state that matters.
 - **Retry day.** The world keeps an in-memory copy of the same state at each dawn. The game's "Retry Day" restores the
   copy for that dawn, so logic state matches the rewound match.
+
+### Runtime core as built (L1)
+
+Where the build settles what the text above leaves open:
+
+- **Files.** `Logic/Runtime/`: pure C# (`LogicApi`, `LogicWorld`, `Rules`, `Actions` (compiler and interpreter),
+  `CoreActions`, `ExprCompiler`, `Values`, `LogicSnapshot`), run by `tests/PalaceMod.Tests/LogicCoreTests.cs` with a
+  fake world; Unity side (`LogicManager` + `.Hooks` + `.Dev`, `GameState`, `LogicGame`, `LogicGameWorld`,
+  `BuilderEntity`).
+- **Steps.** Timers and `wait`s run on 0.05 s steps of game time, `near` polling and `LogicWorld.Polled` (L2's areas)
+  on every other step (10 Hz). Waits resume in due-time, then creation order.
+- **Bodies of `repeat`/`forEach`** are `"actions"`: `"do"` is already the action's type.
+- **`when` params.** `name`, `attack`, `status`, `action`, `line` and `result` compare `event.name`; `night` and
+  `level` compare `event.value`; `min` is `event.value >= min`. `hpBelow` hears only its owner (no `of`).
+- **Global events** (`levelStart`, `levelEnd`, `dusk`, `nightStart`, `dawn`, `day`, `waveCleared`, `goldChanged`,
+  `kingAction`) reach every rule with that `when`, wherever it lives (a merc's `dawn` rule, a bridge's `dusk` rule).
+- **Selectors** skip dead entities unless the filter says `dead`, and skip self and the anchor unless it says `self`.
+  `foe`/`ally` are relative to self's team; a neutral self treats both sides as foes; nobody's foe is neutral.
+- **Division by zero** is 0, `pow` overflow 0: an expression never yields NaN or infinity.
+- **Attribution.** A tower's `AutoAttack` has no `TaggedObject`, so the game passes a null attacker to its arrows.
+  The hooks remember the attacking component (during `OnAttack`, and per `AimbotProjectile` from `Fire` to its hit)
+  and credit `hit`/`kill` to it, without changing what the game passes (that would change aggro).
+- **Wave clones of Builder units** carry `BuilderEntity.TemplateId` (set on the template by `UnitFactory`), so they
+  register in `Start` with the template's rules. They aren't "spawned" for the caps or savestates (the game restores
+  them as its own enemies).
+- **Night numbers.** `night` is the running night from the first spawn to dawn, else the coming one; `dusk` carries
+  the coming night, `dawn` the night that ended.
+- **Caps** come from `logic.caps` (`entities`, `units`, `projectiles`, `perTemplate`, `firingsPerFrame`,
+  `actionsPerFrame`), clamped to `LogicCaps.Max`; a projectile counts only against `projectiles`. A fixed bound of
+  10000 waiting events catches fan-out loops (each firing raising many events) that chain depth alone doesn't bound.
+- **Spawn lines.** An attached `line:` entity switched off (`disable`, or the `disable` signal) pauses its spawn groups
+  (`Spawn.Update` is skipped for them), so the night's schedule and `nightProgress` wait for it.
+- **Savestates and retry day.** The world starts only once a restore is over; a restore's state is applied to the
+  freshly set-up level instead of `levelStart` (and the places' `spawn` events are dropped). A snapshot is kept at
+  each dawn by wave number; a reload that starts mid-run (retry day) applies the snapshot for its wave.
+- **Dev command** `logic status | vars [sel] | trace [n] | budget | entities [filter] | fire <signal> [to] [value] |
+  set <var|sel.var> <expr> | eval <expr> | do <actions json> | raise <event> <on> [other] [name] [value] |
+  king <1-3> | snapshot`. `eval` and `do` run as the level script.
+- **API for game code.** `LogicExpr.Compile/Filter/Text/Matches`, `world.Evaluate/Interpolate`, `world.Defer(list,
+  ctx)` / `Defer(Action)` for callbacks outside the drain, `world.Spawn` (caps, then `IEntityFactory.Build`),
+  `world.AttachRules/DetachRules` (status rules), `LogicActions.RegisterInput` (built-in inputs; `enable`/`disable`
+  handlers also hear `world.SetEnabled`), `LogicWorld.Started/Ending/Polled`.
 
 ### Sessions, the Studio and the arena
 

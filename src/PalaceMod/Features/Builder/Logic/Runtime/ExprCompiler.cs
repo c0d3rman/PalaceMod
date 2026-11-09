@@ -108,7 +108,26 @@ namespace PalaceMod.Builder.Logic
 
         private static Eval Role(string name)
         {
-            string role = ResolveAlias(name);
+            // Aliases (killer, victim, attacker, ...) name `other` or `subject` per event: resolve at run time.
+            if (!Expr.Roles.Contains(name))
+            {
+                var bySubject = Role("subject");
+                var byOther = Role("other");
+                string fallback = ResolveAlias(name);
+                return ctx =>
+                {
+                    if (ctx.Locals != null && ctx.Locals.TryGetValue(name, out var local)) return local;
+                    string ev = ctx.Event?.Name;
+                    string role = ev != null && LogicSchema.Events.TryGetValue(ev, out var spec) && spec.Aliases.TryGetValue(name, out var r) ? r : fallback;
+                    return role switch
+                    {
+                        "subject" => bySubject(ctx),
+                        "other" => byOther(ctx),
+                        _ => throw new LogicError($"\"{name}\" isn't defined here"),
+                    };
+                };
+            }
+            string role = name;
             Eval Local(Eval fallback) => ctx => ctx.Locals != null && ctx.Locals.TryGetValue(name, out var v) ? v : fallback(ctx);
             return role switch
             {
