@@ -238,6 +238,8 @@ namespace PalaceMod.Builder.Studio
         public static IStudioColors Colors;
         /// <summary>The Enemy Studio (R2-C2 installs it). Null: callers fall back to the pack editor's unit page.</summary>
         public static IStudioEnemyEditor Enemies;
+        /// <summary>The Entity Studio (non-unit templates: projectiles, props, pickups, areas, logic objects).</summary>
+        public static IStudioEntityEditor Entities;
     }
 
     internal interface IStudioColors
@@ -261,6 +263,17 @@ namespace PalaceMod.Builder.Studio
         /// <param name="unitId">The unit to edit, or null to start a new enemy (the editor adds it to the draft).</param>
         /// <param name="returnToLevelStudio">Opened from a running Level Studio: come back to it exactly as it was.</param>
         bool Open(PackDraft draft, string unitId, bool returnToLevelStudio, Action<string> onReturn, out string error);
+    }
+
+    internal interface IStudioEntityEditor
+    {
+        /// <summary>Opens a thing (a pack `entities[]` template) of a draft: in place over a running Level Studio (Back
+        /// restores it), else on its own arena.</summary>
+        /// <param name="templateId">The thing to edit, or null for a new one.</param>
+        /// <param name="newKind">For a new thing: "projectile" | "prop" | "pickup" | "area" | "logic"; null shows the kind
+        /// picker.</param>
+        /// <param name="onReturn">Gets the thing's id (or null) on Back.</param>
+        bool Open(PackDraft draft, string templateId, string newKind, Action<string> onReturn, out string error);
     }
 
     /// <summary>The editor state F5 keeps: W1 captures and restores it, W2 stores it across the swap.</summary>

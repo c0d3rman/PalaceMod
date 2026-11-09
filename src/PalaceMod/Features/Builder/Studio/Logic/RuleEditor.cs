@@ -291,7 +291,7 @@ namespace PalaceMod.Builder.Studio.Logic
                 bool spawns = ui.Name is "spawn" or "launch";
                 foreach (var nested in ui.Nested)
                 {
-                    page.Text(LogicFields.Dim($"{indent}{LogicCatalog.Humanize(nested)}{(spawns && nested == "then" ? " (spawned: the new one)" : nested == "onImpact" ? " (other: what it hit)" : "")}"));
+                    page.Text(LogicFields.Dim($"{indent}{LogicCatalog.Humanize(nested)}{(spawns && nested == "then" ? " (spawned: the new one)" : nested == "onImpact" ? " (other: the thing it hit)" : "")}"));
                     var child = path.ToList();
                     child.Add((index, nested));
                     ActionList(page, rule, child, ev, depth + 1, spawned || (spawns && nested == "then"));

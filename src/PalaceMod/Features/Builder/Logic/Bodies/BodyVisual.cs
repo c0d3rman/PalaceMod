@@ -8,7 +8,7 @@ using UnityEngine;
     The look of a non-unit entity (`visual` on an EntityDef): any scenery mesh ("mesh:Tree_02", the map's or the
     cross-map library's), any unit's model ("unit:<catalog id>"), or an imported pack asset, drawn on a child
     "PalaceBuilder Visual" so the body (collider, cut, components) stays on the root. `meshScale` scales it, `tint`
-    tints copies of its materials, `meshRotY`/`meshRotX` turn it, and `motion: "spin"`... is the projectile's `spin`.
+    tints copies of its materials, `meshRotX/Y/Z` turn it, `meshOffset` moves it (metres), and `motion: "spin"`... is the projectile's `spin`.
 */
 namespace PalaceMod.Builder.Logic.Bodies
 {
@@ -45,7 +45,8 @@ namespace PalaceMod.Builder.Logic.Bodies
 
             var container = new GameObject(ChildName);
             container.transform.SetParent(root.transform, false);
-            container.transform.localRotation = Quaternion.Euler(v.MeshRotX ?? 0f, v.MeshRotY ?? 0f, 0f);
+            container.transform.localRotation = Quaternion.Euler(v.MeshRotX ?? 0f, v.MeshRotY ?? 0f, v.MeshRotZ ?? 0f);
+            if (v.MeshOffset is { Length: 3 } o) container.transform.localPosition = new Vector3(o[0], o[1], o[2]);
             container.transform.localScale = Vector3.one * (v.MeshScale ?? 1f) * (v.Scale ?? 1f);
             Color? tint = v.Tint != null && ColorUtility.TryParseHtmlString(v.Tint, out var c) ? c : null;
             foreach (var s in parts)

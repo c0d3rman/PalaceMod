@@ -18,6 +18,23 @@ namespace PalaceMod.Builder.Logic
     public sealed partial class LogicManager
     {
         private bool arenaWorld;
+        /// <summary>While true the arena's world lives (EnemyArena.Running, or the Entity Studio's test).</summary>
+        private Func<bool> arenaAlive;
+
+        /// <summary>The Entity Studio's launch test: a throwaway world like the arena fight's, built from the pack plus
+        /// <paramref name="extra"/> templates (the test dummy), alive while <paramref name="alive"/> says so.</summary>
+        internal static bool StartStudioWorld(DesignPack pack, IEnumerable<(string, JObject)> extra, Func<bool> alive, out string error)
+        {
+            error = null;
+            if (instance == null) { error = "the behaviour engine isn't running"; return false; }
+            try { instance.StartArenaWorld(pack, extra, alive); return true; }
+            catch (Exception e)
+            {
+                Log.For<LogicManager>().Error("Couldn't start the Entity Studio's test world", e);
+                error = e.Message;
+                return false;
+            }
+        }
 
         [HarmonyPatch(typeof(EnemyArena), nameof(EnemyArena.Start))]
         private static class ArenaStart_Patch
@@ -30,7 +47,7 @@ namespace PalaceMod.Builder.Logic
             }
         }
 
-        private void StartArenaWorld(DesignPack pack)
+        private void StartArenaWorld(DesignPack pack, IEnumerable<(string, JObject)> extra = null, Func<bool> alive = null)
         {
             if (World != null) EndWorld("arena fight starting");
             var json = LogicPack.Expand(JObject.Parse(PackSerializer.WriteCompact(pack)), pack, out var issues);
@@ -47,6 +64,7 @@ namespace PalaceMod.Builder.Logic
             if (json["entities"] is JArray ents)
                 for (int i = 0; i < ents.Count; i++)
                     if (ents[i] is JObject en) { en["_path"] = $"entities[{i}]"; templates.Add(((string)en["id"], en)); }
+            if (extra != null) templates.AddRange(extra);
 
             var world = new LogicWorld();
             LogicServices.Game = new ArenaGameState(game);
@@ -54,6 +72,7 @@ namespace PalaceMod.Builder.Logic
             world.TraceListener = OnTrace;
             LogicWorld.Current = world;
             arenaWorld = true;
+            arenaAlive = alive ?? (() => EnemyArena.Running);
             startedScene = SceneManager.GetActiveScene();
             loggedTrace.Clear();
             world.Load(null, templates, (json["statuses"] as JArray)?.OfType<JObject>(), (json["presets"] as JArray)?.OfType<JObject>(), "arena");
