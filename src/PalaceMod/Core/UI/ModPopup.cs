@@ -243,7 +243,7 @@ namespace PalaceMod
             if (text == null) return;
             // Fields lay out their own value (indented beside the label); leave them be.
             var value = row.transform.Find("Value")?.GetComponent<TextMeshProUGUI>();
-            if (value != null && value.margin.x > 0f) return;
+            if (value != null && (value.margin.x > 0f || ModField.LaysOut(value))) return;
             // The wrapped label keeps clear of the value on the right.
             if (value != null && !string.IsNullOrEmpty(value.text))
                 text.margin = new Vector4(text.margin.x, text.margin.y, Mathf.Max(text.margin.z, value.GetPreferredValues(value.text, 100000f, 100f).x + 16f), text.margin.w);
