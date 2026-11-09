@@ -2630,12 +2630,14 @@ def check_pack(ref, data):
         flat = lv.get("base") == "flat" and lv.get("terrain")
         T = Terrain(lv["terrain"]) if flat else None
         g = None if flat else Grid(m["grid"])
+        # A map's own ground sculpted by the level: the pack holds offsets from the host's ground.
+        S = Terrain(lv["terrain"], host=g.height) if not flat and lv.get("terrain") and lv["terrain"].get("heights") else None
         # A Bridge (Uferwind's) is built over water or a gap: its centre is off the ground by design.
         pts = [(s.label, s.pos) for s in slots.values() if s.kind != "Bridge"
                and (s.added or any(e.get("ref") == s.key and e.get("pos") for e in bs.get("edit") or []))]
         for label, pos in pts:
             x, y, z = pos
-            gy = T.height_at(x, z) if T else g.height(x, z)
+            gy = T.height_at(x, z) if T else S.height_at(x, z) if S and S.sculpted_at(x, z) else g.height(x, z)
             if gy is None:
                 err(f"{p}.buildSlots", f"{label} at ({x:.0f}, {z:.0f}) is off the map's ground")
                 continue
