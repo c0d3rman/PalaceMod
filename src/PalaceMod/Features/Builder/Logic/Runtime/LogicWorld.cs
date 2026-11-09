@@ -229,19 +229,21 @@ namespace PalaceMod.Builder.Logic
             Labels(tdef?["labels"]);
             Labels(e.Def?["labels"]);
             if (tdef?["rules"] is JArray tr) foreach (var r in tr) if (r is JObject ro && ro["preset"] is JValue pv && Presets.TryGetValue((string)pv ?? "", out var pre)) Vars(Logic.Presets.Vars(pre, ro["with"] as JObject), $"presets.{pv}.vars");
-            Vars(tdef?["vars"], $"templates.{e.Template}.vars");
-            Vars(place?["vars"], $"{e.Id}.vars");
+            // JSON paths for errors and the trace: the host stamps "_path" on templates and places/attaches.
+            string tpath = (string)tdef?["_path"] ?? $"templates.{e.Template}", ppath = (string)place?["_path"] ?? e.Id;
+            Vars(tdef?["vars"], $"{tpath}.vars");
+            Vars(place?["vars"], $"{ppath}.vars");
 
             if (e.Template != null && tdef != null)
             {
                 if (!templateRules.TryGetValue(e.Template, out var rules))
                 {
-                    rules = RuleCompiler.CompileAll(tdef["rules"] as JArray, $"templates.{e.Template}.rules", Presets, CompileErrors);
+                    rules = RuleCompiler.CompileAll(tdef["rules"] as JArray, $"{tpath}.rules", Presets, CompileErrors);
                     templateRules[e.Template] = rules;
                 }
                 foreach (var r in rules) AddInstance(e, r, null);
             }
-            if (place?["rules"] is JArray pr) AttachRules(e, pr, $"{e.Id}.rules");
+            if (place?["rules"] is JArray pr) AttachRules(e, pr, $"{ppath}.rules");
 
             if (e.Spawned) { liveSpawned++; CountCap(e, +1); }
             Raise("spawn", e, e.Owner, 0, null, null, 0);
