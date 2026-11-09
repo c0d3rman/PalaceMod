@@ -24,6 +24,27 @@ namespace PalaceMod.Builder.Level
         /// <summary>Extra renderers to rasterize while scanning (the ground layer's own walls and air surface).</summary>
         public static readonly List<MeshRenderer> Extra = [];
 
+        /// <summary>Asks for a rescan in a moment (BuilderLevelManager runs it), e.g. once a copied bridge is
+        /// built and its deck is up.</summary>
+        public static void ScanSoon(string why)
+        {
+            ScanAt = Time.realtimeSinceStartup + 1.5f; // after the build animation (the deck grows in)
+            scanReason = why;
+        }
+
+        public static float ScanAt = -1f;
+        private static string scanReason;
+
+        /// <summary>Runs the rescan ScanSoon asked for, once its frame has come.</summary>
+        public static void RunPendingScan()
+        {
+            if (ScanAt < 0f || Time.realtimeSinceStartup < ScanAt) return;
+            ScanAt = -1f;
+            if (AstarPath.active == null) return;
+            long ms = Scan();
+            Log.For<BuilderManager>().Info($"rescan after {scanReason} was built: {ms} ms");
+        }
+
         /// <summary>minRegionSize the ground graphs are rescanned with (see Scan).</summary>
         private const float SmallRegion = 50f;
 

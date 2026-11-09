@@ -32,6 +32,17 @@ namespace PalaceMod.Builder.Level
             var astar = AstarPath.active;
             switch (what)
             {
+                case "clippers":
+                {
+                    // Navmesh cuts and adds (what changes the graphs without a rescan, e.g. a building's footprint).
+                    foreach (var c in Resources.FindObjectsOfTypeAll<NavmeshClipper>())
+                    {
+                        if (c == null || !c.gameObject.scene.IsValid()) continue;
+                        var p = c.transform.position;
+                        sb.AppendLine($"{c.GetType().Name} {Path(c.transform)} at ({p.x:0.0}, {p.y:0.0}, {p.z:0.0}) enabled={c.enabled} active={c.gameObject.activeInHierarchy}");
+                    }
+                    break;
+                }
                 case "graphs":
                 {
                     if (astar == null) return "no AstarPath";
@@ -248,7 +259,7 @@ namespace PalaceMod.Builder.Level
                     break;
                 }
                 default:
-                    return "usage: builder-terrain spike graphs|helper|king|ground|mats|paints|water|update|scan";
+                    return "usage: builder-terrain spike graphs|clippers|helper|king|ground|mats|paints|water|update|scan";
             }
             return sb.ToString();
         }
