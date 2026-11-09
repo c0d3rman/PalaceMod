@@ -105,7 +105,7 @@ namespace PalaceMod
 
             st.Hex = page.TextInput("Hex", () => "#" + ColorUtility.ToHtmlStringRGB(st.Current).ToLowerInvariant(), text =>
             {
-                if (!ColorMath.TryParseHex(text, out var c)) { Notify.Show($"\"{ModFields.TMPEscape(text)}\" isn't a colour like #8fd14f", NotifyKind.Warning, 3f, "modcolor"); return; }
+                if (!ColorTools.TryParseHex(text, out var c)) { Notify.Show($"\"{ModFields.TMPEscape(text)}\" isn't a colour like #8fd14f", NotifyKind.Warning, 3f, "modcolor"); return; }
                 Color.RGBToHSV(c, out st.H, out st.S, out st.V);
                 Changed(st, true);
             }, () => "Type a colour as #rrggbb (or rrggbb), then Enter.", 7);
@@ -301,29 +301,31 @@ namespace PalaceMod
                     }
                 }
             }
-            mapColours = ColorMath.Distinct(found.Select(f => (f.name, f.color)), 0.06f, 40).Select(f => new Swatch(f.name, f.color)).ToList();
+            mapColours = ColorTools.Distinct(found.Select(f => (f.name, f.color)), 0.06f, 40).Select(f => new Swatch(f.name, f.color)).ToList();
             return mapColours;
         }
 
-        private static bool Same(Color a, Color b) => ColorMath.Distance(a, b) < 0.02f;
+        private static bool Same(Color a, Color b) => ColorTools.Distance(a, b) < 0.02f;
     }
 
-    /// <summary>Colour helpers without UI (tests/PalaceMod.Tests covers them).</summary>
-    public static class ColorMath
+    /// <summary>Colour helpers on UnityEngine.Color (the maths is ColorMath's, which has no Unity types).</summary>
+    public static class ColorTools
     {
-        /// <summary>"#8fd14f", "8fd14f" or "#8fd" (short form).</summary>
         public static bool TryParseHex(string text, out Color color)
         {
-            color = Color.black;
-            string s = text?.Trim() ?? "";
-            if (s.StartsWith("#")) s = s.Substring(1);
-            if (s.Length == 3) s = new string([s[0], s[0], s[1], s[1], s[2], s[2]]);
-            if (s.Length != 6 || !int.TryParse(s, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int v)) return false;
-            color = new Color(((v >> 16) & 255) / 255f, ((v >> 8) & 255) / 255f, (v & 255) / 255f, 1f);
-            return true;
+            bool ok = ColorMath.TryParseHex(text, out var c);
+            color = new Color(c.r, c.g, c.b, 1f);
+            return ok;
         }
 
-        public static float Distance(Color a, Color b) => Mathf.Sqrt((a.r - b.r) * (a.r - b.r) + (a.g - b.g) * (a.g - b.g) + (a.b - b.b) * (a.b - b.b));
+        public static float Distance(Color a, Color b) => ColorMath.Distance((a.r, a.g, a.b), (b.r, b.g, b.b));
+
+        /// <summary>See ColorMath.ShadeFor.</summary>
+        public static Color ShadeFor(Color target, Color sourceLight, Color sourceShade)
+        {
+            var (r, g, b) = ColorMath.ShadeFor((target.r, target.g, target.b), (sourceLight.r, sourceLight.g, sourceLight.b), (sourceShade.r, sourceShade.g, sourceShade.b));
+            return new Color(r, g, b, target.a);
+        }
 
         /// <summary>Drops colours closer than <paramref name="minDistance"/> to one already kept (opaque only), at most
         /// <paramref name="max"/>, sorted greys first, then by hue.</summary>
@@ -339,26 +341,6 @@ namespace PalaceMod
                 if (kept.Count >= max) break;
             }
             return kept.OrderBy(k => { Color.RGBToHSV(k.color, out float h, out float s, out float v); return s < 0.12f ? -1f + v * 0.5f : h + (1f - v) * 0.001f; }).ToList();
-        }
-
-        /// <summary>
-        /// The shade (FlatKit's _ColorDim) for a new lit colour, keeping the source material's light-to-shade relation:
-        /// the same hue turn, brightness ratio and saturation change. A grey stays grey.
-        /// </summary>
-        public static Color ShadeFor(Color target, Color sourceLight, Color sourceShade)
-        {
-            Color.RGBToHSV(sourceLight, out float hl, out float sl, out float vl);
-            Color.RGBToHSV(sourceShade, out float hm, out float sm, out float vm);
-            Color.RGBToHSV(target, out float h, out float s, out float v);
-            float dh = Mathf.DeltaAngle(hl * 360f, hm * 360f) / 360f;
-            // How much more saturated the shade is, applied in proportion to the target's own colourfulness.
-            float ds = sm - sl;
-            float shadeS = Mathf.Clamp01(s + ds * Mathf.Clamp01(s * 3f));
-            float ratio = vl > 0.01f ? Mathf.Clamp(vm / vl, 0.2f, 1f) : 0.7f;
-            float hue = (h + dh * Mathf.Clamp01(s * 3f) + 1f) % 1f;
-            var c = Color.HSVToRGB(hue, shadeS, v * ratio);
-            c.a = target.a;
-            return c;
         }
     }
 }

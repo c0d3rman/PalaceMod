@@ -437,14 +437,14 @@ namespace PalaceMod.Builder.Studio.Enemies
                 {
                     string hex = null;
                     EnemyStudio.Unit?.Visuals?.Colors?.TryGetValue(p.Key, out hex);
-                    if (hex != null && ColorMath.TryParseHex(hex, out var c)) return $"{Swatch(c)}  {hex}";
+                    if (hex != null && ColorTools.TryParseHex(hex, out var c)) return $"{Swatch(c)}  {hex}";
                     return p.Original is Color o ? $"{Swatch(o)}  {Dim("original")}" : Dim("original");
                 }, () => $"Replaces the colour of the {(p.Key == ModelRef.BodyPart ? "body (the enemy colour)" : "\"" + Esc(p.Label) + "\" material")} " +
                     "outright: the lit side becomes it and the shaded side follows. Apply to pick.", () =>
                 {
                     string hex = null;
                     EnemyStudio.Unit?.Visuals?.Colors?.TryGetValue(p.Key, out hex);
-                    Color? cur = hex != null && ColorMath.TryParseHex(hex, out var c) ? c : p.Original;
+                    Color? cur = hex != null && ColorTools.TryParseHex(hex, out var c) ? c : p.Original;
                     ModColorPicker.Open($"{p.Label} colour", cur, picked => EnemyStudio.EditVisuals(picked == null ? $"Reset {p.Label.ToLowerInvariant()} colour" : $"Colour the {p.Label.ToLowerInvariant()}", v =>
                     {
                         v.Colors ??= new Dictionary<string, string>();
@@ -458,11 +458,11 @@ namespace PalaceMod.Builder.Studio.Enemies
             tint = Line(page, "Tint", () =>
             {
                 string hex = EnemyStudio.Unit?.Visuals?.Tint;
-                return hex != null && ColorMath.TryParseHex(hex, out var c) ? $"{Swatch(c)}  {hex}" : Dim("none");
+                return hex != null && ColorTools.TryParseHex(hex, out var c) ? $"{Swatch(c)}  {hex}" : Dim("none");
             }, () => "A subtle shift of the body's colour (multiplies it). For a new colour use Body above.", () =>
             {
                 string hex = EnemyStudio.Unit?.Visuals?.Tint;
-                ModColorPicker.Open("Tint", hex != null && ColorMath.TryParseHex(hex, out var c) ? c : null,
+                ModColorPicker.Open("Tint", hex != null && ColorTools.TryParseHex(hex, out var c) ? c : null,
                     picked => EnemyStudio.EditVisuals(picked == null ? "Remove tint" : "Set tint", v => v.Tint = picked is Color pc ? Hex(pc) : null, coalesce: "tint"),
                     tint?.Row.Button.transform as RectTransform, allowNone: true, noneLabel: "No tint");
             });

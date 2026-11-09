@@ -407,7 +407,7 @@ namespace PalaceMod.Builder
                 target.a = light.a;
                 clone.SetColor(baseProp, target);
                 if (clone.HasProperty("_ColorDim") && source.HasProperty("_ColorDim"))
-                    clone.SetColor("_ColorDim", ColorMath.ShadeFor(target, light, source.GetColor("_ColorDim")));
+                    clone.SetColor("_ColorDim", ColorTools.ShadeFor(target, light, source.GetColor("_ColorDim")));
             }
             if (r.Tint is Color tint)
             {
