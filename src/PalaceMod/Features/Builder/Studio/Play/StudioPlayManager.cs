@@ -30,7 +30,9 @@ namespace PalaceMod
             base.Awake(plugin);
             StudioServices.Play = StudioPlay.Instance;
             PlayKeys.Register();
-            Keybinds.ClaimContext(StudioContexts.Play, () => StudioPlay.InPlay);
+            // Test play is the real game: the sandbox keys win over other mod keys on the same input, never over the
+            // game's own (Command Units on R, tap to call and hold to hold position, must work as it does in a run).
+            Keybinds.ClaimContext(StudioContexts.Play, () => StudioPlay.InPlay, blockGame: false);
             SandboxPanel.Register();
             PauseMenu.AddButton("studio-back", BackLabel, StudioPlay.Instance.ReturnToEdit, order: -100,
                 visible: () => StudioPlay.InPlay);
@@ -53,11 +55,19 @@ namespace PalaceMod
         {
             var play = StudioPlay.Instance;
             play.Update();
+            // Restart acts once per press: after one, the key must be let go before it can act again, however long the
+            // reload took and whatever the input system reports as a fresh press after it.
+            if (restartLatched && !PlayKeys.Restart.Held) restartLatched = false;
             if (!StudioPlay.InPlay || play.Swapping) return;
             if (!Feature<BuilderManager>.On) return;
 
             if (PlayKeys.Back.Down) { play.ReturnToEdit(); return; }
-            if (PlayKeys.Restart.Down) { play.Restart(); return; }
+            if (PlayKeys.Restart.Down && !restartLatched)
+            {
+                restartLatched = true;
+                play.Restart();
+                return;
+            }
             if (PlayKeys.Teleport.Down) SandboxPanel.Toggle(SandboxPanel.Armed.Teleport);
             if (PlayKeys.StartNight.Down) SandboxPanel.Run(DebugActions.IsNight ? DebugActions.EndNight : DebugActions.StartNight);
             if (PlayKeys.KillAll.Down) SandboxPanel.Run(DebugActions.KillEnemies);
@@ -70,6 +80,8 @@ namespace PalaceMod
                 else if (Input.GetMouseButtonDown(0) && !StudioPlay.PointerOverUI() && SandboxActions.CursorGround(out var ground)) SandboxPanel.Clicked(ground);
             }
         }
+
+        private static bool restartLatched;
 
         /// <summary>A game menu (pause, settings) is up: clicks belong to it.</summary>
         private static bool PausedByMenu() => Time.timeScale == 0f;
@@ -183,7 +195,7 @@ namespace PalaceMod
                         return play.Swapping ? "restarting" : "didn't restart";
                     case "state":
                         return play.Describe() + $"; armed={SandboxPanel.Arm} unit={SandboxPanel.UnitRef} enemies={(TagManager.instance == null ? 0 : TagManager.instance.CountAllTaggedObjectsWithTag(TagManager.ETag.EnemyOwned))}" +
-                            $"; king={PlayerInteraction.instance?.transform.position}; tipsShown={LevelProgressManager.instance?.tipsShown?.Count}; tip=\"{TipText()}\"";
+                            $"; king={(PlayerInteraction.instance != null ? PlayerInteraction.instance.transform.position.ToString() : "")}; tipsShown={LevelProgressManager.instance?.tipsShown?.Count}; tip=\"{TipText()}\"";
                     case "gold":
                     {
                         string v = args.Length > 1 ? args[1].ToLowerInvariant() : "";
@@ -293,13 +305,17 @@ namespace PalaceMod.Builder.Studio.Play
             const string c = StudioContexts.Play;
             const KeybindFlags f = KeybindFlags.AllowInMenus;
             Back = Keybinds.Register(s, "play-back", "Studio play: back to the Studio", new KeyboardShortcut(KeyCode.F5), "In Studio test play: back to the editor, as it was.", f, c);
-            Restart = Keybinds.Register(s, "play-restart", "Studio play: restart", new KeyboardShortcut(KeyCode.R), "In Studio test play: starts the test again from the same spot.", flags: KeybindFlags.None, context: c);
+            // Cmd/Ctrl+R: plain R is the game's Command Units (hold: hold position), and a restart throws the test away.
+            Restart = Keybinds.Register(s, "play-restart", "Studio play: restart", RestartDefault, "In Studio test play: starts the test again from day 1, from the same spot.", flags: KeybindFlags.None, context: c);
             Teleport = Keybinds.Register(s, "play-teleport", "Studio play: teleport", new KeyboardShortcut(KeyCode.T), "In Studio test play: the next click on the map moves the king there.", flags: KeybindFlags.None, context: c);
             StartNight = Keybinds.Register(s, "play-night", "Studio play: start or end night", new KeyboardShortcut(KeyCode.N), "In Studio test play: starts the next night now, or ends the one in progress.", flags: KeybindFlags.None, context: c);
             KillAll = Keybinds.Register(s, "play-kill", "Studio play: kill all enemies", new KeyboardShortcut(KeyCode.K), "In Studio test play: removes every enemy.", flags: KeybindFlags.None, context: c);
             Slower = Keybinds.Register(s, "play-slower", "Studio play: slower", new KeyboardShortcut(KeyCode.LeftBracket), "In Studio test play: game speed down a step.", flags: KeybindFlags.None, context: c);
             Faster = Keybinds.Register(s, "play-faster", "Studio play: faster", new KeyboardShortcut(KeyCode.RightBracket), "In Studio test play: game speed up a step.", flags: KeybindFlags.None, context: c);
         }
+
+        internal static KeyboardShortcut RestartDefault => new(KeyCode.R,
+            Application.platform == RuntimePlatform.OSXPlayer || Application.platform == RuntimePlatform.OSXEditor ? KeyCode.LeftCommand : KeyCode.LeftControl);
 
         public static string Label(Keybind k) => StudioKeys.Label(k);
     }

@@ -73,7 +73,10 @@ namespace PalaceMod
                 UnitHomes.Settle(scene);
                 Log.For<BuilderManager>().Info($"level start rescan took {ms} ms; paths: {PathCheck.Describe(routes)}; {UnitHomes.LastSettle}");
                 var blocked = routes.Where(r => !r.Reachable).Select(r => r.Line).ToList();
-                if (blocked.Count > 0)
+                int standing = PathCheck.BuiltCutters(scene);
+                if (blocked.Count > 0 && standing > 0)
+                    Log.For<BuilderManager>().Info($"{string.Join(", ", blocked)} closed by the {standing} buildings standing (a resumed or retried run): not a layout problem");
+                else if (blocked.Count > 0)
                     Notify.Show($"This layout blocks enemies from {string.Join(", ", blocked)}: they can't reach the castle", NotifyKind.Warning, 8f, "builder-paths");
             }
             catch (Exception e)
