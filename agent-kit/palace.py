@@ -606,7 +606,7 @@ def find_waveset(data, ws_id):
 # =====================================================================================================================
 
 class Slot:
-    __slots__ = ("key", "name", "kind", "pos", "rot", "castle", "upgrades", "req", "cap", "follows", "added", "base", "units")
+    __slots__ = ("key", "name", "kind", "pos", "rot", "castle", "upgrades", "req", "cap", "follows", "added", "base", "units", "mod")
 
     def __init__(self, **kw):
         for k in self.__slots__:
@@ -654,7 +654,8 @@ def effective_slots(ref, level):
         r = host_req(s)
         slots[s["name"]] = Slot(key=s["name"], name=s["name"], kind=s["kind"], pos=s["pos"], rot=s.get("rotY", 0), castle=bool(s.get("castle")),
                                 upgrades=playable(s["upgrades"]), req=r, cap=s.get("upgradeCap"), follows=bool(s.get("followsActivator")),
-                                added=False, base=None, units=[list(u) for u in s.get("units") or []])
+                                added=False, base=None, units=[list(u) for u in s.get("units") or []],
+                                mod=income_modifier(s))
     warnings = []
 
     def apply_common(slot, e):
@@ -700,7 +701,7 @@ def effective_slots(ref, level):
         req = ("castle", 0) if base.startswith("building:") else host_req(src)
         s = Slot(key=key, name="PalaceBuilder " + a["id"], kind=src["kind"], pos=a.get("pos") or src.get("pos"), rot=a.get("rotY", 0), castle=False,
                  upgrades=playable(src["upgrades"]), req=req, cap=src.get("upgradeCap"), follows=False, added=True, base=base,
-                 units=[list(u) for u in src.get("units") or []])
+                 units=[list(u) for u in src.get("units") or []], mod=income_modifier(src))
         if is_empty_base(level) and s.req and s.req[0] != castle and s.req[0] != "castle" and "requires" not in a:
             s.req = ("__removed__", 0)
         apply_common(s, a)
@@ -724,6 +725,82 @@ def standard_buildings(ref, maps):
 def step_income(step):
     br = step.get("branches") or [{}]
     return max((b.get("income", 0) for b in br), default=0)
+
+
+# Income that changes each dawn, as every level's data has it (game 1.x), for references built before the map dump
+# recorded it: a harbour gains 1 a dawn up to 5, and its level 2 doubles both and adds its current income again
+# (FishingHarbour, FishingHarbourUpgrade); a gold mine loses 1 a dawn down to 1 (MineShaft).
+DEFAULT_MODIFIERS = {"Harbour": {"kind": "harbour", "perDawn": 1, "max": 5, "doublesAt": 1},
+                     "Gold Mine": {"kind": "mine", "perDawn": 1, "min": 1}}
+
+
+def modifier_text(m):
+    if m["kind"] == "harbour":
+        return (f"Each dawn: +{m['perDawn']}g income, up to {m['max']}g (starts at 0). "
+                f"L{m.get('doublesAt', 1) + 1} adds its current income again and doubles the growth and the cap.")
+    if m["kind"] == "mine":
+        return f"Each dawn: -{m['perDawn']}g income, down to {m['min']}g."
+    return ""
+
+
+def income_modifier(s):
+    m = s.get("incomeModifier") or DEFAULT_MODIFIERS.get(s.get("kind"))
+    return dict(m) if m else None
+
+
+class Earner:
+    """One slot's gold per dawn as it's built and the dawns pass (knock-outs and perks aside)."""
+    __slots__ = ("slot", "level", "income", "step", "limit")
+
+    def __init__(self, slot):
+        self.slot, self.level, self.income = slot, 0, 0
+        m = slot.mod or {}
+        self.step, self.limit = m.get("perDawn", 0), m.get("max", m.get("min", 0))
+
+    def copy(self):
+        e = Earner(self.slot)
+        e.level, e.income, e.step, e.limit = self.level, self.income, self.step, self.limit
+        return e
+
+    def buy(self):
+        m = self.slot.mod or {}
+        if m.get("kind") == "harbour" and self.level == m.get("doublesAt", 1):
+            self.income += self.income  # the level-2 upgrade's income change is the harbour's current income
+            self.step, self.limit = self.step * 2, self.limit * 2
+        else:
+            self.income += step_income(self.slot.upgrades[self.level])
+        self.level += 1
+
+    def dawn(self):
+        """Pays, then the dawn's change."""
+        paid = self.income
+        kind = (self.slot.mod or {}).get("kind")
+        if self.level > 0 and kind == "harbour":
+            self.income = min(self.income + self.step, self.limit)
+        elif self.level > 0 and kind == "mine":
+            self.income = max(self.income - self.step, self.limit)
+        return paid
+
+    def paid_over(self, dawns):
+        e = self.copy()
+        return sum(e.dawn() for _ in range(dawns))
+
+    def gain(self, dawns):
+        """Extra gold the next step pays over `dawns` dawns."""
+        after = self.copy()
+        after.buy()
+        return after.paid_over(dawns) - self.paid_over(dawns)
+
+    def peak(self):
+        """The most it pays a dawn, fully built."""
+        e = self.copy()
+        while e.level < len(e.slot.upgrades):
+            e.buy()
+        best = e.income
+        for _ in range(30):
+            e.dawn()
+            best = max(best, e.income)
+        return best
 
 
 # =====================================================================================================================
@@ -2267,12 +2344,12 @@ def wave_summary(ref, data, ws):
 def economy_sim(slots, castle, start_gold, wave_gold, nights):
     """A greedy 'all-in on economy' player: each day, buys the step with the best income per gold that pays back
     before the run ends (unlock steps count half the income they open up), until nothing affordable is worth it.
-    Gold from enemies arrives at night; buildings pay at dawn. Returns per-day rows. An upper bound on economy:
-    real players also spend on defence."""
+    Gold from enemies arrives at night; buildings pay at dawn, harbours growing and mines running dry as they do in
+    the game (`Earner`). Returns per-day rows. An upper bound on economy: real players also spend on defence."""
+    earners = {k: Earner(s) for k, s in slots.items()}
     level = {k: 0 for k in slots}
     gold = start_gold
     rows = []
-    income = 0
 
     def available(k):
         s = slots[k]
@@ -2305,17 +2382,18 @@ def economy_sim(slots, castle, start_gold, wave_gold, nights):
                 cost = step["cost"]
                 if cost > gold:
                     continue
-                inc = step_income(step)
+                # Gold per dawn it adds, on average over the dawns left.
+                inc = earners[k].gain(dawns_left) / dawns_left
                 unlock = 0
                 for k2, s2 in slots.items():
                     if s2.req and s2.req[0] == k and s2.req[1] == level[k] and s2.upgrades:
-                        unlock += step_income(s2.upgrades[0])
+                        unlock += Earner(s2).gain(dawns_left) / dawns_left
                 if k == castle:
                     # A castle level also lifts the upgrade cap of every capped building.
                     for k2, s2 in slots.items():
                         if k2 != castle and s2.cap is not None and s2.cap > -100 and 0 < level[k2] < len(s2.upgrades) \
                                 and level[k2] + 1 == level[castle] + 1 + s2.cap:
-                            unlock += step_income(s2.upgrades[level[k2]])
+                            unlock += earners[k2].gain(dawns_left) / dawns_left
                 value = inc + 0.5 * unlock
                 if k == castle and level[k] == 0:
                     value = 1e6  # the castle first
@@ -2323,17 +2401,18 @@ def economy_sim(slots, castle, start_gold, wave_gold, nights):
                     continue
                 score = value / max(cost, 0.5)
                 if best is None or score > best[0]:
-                    best = (score, k, cost, inc)
+                    best = (score, k, cost)
             if best is None:
                 break
-            _, k, cost, inc = best
+            _, k, cost = best
             gold -= cost
             level[k] += 1
-            income += inc
+            earners[k].buy()
             bought.append(f"{slots[k].label} L{level[k]}")
         dusk = gold
         gold += wave_gold[day - 1] if day - 1 < len(wave_gold) else 0
-        gold += income
+        income = sum(e.income for e in earners.values())
+        gold += sum(e.dawn() for e in earners.values())
         rows.append({"day": day, "bought": bought, "goldAtDusk": dusk, "incomePerDawn": income, "goldAfterDawn": gold})
     return rows
 
@@ -3089,6 +3168,7 @@ def cmd_ref(env, args):
                             if dupes[s["name"]] > 1 else {}),
                          "costs": [u["cost"] for u in s["upgrades"] if not u.get("disabled")],
                          "income": [step_income(u) for u in s["upgrades"] if not u.get("disabled")],
+                         **({"incomeEachDawn": modifier_text(income_modifier(s))} if income_modifier(s) else {}),
                          **({"units": s["units"]} if s.get("units") else {}),
                          **({"castle": True} if s.get("castle") else {}), **({"followsActivator": True} if s.get("followsActivator") else {}),
                          **({} if s.get("canBeBase") else {"copyable": False})})
@@ -3230,6 +3310,9 @@ def reference_markdown(ref):
         name, s, maps_with = seen[kind]
         hp = s.get("hp")
         L.append(f"### {kind}\n\nOn: {', '.join(sorted(maps_with))}. Base HP {hp if hp is not None else '-'}.\n")
+        mod = income_modifier(s)
+        if mod:
+            L.append(modifier_text(mod) + "\n")
         for i, u in enumerate(s["upgrades"]):
             parts = []
             for b in u["branches"]:
@@ -3456,7 +3539,7 @@ def cmd_economy(env, args):
     start = ws.get("startingGold", ref.map(lv["host"]).get("startingGold", 10))
     wg = [r["gold"] for r in wave_summary(ref, data, ws)]
     sim = economy_sim(slots, castle, start, wg, nights)
-    full = sum(sum(step_income(u) for u in s.upgrades) for s in slots.values())
+    full = sum(Earner(s).peak() for s in slots.values())
     cost = sum(sum(u["cost"] for u in s.upgrades) for s in slots.values())
     result = {"level": lv["id"], "startingGold": start, "nights": nights, "enemyGoldPerNight": wg, "maxIncomeAllBuilt": full, "costToBuildEverything": cost,
               "greedyEconomyPlayer": sim}
@@ -3616,7 +3699,8 @@ class Plan:
     """A test plan: {"1": [items], "2": [...], "options": {"carry": true, "save": false}}. An item is a slot id (one
     level up) or {"slot", "level" (up to; 1 = built), "branch", "carry", "save"}. carry: a refused item is retried at the
     start of the next day (until bought). save: when this item is refused, buy nothing else that day (keep the gold for
-    it); with carry the rest of the day's items are carried too."""
+    it); with carry the rest of the day's items are carried too. "king": {"3": "t1", "6": [x, z]}: where the king stands
+    from that night on (see king_point)."""
 
     def __init__(self, data, carry=False, save=False):
         data = data or {}
@@ -3626,8 +3710,12 @@ class Plan:
         self.carry = bool(opts.get("carry", carry))
         self.save = bool(opts.get("save", save))
         self.days = {}
+        king = data.get("king") or {}
+        if not isinstance(king, dict) or any(not str(k).isdigit() for k in king):
+            raise Fail("plan \"king\": {\"<night>\": \"castle\" | \"<slot id>\" | [x, z], ...}")
+        self.king = {int(k): v for k, v in king.items()}
         for k, items in data.items():
-            if k == "options":
+            if k in ("options", "king"):
                 continue
             if not str(k).isdigit() or not isinstance(items, list):
                 raise Fail(f"plan key {k!r}: days are \"1\", \"2\", ... each with a list of items")
@@ -3643,6 +3731,31 @@ class Plan:
 
     def slots(self):
         return {i["slot"] for items in self.days.values() for i in items}
+
+
+def king_point(spec, slots, castle):
+    """Where the king stands for a test: "castle" (just in front of it), a slot id (just in front of that slot, toward
+    the castle, so he isn't inside the building), or x,z ([x, z] or "x,z"). Returns (x, z)."""
+    if isinstance(spec, (list, tuple)) and len(spec) == 2:
+        return float(spec[0]), float(spec[1])
+    text = str(spec).strip()
+    m = re.match(r"^\s*(-?[\d.]+)\s*[, ]\s*(-?[\d.]+)\s*$", text)
+    if m:
+        return float(m.group(1)), float(m.group(2))
+    c = slots.get(castle) if castle else None
+    target = c if text == "castle" else next((s for s in slots.values() if text in (s.label, s.name, s.key) or
+                                               text.replace("_", " ") in (s.label, s.name)), None)
+    if target is None:
+        raise Fail(f"king position {spec!r}: not castle, a slot id on this level, or x,z")
+    x, z = target.pos[0], target.pos[2]
+    if c is not None:
+        dx, dz = c.pos[0] - x, c.pos[2] - z
+        d = (dx * dx + dz * dz) ** 0.5
+        if target is c or d < 1e-3:
+            dx, dz, d = 0.0, -1.0, 1.0  # in front of the castle: a little south of it
+        step = 6.0 if target is c else min(5.0, d)
+        x, z = x + dx / d * step, z + dz / d * step
+    return round(x, 2), round(z, 2)
 
 
 def plan_command(item, free):
@@ -3733,14 +3846,20 @@ def cmd_test(env, args):
     lv = find_level(data, args.level)
     plan = Plan(json.loads(Path(args.plan).read_text()) if args.plan else {}, carry=args.carry, save=args.save)
     warnings = []
+    slots, castle = {}, None
     try:
-        slots, _, _ = effective_slots(Ref(env), lv)
+        slots, castle, _ = effective_slots(Ref(env), lv)
         known = {s.label for s in slots.values()} | {"castle"}
         unknown = sorted(s for s in plan.slots() if s not in known and s.replace("_", " ") not in known)
         if unknown:
             warnings.append(f"plan slots not on this level: {', '.join(unknown)}")
     except Fail:
         pass
+    # Where the king stands each night: --king, then the plan's "king" entries from their night on.
+    king_specs = dict(plan.king)
+    if args.king:
+        king_specs.setdefault(0, args.king)
+    king_at = {n: king_point(spec, slots, castle) for n, spec in king_specs.items()}
     if not args.no_load:
         cmd_play_quiet(g, data, lv["id"], args.timeout_load)
     st = g.status()
@@ -3778,6 +3897,11 @@ def cmd_test(env, args):
         bought, carried = buy_items(g, items, args.free, plan.carry, plan.save, n)
         if args.build == "all":
             bought.append(g.agent("build all"))
+        king = None
+        spot = max((k for k in king_at if k <= n), default=None)
+        if spot is not None:
+            # Every night, so a king knocked out the night before (back at the castle) goes back to his post.
+            king = {"at": list(king_at[spot]), "stood": (g.agent(f"teleport {king_at[spot][0]:g} {king_at[spot][1]:g}") or {}).get("king")}
         if jump:
             g.agent(f"night {n}")  # jumps to night n and starts it
             jump = False
@@ -3791,6 +3915,8 @@ def cmd_test(env, args):
             mid = g.screenshot(shots / f"night{n}.png")
         rep = wait_night(g, args.timeout, n)
         rep["bought"] = bought
+        if king:
+            rep["kingPost"] = king
         if mid:
             rep["screenshot"] = mid
         st = g.status()
@@ -4093,6 +4219,8 @@ def main(argv=None):
     p.add_argument("--plan", help="JSON {\"1\": [\"castle\", \"h1\", {\"slot\":\"t1\",\"level\":2,\"branch\":0}], \"2\": [...]}: buys before each night")
     p.add_argument("--build", choices=["none", "all"], default="none", help="all: also build every available blueprint free each day")
     p.add_argument("--free", action="store_true", help="plan purchases cost nothing (probes defence alone; the economy isn't tested)")
+    p.add_argument("--king", metavar="WHERE", help="where the king stands every night: castle | <slot id> (in front of it) | X,Z "
+                                                   "(default: where he is; the plan's \"king\" entries change it from a night on)")
     p.add_argument("--carry", action="store_true", help="retry refused plan items at the start of the next day (plan option \"carry\")")
     p.add_argument("--save", action="store_true", help="after an item is refused for gold, buy nothing else that day (plan option \"save\")")
     p.add_argument("--catchup", choices=["play", "free", "none"], default="play",

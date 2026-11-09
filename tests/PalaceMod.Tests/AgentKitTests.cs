@@ -294,6 +294,53 @@ print("ok")
             Assert.True(p.ExitCode == 0 && output.Trim() == "ok", "enemy card: " + output);
         }
 
+        public static void PalacePyHarbourMineAndKingPost()
+        {
+            string script = FindScript();
+            if (script == null || !HasPython()) { Console.WriteLine("  (skipped: no python3 or agent-kit/palace.py)"); return; }
+            const string code = """
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("palace", sys.argv[1]); P = importlib.util.module_from_spec(spec); spec.loader.exec_module(P)
+def slot(kind, upgrades, **kw):
+    s = {"name": kind, "kind": kind, "upgrades": upgrades}
+    s.update(kw)
+    return P.Slot(key=kind, name=kind, kind=kind, pos=kw.get("pos", [0, 0, 0]), upgrades=upgrades, mod=P.income_modifier(s))
+harbour = P.Earner(slot("Harbour", [{"cost": 3, "branches": [{}]}, {"cost": 7, "branches": [{"hp": 60}]}]))
+harbour.buy()
+pays = [harbour.dawn() for _ in range(7)]
+assert pays == [0, 1, 2, 3, 4, 5, 5], pays            # +1 a dawn, capped at 5
+harbour.buy()                                          # level 2: adds its income again, doubles growth and cap
+pays = [harbour.dawn() for _ in range(4)]
+assert pays == [10, 10, 10, 10], pays
+mine = P.Earner(slot("Gold Mine", [{"cost": 5, "branches": [{"income": 6}]}]))
+mine.buy()
+pays = [mine.dawn() for _ in range(8)]
+assert pays == [6, 5, 4, 3, 2, 1, 1, 1], pays
+assert P.Earner(slot("Gold Mine", [{"cost": 5, "branches": [{"income": 6}]}], incomeModifier={"kind": "mine", "perDawn": 2, "min": 3})).gain(3) == 6 + 4 + 3
+castle = P.Slot(key="C", name="C", pos=[0, 0, 0], castle=True)
+tower = P.Slot(key="add:t1", name="PalaceBuilder t1", pos=[20, 0, 0])
+slots = {"C": castle, "add:t1": tower}
+assert P.king_point("t1", slots, "C") == (15.0, 0.0)
+assert P.king_point("castle", slots, "C") == (0.0, -6.0)
+assert P.king_point("-40,-10", slots, "C") == (-40.0, -10.0)
+assert P.king_point([3, 4], slots, "C") == (3.0, 4.0)
+try:
+    P.king_point("nope", slots, "C"); raise SystemExit("no failure")
+except P.Fail:
+    pass
+assert P.Plan({"1": ["t1"], "king": {"2": "t1"}}).king == {2: "t1"}
+print("ok")
+""";
+            var psi = new ProcessStartInfo("python3") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+            psi.ArgumentList.Add("-c");
+            psi.ArgumentList.Add(code);
+            psi.ArgumentList.Add(script);
+            using var p = Process.Start(psi);
+            string output = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
+            p.WaitForExit();
+            Assert.True(p.ExitCode == 0 && output.Trim() == "ok", "economy earners / king post: " + output);
+        }
+
         private static int RunRaw(string script, string game, string refDir, out string output, params string[] args)
         {
             var psi = new ProcessStartInfo("python3") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };

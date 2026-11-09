@@ -102,6 +102,7 @@ namespace PalaceMod.Builder.Agent
             if (s.RequiredRootLevelDifference > -100) o["upgradeCap"] = s.RequiredRootLevelDifference;
             o["canBeBase"] = LayoutScene.CanBeBase(s);
             if (hp != null) o["hp"] = R(hp.maxHp);
+            if (IncomeModifier(s) is { } mod) o["incomeModifier"] = mod;
             // A training slot's units: where each stands, [x, z] metres in the slot's frame (LevelDef buildSlots units).
             var units = UnitHomes.Spots(s);
             if (units.Count > 0) o["units"] = new JArray(units.Select(u => new JArray(R(u.X), R(u.Z))));
@@ -111,6 +112,33 @@ namespace PalaceMod.Builder.Agent
                 ["disabled"] = u.disableInThisMode ? true : null,
                 ["branches"] = new JArray((u.upgradeBranches ?? []).Select(Branch)),
             }));
+            return o;
+        }
+
+        // Income that changes each dawn (the economy planner's EconomySnapshot.ReadModifiers reads the same fields).
+        // Harbour: +perDawn up to max; the step whose branch switches on FishingHarbourUpgrade (doublesAt) doubles
+        // both, and its income change is the harbour's current income. Mine: -perDawn down to min.
+        private static JObject IncomeModifier(BuildSlot s)
+        {
+            if (s.GetComponent<MineShaft>() is { } mine)
+                return new JObject { ["kind"] = "mine", ["perDawn"] = mine.incomeReductionPerTurn, ["min"] = mine.minimumIncome };
+            var harbour = s.GetComponentsInChildren<FishingHarbour>(true).FirstOrDefault(h => h.buildSlot == s);
+            if (harbour == null) return null;
+            // Without the perk's extra boats, which Start adds to maximumIncome when it's equipped.
+            var t = HarmonyLib.Traverse.Create(harbour);
+            var perk = t.Field("perk").GetValue<Equippable>();
+            bool started = t.Field("maximumBoats").GetValue<int>() != 0;
+            int max = harbour.maximumIncome;
+            if (started && perk != null && PerkManager.instance != null && PerkManager.instance.CurrentlyEquipped.Contains(perk))
+                max -= t.Field("additionalBoatCapacity").GetValue<int>();
+            var o = new JObject { ["kind"] = "harbour", ["perDawn"] = harbour.incomeIncreasePerTurn, ["max"] = max };
+            var ups = s.OwnUpgrades;
+            for (int i = 0; i < ups.Count; i++)
+                if ((ups[i].upgradeBranches ?? []).Any(b => (b.objectsToActivate ?? []).Any(go => go != null && go.GetComponentInChildren<FishingHarbourUpgrade>(true) != null)))
+                {
+                    o["doublesAt"] = i;
+                    break;
+                }
             return o;
         }
 

@@ -673,6 +673,39 @@ namespace PalaceMod.Tests
             Assert.Equal(ActionStatus.Planned, EconSim.Run(w, [Do(1, b1, 1), Do(1, harbour, 1)]).Actions[1].Status, "the other way");
         }
 
+        public static void ReachRulesCoverUferwindsVariants()
+        {
+            EconSlot Add(EconWorld w, string id)
+            {
+                var s = Slot(w, "X", 0, 0, Step(3));
+                s.Id = id;
+                return s;
+            }
+            foreach (var scene in new[] { "Uferwind", "Uferwind Defense Puzzle", "Uferwind Lightning Staff Challenge" })
+            {
+                var w = World();
+                w.Level = scene;
+                var east = Add(w, "7cf210e6-3e9b-435d-972c-52d41e43c53f");
+                var west = Add(w, "366bdb95-dab5-4de6-9024-45af73830f55");
+                var middle = Add(w, "f2cd6fed-5b4c-48ab-b116-02c61a6b638b");
+                PlannerReach.Apply(w);
+                Assert.Equal($"{east.Index}|{west.Index}", string.Join("|", middle.Reach.Select(set => string.Join("+", set))), scene + ": middle bridge");
+            }
+            var hc = World();
+            hc.Level = "Uferwind Hero Commander";
+            var hcEast = Add(hc, "4b1cf36a-9cd1-42ad-a24e-d3e67e412bd8");
+            var hcWest = Add(hc, "3405e7c6-0154-4e9f-8e5f-c3455249f798");
+            var hcMiddle = Add(hc, "35a6f8a7-5127-46fd-8375-779da496c5d2");
+            var quarter = Add(hc, "00d1ae87-a033-49f2-9a60-667d9983c0a8");
+            PlannerReach.Apply(hc);
+            Assert.Equal($"{hcWest.Index}|{hcEast.Index}+{hcMiddle.Index}", string.Join("|", quarter.Reach.Select(set => string.Join("+", set))), "hero commander: west hero's quarter");
+            var other = World();
+            other.Level = "Wildbach MM1";
+            var lone = Add(other, "00d1ae87-a033-49f2-9a60-667d9983c0a8");
+            PlannerReach.Apply(other);
+            Assert.Null(lone.Reach, "no rules elsewhere");
+        }
+
         public static void ComparesMigrateFromTheOldField()
         {
             var f = new PlannerFile { Scenarios = [new PlannerScenario { Id = "a", Name = "A" }, new PlannerScenario { Id = "b", Name = "B" }], Current = "a", Compare = "b" };

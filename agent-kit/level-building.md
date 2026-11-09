@@ -301,12 +301,12 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 | `check <pack> [level] [--live]` | offline checks (of that level and its nights only, if given); `--live` adds the game's validator (exit 1 on errors) |
 | `show <pack> [level]` | the level as it will play: every slot, what it needs, costs, income, lines |
 | `render <pack> [level] -o f.png [--labels names\|costs\|reqs\|none] [--live]` | top-down picture; routes in one colour per line, named, lengths in the legend; offline they're an estimate, `--live` = real game render + the game's routes (level loaded) |
-| `economy <pack> [level] [--compare] [--report test.json]` | gold curve of a greedy all-economy player (assumes nothing is ever knocked out); vs the base map's vanilla; `--report`: what a saved `test` run actually received per dawn and which buildings were knocked out most |
+| `economy <pack> [level] [--compare] [--report test.json]` | gold curve of a greedy all-economy player (harbours grow and mines run dry each dawn as in the game; assumes nothing is ever knocked out); vs the base map's vanilla; `--report`: what a saved `test` run actually received per dawn and which buildings were knocked out most |
 | `waves <pack> [level] [--compare [Map]]` | per night: enemies, effective HP, gold, flyers; vs vanilla |
 | `play <pack> <level>` | load as a normal run (real gold); prints load warnings |
 | `sandbox <pack> <level> [--at X Z]` | Studio test play: unlimited gold, king at X,Z |
 | `edit <pack> <level>` | open the level in the in-game Studio (the player's editor: F5 there test-plays); it edits its own copy and Ctrl+S writes pack.json, so don't `apply` while the player has unsaved Studio changes |
-| `test <pack> <level> [--nights 1-3] [--plan p.json] [--carry] [--save] [--catchup play\|free\|none] [--free] [--build all] [--god] [--invulnerable] [--gold N] [--speed 3] [--shots dir] [--quiet]` | load, buy per plan each day once its gold is in, play nights, report each (one progress line per night on stderr) |
+| `test <pack> <level> [--nights 1-3] [--plan p.json] [--carry] [--save] [--catchup play\|free\|none] [--free] [--king castle\|<slot>\|X,Z] [--build all] [--god] [--invulnerable] [--gold N] [--speed 3] [--shots dir] [--quiet]` | load, buy per plan each day once its gold is in, play nights, report each (one progress line per night on stderr) |
 | `night [N] [--speed 3]` | start the next night (or jump to night N) and wait for its report |
 | `build <slot> [level] [branch] [--pay]` | build/upgrade now (free unless --pay); `castle`, an added id, or a host name; exit 1 if refused |
 | `enemy <id> [--difficulty D] [--elite] [--studio] [--fight N] [--portrait]` | a library enemy's numbers (offline: HP, damage per hit/second against buildings, the king and troops, troops' time to kill it); with the game: open it in the Enemy Studio, fight N copies in its arena, save its portrait |
@@ -371,6 +371,10 @@ would follow; it proves the economy works, not just the defence.
   nothing else that day, so the gold is kept for it (with carry, the rest of the day moves to the next day too). That's
   how a plan "saves up" for castle level 3 instead of spending the 20 g on houses.
 - `--free`: purchases cost nothing (a defence-only probe; the economy isn't tested).
+- `--king WHERE`: where the king stands every night: `castle` (just in front of it), a slot id (just in front of that
+  slot, on the castle side) or `X,Z`. A plan's `"king": {"4": "t1", "8": [-40, -10]}` moves him from that night on.
+  He's put back there before every night (a king knocked out wakes at the castle); each night report's `kingPost`
+  says where he was asked to stand and where he landed. Default: he stays where he is (at the castle after loading).
 - `--nights N-M`: the earlier nights are played first (`--catchup play`, the default: the plan with real income, so
   night N starts with what a player would have; listed under `catchup`), or skipped: `--catchup free` builds the
   earlier days' items for free and jumps to night N, `--catchup none` jumps with nothing built (add `--gold X`).
@@ -399,7 +403,7 @@ income paid), then the full `nights` reports. Each night report:
 - `income`: the next dawn's `nominal` income (every building), `blocked` (knocked out that night) and `paid`.
 - `after`: the game status at that same moment (the next morning; the end screen after the last night).
 
-The king does nothing during `test` (he stands where he was), so a defence that holds in `test` holds without the
+The king does nothing during `test` (he stands where he was, or where `--king` put him), so a defence that holds in `test` holds without the
 player's help; a real player adds his own damage (roughly one strong unit). Use `--god` to keep the king alive,
 `--invulnerable` to test pathing alone.
 
@@ -475,8 +479,8 @@ Buildings (cost per level; +income per dawn):
 | Castle Center | 3 / 7 / 20 | - | lose condition; shoots from L2; each level a perk choice; gates most of a map |
 | House | 2 / 2 | +1 / +1 | the basic economy; cheap, fragile (20 HP) |
 | Mill | 3 / 4 / 6 | +1 / +1 / +4 | unlocks its Fields (1 g each, +1); fields follow the mill |
-| Gold Mine | 5 | +6, falling each dawn | early burst |
-| Harbour | 3 / 7 | grows each dawn to a cap | slow, big |
+| Gold Mine | 5 | +6, then -1 each dawn down to 1 | early burst |
+| Harbour | 3 / 7 | 0, then +1 each dawn up to 5; L2 doubles it, the growth and the cap (10) | slow, big |
 | Defense Tower | 3 / 5 / 15 | - | 36 m range; L2 and L3 are choices (Castle/Sniper/Armored/Bunker; Archer/Ballistic/Fire/Healing spires) |
 | Barracks | 4 / 8 / 16 | - | melee squad (Knights / Spearmen / Flails / Berserkers) |
 | Archery Range | 4 / 8 / 16 | - | archer squad (Longbow / Crossbow / Hunters / Fire) |
@@ -487,7 +491,7 @@ Buildings (cost per level; +income per dawn):
 | Shrine | 3 | - | 777 HP decoy/buff |
 
 Vanilla maps for scale: 12-15 nights; starting gold 7-23; 10-18 houses, 2-5 mills, 10-31 towers, 2 barracks, 2
-archery ranges per map; an all-economy player (`economy`, an upper bound: real players also buy defence, and mines decline) reaches 13-60 gold per dawn by day 4 and 40-90 by day 6. Night 1 is 3-20 weak enemies
+archery ranges per map; an all-economy player (`economy`, an upper bound: real players also buy defence, and mines decline) reaches 5-50 gold per dawn by day 4 and 25-110 by day 6. Night 1 is 3-20 weak enemies
 (0.1-0.9k effective HP); nights grow roughly 1.3x per night with a dip every 3-4 nights and a final night 2-4x the
 one before it (Nordfels: 0.1k → 0.5k by N4 → 2.9k N10 → 6.8k N13). Flyers appear from about night 4-7.
 
