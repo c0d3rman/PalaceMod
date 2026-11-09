@@ -74,6 +74,8 @@ namespace PalaceMod.Builder.Studio
         {
             // A press on a selected training slot's unit disc drags that unit (Studio/Units).
             if (drag == Drag.None && Units.StudioUnits.HandlePointer(p)) return;
+            // A press on a selected thing's handle (a path point, an area's corner) drags that handle.
+            if (drag == Drag.None && Studio.RunPointerHandlers(p)) return;
             if (p.LeftDown && !p.OverUI)
             {
                 pressKey = p.HoverKey;
@@ -405,6 +407,7 @@ namespace PalaceMod.Builder.Studio
         public override bool Cancel()
         {
             if (Armed == null) return false;
+            if (Armed.CancelDraw?.Invoke() == true) return true;
             Disarm();
             StudioShell.SetToolLater("select");
             return true;
@@ -415,6 +418,19 @@ namespace PalaceMod.Builder.Studio
         public override void Update(StudioPointer p)
         {
             if (Armed == null) return;
+            if (Armed.Draw != null)
+            {
+                // A shape drawn in several clicks or a drag: the placeable runs the gesture.
+                if (ghost != null) ghost.SetActive(false);
+                string made = null;
+                try { made = Armed.Draw(p); }
+                catch (Exception e) { Log.For<BuilderManager>().Caught($"Studio: drawing {Armed.Id} failed", e); }
+                if (made == null) return;
+                StudioShell.Remember(Armed);
+                StudioSelection.Select([made], SelectOp.Replace);
+                if (!p.Shift) { Disarm(); StudioShell.SetToolLater("select"); }
+                return;
+            }
             bool show = p.Snapped != null && !p.OverUI;
             if (ghost != null)
             {

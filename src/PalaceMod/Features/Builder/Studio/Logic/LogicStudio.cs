@@ -26,6 +26,9 @@ namespace PalaceMod.Builder.Studio.Logic
                 "Wire tool: drag from one thing to another to make one set off the other.", context: StudioContexts.Edit, flags: KeybindFlags.AllowInMenus);
             Studio.AddTool(new WireTool(wireKey));
             Studio.AddOverlay(WireOverlay.Instance);
+            Studio.AddOverlay(PlaceHandles.Instance);
+            Studio.AddPointerHandler(PlaceHandles.HandlePointer);
+            Studio.AddCancelHandler(PlaceHandles.Cancel);
             Studio.AddItemSource(PlaceItems.Instance);
             Studio.AddPanel(LogicStudio.Tab, StudioMode.Edit, () => true, page => BehaviourPanel.Build(page, LogicStudio.SelectedOwner()));
             Studio.AddInspectorSection("behaviour", 150, keys => keys.Count == 1 && LogicOwner.ForItem(keys[0]) != null, LogicStudio.InspectorSummary);
@@ -277,16 +280,22 @@ namespace PalaceMod.Builder.Studio.Logic
             public string Id, Name, Desc, IdPrefix;
             public JObject Place;
             public string ThingKind;
+            /// <summary>Drawn on the map (a drag or clicks) instead of one click.</summary>
+            public ShapeDrawer.Shape? Draw;
             public string Kind => ThingKind ?? (string)Place["kind"];
             public bool IsThing => ThingKind != null;
         }
 
         private static readonly PaletteObject[] Shapes =
         [
-            new() { Id = "area", Name = "Area", IdPrefix = "area", Desc = "A zone that notices what's inside: enter, exit, inside, empty.",
+            new() { Id = "area", Name = "Circle area", IdPrefix = "area", Draw = ShapeDrawer.Shape.Circle, Desc = "A zone that notices what's inside: enter, exit, inside, empty. Drag from its centre out to its edge.",
                 Place = JObject.Parse("{ 'kind': 'area', 'area': { 'shape': { 'circle': { 'radius': 4 } }, 'watch': 'unit', 'show': 'outline' } }") },
+            new() { Id = "area-rect", Name = "Rectangle area", IdPrefix = "area", Draw = ShapeDrawer.Shape.Rect, Desc = "A rectangular zone. Drag from one corner to the opposite one.",
+                Place = JObject.Parse("{ 'kind': 'area', 'area': { 'shape': { 'rect': { 'size': [6, 4] } }, 'watch': 'unit', 'show': 'outline' } }") },
+            new() { Id = "area-polygon", Name = "Polygon area", IdPrefix = "area", Draw = ShapeDrawer.Shape.Polygon, Desc = "A zone of any shape. Click its corners; click the first again to close it.",
+                Place = JObject.Parse("{ 'kind': 'area', 'area': { 'shape': { 'polygon': { 'points': [[-3, -3], [3, -3], [3, 3], [-3, 3]] } }, 'watch': 'unit', 'show': 'outline' } }") },
             new() { Id = "point", Name = "Point", IdPrefix = "point", Desc = "A named spot to teleport, spawn or walk to (@name).", Place = JObject.Parse("{ 'kind': 'point' }") },
-            new() { Id = "path", Name = "Path", IdPrefix = "path", Desc = "A route for movers and walkers (@name). Move it whole; add points in its Behaviour tab.",
+            new() { Id = "path", Name = "Path", IdPrefix = "path", Draw = ShapeDrawer.Shape.Path, Desc = "A route for movers and walkers (@name). Click its points; click the last again to end it.",
                 Place = JObject.Parse("{ 'kind': 'path', 'points': [[0, 0, 0], [6, 0, 0], [6, 0, 6]] }") },
         ];
 
@@ -303,7 +312,19 @@ namespace PalaceMod.Builder.Studio.Logic
                 Place = new JObject { ["entity"] = e.Id }, ThingKind = e.Kind ?? "prop",
             });
 
-        public static StudioPlaceable Placeable(PaletteObject obj) => new()
+        public static StudioPlaceable Placeable(PaletteObject obj)
+        {
+            var p = PlainPlaceable(obj);
+            if (obj.Draw is ShapeDrawer.Shape shape)
+            {
+                var drawer = new ShapeDrawer(shape);
+                p.Draw = drawer.Update;
+                p.CancelDraw = drawer.Cancel;
+            }
+            return p;
+        }
+
+        private static StudioPlaceable PlainPlaceable(PaletteObject obj) => new()
         {
             Id = "logic:" + obj.Id,
             Name = obj.Name,
