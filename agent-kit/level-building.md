@@ -831,8 +831,12 @@ A number field may be an expression evaluated when the entity appears: `"hp": "=
 **Surfaces (who may walk where).** An area with `"surface": "mud"` or `{"name": "ladder", "allow": "melee", "cost": 1}`
 becomes a named pathfinding surface: only units matching `allow` path through it, and `cost` multiplies its path cost
 (2 = units avoid it unless it's much shorter). A unit's `movement.surfaces` overrides per unit: `{"ladder": true,
-"mud": 3, "ice": false}`. At most 31 surface names per level. A `body.walkable` object (a bridge, a raft) should be
-placed in `logic.places`: spawned at runtime it costs a pathfinding rescan of about a second.
+"mud": 3, "ice": false}`. At most 31 surface names per level. A `body.walkable` object (a bridge, a raft) is best
+placed in `logic.places`; spawned or destroyed at runtime it rebuilds the pathfinding round it (30-100 ms), fine now
+and then. Its top should be within 2.5 m of the ground it meets: an edge that touches walkable ground opens (with a
+ramp when the step is over 0.45 m), and the map's invisible walls or terrain water under it give way; every other
+edge gets an invisible rail, so units can't step off into the river. Let a bridge overlap each bank by 1 m or more,
+and make it over 8 m wide for large enemies (they keep 4 m from every edge).
 
 ### 12.8 Statuses
 
