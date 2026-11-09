@@ -282,6 +282,32 @@ class SharedItems(unittest.TestCase):
         with self.assertRaises(palace.Fail):
             ops.run([{"op": "rename_entity", "from": "pillar", "to": "slime-pool"}])
 
+    def test_entity_with_undeclared_vars_never_blocks_another_level(self):
+        """E2's report: bt-world 20's grassfire reads $wind/$fires; plain levels must check clean whether a level uses it
+        or none does, and partest must copy what a level uses (entities and statuses too, not only enemies)."""
+        import tempfile
+        data = shared_library()
+        data["entities"].append({"id": "grassfire", "kind": "prop", "rules": [{"when": {"on": "every", "seconds": 1.5}, "if": "$fires < 70",
+                                 "do": [{"do": "spawn", "entity": "grassfire", "at": "self.pos + dir($wind) * 4"}]}]})
+        for used in (True, False):
+            if used:
+                data["levels"].append({"id": "fire", "host": "Nordfels", "logic": {"vars": {"wind": 0, "fires": 0},
+                                       "places": [{"id": "f", "entity": "grassfire", "pos": [0, 0, 0]}]}})
+            else:
+                data["levels"] = [l for l in data["levels"] if l["id"] != "fire"]
+            errs = [i for i in palace.logic_issues(palace.level_scope(data, "plain")) if i["severity"] == "error"]
+            self.assertEqual(errs, [], used)
+            rest = palace.unused_scope(data)
+            self.assertFalse([i for i in palace.logic_issues(rest) if "$wind" in i["message"]], used)
+        with tempfile.TemporaryDirectory() as d:
+            ref = palace.LibraryRef(d)
+            palace.save_library(ref, shared_library())
+            spec = importlib.util.spec_from_file_location("partest", Path(__file__).resolve().parents[2] / "scripts" / "partest.py")
+            partest = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(partest)
+            names = sorted(f"{f.parent.name}/{f.name}" for f in partest.level_files(Path(d), "snail"))
+            self.assertEqual(names, ["enemies/siege-snail.json", "entities/slime-pool.json", "levels/snail.json", "statuses/mired.json"])
+
     def test_rename_refuses_what_it_cant_rewrite(self):
         data = shared_library()
         data["entities"].append({"id": "mired", "kind": "prop"})   # a status and an entity share the id
