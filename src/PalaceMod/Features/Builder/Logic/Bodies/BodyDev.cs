@@ -1,0 +1,147 @@
+using System.Globalization;
+using System.Linq;
+using Newtonsoft.Json.Linq;
+using UnityEngine;
+
+/*
+    Dev tools for bodies: `logic-l2 status | build <template|json> <x> <z> [rotY] | signal <entity> <input> [value]`.
+    `build` takes a template id from the session pack, or an inline EntityDef as JSON (no spaces needed: the args are
+    joined back).
+*/
+namespace PalaceMod.Builder.Logic.Bodies
+{
+    internal static class BodyDev
+    {
+        public static string Status() =>
+            $"world {(LogicWorld.Current != null ? "on" : "off")}; entities {LogicWorld.Current?.Entities.Count() ?? 0}; " +
+            $"projectiles: builder {BuilderProjectile.Live.Count}, vanilla {VanillaProjectiles.Count}; areas {BuilderArea.All.Count}; movers {BuilderMover.All.Count}; " +
+            $"pickups {BuilderPickup.All.Count}; {Surfaces.Describe()}; {Walkables.Describe()}; drifts {(Drifts.Any ? Drifts.Drifting.Count() : 0)}; " +
+            $"last impacts: {string.Join(" ", BuilderProjectile.LastImpacts)}";
+
+        public static string Build(string[] a)
+        {
+            if (a.Length < 3) return "build <template|{json}> <x> <z> [rotY] [id]";
+            LogicWorld.Current ??= new LogicWorld();
+            // The JSON may have been split on spaces: everything before the last numeric args is the template.
+            int n = a.Length;
+            int numStart = n;
+            while (numStart > 0 && float.TryParse(a[numStart - 1], NumberStyles.Float, CultureInfo.InvariantCulture, out _)) numStart--;
+            string id = null;
+            if (numStart == n && n >= 4) { id = a[n - 1]; n--; numStart = n; while (numStart > 0 && float.TryParse(a[numStart - 1], NumberStyles.Float, CultureInfo.InvariantCulture, out _)) numStart--; }
+            string template = string.Join(" ", a.Take(numStart));
+            var nums = a.Skip(numStart).Take(n - numStart).Select(s => float.Parse(s, CultureInfo.InvariantCulture)).ToArray();
+            if (nums.Length < 2) return "need x and z";
+            var pos = new Vector3(nums[0], 0f, nums[1]);
+            pos.y = BodyGround.Below(pos, out float g) ? g : 0f;
+            float rot = nums.Length > 2 ? nums[2] : 0f;
+            var e = new LogicEntity { Id = id };
+            if (template.StartsWith("{"))
+            {
+                var def = JObject.Parse(template);
+                e.Def = def;
+                e.Template = (string)def["id"];
+                e.Name = (string)def["name"];
+            }
+            else
+            {
+                e.Template = template;
+                e.Def = EntityFactory.Instance.EntityDef(template)?.DeepClone() as JObject;
+            }
+            if (!EntityFactory.Instance.Build(e, pos.ToVec(), rot, out string error)) return "failed: " + error;
+            return $"built {e.Id} ({e.Kind}, {e.Team}) at {pos}";
+        }
+
+        private static readonly System.Collections.Generic.Queue<string> events = new();
+
+        /// <summary>Every event a body raises goes through here (kept for `logic-l2 events`).</summary>
+        public static void Raise(string name, LogicEntity subject, LogicEntity other = null, double value = 0, Vec? pos = null)
+        {
+            events.Enqueue($"{name}:{subject?.Id}{(other != null ? "<-" + other.Id : "")}");
+            while (events.Count > 30) events.Dequeue();
+            LogicEvents.Raise(name, subject, other, value, pos);
+        }
+
+        public static string Events()
+        {
+            var s = string.Join(" | ", events);
+            events.Clear();
+            return s;
+        }
+
+        /// <summary>vp drift &lt;x&gt; &lt;z&gt; &lt;m/s&gt; | vp redirect &lt;role&gt; | vp point &lt;x&gt; &lt;z&gt; | vp list: act on every vanilla projectile in flight.</summary>
+        public static string Vanilla(string[] a)
+        {
+            var list = new System.Collections.Generic.List<LogicEntity>();
+            VanillaProjectiles.Query(Vector3.zero, 0f, list);
+            string sub = a.Length > 0 ? a[0] : "list";
+            if (sub == "field")
+            {
+                // field <x> <z> <r> <drift dx dz speed | point px pz | off>: acts on every vanilla projectile that enters
+                if (a.Length > 1 && a[1] == "off") { field = null; return $"field off; it acted on {fieldHits} projectiles"; }
+                fieldCenter = new Vector3(F(a[1]), 0f, F(a[2]));
+                fieldRadius = F(a[3]);
+                field = a.Skip(4).ToArray();
+                fieldHits = 0;
+                fieldSeen.Clear();
+                return "field on";
+            }
+            int n = 0;
+            foreach (var e in list)
+            {
+                switch (sub)
+                {
+                    case "drift":
+                        var v = new Vector3(F(a[1]), 0f, F(a[2])).normalized * F(a[3]);
+                        Drifts.Set(e, "dev", () => v, 0);
+                        n++;
+                        break;
+                    case "redirect":
+                        var t = DevParams.Resolve(a[1], new LogicContext { Self = e })?.FirstOrDefault();
+                        if (BodyLaunch.Redirect(e, t, null)) n++;
+                        break;
+                    case "point":
+                        if (BodyLaunch.Redirect(e, null, new Vector3(F(a[1]), 0f, F(a[2])))) n++;
+                        break;
+                    case "destroy":
+                        if (VanillaProjectiles.Destroy(e)) n++;
+                        break;
+                }
+            }
+            return $"{list.Count} vanilla projectiles in flight ({string.Join(", ", list.Take(6).Select(e => $"{e.Template} by {e.Owner?.Id} at {e.Position}"))}); {sub} on {n}";
+        }
+
+        private static string[] field;
+        private static Vector3 fieldCenter;
+        private static float fieldRadius;
+        private static int fieldHits;
+        private static readonly System.Collections.Generic.HashSet<LogicEntity> fieldSeen = [];
+        private static readonly System.Collections.Generic.List<LogicEntity> fieldList = [];
+
+        /// <summary>The dev field's 10 Hz step.</summary>
+        public static void FieldStep()
+        {
+            if (field == null || field.Length == 0) return;
+            VanillaProjectiles.Query(fieldCenter, fieldRadius, fieldList);
+            foreach (var e in fieldList)
+            {
+                if (!fieldSeen.Add(e)) continue;
+                fieldHits++;
+                if (field[0] == "drift") { var v = new Vector3(F(field[1]), 0f, F(field[2])).normalized * F(field[3]); Drifts.Set(e, "dev", () => v, 0); }
+                else if (field[0] == "point") BodyLaunch.Redirect(e, null, new Vector3(F(field[1]), 0f, F(field[2])));
+            }
+            fieldList.Clear();
+        }
+
+        private static float F(string s) => float.Parse(s, CultureInfo.InvariantCulture);
+
+        public static string Signal(string[] a)
+        {
+            if (a.Length < 2) return "signal <entity id|@name> <input> [value]";
+            var world = LogicWorld.Current;
+            var e = world?.FindNamed(a[0].TrimStart('@')) ?? world?.Find(a[0]);
+            if (e == null) return $"no entity {a[0]}";
+            double v = a.Length > 2 ? double.Parse(a[2], CultureInfo.InvariantCulture) : 0;
+            return BodyActions.Input(e, a[1], v) ? $"{e.Id} handled {a[1]}" : $"{e.Id} has no input {a[1]} (inputs: {string.Join(", ", BodyActions.InputsOf(e))})";
+        }
+    }
+}
