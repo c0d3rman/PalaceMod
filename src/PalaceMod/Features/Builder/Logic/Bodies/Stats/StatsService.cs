@@ -409,6 +409,33 @@ namespace PalaceMod.Builder.Logic.Bodies
             if (e != null && sheets.TryGetValue(e, out var s)) { s.Parts = null; Write(s); }
         }
 
+        /// <summary>
+        /// Another part just wrote a new base value into the game fields of <paramref name="stat"/> (Steering's
+        /// `movement.speed`, `setMovement`): remember the live values as the base and apply the modifiers on top.
+        /// </summary>
+        public void BaseChanged(LogicEntity e, string stat)
+        {
+            if (e == null || !sheets.TryGetValue(e, out var s)) return;
+            StatWriter.Forget(PartsOf(s, e), stat);
+            if (s.Touched.Contains(stat) || s.Touched.Contains("timeScale") || s.Touched.Contains("frozen")) Write(s);
+        }
+
+        /// <summary>
+        /// The factor modifiers put on <paramref name="stat"/> for fields this part doesn't write (Builder attacks'
+        /// Range/Cooldown): adds and mults over a base of 1 (a `set` needs a base, so it's left out); attackCooldown
+        /// and moveSpeed include timeScale. 1 when nothing modifies it.
+        /// </summary>
+        public double Factor(LogicEntity e, string stat)
+        {
+            if (e == null || !sheets.TryGetValue(e, out var s) || s.Mods.Count == 0) return 1;
+            double f = StatMath.Combine(1, s.Mods, m => m.Count, m => m.Stat == stat && !m.Conditional && m.Set == null);
+            double ts = StatMath.Combine(1, s.Mods, m => m.Count, m => m.Stat == "timeScale" && !m.Conditional);
+            if (ts <= 0) ts = 0.01;
+            if (stat == "attackCooldown") f /= ts;
+            if (stat == "moveSpeed") f *= ts;
+            return Math.Max(0, f);
+        }
+
         public bool HasFlag(GameObject go, string flag) => flagged > 0 && SheetOfGo(go) is { } s && s.MyFlags.Contains(flag);
 
         // ------------------------------------------------------------------ time

@@ -25,6 +25,29 @@ namespace PalaceMod.Builder.Logic.Bodies
             return b.V;
         }
 
+        /// <summary>Forget the remembered bases of <paramref name="stat"/>'s fields on these parts (their live values are
+        /// the new base: another part just wrote them).</summary>
+        public static void Forget(Parts p, string stat)
+        {
+            if (p == null) return;
+            void F(object o, params string[] fields)
+            {
+                if (o != null && bases.TryGetValue(o, out var d)) foreach (var f in fields) d.Remove(f);
+            }
+            switch (stat)
+            {
+                case "moveSpeed":
+                    F(p.EnemyMove, "movementSpeed"); F(p.UnitMove, "movementSpeed"); F(p.FollowPath, "speed");
+                    F(p.King, "speed", "speedDuringDay", "sprintSpeed", "sprintSpeedDuringDay");
+                    break;
+                case "keepDistance": F(p.EnemyMove, "keepDistanceOf"); F(p.UnitMove, "keepDistanceOf"); break;
+                case "aggroTime": F(p.EnemyMove, "agroTime"); F(p.UnitMove, "agroTime"); break;
+                case "attackCooldown": foreach (var a in p.Attacks) F(a, "cooldownDuration"); foreach (var m in p.KingAttacks) F(m, "cooldownTime"); break;
+                case "attackRange": foreach (var a in p.Attacks) foreach (var tp in a.targetPriorities) F(tp, "range"); break;
+                case "maxHp": F(p.Hp, "maxHp"); break;
+            }
+        }
+
         private static bool HasBase(object owner, string field, out float v)
         {
             v = 0;
