@@ -62,17 +62,26 @@ namespace PalaceMod.Builder.Studio.Enemies
         // ---- Open and close -----------------------------------------------------------------------------------------
 
         /// <summary>Opens a unit of a draft (null id: a new enemy). onReturn gets the unit's id (or null) on Back.</summary>
-        public static bool Open(PackDraft d, string unitId, Action<string> back, out string error)
+        public static bool Open(PackDraft d, string unitId, Action<string> back, out string error) => Open(d, back, out error, () =>
+        {
+            Entities.EntityStudio.Reset();
+            index = unitId == null ? -1 : d.Pack.Units.FindIndex(u => u?.Id == unitId);
+            if (unitId != null && index < 0) return $"no unit \"{unitId}\"";
+            if (index < 0) index = NewEnemy(null);
+            return index < 0 ? "couldn't add an enemy" : null;
+        });
+
+        /// <summary>Opens the studio on a draft; <paramref name="pick"/> chooses what it edits (a unit, or a thing:
+        /// Entities.EntityStudio) once the draft is set, and returns an error or null.</summary>
+        internal static bool Open(PackDraft d, Action<string> back, out string error, Func<string> pick)
         {
             error = null;
             if (d == null) { error = "no draft"; return false; }
             if (Running) Close(returnToLevel: false);
             draft = d;
             onReturn = back;
-            index = unitId == null ? -1 : d.Pack.Units.FindIndex(u => u?.Id == unitId);
-            if (unitId != null && index < 0) { error = $"no unit \"{unitId}\""; draft = null; return false; }
-            if (index < 0) index = NewEnemy(null);
-            if (index < 0) { error = "couldn't add an enemy"; draft = null; return false; }
+            error = pick();
+            if (error != null) { draft = null; onReturn = null; Entities.EntityStudio.Reset(); return false; }
             // A Level Studio is up: take over its scene in place, and give it back exactly as it was.
             if (Studio.Mode == StudioMode.Edit && StudioShell.Editing)
             {
@@ -111,7 +120,7 @@ namespace PalaceMod.Builder.Studio.Enemies
             RebuildModel();
             EnemyStage.ResetView();
             EnemyDock.Build();
-            Log.For<BuilderManager>().Info($"Enemy Studio: {draft.Pack.Id}/{UnitId} on {scene.name}{(fromLevel ? " (from the Level Studio)" : "")}");
+            Log.For<BuilderManager>().Info($"Enemy Studio: {draft.Pack.Id}/{(Entities.EntityStudio.Active ? "entities/" + Entities.EntityStudio.Id : UnitId)} on {scene.name}{(fromLevel ? " (from the Level Studio)" : "")}");
         }
 
         /// <summary>Back: to the Level Studio (exactly as it was) or out of the arena.</summary>
@@ -120,8 +129,10 @@ namespace PalaceMod.Builder.Studio.Enemies
         public static void Close(bool returnToLevel)
         {
             if (state == State.Off) return;
-            string id = UnitId;
+            string id = Entities.EntityStudio.Active ? Entities.EntityStudio.Id : UnitId;
             var callback = onReturn;
+            Entities.EntityTest.Clear();
+            Entities.EntityStudio.Reset();
             bool wasFromLevel = fromLevel, wasActive = state == State.Active;
             EnemyArena.Clear();
             EnemyStage.Leave();
@@ -157,7 +168,8 @@ namespace PalaceMod.Builder.Studio.Enemies
             }
             // The scene went (the session ended, Builder switched off, a swap): drop out quietly.
             if (Studio.Mode != StudioMode.Edit || !StudioShell.Editing || !EnemyStage.Ready) { Close(returnToLevel: false); return; }
-            if (Unit == null && draft != null)
+            if (Entities.EntityStudio.Active) Entities.EntityStudio.Tick();
+            else if (Unit == null && draft != null)
             {
                 // The unit was deleted (undo of its creation, or Delete): edit another, else leave.
                 index = draft.Pack.Units.FindIndex(u => u?.Side == UnitSide.Enemy);
@@ -173,6 +185,7 @@ namespace PalaceMod.Builder.Studio.Enemies
             EnemyControls.Update();
             EnemyStage.Update(dt);
             EnemyArena.Update(Time.deltaTime);
+            Entities.EntityTest.Update();
         }
 
         private static void OnDraftChanged(bool structural)
@@ -185,6 +198,7 @@ namespace PalaceMod.Builder.Studio.Enemies
         /// <summary>Shows the unit's current template on the turntable (only when it changed).</summary>
         public static void RebuildModel(bool force = false)
         {
+            if (Entities.EntityStudio.Active) { Entities.EntityStudio.RebuildModel(force); return; }
             var u = Unit;
             if (u == null || draft == null) { EnemyStage.Show(null, -1f); return; }
             string key = u.Id + "|" + PackSerializer.WriteCompact(draft.Pack);
@@ -238,7 +252,8 @@ namespace PalaceMod.Builder.Studio.Enemies
         public static void Select(string unitId)
         {
             int i = draft?.Pack.Units.FindIndex(u => u?.Id == unitId) ?? -1;
-            if (i < 0 || i == index) return;
+            if (i < 0 || (i == index && !Entities.EntityStudio.Active)) return;
+            Entities.EntityStudio.Leave();
             index = i;
             Page.Index = i;
             EnemyArena.Clear();
@@ -320,7 +335,7 @@ namespace PalaceMod.Builder.Studio.Enemies
         {
             if (draft == null) return;
             bool ok = draft.Save(out string message);
-            if (ok) SavePortrait();
+            if (ok) { if (Entities.EntityStudio.Active) Entities.EntityStudio.SavePortrait(); else SavePortrait(); }
             Notify.Show(message, ok ? NotifyKind.Success : NotifyKind.Error, key: "builder-enemy");
             EnemyDock.OnChanged(false);
         }
@@ -403,6 +418,7 @@ namespace PalaceMod.Builder.Studio.Enemies
         {
             if (state == State.Off) return "Enemy Studio closed";
             if (state == State.Opening) return "Enemy Studio: opening the arena";
+            if (Entities.EntityStudio.Active) return Entities.EntityStudio.Describe();
             var e = Effective();
             return $"enemy studio {draft?.Pack.Id}/{UnitId} ({Unit?.Name}) base={Unit?.Base} mesh={Unit?.Visuals?.Mesh ?? "-"} fromLevel={fromLevel}; hp={e.MaxHp} speed={e.MoveSpeed} " +
                 $"cooldown={e.AttackCooldown} tags=[{string.Join(",", e.Tags)}]; stage={EnemyStage.Point} cam yaw={EnemyStage.Yaw:0} pitch={EnemyStage.Pitch:0} dist={EnemyStage.Distance:0.0}; " +
