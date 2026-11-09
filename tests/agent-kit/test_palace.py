@@ -121,5 +121,32 @@ class PropIds(unittest.TestCase):
             ops.run([{"op": "add_prop", "id": "rock-a-4", "mesh": "Rock A", "at": [0, 0]}])
 
 
+class Tilt(unittest.TestCase):
+    def test_add_and_set_tilt(self):
+        lv, ops = level()
+        ops.run([{"op": "add_prop", "id": "flag", "mesh": "Rock A", "at": [0, 0], "rotY": 30, "rotX": 90},
+                 {"op": "add_prop", "id": "rock", "mesh": "Rock A", "at": [2, 0]}])
+        flag, rock = lv["props"]
+        self.assertEqual(list(flag), ["id", "base", "pos", "rotY", "rotX", "scale", "solid"])
+        self.assertNotIn("rotX", rock)
+        ops.run([{"op": "set_prop", "ids": ["flag", "rock"], "rotX": 0, "rotZ": 270}])
+        self.assertEqual((flag.get("rotX"), flag["rotZ"], rock["rotZ"]), (None, -90, -90))
+        with self.assertRaisesRegex(palace.Fail, "no prop 'nope'"):
+            ops.run([{"op": "set_prop", "id": "nope", "rotX": 1}])
+
+    def test_footprint_follows_tilt(self):
+        ref = FakeRef()
+        ref._map["scenery"] = [{"base": "mesh:Banner", "size": [2.0, 10.0, 0.5]}]   # 10 m tall, 2 m wide, thin
+        ref.scenery = {"meshes": [{"name": "Disc", "size": [20.0, 20.0, 1.0], "upright": [-0.70711, 0, 0, 0.70711]}]}
+        lv = {"host": "Test"}
+        r = lambda p: palace.prop_radius(ref, lv, dict({"scale": 1}, **p))
+        self.assertAlmostEqual(r({"base": "mesh:Banner"}), 1.0)
+        self.assertAlmostEqual(r({"base": "mesh:Banner", "rotX": 90}), 5.0, places=4)    # lying on its back
+        self.assertAlmostEqual(r({"base": "mesh:Banner", "rotZ": 90}), 5.0, places=4)    # on its side
+        self.assertAlmostEqual(r({"base": "mesh:Disc"}), 10.0)                           # library mesh, z up
+        self.assertAlmostEqual(r({"base": "mesh:Disc", "rotX": 90}), 10.0, places=3)     # stood on edge: 20 m wide still
+        self.assertAlmostEqual(r({"base": "mesh:Disc", "rotX": 90, "rotZ": 90}), 10.0, places=3)
+
+
 if __name__ == "__main__":
     unittest.main()

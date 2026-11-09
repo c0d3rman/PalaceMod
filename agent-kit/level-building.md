@@ -92,6 +92,12 @@ All commands print JSON. Errors go to stderr as `{"error": "..."}` with exit cod
   grid, or your terrain). Use `"pos": [x, y, z]` only to force a height.
 - `rotY`: yaw in degrees around the vertical axis (copies keep their base's tilt). Turn buildings to face the
   lane they guard; for most buildings it is cosmetic.
+- Props can also tilt: `rotX` tips one about its own sideways axis (+ leans its front down; 90 lays an upright piece
+  on its back, e.g. a banner or insignia as a floor emblem), `rotZ` rolls it onto its side. Both are degrees
+  (-180..180), applied before `rotY` (so `rotY` stays its heading), and left out at 0. A solid prop's blocker tilts
+  with it; offline checks use the tilted bounding box's footprint, centred on the prop's position (a mesh whose pivot
+  is at its base sticks out further on one side; check a large tilted solid prop with `paths`). Lower a half-sunk
+  piece with `"pos": [x, y, z]`.
 - **Which way lines and walls run**: at `rotY` 0 a spawn line's segment, and a wall or gate copied from a host's
   "Gate Variant", runs **east-west** (along x), so it faces, or blocks, traffic moving north or south; at `rotY` 90 it
   runs north-south. To close an east-west pass, use `rotY` 90. A gate's length varies by host piece; check it with
@@ -157,6 +163,7 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
     "remove": ["Forest", "Right Bridge"]   // host lines taken off the map: no enemies, routes or markers
   },
   "props": [{ "id": "rock-1", "base": "mesh:Rock A", "pos": [x,y,z], "rotY": 0, "scale": 1.0, "solid": true,
+              "rotX": 90, "rotZ": 0,   // optional tilt (absent = 0): rotX tips it forward, rotZ rolls it
               "colors": "Totend" }],   // optional: keep that map's colours (absent = the level's)
   "terrain": { ... }                                  // section 7
 }
@@ -331,7 +338,8 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 | `set_units` | `slot`, `units` [[x,z] in the slot's frame, null keeps that one] or `at` [[x,z] world points]; `units: null` = back to the map's |
 | `remove_slot` | `slot` |
 | `chain` | `slots` [ids/names], `mode` `tree`\|`nearest`\|`order`, `first` (requirement of the root(s), default `"castle"`), `every` N (order/nearest: every N-th link needs one more castle level instead) |
-| `add_prop` | `mesh`, `at`/`pos`, `rotY`, `scale`, `solid`, `colors` (a map or `original`), `id` (auto) |
+| `add_prop` | `mesh`, `at`/`pos`, `rotY`, `rotX`/`rotZ` (tilt), `scale`, `solid`, `colors` (a map or `original`), `id` (auto) |
+| `set_prop` | `id` or `ids`, then any of `at`/`pos`, `rotY`, `rotX`, `rotZ`, `scale`, `solid`, `colors` (null: the level's) |
 | `scatter` | `mesh` (name or list), `count`, shape (`circle`/`rect`/`line`/`polygon`), `spacing` (3), `avoid` (6 m from slots and lines), `scale` [min,max], `solid` (default true: solid scatter can close a lane; `false` for decoration), `colors`, `seed` |
 | `remove_prop` | `id` or `ids` |
 | `add_spawn_line` | `id`, `at`/`pos`, `rotY`, `width`, `ground`, `large`, `flying` |
