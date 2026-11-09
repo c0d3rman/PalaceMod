@@ -4,9 +4,9 @@ using Newtonsoft.Json.Linq;
 using UnityEngine;
 
 /*
-    A status's `visual`: a tint over the carrier's renderers (per-renderer property blocks, so shared materials stay
-    untouched) and an effect parented to it while the status lasts. Several tinted statuses: the latest one shows; when
-    it ends the previous one comes back.
+    A status's `visual`: a tint over the carrier's renderers (tinted material clones, swapped back when it ends) and an
+    effect parented to it while the status lasts. Several tinted statuses: the latest one shows; when it ends the
+    previous one comes back.
 */
 namespace PalaceMod.Builder.Logic.Bodies
 {
@@ -59,40 +59,72 @@ namespace PalaceMod.Builder.Logic.Bodies
             if (go != null) Paint(go, list.Count > 0 ? list[list.Count - 1].Tint : null);
         }
 
-        public static void Clear() => tints.Clear();
+        public static void Clear()
+        {
+            tints.Clear();
+            originals.Clear();
+        }
+
+        // Untinted materials per renderer while a tint is on, and tinted clones per (material, colour). Units are drawn
+        // through the game's GPU instancing, which follows renderer.sharedMaterial every frame (GPUInstanced.Update),
+        // so swapping materials works for instanced and plain renderers alike (property blocks don't reach instancing).
+        private static readonly Dictionary<Renderer, Material[]> originals = [];
+        private static readonly Dictionary<(Material, Color), Material> clones = [];
+        private static readonly System.Reflection.FieldInfo flasherPairs = HarmonyLib.AccessTools.Field(typeof(MaterialFlasherFX), "targetRendererMaterialPairs");
 
         private static void Paint(GameObject go, Color? tint)
         {
-            var block = new MaterialPropertyBlock();
+            var pairs = new Dictionary<Renderer, MaterialFlasherFX.RendererMaterialPair>();
+            foreach (var f in go.GetComponentsInChildren<MaterialFlasherFX>(true))
+                if (flasherPairs?.GetValue(f) is List<MaterialFlasherFX.RendererMaterialPair> list)
+                    foreach (var pr in list) if (pr?.renderer != null) pairs[pr.renderer] = pr;
+
             foreach (var r in go.GetComponentsInChildren<Renderer>(true))
             {
                 if (r is not (MeshRenderer or SkinnedMeshRenderer)) continue;
-                var mats = r.sharedMaterials;
-                for (int i = 0; i < mats.Length; i++)
+                pairs.TryGetValue(r, out var pair);
+                if (!originals.TryGetValue(r, out var orig))
                 {
-                    var m = mats[i];
-                    if (m == null) continue;
-                    block.Clear();
-                    if (tint is Color t)
-                    {
-                        int prop = m.HasProperty(BaseColor) ? BaseColor : m.HasProperty(ColorId) ? ColorId : -1;
-                        if (prop < 0) continue;
-                        var orig = m.GetColor(prop);
-                        var tinted = Color.Lerp(orig, t, 0.55f);
-                        tinted.a = orig.a;
-                        block.SetColor(prop, tinted);
-                        if (m.HasProperty(ColorDim))
-                        {
-                            var dim = m.GetColor(ColorDim);
-                            var td = Color.Lerp(dim, t * 0.7f, 0.45f);
-                            td.a = dim.a;
-                            block.SetColor(ColorDim, td);
-                        }
-                        r.SetPropertyBlock(block, i);
-                    }
-                    else r.SetPropertyBlock(null, i);
+                    if (tint == null) continue;
+                    orig = r.sharedMaterials;
+                    if (pair != null && orig.Length > 0) orig[0] = pair.originalMaterial;   // not a flash in progress
+                    originals[r] = orig;
                 }
+                Material[] mats;
+                if (tint is Color t)
+                {
+                    mats = new Material[orig.Length];
+                    for (int i = 0; i < orig.Length; i++) mats[i] = Tinted(orig[i], t);
+                }
+                else
+                {
+                    mats = orig;
+                    originals.Remove(r);
+                }
+                r.sharedMaterials = mats;
+                if (pair != null && mats.Length > 0) pair.originalMaterial = mats[0];
             }
+        }
+
+        private static Material Tinted(Material m, Color t)
+        {
+            if (m == null) return null;
+            int prop = m.HasProperty(BaseColor) ? BaseColor : m.HasProperty(ColorId) ? ColorId : -1;
+            if (prop < 0) return m;
+            if (clones.TryGetValue((m, t), out var c) && c != null) return c;
+            c = new Material(m) { name = m.name };
+            var orig = m.GetColor(prop);
+            var tinted = Color.Lerp(orig, t, 0.55f);
+            tinted.a = orig.a;
+            c.SetColor(prop, tinted);
+            if (c.HasProperty(ColorDim))
+            {
+                var dim = m.GetColor(ColorDim);
+                var td = Color.Lerp(dim, t * 0.7f, 0.45f);
+                td.a = dim.a;
+                c.SetColor(ColorDim, td);
+            }
+            return clones[(m, t)] = c;
         }
     }
 }

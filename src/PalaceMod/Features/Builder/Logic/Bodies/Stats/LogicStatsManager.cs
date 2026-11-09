@@ -57,6 +57,19 @@ namespace PalaceMod
             {
                 if (LogicWorld.Current == null) return "no logic session";
                 var ctx = new LogicContext { World = LogicWorld.Current, Self = LogicWorld.Current.Level };
+                if (args.FirstOrDefault() == "mats")
+                {
+                    var e = DevParams.Resolve(args.ElementAtOrDefault(1) ?? "king", ctx)?.FirstOrDefault();
+                    if (e?.Go() == null) return "no entity";
+                    var block = new MaterialPropertyBlock();
+                    return string.Join("\n", e.Go().GetComponentsInChildren<Renderer>(true).Select(r =>
+                    {
+                        r.GetPropertyBlock(block, 0);
+                        var m = r.sharedMaterial;
+                        return $"{r.GetType().Name} {r.name} on={r.enabled && r.gameObject.activeInHierarchy} mat={m?.name} shader={m?.shader?.name} " +
+                               $"base={m?.HasProperty("_BaseColor")} color={m?.HasProperty("_Color")} block.empty={block.isEmpty}";
+                    }));
+                }
                 var list = DevParams.Resolve(args.FirstOrDefault() ?? "king", ctx);
                 if (list == null || list.Count == 0) return "no entity";
                 return string.Join("\n", list.Take(20).Select(Stats.Describe));
