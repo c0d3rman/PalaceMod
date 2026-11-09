@@ -479,6 +479,69 @@ namespace PalaceMod
             private static void Finalizer(DayNightCycle.Timestate? __state) => GamePhase.Restore(__state);
         }
 
+        // ------------------------------------------------------------------ weapons follow their wielder's side
+
+        /*
+            A weapon's damage table rows name the side they hurt by team tag (an enemy weapon's rows need PlayerOwned,
+            a player weapon's EnemyOwned). A weapon swung by a unit of another side (a neutral beast, a copied or stolen
+            weapon) would do 0 to everything it's aimed at. While such a wielder deals damage, a team-tag row means
+            "the wielder's foe" instead: the other side, or, for a neutral wielder, whatever it hits.
+        */
+        private enum Side { None, Player, Enemy, Neutral }
+
+        private static Side wielder = Side.None;
+
+        private static Side SideOf(TaggedObject t) =>
+            t.Tags.Contains(TagManager.ETag.PlayerOwned) ? Side.Player : t.Tags.Contains(TagManager.ETag.EnemyOwned) ? Side.Enemy : Side.Neutral;
+
+        private static readonly Dictionary<Weapon, Side> nativeSides = [];
+
+        /// <summary>The side a weapon is made for, from the rows it hurts with: rows naming EnemyOwned make it a player
+        /// weapon, PlayerOwned an enemy one; else `isPlayerWeapon` (which towers' weapons don't set).</summary>
+        private static Side NativeSide(Weapon w)
+        {
+            if (nativeSides.TryGetValue(w, out var s)) return s;
+            bool Names(TagManager.ETag tag) =>
+                (w.directDamage?.Any(m => m?.requiredTags != null && m.requiredTags.Contains(tag)) ?? false)
+                || (w.splashDamage?.Any(m => m?.requiredTags != null && m.requiredTags.Contains(tag)) ?? false);
+            s = Names(TagManager.ETag.EnemyOwned) ? Side.Player : Names(TagManager.ETag.PlayerOwned) ? Side.Enemy
+                : w.isPlayerWeapon ? Side.Player : Side.Enemy;
+            return nativeSides[w] = s;
+        }
+
+        [HarmonyPatch(typeof(Weapon), nameof(Weapon.DealDamage))]
+        private static class WielderSide
+        {
+            private static void Prefix(Weapon __instance, TaggedObject _attacker, out Side __state)
+            {
+                __state = wielder;
+                if (LogicWorld.Current == null || _attacker == null) return;
+                var side = SideOf(_attacker);
+                wielder = side == NativeSide(__instance) ? Side.None : side;
+            }
+
+            private static void Finalizer(Side __state) => wielder = __state;
+        }
+
+        [HarmonyPatch(typeof(DamageModifyer), nameof(DamageModifyer.AppliesTo))]
+        private static class WielderRows
+        {
+            private static bool Prefix(DamageModifyer __instance, TaggedObject _taggedObject, ref bool __result)
+            {
+                if (wielder == Side.None) return true;
+                var target = SideOf(_taggedObject);
+                foreach (var tag in __instance.requiredTags)
+                {
+                    bool ok = tag is TagManager.ETag.PlayerOwned or TagManager.ETag.EnemyOwned
+                        ? wielder == Side.Neutral || (target != Side.Neutral && target != wielder)
+                        : _taggedObject.Tags.Contains(tag);
+                    if (!ok) { __result = false; return false; }
+                }
+                __result = true;
+                return false;
+            }
+        }
+
         // Dusk forces every build prompt off; with building at night they come back right after.
         [HarmonyPatch(typeof(BuildingInteractor), nameof(BuildingInteractor.OnDusk))]
         private static class BuildAtDusk

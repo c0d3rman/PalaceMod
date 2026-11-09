@@ -48,7 +48,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             container.transform.localRotation = Quaternion.Euler(v.MeshRotX ?? 0f, v.MeshRotY ?? 0f, v.MeshRotZ ?? 0f);
             if (v.MeshOffset is { Length: 3 } o) container.transform.localPosition = new Vector3(o[0], o[1], o[2]);
             container.transform.localScale = Vector3.one * (v.MeshScale ?? 1f) * (v.Scale ?? 1f);
-            Color? tint = v.Tint != null && ColorUtility.TryParseHtmlString(v.Tint, out var c) ? c : null;
+            Color? tint = v.Tint != null && WorldCommon.TryColor(v.Tint, out var c) ? c : null;
             foreach (var s in parts)
             {
                 var child = new GameObject(s.Mesh.name);

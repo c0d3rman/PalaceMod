@@ -40,7 +40,8 @@ namespace PalaceMod.Builder.Logic
         public static CompiledAction Compile(JObject o, string path)
         {
             string type = (string)o["do"] ?? throw new LogicError($"{path}: the action has no \"do\"");
-            var a = new CompiledAction { Type = type, Path = path, Json = o, Params = new CompiledParams(o, path) };
+            Model.Logic.LogicSchema.Actions.TryGetValue(type, out var spec);
+            var a = new CompiledAction { Type = type, Path = path, Json = o, Params = new CompiledParams(o, path, spec) };
             switch (type)
             {
                 case "if":
@@ -79,14 +80,71 @@ namespace PalaceMod.Builder.Logic
         private readonly Dictionary<string, Func<LogicContext, string>> texts = new(StringComparer.Ordinal);
         private readonly Dictionary<string, ActionList> lists = new(StringComparer.Ordinal);
 
-        public CompiledParams(JObject json, string path) { Json = json; Path = path; }
+        /// <summary>The action's schema entry (null for an unknown action): its param types decide how each param's
+        /// string is read (Model.Logic.ParamForms, the same rules the validator checks).</summary>
+        public readonly Model.Logic.ActionSpec Spec;
+
+        public CompiledParams(JObject json, string path, Model.Logic.ActionSpec spec = null) { Json = json; Path = path; Spec = spec; }
+
+        /// <summary>The param's schema type, or null if the schema doesn't list it.</summary>
+        public string TypeOf(string name) => Spec?.Param(name)?.Type;
+
+        /// <summary>How the param's value is read (ParamForms.Classify on its schema type).</summary>
+        public Model.Logic.ParamForm Form(string name, out string source) => Model.Logic.ParamForms.Classify(TypeOf(name), name, Json[name], out source);
 
         public Func<LogicContext, Value> Expr(string name)
         {
             if (exprs.TryGetValue(name, out var f)) return f;
-            f = FromToken(Json[name], $"{Path}.{name}");
+            string path = $"{Path}.{name}";
+            switch (Form(name, out string src))
+            {
+                case Model.Logic.ParamForm.Literal:
+                case Model.Logic.ParamForm.Filter:
+                {
+                    var v = TypeOf(name) == "template" ? Value.Template(src.StartsWith("@@") ? src.Substring(2) : src) : Value.Text(src);
+                    f = _ => v;
+                    break;
+                }
+                case Model.Logic.ParamForm.Text:
+                {
+                    var t = Text(name);
+                    f = ctx => Value.Text(t(ctx));
+                    break;
+                }
+                case Model.Logic.ParamForm.Expression:
+                    f = ExprCompiler.Compile(src, path);
+                    break;
+                default:
+                    f = FromToken(Json[name], path);
+                    break;
+            }
             exprs[name] = f;
             return f;
+        }
+
+        /// <summary>Compiles every param now and throws the LogicError the first run would (the validator's dry
+        /// run, so `check` fails exactly where the game would).</summary>
+        public void CompileAll()
+        {
+            foreach (var prop in Json.Properties())
+            {
+                if (prop.Name == "do" || prop.Name.StartsWith("_")) continue;
+                switch (Form(prop.Name, out _))
+                {
+                    case Model.Logic.ParamForm.Structured:
+                        if (TypeOf(prop.Name) == "actions") List(prop.Name);
+                        break;
+                    case Model.Logic.ParamForm.Filter:
+                        ExprCompiler.CompileFilter((string)prop.Value, $"{Path}.{prop.Name}");
+                        break;
+                    case Model.Logic.ParamForm.Json:
+                    case Model.Logic.ParamForm.None:
+                        break;
+                    default:
+                        Expr(prop.Name);
+                        break;
+                }
+            }
         }
 
         /// <summary>A JSON param as a value: numbers and bools are literals, strings are expressions (a leading `=` is
@@ -131,17 +189,15 @@ namespace PalaceMod.Builder.Logic
         {
             if (texts.TryGetValue(name, out var f)) return f;
             var t = Json[name];
-            if (t == null || t.Type == JTokenType.Null) f = _ => null;
-            else if (t.Type == JTokenType.String)
+            var form = Form(name, out string src);
+            if (form == Model.Logic.ParamForm.None) f = _ => null;
+            else if (form is Model.Logic.ParamForm.Literal or Model.Logic.ParamForm.Filter) f = _ => src;
+            else if (form == Model.Logic.ParamForm.Expression && (t.Type != JTokenType.String || TypeOf(name) != null || ((string)t).StartsWith("=")))
             {
-                string s = (string)t;
-                if (s.StartsWith("="))
-                {
-                    var e = ExprCompiler.Compile(s.Substring(1), $"{Path}.{name}");
-                    f = ctx => Values.Format(e(ctx));
-                }
-                else f = ExprCompiler.CompileText(s, $"{Path}.{name}");
+                var e = ExprCompiler.Compile(src, $"{Path}.{name}");
+                f = ctx => Values.Format(e(ctx));
             }
+            else if (t.Type == JTokenType.String) f = ExprCompiler.CompileText((string)t, $"{Path}.{name}");
             else { string lit = t.ToString(Newtonsoft.Json.Formatting.None); f = _ => lit; }
             texts[name] = f;
             return f;
@@ -236,6 +292,8 @@ namespace PalaceMod.Builder.Logic
             public int Iteration, Times;
             public double Every;
             public IReadOnlyList<LogicEntity> Items;
+            public LogicContext Base;            // forEach: the context the loop started in (each member binds from it)
+            public string As;                    // forEach: the member's name (`as`), or null
         }
 
         public readonly Stack<Frame> Frames = new();
@@ -349,7 +407,8 @@ namespace PalaceMod.Builder.Logic
                         int limit = bp.Has("limit") ? (int)Math.Max(0, bp.Number("limit")) : Caps.Set;
                         int n = Math.Min(items.Count, Math.Min(limit, Caps.Set));
                         if (n == 0 || a.Body.Count == 0) return true;
-                        var fr = new ActionCursor.Frame { List = a.Body, Ctx = ctx.With(it: items[0]), Loop = a.Body, Iteration = 0, Times = n, Items = items };
+                        string loopVar = a.Json["as"] is JValue { Type: JTokenType.String } asTok ? (string)asTok : null;
+                        var fr = new ActionCursor.Frame { List = a.Body, Ctx = MemberCtx(ctx, items[0], loopVar), Loop = a.Body, Iteration = 0, Times = n, Items = items, Base = ctx, As = loopVar };
                         task.Frames.Push(fr);
                         return true;
                     }
@@ -366,12 +425,27 @@ namespace PalaceMod.Builder.Logic
                 {
                     var t = targets[i];
                     if (t == null) continue;
-                    var c = ctx.With(it: t);
+                    // An explicit target binds `it` to each member; the default (self) leaves the surrounding `it` alone,
+                    // so a forEach member stays `it` in an action that has no target of its own.
+                    var c = bp.Has("target") ? ctx.With(it: t) : ctx;
                     entry.Handler(c, new BoundParams(a.Params, c, t));
                 }
             }
             else entry.Handler(ctx, bp);
             return true;
+        }
+
+        /// <summary>A forEach member's context: `it` is the member (`outer` the `it` around the loop), and the loop's
+        /// `as` name, if any, holds it too.</summary>
+        private static LogicContext MemberCtx(LogicContext loop, LogicEntity member, string name)
+        {
+            var c = loop.With(it: member);
+            if (name != null)
+            {
+                c.Locals ??= new Dictionary<string, Value>(StringComparer.Ordinal);
+                c.Locals[name] = Value.Entity(member);
+            }
+            return c;
         }
 
         private static LogicContext IterationCtx(LogicContext ctx, int i)
@@ -389,7 +463,7 @@ namespace PalaceMod.Builder.Logic
             if (f.Iteration >= f.Times) return false;
             f.Index = 0;
             var parentCtx = f.Ctx;
-            f.Ctx = f.Items != null ? parentCtx.With(it: f.Items[f.Iteration]) : IterationCtx(parentCtx, f.Iteration);
+            f.Ctx = f.Items != null ? MemberCtx(f.Base, f.Items[f.Iteration], f.As) : IterationCtx(parentCtx, f.Iteration);
             if (f.Every > 0)
             {
                 task.ResumeAt = LocalTime(task.Clock) + f.Every;

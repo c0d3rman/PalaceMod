@@ -170,7 +170,7 @@ namespace PalaceMod.Tests
                 Run(script, game, refDir, "level", "test.pack", "lv", "--host", "Testmap", "--base", "flat");
                 string applied = Run(script, game, refDir, "apply", "test.pack", ops);
                 Assert.True(applied.Contains("h2 <- h1"), "chain prints its links: " + applied);
-                Assert.True(RunRaw(script, game, refDir, out _, "apply", "test.pack", ops) == 2, "a second plain apply fails (h1 exists)");
+                Assert.True(RunRaw(script, game, refDir, out string again, "apply", "test.pack", ops) == 1 && again.Contains("\"errors\"") && again.Contains("\"path\": \"ops[2]\""), "a second plain apply fails (h1 exists), as an errors[] entry with its op's path: " + again);
                 Run(script, game, refDir, "apply", "test.pack", ops, "--fresh");
 
                 string packFile = Path.Combine(game, "BepInEx", "PalaceBuilder", "packs", "test.pack", "pack.json");

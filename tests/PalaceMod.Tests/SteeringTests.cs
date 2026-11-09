@@ -25,9 +25,17 @@ namespace PalaceMod.Tests
             Eq("foe", TargetRule.ParseList(JToken.Parse("\"foe\""))[0].Filter, "a lone filter");
         }
 
+        public static void AScoreMeansPreferBest()
+        {
+            var r = TargetRule.ParseList(JToken.Parse("[{\"filter\": \"player and building\", \"score\": \"it.income\"}]"))[0];
+            Eq("best", r.Prefer, "a score without prefer ranks by the score");
+            Eq("{\"filter\":\"player and building\",\"score\":\"it.income\"}", r.ToJson().ToString(Newtonsoft.Json.Formatting.None), "round trip keeps it implied");
+        }
+
         public static void RejectsBadRules()
         {
-            foreach (var bad in new[] { "{\"filter\": \"foe\", \"prefer\": \"closest\"}", "{\"filter\": \"foe\", \"prefer\": \"best\"}", "\"foe and (\"" })
+            foreach (var bad in new[] { "{\"filter\": \"foe\", \"prefer\": \"closest\"}", "{\"filter\": \"foe\", \"prefer\": \"best\"}", "\"foe and (\"",
+                "{\"filter\": \"foe\", \"prefer\": \"nearest\", \"score\": \"it.hp\"}" })
             {
                 bool threw = false;
                 try { TargetRule.ParseList(JToken.Parse(bad)); } catch (LogicError) { threw = true; }

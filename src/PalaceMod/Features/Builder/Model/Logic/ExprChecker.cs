@@ -199,6 +199,9 @@ namespace PalaceMod.Builder.Model.Logic
                 case "it":
                     if (!scope.HasIt) Err(n, "\"it\" is only defined inside where(), best(), forEach, targeting, or an action applied to a set");
                     return LType.Entity;
+                case "outer":
+                    if (!scope.HasIt) Err(n, "\"outer\" (the `it` one scope out) is only defined where `it` is: inside where(), best(), forEach, targeting, or an action applied to a set");
+                    return LType.Entity;
             }
             return LType.Entity;
         }
@@ -237,11 +240,11 @@ namespace PalaceMod.Builder.Model.Logic
                         if (ev != null && ev.Value == LType.Void && !(ev.Name == "signal")) { Err(n, $"the event \"{ev.Name}\" has no value"); return LType.Any; }
                         return ev?.Value ?? LType.Any;
                     case "pos": return LType.Position;
-                    case "name": case "choice": case "result":
+                    case "name": case "choice": case "result": case "types": case "weapon":
                         if (ev != null && !ev.Fields.ContainsKey(n.Name)) Err(n, $"the event \"{ev.Name}\" has no {n.Name}");
-                        return LType.Text;
+                        return ev != null && ev.Fields.TryGetValue(n.Name, out var ft) ? ft : n.Name == "types" ? LType.List : LType.Text;
                 }
-                Err(n, $"events have value, pos, name, choice and result, not \"{n.Name}\"");
+                Err(n, $"events have value, pos, name, choice, result, types and weapon, not \"{n.Name}\"");
                 return LType.Any;
             }
             var on = tt == LType.Level ? LType.Level : tt;
@@ -416,6 +419,10 @@ namespace PalaceMod.Builder.Model.Logic
                         Issues.Add(new ExprIssue(col, $"nothing is named \"{f.Arg}\"" + Suggest(f.Arg.Substring(1), scope.Names, "@")));
                     return;
                 case "type": return;
+                case "include":
+                    if (!Filter.Includes.Contains(f.Arg))
+                        Issues.Add(new ExprIssue(col, $"include: takes {string.Join(", ", Filter.Includes)}, not \"{f.Arg}\"" + Suggest(f.Arg, Filter.Includes)));
+                    return;
             }
             if (PlainTerms.Contains(f.Term) || LogicSchema.Tags.Contains(f.Term)) return;
             var lower = LogicSchema.Tags.FirstOrDefault(t => string.Equals(t, f.Term, StringComparison.OrdinalIgnoreCase));

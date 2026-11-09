@@ -37,7 +37,7 @@ that pack. A folder under `packs/` (an installed pack) is read and written as be
    then the whole file runs again; ops aren't idempotent, so a plain second `apply` of the same file fails at the first
    `add_slot`). Packs reload in the game within ~2 s; reload the level (`play` again) to see changes.
 
-All commands print JSON. Errors go to stderr as `{"error": "..."}` with exit code 2; `test` exits 1 when the run is lost.
+All commands print JSON. Errors go to stderr as `{"error": "..."}` with exit code 2; `test` exits 1 when the run is lost. `apply` always answers with `{"applied", "saved", "errors", "warnings"}`: a bad op is an `errors[]` entry with its path (`"ops[3]"`), exit code 1, and nothing is saved.
 
 ## 2. Setup
 
@@ -62,9 +62,13 @@ All commands print JSON. Errors go to stderr as `{"error": "..."}` with exit cod
   upgrade. He presses "start night" when ready. Each night enemies spawn from **spawn lines** at the map's edges and
   walk (or fly) toward the player's buildings and the castle. The night ends when every enemy is dead; then dawn.
   The run is won after the last night. It is lost when the **castle** (its center building) is destroyed.
-  Vanilla fighting (units', towers' and the king's attacks) happens only at night, and the king builds only by day.
-  Every one of these rules can be changed per level: `logic.game` (12.9) sets how the level is won and lost, hides
-  the castle, holds a night open or ends it early, and lets fighting or building happen in either phase.
+- **Fighting is a night thing, building a day thing.** The game's own attacks (towers, troops, houses, the castle,
+  enemies and the king's weapon) only fire at night: by day an enemy can stand next to a building and hurt nothing,
+  and towers stay idle. Building and upgrading are refused at night ("Only during the day"). A night ends the moment
+  its spawning is done and no enemy is left, so anything a level wants to do "after the wave" must happen before the
+  last enemy dies or hold the night open (section 12.16).
+- **All of these are only the defaults.** `logic.game` (12.9) sets per level how it is won and lost, hides the
+  castle, holds a night open or ends it early, and lets fighting or building happen in either phase.
 - **Gold.** Buildings with income pay at dawn (houses +1 each, mills, mines, harbours, fields). Enemies drop gold
   (the spawn group's `gold`, spread over its enemies). A night's leftover gold carries over. Day 1 starts with the
   wave set's `startingGold`.
@@ -647,6 +651,9 @@ island with three causeways; if that's where yours is heading, check whether ano
 | load warnings in `play` | names that don't exist on the host (slot, line, mesh); fix the ops |
 | buildings float or sink | an added slot's y is off the ground; use `at` instead of `pos` |
 | king can't reach a slot | the slot is on unwalkable ground (cliff, water, inside props) |
+| enemies spawned by day reach buildings but deal no damage; towers don't fire by day | the game's attacks only work at night by default: `logic.game.combat` (12.9), or Builder `attacks` (`"when": "always"`) and `damage` rules (12.16) |
+| a rule meant to run "after the wave" never fires | the night ended with the last enemy's death: hold it open with `logic.game.holdNight` or a `countsAsEnemy` keeper (12.16) |
+| a test's `sleep` overshoots or a rule fired "early" | fast mode runs faster than real time: wait on `logic eval time` (12.12) |
 
 ## 11. Worked example
 
@@ -758,40 +765,69 @@ log warns by file). Delete or rename shared items with the `remove_*` / `rename_
 - Without `of`, a rule hears only its owner's events. With `"of": "<filter>"` (and optional `"range"`) it hears that
   event on any matching entity: `{ "on": "death", "of": "foe and unit", "range": 12 }` on a necromancer fires when a
   foe dies within 12 m. Then `subject` is the one that died, `other` its killer, `self` still the necromancer.
+- Combat events name the attacker for every hit: `damaged`/`death` `other` (and `hit`/`kill` on the attacker) is
+  the king, a unit, a tower or other building, the shooter of a projectile, or whoever left the burning ground or hot
+  oil that hurt it. Only scenery hazards and a `damage` action without a `source` leave it `none`.
+- `built` and `upgraded` fire for every build slot, map or added (`add:<id>`), however it's built: the king,
+  `palace.py build`, or the `building` action. Use them instead of polling `self.alive` or `self.level`.
 - The level script hears time and night events (`levelStart`, `every`, `dusk`, `dawn`, `waveCleared`, `goldChanged`,
   `kingAction`, `signal`, `varChanged`...) directly; entity events (`death`, `damaged`, `spawn`, `enter`...) need `of`.
   In the level script `foe`/`ally` mean enemy/player.
 - `near` takes its own `filter` and `range`: `{ "on": "near", "filter": "king", "range": 2 }`.
 - Event params narrow it: `{ "on": "signal", "name": "open" }`, `{ "on": "hpBelow", "pct": 0.5 }`, `{ "on": "dusk",
   "night": 4 }`, `{ "on": "damaged", "min": 20 }`. Events with a value: `event.value` (damage, tick count, night...).
+- `damaged`, `hit`, `kill` and `death` carry the hit's damage types as `event.types` (a list: `event.types.has('fire')`)
+  and the weapon that dealt it as `event.weapon` (`"vanilla:<weapon>"`, or none). See 12.8 for the types.
+- `bump` (units): a shove (`push`, or the game's own knockback) was stopped short by something solid: a wall, a
+  building, a solid body, a cliff or the map's edge. `other` is the building or body it hit (none for terrain),
+  `event.value` the metres of push it didn't travel, `event.pos` where it stopped.
 - Rules run one frame after the event, in order; actions that raise events queue them after. Waits resume later.
 
 ### 12.4 Expressions (the one formula language)
 
 One small, pure language everywhere: conditions, numbers, selectors, positions.
 
-- **Which fields are expressions.** A param whose type isn't text is an expression when it's a JSON string:
-  `"amount": 25` and `"amount": "night * 5"` both work; `"target": "all('foe', 3)"`. A **text** field (messages, HUD,
-  prompts) is literal text with `{expr}` parts (`"Souls {$souls}/10"`); start it with `=` to make the whole field an
-  expression. A **template** field (`spawn.entity`) is an id (`"goblin"`, `"vanilla:E Slime"`) unless it starts with
-  `=` (`"=self.template"`). Text inside an expression is quoted: `'summer'`, `count('foe')`.
+- **Which fields are expressions.** Each param's type (in `logic-reference.md`) decides how its string is read, and
+  `check` reads it exactly as the game does:
+  - number, bool, position, entity, entities and slot params: an expression (`"amount": 25` and `"amount": "night *
+    5"` both work; `"target": "all('foe', 3)"`; a leading `=` is allowed);
+  - **text** fields (messages, HUD, prompts, signal and label names): literal text with `{expr}` parts (`"Souls
+    {$souls}/10"`); start it with `=` to make the whole field an expression;
+  - names and literals: a **template** (`spawn.entity`: `"goblin"`, `"vanilla:E Slime"`), a **colour** (`"#40c0ff"`,
+    `"#4cf"`, `"#40c0ff80"` or a name like `"red"`), an effect, a sound, a status or an option (`"op": "build"`); start
+    it with `=` for an expression (`"=self.template"`, `"tint": "=$colour"`). Variable and rule names are always names.
+  Text inside an expression is quoted: `'summer'`, `count('foe')`. An expression may be up to 8192 characters, nested
+  at most 100 deep.
 - **Literals**: `12`, `0.5`, `true`, `'text'`, `vec(x, z)` (a ground position), `vec(x, y, z)`.
-- **Names**: roles (`self subject other spawned it king castle level`), per-event aliases (`killer`, `victim`,
-  `attacker`, `target`, `entrant`, `collector`, `sender`...), `event.value` / `event.pos` / `event.name` /
-  `event.choice`, `@name` (a place or attached object), `@@id` (a template), `$var` (a level variable), `x.$var` (an
-  entity variable), globals (`night`, `isNight`, `isDay`, `time`, `nightTime`, `nightProgress`, `gold`, `income`,
-  `enemiesAlive`, `difficulty`, `nights`, `daylight`).
+- **Names**: roles (`self subject other spawned it outer king castle level`), per-event aliases (`killer`, `victim`,
+  `attacker`, `target`, `entrant`, `collector`, `sender`, `obstacle`...), `event.value` / `event.pos` / `event.name` /
+  `event.choice` / `event.types` / `event.weapon`, `@name` (a place or attached object), `@@id` (a template), `$var` (a level variable), `x.$var` (an
+  entity variable), globals (`night`, `isNight`, `isDay`, `time`, `nightTime`, `nightProgress`, `gold`, `income`
+  (what the buildings paid at the last dawn, already set when `dawn` rules run), `enemiesAlive`, `difficulty`,
+  `nights`, `daylight`).
 - **Properties**: `.hp .maxHp .hpPct .alive .elite .pos .x .y .z .facing .team .kind .template .labels .level .cost
-  .buildingType .age .target .owner .id .light .lit` (`.facing` follows a walking unit's model; `.light` 0..1 and `.lit`
-  are how lit it stands, see 12.7a) (`.maxHp` is the live value, after the night's difficulty and elite; `@@x.hp`
+  .buildingType .age .target .owner .id .weapon .light .lit` (`.facing` follows a walking unit's model; `.light` 0..1 and
+  `.lit` are how lit it stands, 12.7a; `.weapon` is its weapon's id, `"vanilla:<weapon>"`: a unit's or
+  tower's attack, the king's equipped weapon; `"none"` after `setWeapon none`; `.maxHp` is the live value, after the night's difficulty and elite; `@@x.hp`
   is the template's catalog value), every stat by name (`.moveSpeed`, `.damageMult`, `.income`...), methods
   `.is('filter')`, `.dist(e)`, `.inside(@area)`, `.stacks('status')`; lists and sets: `.len .first .last .at(i)
   .has(x)`.
 - **Selectors**: `nearest(f, r?)`, `farthest`, `weakest`, `strongest`, `random`, `all(f, r?)` (a set, nearest first),
   `best(f, r, score)` (score is an expression over `it`), `count(f, r?)`. They anchor at `self`; call them as methods
-  to anchor elsewhere: `castle.count('enemy', 10)`, `other.nearest('ally')`. A selector never returns the anchor itself
-  or dead entities unless the filter says `self` / `dead`. No match is `none` (actions on none do nothing); test it with
-  `other != none`. A role the event doesn't have is `none` too.
+  to anchor elsewhere: `castle.count('enemy', 10)`, `other.nearest('ally')`. No match is `none` (actions on none do
+  nothing); test it with `other != none`. A role the event doesn't have is `none` too, and so is a distance to or from
+  none (`nearest('#x').dist(self)`); `none` counts as 0 in arithmetic and comparisons, so test `!= none` first.
+- **What a selector sees.** By default it skips its anchor (`self`), the dead (and knocked-out buildings), switched-off
+  entities (`disable`, or placed with `"active": false`) and empty build slots. Its filter opts in by naming them:
+  `dead`, `disabled`, `unbuilt` (or `self`) match only those, and `include:dead`, `include:disabled`,
+  `include:unbuilt`, `include:self` match everything, so they only widen the search: `nearest('#lamp and
+  include:disabled')` finds a lamp whether it's on or off; `all('unbuilt and type:House')` is every empty house slot,
+  vanilla or added, attached or not.
+- **`it` and `outer`.** `it` is rebound by every scope that walks a set: `forEach`, an action whose `target` is a set
+  (its params see each member as `it`), `where()`, `best()`, `.is()`. `outer` is the `it` one scope out (`none` at the
+  top), and `forEach` takes `"as": "name"` to name its member for everything nested inside: in `forEach in
+  all('#nest') as nest` → `spawn` → `then` → `setVar target spawned value "nest"`, `it` is the spawned thing but `nest`
+  (and here `outer`) is still the nest.
 - **Positions**: an entity is its position wherever a position is wanted. `pointNear(p, r)` (a random walkable point),
   `ahead(e, d)`, `toward(a, b, d)`, `lerp(a, b, t)`, `dir(deg)` (0 = north, 90 = east), `angle(a, b)`,
   `spawnLine('Name')`; positions add, subtract and scale (`self.pos + dir(90) * 3`).
@@ -809,7 +845,12 @@ A filter is a string: `"foe and Building and not Wall"`, `"#lantern"`, `"in:@moa
 enemy neutral` (foe/ally relative to `self`); kinds `unit building prop projectile area pickup coin king castle line
 point path logic self`; `melee ranged alive dead elite`; any game tag, case-sensitive (`Tower`, `Flying`, `Wall`, `Boss`,
 `Undead`...; see `logic-reference.md`); `#label`; `is:<template>`; `in:@area` / `in:self` (inside an area); `has:<status>`;
-`type:<building kind>` (`type:Mill`); `lit` (standing in the light, 12.7a); `where(<expression over it>)`. Combine with `and or not ( )`.
+`type:<building kind>` (`type:Mill`); `lit` (standing in the light, 12.7a); `where(<expression over it>)`; the visibility terms `disabled unbuilt` and
+`include:<dead|disabled|unbuilt|self>` (12.4, "What a selector sees"). Combine with `and or not ( )`.
+
+A name with spaces (or other punctuation) is quoted, with whichever quote the surrounding expression doesn't use:
+`type:"Defense Tower"`, `is:"vanilla:E Ogre"`, `#"night watch"`; inside an expression that's `nearest('type:"Defense
+Tower"')`. Template refs with a colon work unquoted too: `is:vanilla:Ogre`.
 
 ### 12.6 Actions
 
@@ -820,14 +861,22 @@ runs once per member and the other params are evaluated per member with `it` bou
 |---|---|
 | Make | `spawn` (any template; `then` runs with `spawned`), `launch` (a projectile template toward a target; `onImpact`), `spawnGroup` (a wave-style group that counts toward the night), `replace` (morph into another template) |
 | Health | `damage` (`amount`, `source` credited, `types` like `["fire"]`), `heal`, `kill`, `revive`, `setHp` |
-| Stats | `setStat` (`stat`, one of `value`/`add`/`mult`, `for` seconds or `"night"`/`"day"`), `applyStatus`, `removeStatus` |
+| Stats | `setStat` (`stat`, one of `value`/`add`/`mult`, `for` seconds or `"night"`/`"day"`), `applyStatus`, `removeStatus`, `setWeapon` (below) |
 | Team, move | `convert` (switch side), `teleport`, `push` (knockback), `drift` (continuous pull/wind), `moveTo`, `setMovement`, `setTargeting` (`prepend`, `remove`, `for`), `taunt`, `command` (player units: follow/hold/home), `turn` (`facing`/`by`/`toward`, `speed`: aim a beam, a turret, an area), `setShape` (an area's shape or size, a body's footprint, at runtime) |
 | Logic | `signal`, `setVar`, `addVar`, `listAdd`/`listRemove`/`listClear`, `addLabel`/`removeLabel`, `enableRule`/`disableRule`, `enable`/`disable`/`toggle`, `wait`, `if` (`cond`, `then`, `else`), `repeat` (`times`, `every`, `actions`), `forEach` (`in`, `actions`, `limit`), `choose` (`options: [{weight, do}]`), `stop` |
-| World | `gold` (give/take), `dropCoins`, `building` (build, upgrade, knockOut, repair, demolish, lock, unlock, setCost, setIncome a slot), `waves` (addSpawn, removeUnit, scaleCount, scaleHp, clearRemaining, startNight, endNight, skipNight), `endLevel` |
+| World | `gold` (give/take), `dropCoins`, `building` (build, upgrade, knockOut, repair, demolish, lock, unlock, setCost, setIncome a slot: `slot` is any expression giving a building or slot entity, `@name`, `it`, `$var`, `it.$slot`, `nearest('unbuilt and type:House')`, or a Studio key `"add:h1"`; without `slot` it acts on each `target`), `waves` (addSpawn, removeUnit, scaleCount, scaleHp, clearRemaining, startNight, endNight, skipNight), `endLevel` |
 | Show | `effect`, `sound`, `message`, `floatText`, `setVisual`, `hud`, `shake`, `marker`, `lighting` (darken or tint the level: an eclipse, day made night), `setLight` (a light that follows anything: a torch on the king) |
-| End | `destroy` (`drops`, `effects`, `silent`) |
+| End | `destroy` (`drops`, `effects`, `silent`): removes anything; a unit the logic spawned is removed outright, one of the game's own player troops is knocked out for good (no revive at dawn); buildings, the castle and the king are only knocked out |
 
-`repeat` and `forEach` take their body as `actions` (the key `do` already names the action). `setVar`/`addVar` write
+**`setWeapon`** gives units, towers and the king another weapon: `"weapon": "vanilla:<weapon>"` (or
+`"=other.weapon"`), `"=other"` (copy that entity's weapon with its range and keep distance), `"none"` (its attacks
+swing but do nothing) or `"base"` (the weapon it started with). The attack range follows the weapon (a melee unit
+given a bow shoots from the bow's range; `range` overrides), and so does a unit's keep distance. `for` (seconds,
+`"night"`, `"day"`) gives back what it had before. On the king it swaps his auto attack (the equipped weapon's
+passive half). `palace.py game cmd logic-weapons` lists every weapon id with its damage types.
+
+`repeat` and `forEach` take their body as `actions` (the key `do` already names the action); `forEach` also takes
+`limit` and `as` (a name for the member, 12.4). `setVar`/`addVar` write
 `self`'s variable unless `target` names another entity; a level variable is `"name": "$souls"` or `"target":
 "level"` (in the level script plain names are level variables).
 
@@ -846,7 +895,7 @@ runs once per member and the other params are evaluated per member with `it` bou
 | `pickup` | collectibles | `by` (filter, e.g. `king`), `radius`, `magnet`, `consume`; event `pickup` |
 | `interact` | king-usable | `prompt` (`{cost}` shows the cost), `cost`, `when` day/night/always, `radius`, `repeat`, `choices` (up to 4 `{id, label, description, cost, icon}`: the game's upgrade-choice popup; the chosen cost is paid and `event.choice` is its id); event `interact` |
 | `attacks` | turrets, units | `[{ "cooldown", "range", "targeting", "launch": {"entity", "from"} \| "weapon", "do", "replace", "when" }]`; the unit's base attacks stay unless `replace` |
-| `targeting` | attackers | ordered list of filters or `{filter, range, prefer, score}`; works on vanilla towers too (`setTargeting`) |
+| `targeting` | attackers | ordered list of filters or `{filter, range, prefer, score}`: the first rule with a match in range wins (a list with no match leaves it idle: it never falls back to anything the list excludes); `score` (an expression over `it`) picks the highest-scoring match, e.g. `{"filter": "player and building", "score": "it.income"}`, else `prefer` nearest (default), farthest, weakest, strongest or random; works on units, vanilla towers and attached slots (`attach` `targeting`, or `setTargeting`) |
 | `movement` | units | `mode` pathfind/direct/hold/path, `path`, `then`, `speed`, `keepDistance`, `kite`, `flee`, `wander`, `home`, `surfaces` |
 
 A number field may be an expression evaluated when the entity appears: `"hp": "=100 * night"`.
@@ -901,7 +950,23 @@ and make it over 8 m wide for large enemies (they keep 4 m from every edge).
 
 In a status's rules `self` is the carrier and `other` whoever applied it. `damageTaken` works on anything with hit
 points, buildings and the castle included (`setStat` on `castle` with `"for": "night"` is a one-night shield). `drift` is a mod too (`"drift": {"toward":
-"@well", "speed": 3}`). Vanilla damage carries types `melee`/`ranged`, `tower`, `king`, `splash`, `magic`.
+"@well", "speed": 3}`). Vanilla damage carries types `melee`/`ranged`, `tower`, `king`, `splash`, `magic`, the
+weapon's id (`vanilla:P Fire Archer`, so any weapon can be told apart), and `fire` for weapons that leave burning
+ground (fire archers, the Fire Spire, Firewing, potion vials) or that the game marks as fire or explosion damage
+(exploders, the fire snail's blast); the burning ground's ticks are `fire` too, credited to the shooter.
+
+A status's rules also hear the carrier's own events (`damaged`, `signal`, `attack`...), so a status can end itself:
+`{"when": "damaged", "do": [{"do": "removeStatus", "status": "asleep"}]}` (see "Sleeping enemies" in the cookbook).
+
+**How long a status lasts.** `duration` is in seconds (0.05 to 36000). Leave it out and the status is permanent: it
+stays until `removeStatus`, the way to give something a lasting buff, curse or flag.
+`applyStatus` `for` overrides the duration for that application only.
+
+**Damage modifier conditions.** A `damageTaken`/`damageMult` mod's `from` is a filter (relative to the carrier) on
+the attacker; its `when` is an expression where `self` is the carrier, `attacker` (also `other`, `it`) who deals the
+hit, `victim` (also `subject`) who takes it, and `dist` the ground distance between them. A hit with no known attacker
+fails `from`, and `attacker` is `none` in `when`. `chance` is rolled per hit. These keys only work on the two damage
+stats.
 
 ### 12.9 Variables, HUD, king actions, caps
 
@@ -992,17 +1057,67 @@ with `{"op": "rule", "on": "unit:<id>", ...}`.
      `logic set <var> <expr>`, `logic king <1-3>`.
 3. Test a mechanic deliberately: spawn what it needs with `logic do`, wait, assert with `logic eval`.
 
+**Testing helpers and traps.**
+
+- Measure waits in game time, not wall time: `test` and `game cmd "agent fast on"` run the game several times faster
+  than real time, so a `sleep` overshoots. Read `logic eval time` (seconds since level start) before and after and
+  poll until the difference is reached; poll conditions with `logic eval` the same way.
+- `logic raise interact <place>` fires the `interact` rules without charging the `cost` (the king pays only when he
+  really interacts). To test a paid interaction, check `gold` before and after a real one, or charge it with
+  `logic do '{"do": "gold", "amount": -5}'`.
+- Keep a probe alive: `logic do '{"do": "setStat", "target": "castle", "stat": "damageTaken", "value": 0}'` makes the
+  castle take no damage (any hittable target likewise); `cheat god` and `cheat invulnerable` protect the king and the
+  whole kingdom, so `logic do` `damage`/`kill` on your own units does nothing while they're on: `cheat invulnerable
+  off` before testing damage to your side.
+- `game cmd "run <h> <v> <seconds>"` holds the movement stick (`h`, `v` in -1..1; the camera's axes) to ride the king
+  into something; `cheat teleport X,Z` first puts him at the start. `shot` frames the camera, which follows the king:
+  teleport him to what you want in the picture.
+- A pool or fresh game has no reference cache: `ref build --maps <host>` (works from inside a level; it ends the
+  session and loads each map) before `ref slots <host>`, and before an `add_slot` of a building kind the host lacks.
+- The `effect` names (`fx`) and `sound` names are listed by `game cmd "builder dump"` (it writes `catalog.json`).
+
+**Fixtures (`palace.py logic fixture <file.json>`).** A fixture is a level plus a scripted check, run in the game
+(fast mode) as one command: it copies the fixture's pack into the library, plays its level, runs the steps in order
+and stops at the first failure. The output lists every step with `passed`/`value`/`error`, then errors from the game
+log and the last 30 trace lines; `"ok": true` means every step passed.
+
+```jsonc
+{ "title": "Necromancer raises skeletons",
+  "pack": { "format": "palace-builder", "version": 3, "id": "fx", "units": [...], "entities": [...], "statuses": [...],
+            "levels": [{ "id": "fx-necro", "name": "Necro test", "host": "Nordfels", "logic": {...} }] },  // one level
+  "play": { "steps": [
+    { "cmd": "agent build castle" },                  // any game command (what `game cmd` takes)
+    { "cmd": "night" },
+    { "do": [{ "do": "spawn", "entity": "necromancer", "at": "vec(20, 10)" }] },   // actions, as the level script
+    { "raise": "death", "on": "@plate", "other": "king", "name": "-", "value": 1 },   // a synthetic event
+    { "wait": 1 },                                     // game seconds
+    { "expect": "count('is:skeleton') >= 1", "within": 5 },   // a bool expression, polled for `within` game s (default 5)
+    { "expectLog": "Raised", "within": 5 },          // text in a game log line since the fixture started
+    { "expectState": "AfterMatchVictory", "within": 60 } ] } }   // the game state `game status` reports
+```
+
+Write one per mechanic you want to keep working, next to your ops, and re-run it after every change.
+
 ### 12.13 Limits (what the engine can't do)
 
 - Vanilla arrows in flight aren't affected by `drift` or `timeScale` (Builder projectiles are).
 - Per-unit walkability is by surfaces (above), not by terrain: a "ladder" is an area surface only some units may
   path through. Walkable movers snap between poses; they don't carry units while gliding. Terrain height doesn't
   change at runtime.
-- Three teams; vanilla units never attack `neutral` things (Builder targeting can).
+- Three teams; vanilla units never attack `neutral` things (Builder targeting can). A weapon hurts its wielder's
+  foes whatever side it was made for: a `neutral` unit's vanilla swing hurts whatever its targeting picks, and a
+  copied or stolen weapon hurts the new owner's foes.
 - Game tags are a fixed set; your own labels work through Builder targeting and filters.
 - The castle can be hidden (`logic.game.castle`) but not moved at runtime; place it where the level needs it.
 - No new scenes, fog or arbitrary code (light: 12.7a). Pending `wait`s and Builder projectiles in flight aren't kept by
   savestates; keep state that matters in variables.
+- No world queries beyond entities: expressions can't ask for the ground height at a point (`vec(x, z).y` is 0, not
+  the ground), whether a point is walkable, the terrain material under it, or how lit it is. Track such state yourself
+  (areas, labels, variables).
+- Game coins on the ground aren't entities (`count('coin')` doesn't see `dropCoins` or kill drops; `game status`
+  `coinsPending` does). A pickup entity is a coin you can see and count.
+- Ranges the checker enforces: a status `duration` 0.05 to 36000 s (leave it out for a permanent status, 12.8), `every`
+  at least 0.1 s with `jitter` 0..1, `wait` at least 0.05 s, `repeat` at most 100 times.
 
 ### 12.14 Cookbook
 
@@ -1102,12 +1217,36 @@ the mirror rule at `dawn` on the werewolf.
 1, "per": "day"}}` and a level rule on `{"on": "kingAction", "action": "horn"}`: `command follow` and `setStat
 moveSpeed mult 1.2 for "night"` on `all('player and unit', 20)`.
 
+**Mirror knight** (copies the weapon of whatever hit it; a tower's bow makes it shoot from the tower's range):
+`{"when": "damaged", "if": "event.weapon != none and event.weapon != self.weapon", "do": [{"do": "if", "cond":
+"other != none and other.weapon == event.weapon", "then": [{"do": "setWeapon", "weapon": "=other"}], "else": [{"do":
+"setWeapon", "weapon": "=event.weapon"}]}]}`.
+
+**Thief** (steals the king's weapon until he picks it up): on the thief `{"when": {"on": "near", "filter": "king",
+"range": 2.5}, "if": "king.weapon != 'none'", "do": [{"do": "setWeapon", "weapon": "=king"}, {"do": "setWeapon",
+"target": "king", "weapon": "none"}, {"do": "spawn", "entity": "lost-weapon", "at": "pointNear(self, 12)"}]}`; the
+`lost-weapon` pickup (`by: "king"`) runs `setWeapon` `"base"` on `king` and on the thief.
+
+**Sleeping enemies** (wake when hit or called): a status `{"id": "asleep", "duration": 36000, "flags": ["stunned"],
+"rules": [{"when": "damaged", "do": [{"do": "removeStatus", "status": "asleep"}]}, {"when": {"on": "signal", "name":
+"wake"}, "do": [{"do": "removeStatus", "status": "asleep"}]}]}` in the unit's `statuses`; a horn wakes them with
+`{"do": "signal", "name": "wake", "to": "all('enemy and has:asleep', 14)"}`.
+
+**Shove into a wall** (a knockback that hits something solid): on the unit `{"when": "bump", "if": "event.value > 1",
+"do": [{"do": "applyStatus", "status": "flipped"}]}`; `other` is the wall or building it hit (none for a cliff).
+
+**Weak to fire**: a status mod `"damageTaken": {"mult": 2, "types": ["fire"]}`, or a rule `{"when": "damaged", "if":
+"event.types.has('fire')", ...}`: fire archers, the Fire Spire and burning ground all count.
+
 ### 12.15 Pitfalls
 
 - A text field is literal: `"text": "souls"` shows the word; `"text": "{$souls}"` shows the number. A non-text field
   is an expression: `"value": "summer"` is an unknown name; write `"value": "'summer'"`.
-- `foe`/`ally` are relative to `self`; in the level script they mean enemy/player. A selector skips `self` and dead
-  entities unless the filter says `self`/`dead`.
+- `foe`/`ally` are relative to `self`; in the level script they mean enemy/player. A selector skips `self`, the dead,
+  switched-off entities and empty build slots unless the filter names them (`dead`, `disabled`, `unbuilt`, or
+  `include:...`).
+- Every set-walking scope rebinds `it`, so a nested `target` set or a `spawn.then` inside a `forEach` loses the
+  member: name it with `"as"` on the `forEach`, or read `outer`.
 - The level script needs `of` for entity events; `other` exists only for events that have one (see the reference).
 - Declare variables first; set entity variables on the right `target` (`"target": "spawned"` inside `then`).
 - `@names` are place ids/names and attach names; give attached slots a `name` before wiring them.
@@ -1116,3 +1255,72 @@ moveSpeed mult 1.2 for "night"` on `all('player and unit', 20)`.
 - `repeat`/`forEach` bodies are `actions`, not `do`.
 - An enemy-team entity that should hold the night open needs `body.hittable` and `countsAsEnemy: true`. To hold a
   night on a condition instead (or to end one early), use `logic.game.holdNight` / `endNight` (12.9).
+
+### 12.16 How the game and the engine behave (facts to design around)
+
+**Day and night.**
+
+- By default the game's own attacks only fire at night and building only works by day (section 3); `logic.game`
+  `combat` and `build` (12.9) change both. Builder damage never depended on it: the `damage` action, status ticks,
+  projectile `impact` rules and Builder `attacks` with `"when": "day"` or `"always"` hurt by day too.
+- A night ends in the frame its spawning is finished and no enemy is left. Two ways to keep it going after the wave:
+  `logic.game.holdNight` (a condition), or a hittable enemy-team entity with `countsAsEnemy: true` (a "keeper"), which
+  counts as an enemy while it lives; `destroy` it to let dawn come.
+- `waves endNight` stops the spawning and removes every enemy at once, silently (no `death` events, no drops, no
+  gold), keepers included; the night then ends. `waves skipNight` works only by day, and not when the coming night
+  is the last.
+- `every` runs on its owner's clock from level start (or from when the owner appeared), not from nightfall: with
+  `"during": "night"` it only skips the ticks that fall by day, so the first night tick comes anywhere from 0 to
+  `seconds` after dusk and `event.value` counts only the ticks that ran. For "N seconds into each night" use a `dusk`
+  rule with a `wait` or a `repeat` (`every` seconds). `jitter` (0..1) varies each interval by up to that share of
+  `seconds`.
+
+**Gold.**
+
+- `gold` with a positive `amount` and no `at` pays at once. With `at`, up to 40 coins rise there and fly to the king,
+  paying 1 each as they arrive (a few seconds); the rest is paid at once. A negative amount takes gold at once (never
+  below 0).
+- Dawn income and dropped gold (kills, `dropCoins`) reach the treasury as the game's coins, over a few seconds.
+  `game status` `coinsPending` counts coins still being spawned, flying or lying on the ground: wait until it's 0
+  before checking `gold`.
+- `game status` `buildings.income` and `game slots` `income` are what each building pays at dawn, `income` modifiers
+  (`setStat`, statuses, `noIncome`) included.
+
+**Projectiles** (Builder projectiles; the `projectile` component and `launch`).
+
+- A projectile hits anything matching its `hits` filter (default `foe`, relative to whoever launched it) that comes
+  within `hitRadius` of its flight, not only its target. Only its launcher is never hit. `homing` only steers: 0 flies
+  straight at where the target stood at launch, 1 re-aims every frame, in between it turns part of the way per second.
+  Each hit raises `impact` (`other` = what it hit) and runs the launch's `onImpact`; with `pierce` 0 the first hit ends
+  it, `pierce: -1` hits everything on its way.
+- Launched at a position (`toward` a point, or a target that's gone), reaching that point is a ground hit: `impact`
+  with `other` none, then it ends (`onGround` `stick`/`bounce`/`pass` change that).
+- After `range` metres of flight (default 60) it ends with `expire` and no impact; `lifetime` likewise.
+- `launch` with `"from": "other"` starts it at that entity, which isn't excluded: if it matches `hits` it's hit
+  immediately. Exclude it in `hits` (`"foe and not has:shocked"`, a label) or start a little away from it
+  (`"from": "toward(other, nearest('foe and not has:shocked', 8), 1.5)"`).
+
+**Builder attacks (`attacks[]`).** Every `cooldown` the unit picks a target (the attack's own `targeting`, else the
+unit's, else `foe`) within `range` (and beyond `minRange`), fires its `launch` or `weapon`, raises `attack` on itself
+(`other` = the target) and runs `do` with `self` and `subject` = the attacker and `other` = the target. `when` is
+`"night"` (default), `"day"` or `"always"`, nothing else; a stunned, disarmed or knocked-out unit doesn't attack. How
+units and towers choose targets (first matching rule, `prefer`, `score`) is in the `targeting` row of 12.7.
+
+**Who vanilla attackers hit.** Towers, troops, the castle and the king attack only what the game counts as an enemy:
+enemy units, and enemy-team hittable entities with `countsAsEnemy` (which also hold the night open). Any other
+enemy-team entity, even one tagged `Building`, is reached only by Builder attacks, projectiles and `damage` rules. (A
+body's game `tags` such as `Building` are for the other side: they make *enemies* attack a player-team body.)
+
+**Movement.** `"wander": {"radius": 6}` makes a unit stroll to random points within `radius` of its home (a new point
+every 4-7 s) whenever it has nothing to go for: in the default `pathfind` mode, when its targeting finds nothing, or
+for a player unit, when it's idle at home and not following the king. `hold`, `path` and a `moveTo` come first.
+
+**What changes the routes at runtime.**
+
+- A `solid` body cuts the ground pathfinding where it stands, and units re-path within about 0.25 s whenever one is
+  placed, spawned, enabled, disabled, destroyed or teleported, or a mover changes pose. That's the tool for opening
+  and closing a region at runtime (a gate, a collapsing bridge, rising water): a solid body you toggle. Place it with
+  `at` at the size of the blocked ground and hide or sink only its look (`"visual": null`, or
+  `"visual": {"meshOffset": [0, -2, 0]}`); its body keeps blocking where the entity stands.
+- A `walkable` body spawned or destroyed rebuilds the pathfinding round it (12.7, "Surfaces").
+- Terrain height and water don't change at runtime; `paths` (and `paths --between`) shows the routes after a change.

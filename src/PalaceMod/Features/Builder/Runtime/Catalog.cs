@@ -18,8 +18,13 @@ using UnityEngine;
 */
 namespace PalaceMod.Builder
 {
-    public sealed class Catalog : ICatalog, ITroopValidationContext, IHostWavesContext
+    public sealed class Catalog : ICatalog, ITroopValidationContext, IHostWavesContext, Model.Logic.ILogicNamesContext
     {
+        /// <summary>Effect names for the validator: only inside a level, where the game's effect prefabs are loaded
+        /// (from the menu the list would be short, and a real name would read as unknown).</summary>
+        public IReadOnlyCollection<string> Effects => EnemySpawner.instance != null ? GameFx.Effects.Keys.ToList() : null;
+        public IReadOnlyCollection<string> Sounds => GameFx.Sounds.Keys.ToList();
+
         private List<CatalogUnit> units;
         private List<CatalogWeapon> weapons;
         private List<CatalogHost> hosts;

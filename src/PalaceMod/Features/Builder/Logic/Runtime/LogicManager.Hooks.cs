@@ -29,18 +29,25 @@ namespace PalaceMod.Builder.Logic
             return LogicGame.EntityOf(c);
         }
 
+        private static bool Wants(LogicWorld w, string ev) => w.HasOfListeners(ev) || w.HasListeners(ev);
+
+        /// <summary>The entity that dealt a hit, from what the game passed (a TaggedObject) or what the hooks below
+        /// remembered (an attack, a projectile's shooter, a damage-dealing script): a Builder entity always, a
+        /// vanilla one when <paramref name="wanted"/>. Only something that is (or belongs to) a game object with a
+        /// TaggedObject counts: scenery hazards (water, kill zones) name no attacker.</summary>
+        private static LogicEntity AttackerOf(Component from, bool wanted)
+        {
+            if (from == null) return null;
+            if (from.GetComponentInParent<BuilderEntity>() is { Entity: { } be }) return be;
+            if (!wanted) return null;
+            var tagged = from as TaggedObject ?? from.GetComponentInParent<TaggedObject>();
+            return tagged != null ? LogicGame.EntityOf(tagged) : null;
+        }
+
         private void HookGame(LogicWorld world)
         {
             daytime = new DaytimeHook();
             DayNightCycle.Instance?.RegisterDaytimeSensitiveObject(daytime);
-            slotHooks.Clear();
-            foreach (var slot in UnityEngine.Object.FindObjectsOfType<BuildSlot>())
-            {
-                var s = slot;
-                UnityEngine.Events.UnityAction a = () => OnSlotUpgraded(s);
-                s.OnUpgrade.AddListener(a);
-                slotHooks.Add((s, a));
-            }
             var tm = TagManager.instance;
             goldHooked = tm != null && tm.Players.Count > 0 ? tm.Players[0].GetComponent<PlayerInteraction>() : null;
             if (goldHooked != null)
@@ -54,8 +61,6 @@ namespace PalaceMod.Builder.Logic
         {
             if (daytime != null && DayNightCycle.Instance != null) DayNightCycle.Instance.UnregisterDaytimeSensitiveObject(daytime);
             daytime = null;
-            foreach (var (slot, a) in slotHooks) if (slot != null) slot.OnUpgrade.RemoveListener(a);
-            slotHooks.Clear();
             if (goldHooked != null)
             {
                 goldHooked.onBalanceGain.RemoveListener(OnGoldGain);
@@ -66,7 +71,6 @@ namespace PalaceMod.Builder.Logic
 
         private void OnGoldGain(int amount)
         {
-            if (incomeCounting) game.IncomeAtDawn += amount;
             if (Listening("goldChanged")) World.Raise("goldChanged", World.Level, null, amount, null, null);
         }
 
@@ -75,14 +79,69 @@ namespace PalaceMod.Builder.Logic
             if (Listening("goldChanged")) World.Raise("goldChanged", World.Level, null, -amount, null, null);
         }
 
-        private void OnSlotUpgraded(BuildSlot slot)
+        /*
+            `built` / `upgraded`: every build or upgrade goes through OnUpgradeChoiceComplete (the king's interact, the
+            `building` action, dev builds), for map slots, Builder-added slots and slots made after the session
+            started alike. A slot whose level follows its activator's (a gate's wall parts) doesn't raise its own.
+            ForceManualUpgradeWithoutFeedbackEffects (load/restore, previews) isn't a build.
+        */
+        [HarmonyPatch(typeof(BuildSlot), nameof(BuildSlot.OnUpgradeChoiceComplete))]
+        private static class SlotUpgrade_Patch
         {
-            var w = World;
-            if (w == null || slot == null) return;
-            bool built = slot.Level <= 1;
-            string ev = built ? "built" : "upgraded";
-            var e = Of(slot, ev);
-            if (e != null) w.Raise(ev, e, null, slot.Level, null, null);
+            private static void Prefix(BuildSlot __instance, out int __state) =>
+                __state = World != null && !__instance.ActivatorUpgradesThis ? __instance.Level : -1;
+
+            private static void Postfix(BuildSlot __instance, int __state)
+            {
+                var w = World;
+                if (w == null || __state < 0 || __instance.Level <= __state) return;
+                try
+                {
+                    string ev = __state == 0 ? "built" : "upgraded";
+                    var e = Of(__instance, ev);
+                    if (e != null) w.Raise(ev, e, null, __instance.Level, null, null);
+                }
+                catch (Exception ex) { Log.For<LogicManager>().Error("build hook", ex); }
+            }
+        }
+
+        // ------------------------------------------------------------------ dawn income
+
+        /// <summary>`income`: what the dawn's harvests paid (the coins the buildings' spawners send, `income` stats
+        /// applied), counted from the first dawn callback to the last, so the `dawn` rules (dispatched after them)
+        /// read the whole payout although the coins themselves land over the next seconds.</summary>
+        private static bool incomeCounting;
+
+        [HarmonyPatch(typeof(DayNightCycle), "DawnCallBeforeSunrise")]
+        private static class DawnIncomeStart_Patch
+        {
+            private static void Prefix()
+            {
+                if (World == null || instance == null) return;
+                incomeCounting = true;
+                instance.game.IncomeAtDawn = 0;
+            }
+        }
+
+        [HarmonyPatch(typeof(DayNightCycle), "DawnCallAfterSunrise")]
+        private static class DawnIncomeEnd_Patch
+        {
+            private static Exception Finalizer(Exception __exception)
+            {
+                incomeCounting = false;
+                return __exception;
+            }
+        }
+
+        [HarmonyPatch(typeof(CoinSpawner), nameof(CoinSpawner.TriggerCoinSpawn))]
+        private static class DawnIncomeCoins_Patch
+        {
+            private static void Prefix(CoinSpawner __instance, int amount)
+            {
+                if (!incomeCounting || World == null || instance == null || amount <= 0) return;
+                if (!__instance.gameObject.activeInHierarchy) return;   // the game spawns nothing then
+                instance.game.IncomeAtDawn += amount;
+            }
         }
 
         // ------------------------------------------------------------------ damage, death, heal, revive
@@ -112,19 +171,23 @@ namespace PalaceMod.Builder.Logic
                     if (dealt <= 0f && !__result) return;   // nothing happened (skipped, invulnerable, already dead)
                     var victim = Of(__instance, __result ? "death" : "damaged");
                     Component from = _damageComingFrom != null ? _damageComingFrom : currentAttacker;
-                    var source = from == null ? null : __result ? Of(from, "kill") ?? Of(from, "hit") : Of(from, "hit");
+                    // The victim's damaged/death rules name the attacker whether or not anything listens to hit/kill.
+                    bool wanted = victim != null || Wants(w, "hit") || __result && Wants(w, "kill");
+                    var source = AttackerOf(from, wanted);
                     if (source == null && _damageComingFrom == null) source = LogicServices.CurrentDamageSource?.Invoke();
                     if (victim == null && source == null) return;
                     // Credit a Builder projectile's hit to its owner as well (doc: hit/kill go to a projectile's owner).
                     var credited = source?.Kind == "projectile" && source.Owner != null ? source.Owner : source;
                     var pos = victim?.Position ?? __instance.transform.position.ToVec();
-                    if (victim != null && dealt > 0) w.Raise("damaged", victim, credited, dealt, pos, null);
-                    if (credited != null && dealt > 0) w.Raise("hit", credited, victim ?? LogicGame.EntityOf(__instance), dealt, pos, null);
+                    // The hit's damage types and weapon (event.types / event.weapon), from the game's attacker.
+                    var (types, weapon) = LogicServices.CurrentHit?.Invoke(_damageComingFrom != null ? _damageComingFrom : from != null ? from.GetComponentInParent<TaggedObject>() : null) ?? default;
+                    if (victim != null && dealt > 0) w.Raise("damaged", victim, credited, dealt, pos, null, types: types, weapon: weapon);
+                    if (credited != null && dealt > 0) w.Raise("hit", credited, victim ?? LogicGame.EntityOf(__instance), dealt, pos, null, types: types, weapon: weapon);
                     if (__result)
                     {
                         var v = victim ?? LogicGame.EntityOf(__instance);
-                        w.Raise("death", v, credited, 0, pos, null);
-                        if (credited != null) w.Raise("kill", credited, v, 0, pos, null);
+                        w.Raise("death", v, credited, 0, pos, null, types: types, weapon: weapon);
+                        if (credited != null) w.Raise("kill", credited, v, 0, pos, null, types: types, weapon: weapon);
                     }
                 }
                 catch (Exception e) { Log.For<LogicManager>().Error("damage hook", e); }
@@ -225,13 +288,113 @@ namespace PalaceMod.Builder.Logic
             private static void Postfix(Component __state) => currentAttacker = __state;
         }
 
+        /// <summary>Who fired a vanilla projectile (the attack that was running when it was fired), or null.</summary>
+        internal static Component ShooterOf(AimbotProjectile p) => p != null && shooterOf.TryGetValue(p, out var c) ? c : null;
+
+        /*
+            What a hit leaves behind (a fire archer's burning ground, a projectile's spawn-on-hit) deals its damage
+            later from its own script, with no attacker. Every object a projectile instantiates on its hit is
+            remembered with the shooter, and those scripts' damage is credited to it (DamageScript_Patch).
+        */
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<GameObject, Component> leftBy = new();
+
+        private static void Spawned(GameObject go)
+        {
+            if (go == null || World == null || currentAttacker == null) return;
+            leftBy.Remove(go);
+            leftBy.Add(go, currentAttacker);
+        }
+
+        [HarmonyPatch]
+        private static class ProjectileSpawnOnHit_Patch
+        {
+            private static IEnumerable<MethodBase> TargetMethods()
+            {
+                yield return AccessTools.Method(typeof(AimbotProjectile), "SpawnWeaponObjectOnHit");
+                yield return AccessTools.Method(typeof(AimbotProjectile), "SpawnProjectileObjectOnHit");
+            }
+
+            // after every Instantiate that returns a GameObject: dup it and hand it to Spawned
+            private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> code)
+            {
+                var spawned = AccessTools.Method(typeof(LogicManager), nameof(Spawned));
+                foreach (var ci in code)
+                {
+                    yield return ci;
+                    if ((ci.opcode == System.Reflection.Emit.OpCodes.Call || ci.opcode == System.Reflection.Emit.OpCodes.Callvirt)
+                        && ci.operand is MethodInfo m && m.Name == "Instantiate" && m.ReturnType == typeof(GameObject))
+                    {
+                        yield return new CodeInstruction(System.Reflection.Emit.OpCodes.Dup);
+                        yield return new CodeInstruction(System.Reflection.Emit.OpCodes.Call, spawned);
+                    }
+                }
+            }
+        }
+
+        /*
+            The game's damage scripts (hot oil, spikes, burning ground, a charging king, self-destructs...) call
+            Hp.TakeDamage without an attacker. Every game method that calls it (found by its IL, so new ones are
+            covered) credits the hit, unless an attack or projectile already set one, to what left the script (above)
+            or else to the object the script sits on. AttackerOf then keeps only objects with a TaggedObject.
+        */
+        [HarmonyPatch]
+        private static class DamageScript_Patch
+        {
+            private static IEnumerable<MethodBase> TargetMethods()
+            {
+                var takeDamage = AccessTools.Method(typeof(Hp), nameof(Hp.TakeDamage));
+                int token = takeDamage.MetadataToken;
+                var module = takeDamage.Module;
+                var skip = new HashSet<Type> { typeof(Hp), typeof(Weapon) };
+                foreach (var t in AccessTools.GetTypesFromAssembly(typeof(Hp).Assembly))
+                {
+                    if (!typeof(MonoBehaviour).IsAssignableFrom(t) || skip.Contains(t) || t.IsGenericTypeDefinition) continue;
+                    if (typeof(AutoAttack).IsAssignableFrom(t) || typeof(ManualAttack).IsAssignableFrom(t) || typeof(AimbotProjectile).IsAssignableFrom(t)) continue;
+                    foreach (var m in t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+                    {
+                        if (m.IsAbstract || m.IsGenericMethodDefinition || m.Module != module) continue;
+                        byte[] il;
+                        try { il = m.GetMethodBody()?.GetILAsByteArray(); }
+                        catch { continue; }
+                        if (il != null && CallsToken(il, token)) yield return m;
+                    }
+                }
+            }
+
+            private static bool CallsToken(byte[] il, int token)
+            {
+                for (int i = 0; i + 4 < il.Length; i++)
+                    if ((il[i] == 0x28 || il[i] == 0x6F) && BitConverter.ToInt32(il, i + 1) == token) return true;
+                return false;
+            }
+
+            private static void Prefix(MonoBehaviour __instance, out Component __state)
+            {
+                __state = currentAttacker;
+                if (World == null || currentAttacker != null || __instance == null) return;
+                var t = __instance.transform;
+                Component by = null;
+                for (var x = t; x != null && by == null; x = x.parent) leftBy.TryGetValue(x.gameObject, out by);
+                currentAttacker = by != null ? by : __instance;
+            }
+
+            private static void Postfix(Component __state) => currentAttacker = __state;
+        }
+
         [HarmonyPatch(typeof(ManualAttack), nameof(ManualAttack.Attack))]
         private static class ManualAttack_Patch
         {
             private static readonly AccessTools.FieldRef<ManualAttack, TaggedObject> target = AccessTools.FieldRefAccess<ManualAttack, TaggedObject>("target");
 
-            private static void Postfix(ManualAttack __instance)
+            private static void Prefix(ManualAttack __instance, out Component __state)
             {
+                __state = currentAttacker;
+                if (World != null) currentAttacker = __instance;
+            }
+
+            private static void Postfix(ManualAttack __instance, Component __state)
+            {
+                currentAttacker = __state;
                 if (!Listening("attack")) return;
                 var e = Of(__instance, "attack");
                 if (e == null) return;

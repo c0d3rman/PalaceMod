@@ -28,7 +28,12 @@ namespace PalaceMod.Builder.Logic
         public Hp Hp => hp;
         public TaggedObject Tagged => tagged;
         public bool Exists => Go != null;
-        public bool Alive => Go != null && Go.activeInHierarchy && (hp == null || !hp.KnockedOut);
+        /// <summary>A build slot's body (the slot, or its building) is alive while the slot is built and standing:
+        /// empty (level 0, also after `demolish`) and knocked-out buildings aren't.</summary>
+        public bool Alive => Go != null && (IsSlotBody ? Slot.Level > 0 && Slot.gameObject.activeInHierarchy : Go.activeInHierarchy) && (hp == null || !hp.KnockedOut);
+
+        /// <summary>The body is a build slot or its building (not a unit that happens to sit under one).</summary>
+        public bool IsSlotBody => Slot != null && (Go == Slot.gameObject || HasTag("Building"));
         private Vec last;
 
         /// <summary>The object's position, or where it last was once it's gone (a dead unit's `death` rules still
@@ -41,8 +46,8 @@ namespace PalaceMod.Builder.Logic
                 return last;
             }
         }
-        /// <summary>Where it looks: a unit's model or the king's mesh (their roots never turn), else the object.</summary>
-        public float Facing => Go != null ? PalaceMod.Builder.Logic.Bodies.Facing.Of(Go) : 0f;
+        /// <summary>A unit's root never turns, its model does (Bodies.Heading).</summary>
+        public float Facing => Go != null ? Bodies.Heading.Yaw(Go) : 0f;
         float IEntityBody.Hp => hp != null ? hp.HpValue : 0f;
         public float MaxHp => hp != null ? hp.maxHp : 0f;
 
@@ -52,7 +57,7 @@ namespace PalaceMod.Builder.Logic
         {
             get
             {
-                if (!slotLooked) { slotLooked = true; slot = Go != null ? Go.GetComponentInParent<BuildSlot>() : null; }
+                if (!slotLooked) { slotLooked = true; slot = Go != null ? Go.GetComponentInParent<BuildSlot>(true) : null; }
                 return slot;
             }
         }
@@ -91,11 +96,11 @@ namespace PalaceMod.Builder.Logic
             int key = go.GetInstanceID();
             if (idx.TryGetValue(key, out var e) && !e.Destroyed) return e;
 
-            var be = go.GetComponentInParent<BuilderEntity>();
+            var be = go.GetComponentInParent<BuilderEntity>(true);
             if (be?.Entity != null) { idx[key] = be.Entity; return be.Entity; }
 
             // A vanilla object: wrap the object that carries its TaggedObject, so a child collider or Hp maps to the same entity.
-            var tagged = go.GetComponentInParent<TaggedObject>() ?? go.GetComponentInChildren<TaggedObject>();
+            var tagged = go.GetComponentInParent<TaggedObject>(true) ?? go.GetComponentInChildren<TaggedObject>();
             var root = tagged != null ? tagged.gameObject : go;
             int rootKey = root.GetInstanceID();
             if (rootKey != key && idx.TryGetValue(rootKey, out e) && !e.Destroyed) { idx[key] = e; return e; }

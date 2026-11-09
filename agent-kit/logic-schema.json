@@ -18,9 +18,13 @@
     {
       "name": "death",
       "group": "Combat",
-      "description": "It dies (a unit) or is knocked out (a building or the king). `other` is the killer (may be none).",
+      "description": "It dies (a unit) or is knocked out (a building or the king). `other` is the killer (may be none). event.types / event.weapon: the killing hit's (see damaged).",
       "params": [],
       "other": "killer",
+      "fields": {
+        "types": "list",
+        "weapon": "text"
+      },
       "aliases": {
         "killer": "other",
         "victim": "subject"
@@ -34,7 +38,7 @@
     {
       "name": "damaged",
       "group": "Combat",
-      "description": "It takes damage (not when modifiers reduce it to 0).",
+      "description": "It takes damage (not when modifiers reduce it to 0). `other` is who dealt it: the king, a unit, a tower or building, a projectile's shooter, or whoever left burning ground or hot oil there; none for scenery hazards and plain `damage` actions without a source. event.types is the hit's damage types (a list: melee, ranged, tower, king, splash, magic, fire, the damage action's own types, and the weapon's id); event.weapon is the weapon that dealt it (\"vanilla:<weapon>\"), or none.",
       "params": [
         {
           "name": "min",
@@ -45,12 +49,17 @@
       "other": "attacker",
       "value": "number",
       "valueMeaning": "the damage taken",
+      "fields": {
+        "types": "list",
+        "weapon": "text"
+      },
       "aliases": {
         "attacker": "other"
       },
       "owners": [
         "any"
       ],
+      "example": "{ \"when\": \"damaged\", \"if\": \"event.types.has('fire')\", \"do\": [{ \"do\": \"removeStatus\", \"status\": \"frozen\" }] }",
       "since": "1.0.0"
     },
     {
@@ -114,11 +123,15 @@
     {
       "name": "hit",
       "group": "Combat",
-      "description": "Its attack, projectile or damage action damaged something.",
+      "description": "Its attack, projectile or damage action damaged something. event.types / event.weapon as for damaged.",
       "params": [],
       "other": "victim",
       "value": "number",
       "valueMeaning": "the damage dealt",
+      "fields": {
+        "types": "list",
+        "weapon": "text"
+      },
       "aliases": {
         "victim": "other"
       },
@@ -130,9 +143,13 @@
     {
       "name": "kill",
       "group": "Combat",
-      "description": "Something it damaged died from that damage.",
+      "description": "Something it damaged died from that damage. event.types / event.weapon as for damaged.",
       "params": [],
       "other": "victim",
+      "fields": {
+        "types": "list",
+        "weapon": "text"
+      },
       "aliases": {
         "victim": "other"
       },
@@ -158,7 +175,7 @@
           "type": "number",
           "min": 0.0,
           "max": 1.0,
-          "description": "Random extra delay each time, 0..1 of seconds."
+          "description": "Each interval varies randomly by up to this share of seconds (0.2: ±20%)."
         },
         {
           "name": "phase",
@@ -330,6 +347,24 @@
       "owners": [
         "any"
       ],
+      "since": "1.0.0"
+    },
+    {
+      "name": "bump",
+      "group": "Movement",
+      "description": "A push (the push action or the game's knockback) was stopped short by something solid: a wall or building, a solid body, a cliff or the map's edge. `other` is what it hit when that's an entity (a building, a wall, a solid body), else none; event.pos is where it stopped.",
+      "params": [],
+      "other": "obstacle",
+      "value": "number",
+      "valueMeaning": "the push distance left (metres)",
+      "pos": true,
+      "aliases": {
+        "obstacle": "other"
+      },
+      "owners": [
+        "unit"
+      ],
+      "example": "{ \"when\": \"bump\", \"if\": \"event.value > 1\", \"do\": [{ \"do\": \"applyStatus\", \"status\": \"flipped\" }] }",
       "since": "1.0.0"
     },
     {
@@ -517,7 +552,7 @@
     {
       "name": "built",
       "group": "Buildings",
-      "description": "(build slots) The player builds it.",
+      "description": "(build slots, map or added) It's built: by the king, `palace.py build` or the `building` action.",
       "params": [
         {
           "name": "level",
@@ -535,7 +570,7 @@
     {
       "name": "upgraded",
       "group": "Buildings",
-      "description": "(build slots) The player upgrades it.",
+      "description": "(build slots, map or added) It's upgraded (any way it's built).",
       "params": [
         {
           "name": "level",
@@ -1255,6 +1290,38 @@
       "since": "1.0.0"
     },
     {
+      "name": "setWeapon",
+      "group": "Stats",
+      "description": "Gives it another weapon (units, towers, the king): a weapon id, a copy of another entity's weapon, none, or its own back. A ranged weapon makes it shoot: its range follows the weapon.",
+      "params": [
+        {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
+          "name": "weapon",
+          "type": "text",
+          "required": true,
+          "description": "\"vanilla:<weapon>\" (e.g. \"=other.weapon\"), an entity to copy (\"=other\": its weapon, range and keep distance), \"none\" (its attacks do nothing) or \"base\" (the weapon it started with)."
+        },
+        {
+          "name": "range",
+          "type": "number",
+          "min": 0.0,
+          "description": "Attack range in metres (default: the copied entity's, else the weapon's usual range)."
+        },
+        {
+          "name": "for",
+          "type": "for",
+          "description": "Seconds, or \"night\"/\"day\"; then it gets back the weapon it had before. Omit to keep it."
+        }
+      ],
+      "example": "{ \"do\": \"setWeapon\", \"weapon\": \"=other\" }",
+      "since": "1.0.0"
+    },
+    {
       "name": "convert",
       "group": "Team",
       "description": "Switches team (a dead target is raised as a new entity of that team).",
@@ -1919,6 +1986,11 @@
           "min": 1.0,
           "max": 256.0,
           "description": "At most this many (max 256)."
+        },
+        {
+          "name": "as",
+          "type": "local",
+          "description": "A name for the member, readable inside (and in nested actions that rebind `it`): \"as\": \"tower\" then `tower.hp`."
         }
       ],
       "since": "1.0.0"
@@ -1991,10 +2063,15 @@
       "description": "Acts on a build slot.",
       "params": [
         {
+          "name": "target",
+          "type": "entities",
+          "default": "self",
+          "description": "Who it acts on: a selector (one entity or a set; each member in turn, with `it` bound). Default self."
+        },
+        {
           "name": "slot",
           "type": "slot",
-          "required": true,
-          "description": "The slot: @name, a selector, or a Studio key (\"slot:Tower 3\")."
+          "description": "The slot: any expression giving a building or slot entity (@name, it, $var, nearest('unbuilt and type:House')...), or a Studio key (\"slot:Tower 3\", \"add:<id>\", \"castle\"). Default: the target."
         },
         {
           "name": "op",
@@ -2266,7 +2343,7 @@
         {
           "name": "glow",
           "type": "color",
-          "description": "Glow colour."
+          "description": "Glow colour; true for the default glow, false for none, or a 0-1 strength."
         },
         {
           "name": "for",
@@ -3060,7 +3137,7 @@
       "on": "entity",
       "name": "facing",
       "returns": "number",
-      "description": "Its yaw in degrees (0 = north)."
+      "description": "Its yaw in degrees (0 = north, clockwise): where a unit's or the king's model faces (its walking direction, or its target while attacking), else its own rotation."
     },
     {
       "on": "entity",
@@ -3090,7 +3167,7 @@
       "on": "entity",
       "name": "level",
       "returns": "number",
-      "description": "A building's level (0 = built, 1 = first upgrade...)."
+      "description": "A build slot's level: 0 = empty (unbuilt), 1 = built, 2 = upgraded once..."
     },
     {
       "on": "entity",
@@ -3139,6 +3216,12 @@
       "name": "lit",
       "returns": "bool",
       "description": "Whether it stands in the light (light >= 0.5): day, or near a light at night or in an eclipse."
+    },
+    {
+      "on": "entity",
+      "name": "weapon",
+      "returns": "text",
+      "description": "Its current weapon's id (\"vanilla:<weapon>\"; the king's is his equipped weapon's auto attack), \"none\" when disarmed by setWeapon, or none."
     },
     {
       "on": "entity",
@@ -3301,6 +3384,18 @@
       "name": "result",
       "returns": "text",
       "description": "levelEnd: 'win' or 'lose'."
+    },
+    {
+      "on": "event",
+      "name": "types",
+      "returns": "list",
+      "description": "damaged/hit/kill/death: the hit's damage types, e.g. event.types.has('fire')."
+    },
+    {
+      "on": "event",
+      "name": "weapon",
+      "returns": "text",
+      "description": "damaged/hit/kill/death: the weapon that dealt the hit (\"vanilla:<weapon>\"), or none."
     }
   ],
   "globals": [
@@ -3346,7 +3441,7 @@
     },
     {
       "name": "income",
-      "description": "The last dawn's payout.",
+      "description": "The gold the buildings paid at the last dawn (`income` stats applied), already counted when `dawn` rules run; the coins themselves land over the next seconds.",
       "type": "number"
     },
     {
@@ -3394,6 +3489,11 @@
     {
       "name": "it",
       "description": "The current candidate: inside a filter's where(), best()'s score, forEach, or an action applied to a set.",
+      "type": "entity"
+    },
+    {
+      "name": "outer",
+      "description": "The `it` one scope out (the forEach member while a nested target, where() or best() rebinds `it`); none at the top.",
       "type": "entity"
     },
     {
@@ -3572,19 +3672,27 @@
     },
     {
       "name": "alive",
-      "description": "Alive."
+      "description": "Alive (not dead, switched off or an unbuilt slot)."
     },
     {
       "name": "dead",
-      "description": "Dead or knocked out."
+      "description": "Dead or knocked out. Naming it lets a selector see the dead."
+    },
+    {
+      "name": "elite",
+      "description": "Elite enemies."
     },
     {
       "name": "lit",
       "description": "Standing in the light (.light >= 0.5)."
     },
     {
-      "name": "elite",
-      "description": "Elite enemies."
+      "name": "disabled",
+      "description": "Switched off (`disable`, or placed with active: false). Naming it lets a selector see switched-off things."
+    },
+    {
+      "name": "unbuilt",
+      "description": "An empty build slot (level 0). Naming it lets a selector see empty slots, which it otherwise skips."
     },
     {
       "name": "logic",
@@ -3604,11 +3712,11 @@
     },
     {
       "name": "#label",
-      "description": "Has a label."
+      "description": "Has a label (#\"two words\" for a label with spaces)."
     },
     {
       "name": "is:<template>",
-      "description": "Made from a template."
+      "description": "Made from a template (is:goblin, is:vanilla:Ogre, is:'vanilla:E Ogre')."
     },
     {
       "name": "in:@area",
@@ -3620,7 +3728,11 @@
     },
     {
       "name": "type:<Kind>",
-      "description": "A building of that kind (Mill, Tower...)."
+      "description": "A building of that kind (type:Mill, type:\"Defense Tower\")."
+    },
+    {
+      "name": "include:<what>",
+      "description": "Matches everything, but lets a selector also see what it skips by default: include:dead, include:disabled, include:unbuilt, include:self (repeat it for more)."
     },
     {
       "name": "where(expr)",
@@ -3671,18 +3783,19 @@
     "enum": "one of the listed options",
     "actions": "a nested list of actions",
     "options": "[{ \"weight\": 2, \"do\": [actions] }, ...]",
-    "targeting": "a targeting list: filter strings or { \"filter\", \"range\", \"prefer\", \"score\" }",
+    "targeting": "a targeting list: filter strings or { \"filter\", \"range\", \"prefer\", \"score\" } (a score picks the highest-scoring match)",
     "movement": "a movement block (mode, path, speed, keepDistance, kite, flee, wander, home)",
     "any": "an expression of any type",
     "for": "seconds, or \"night\" / \"day\" (until the next dawn / dusk)",
     "night": "a night number expression, or \"current\"",
-    "slot": "a build slot: @name, a selector, or a Studio key (\"slot:Tower 3\", \"add:<id>\", \"castle\")",
+    "slot": "a build slot: any expression giving a building or slot entity (@name, it, $var, a selector), or a Studio key (\"slot:Tower 3\", \"add:<id>\", \"castle\")",
     "types": "a list of damage-type labels ([\"fire\"])",
     "keep": "a list of the listed options",
     "fx": "a game effect name",
     "sound": "\"asset:<key>\" or a game sound",
-    "color": "\"#rrggbb\"",
-    "json": "a JSON block"
+    "color": "\"#rrggbb\" (or \"#rgb\", \"#rrggbbaa\", a colour name like \"red\"); \"=expr\" for an expression",
+    "json": "a JSON block",
+    "local": "a plain name (letters, digits, _) for a value bound inside the action's actions"
   },
   "tags": [
     "AUTO_Alive",
