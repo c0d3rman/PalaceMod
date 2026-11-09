@@ -4573,7 +4573,8 @@
       "fields": [
         "var",
         "amount",
-        "label"
+        "label",
+        "level"
       ],
       "children": {}
     },
@@ -4778,10 +4779,14 @@
         "statuses",
         "targeting",
         "rules",
-        "light"
+        "light",
+        "interact",
+        "pay"
       ],
       "children": {
-        "light": "light"
+        "light": "light",
+        "interact": "interact",
+        "pay[]": "pay"
       }
     },
     "hud": {
