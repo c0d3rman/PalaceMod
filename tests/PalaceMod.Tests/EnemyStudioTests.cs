@@ -78,5 +78,48 @@ namespace PalaceMod.Tests
             foreach (var p in new[] { "units[0].visuals.mesh", "units[0].visuals.meshOffset", "units[0].visuals.meshRotZ", "units[0].visuals.meshLook", "units[0].visuals.motion" })
                 Assert.True(bad.Contains(p), "error at " + p + " (got " + string.Join(", ", bad) + ")");
         }
+
+        public static void StageStandsClearOfTheLevel()
+        {
+            // East of the level's box by the margin, level with its middle.
+            var p = StageMath.AwayPoint(new System.Numerics.Vector3(-100, 0, -40), new System.Numerics.Vector3(80, 30, 60), 150f, 5f);
+            Assert.Equal(230f, p.X, "past the east edge");
+            Assert.Equal(10f, p.Z, "middle north-south");
+            Assert.Equal(5f, p.Y, "at the given height");
+            // Sea and ground planes don't widen the level; props do.
+            Assert.True(StageMath.IsBackdrop(new System.Numerics.Vector3(2000, 0, 2000), 600f), "sea plane is backdrop");
+            Assert.True(!StageMath.IsBackdrop(new System.Numerics.Vector3(6, 12, 6), 600f), "tree is a prop");
+        }
+
+        public static void StageCameraFramesAndClamps()
+        {
+            // A sphere of radius r fits a 30 degree view at r / sin(15) (+5 %): bigger models stand further away.
+            float small = StageMath.FrameDistance(1f, 30f), big = StageMath.FrameDistance(10f, 30f);
+            Assert.True(System.Math.Abs(small - 1f / System.Math.Sin(15 * System.Math.PI / 180) * 1.05) < 1e-3, "frame distance " + small);
+            Assert.True(big > small * 9.9f, "ten times the size, ten times the distance");
+            Assert.Equal(60f, StageMath.MaxDistance(small, 60f), "small model keeps the 60 m limit");
+            Assert.True(StageMath.MaxDistance(big, 60f) >= big * 2f, "huge model can zoom out past its framing");
+            // The focus can't be panned off the platform or under it.
+            var stage = new System.Numerics.Vector3(100, 10, 0);
+            var f = StageMath.ClampFocus(new System.Numerics.Vector3(400, -50, 0), stage, 70f, 1f, 20f);
+            Assert.Equal(170f, f.X, "kept within the platform");
+            Assert.Equal(9f, f.Y, "not under the floor");
+            var inside = new System.Numerics.Vector3(110, 15, 5);
+            Assert.Equal(inside, StageMath.ClampFocus(inside, stage, 70f, 1f, 20f), "free inside");
+        }
+
+        public static void StageSeesWhatIsInTheWay()
+        {
+            var min = new System.Numerics.Vector3(-1, 0, 4);
+            var max = new System.Numerics.Vector3(1, 10, 6);
+            var cam = new System.Numerics.Vector3(0, 3, 0);
+            Assert.True(StageMath.SegmentHitsBox(cam, new System.Numerics.Vector3(0, 3, 10), min, max), "a rock between camera and model");
+            Assert.True(!StageMath.SegmentHitsBox(cam, new System.Numerics.Vector3(0, 3, 3), min, max), "behind the model: not in the way");
+            Assert.True(!StageMath.SegmentHitsBox(cam, new System.Numerics.Vector3(5, 3, 10), new System.Numerics.Vector3(-3, 0, 4), new System.Numerics.Vector3(-2, 10, 6)), "beside the line");
+            Assert.True(StageMath.SegmentHitsBox(new System.Numerics.Vector3(0, 5, 5), new System.Numerics.Vector3(0, 5, 5), min, max), "camera inside the rock");
+            Assert.True(StageMath.SegmentHitsBox(cam, new System.Numerics.Vector3(0, 11, 0), min, max, 0f) == false, "vertical segment beside the box");
+            Assert.True(StageMath.BoxesOverlap(min, max, new System.Numerics.Vector3(0, 0, 0), new System.Numerics.Vector3(2, 2, 4.5f)), "touching the model's room");
+            Assert.True(!StageMath.BoxesOverlap(min, max, new System.Numerics.Vector3(5, 0, 0), new System.Numerics.Vector3(6, 2, 2)), "apart");
+        }
     }
 }

@@ -205,7 +205,7 @@ namespace PalaceMod.Builder.Studio.Enemies
     {
         internal const string Usage =
             "builder-enemy open [unit] | library [unit] | level [unit] | new [base] | state | dock | press <tile|row> | set <field> <value> | color <part> <#hex|-> | parts | picker | look <ref|base> | fit <scale|-> " +
-            "| offset <x> <y> <z> | rot <x> <y> <z> | material own|unit | motion auto|bob|none | walk on|off | fight [n] | stop | elite on|off | arena | readout | portrait | orbit <yaw> <pitch> <dist> | spin <deg> " +
+            "| offset <x> <y> <z> | rot <x> <y> <z> | material own|unit | motion auto|bob|none | walk on|off | fight [n] | stop | elite on|off | arena | readout | portrait | orbit <yaw> <pitch> <dist> | pan <right> <up> (metres) | frame | spin <deg> " +
             "| tab <palette tab> <panel tab> | select <unit> | undo | redo | save | back   the Enemy Studio";
 
         private static string Arg(string[] a, int i) => i < a.Length ? a[i] : throw new ArgumentException("missing argument " + i);
@@ -353,6 +353,14 @@ namespace PalaceMod.Builder.Studio.Enemies
                     EnemyStage.Pitch = F(Arg(args, 2));
                     EnemyStage.Distance = F(Arg(args, 3));
                     return "ok";
+                case "pan":
+                {
+                    Require();
+                    var cam = Camera.main ?? throw new InvalidOperationException("no camera");
+                    EnemyStage.Focus += cam.transform.right * F(Arg(args, 1)) + cam.transform.up * F(Arg(args, 2));
+                    return "ok";
+                }
+                case "frame": Require(); EnemyStage.FrameModel(); return "framed";
                 case "spin":
                     Require();
                     EnemyStage.Turning = false;

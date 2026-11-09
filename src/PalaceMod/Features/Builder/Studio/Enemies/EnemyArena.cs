@@ -91,7 +91,7 @@ namespace PalaceMod.Builder.Studio.Enemies
             var template = BuilderServices.Units.Resolve(pack, unitRef, out string error) ?? throw new InvalidOperationException(error ?? "unit not found");
             before = new HashSet<Hp>(Object.FindObjectsOfType<Hp>());
             // Its own ground, outside the level (ArenaZone): no level geometry, no king, no buildings.
-            ArenaZone.Create(StudioScene.Scene, EnemyStage.Point.y);
+            ArenaZone.Create(StudioScene.Scene, EnemyStage.Point);
             center = ArenaZone.Center;
             EnemyStage.SetVisible(false);
             DamageToDefenders = DamageToEnemies = 0f;

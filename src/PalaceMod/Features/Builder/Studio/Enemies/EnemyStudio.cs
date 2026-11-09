@@ -425,7 +425,7 @@ namespace PalaceMod.Builder.Studio.Enemies
             if (Entities.EntityStudio.Active) return Entities.EntityStudio.Describe();
             var e = Effective();
             return $"enemy studio {draft?.Pack.Id}/{UnitId} ({Unit?.Name}) base={Unit?.Base} mesh={Unit?.Visuals?.Mesh ?? "-"} fromLevel={fromLevel}; hp={e.MaxHp} speed={e.MoveSpeed} " +
-                $"cooldown={e.AttackCooldown} tags=[{string.Join(",", e.Tags)}]; stage={EnemyStage.Point} cam yaw={EnemyStage.Yaw:0} pitch={EnemyStage.Pitch:0} dist={EnemyStage.Distance:0.0}; " +
+                $"cooldown={e.AttackCooldown} tags=[{string.Join(",", e.Tags)}]; stage={EnemyStage.Point} cam yaw={EnemyStage.Yaw:0} pitch={EnemyStage.Pitch:0} dist={EnemyStage.Distance:0.0}/{EnemyStage.MaxDistance:0} focus={EnemyStage.Focus} hidden={EnemyStage.HiddenCount}; " +
                 $"model={(EnemyStage.Model != null ? EnemyStage.ModelBounds.size.ToString() : "none")}{(ModelError != null ? " error=" + ModelError : "")}; dirty={draft?.Dirty} undo={draft?.History.UndoLabel ?? "-"}; arena: {EnemyArena.Describe()}";
         }
     }
