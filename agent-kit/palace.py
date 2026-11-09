@@ -2392,13 +2392,27 @@ class Terrain:
 # Analysis: walk grid for the level, paths, economy, waves, checks
 # =====================================================================================================================
 
-SLOPE_LIMIT = 32.0
-# The game's ground graphs (`dev.py cmd "builder-level graphs"`): recast, 0.2 m voxels, max slope 30 degrees, agent
-# radius 0.5 m on the small-enemy and king graphs and 4 m on the large-enemy graph. The clearances are what the offline
-# model needs to reproduce the widths measured in game (level-building.md section 7).
-WALK_SLOPE = 30.0
+# The game's ground graphs (`dev.py cmd "builder-level graphs"`): recast, 0.2 m voxels, agent radius 0.5 m on the
+# small-enemy and king graphs; the large-enemy graph's radius and the walkable slope are the host map's own. A level's
+# terrain is walkable up to the strictest ground graph's slope (GroundLayer), and its cliffs are walls for every graph.
+# The clearances are what the offline model needs to reproduce the widths measured in game (level-building.md
+# section 7). A reference built by a newer game copy carries them (map dump "graphs"); HOST_GRAPHS is the fallback,
+# measured on game 2.14.
 SMALL_CLEARANCE = 0.5
-LARGE_CLEARANCE = 4.0
+HOST_GRAPHS = {
+    # host: (large-enemy radius m, walkable slope degrees)
+    "Durststein": (1.5, 45), "Freifort": (2, 50), "Frostsee": (2, 20), "Moorweg": (2, 40), "Nordfels": (4, 30),
+    "Sturmklamm": (2, 40), "Totend": (2, 50), "Uferwind": (2, 40), "Wildbach": (2, 40),
+}
+
+
+def host_graphs(ref, host):
+    """(large-enemy radius, walkable slope) of a host map's ground graphs."""
+    g = (ref.map(host) or {}).get("graphs") if ref else None
+    if g and "Enemy Units L" in g:
+        ground = [v["slope"] for k, v in g.items() if k != "Enemy Units Air"]
+        return float(g["Enemy Units L"]["radius"]), float(min(ground))
+    return HOST_GRAPHS.get(host, (4.0, 30.0))
 
 
 def quat_matrix(q):
@@ -2460,6 +2474,7 @@ class LevelGround:
         m = ref.map(level["host"])
         t = level.get("terrain")
         self.flat = level.get("base") == "flat"
+        self.large_r, self.walk_slope = host_graphs(ref, level["host"])
         # Fine model (flat terrain): clearance per half-cell quad, see clearance(). corner_ok refines diagonal steps.
         self.clear = None
         if self.flat and t:
@@ -2489,14 +2504,14 @@ class LevelGround:
 
     def clearance(self, T, level, ref):
         """Flat terrain, modelled the way the game's recast graphs see it: the ground mesh's triangles (split as
-        GroundLayer splits each cell) steeper than WALK_SLOPE, water/blocked columns, solid props and the field's edge
+        GroundLayer splits each cell) steeper than the host's walkable slope, water/blocked columns, solid props and the field's edge
         are obstacles; every half-cell quad gets its distance to the nearest obstacle (its clearance), and a 2 m cell is
         open to an enemy size when one of its quads has that size's clearance. Steps between cells need clearance where
         the cells meet, so a diagonal causeway one quad wide still connects."""
         Q = 2
         QW, QH, qs = T.w * Q, T.h * Q, T.cell / Q
         W1 = T.w + 1
-        lim = math.tan(math.radians(WALK_SLOPE)) * T.cell
+        lim = math.tan(math.radians(self.walk_slope)) * T.cell
         blocked = bytearray(QW * QH)
 
         def mark(i, j, qi, qj):
@@ -2512,16 +2527,18 @@ class LevelGround:
                     continue
                 h00, h10 = T.hts[j * W1 + i] / 100.0, T.hts[j * W1 + i + 1] / 100.0
                 h01, h11 = T.hts[(j + 1) * W1 + i] / 100.0, T.hts[(j + 1) * W1 + i + 1] / 100.0
+                # A quad the cell's diagonal runs through is an obstacle if either triangle is steep: the game walls
+                # off every steep triangle (GroundLayer's cliff walls) and erodes its graphs from those walls.
                 if abs(h00 - h11) <= abs(h10 - h01):
                     # Split 00-11: triangle (00,01,11) above the diagonal, (00,11,10) below it.
                     a = math.hypot(h11 - h01, h01 - h00) > lim
                     b = math.hypot(h10 - h00, h11 - h10) > lim
-                    steep = {(0, 1): a, (1, 0): b, (0, 0): a and b, (1, 1): a and b}
+                    steep = {(0, 1): a, (1, 0): b, (0, 0): a or b, (1, 1): a or b}
                 else:
                     # Split 10-01: triangle (00,01,10) below the anti-diagonal, (10,01,11) above it.
                     c = math.hypot(h10 - h00, h01 - h00) > lim
                     d = math.hypot(h11 - h01, h11 - h10) > lim
-                    steep = {(0, 0): c, (1, 1): d, (0, 1): c and d, (1, 0): c and d}
+                    steep = {(0, 0): c, (1, 1): d, (0, 1): c or d, (1, 0): c or d}
                 for (qi, qj), s in steep.items():
                     if s:
                         mark(i, j, qi, qj)
@@ -2566,7 +2583,7 @@ class LevelGround:
             row = []
             for i in range(T.w):
                 best = max(self.qclear(i, j, qi, qj) for qi in range(Q) for qj in range(Q))
-                row.append("w" if best >= LARGE_CLEARANCE else "s" if best >= SMALL_CLEARANCE else ".")
+                row.append("w" if best >= self.large_r else "s" if best >= SMALL_CLEARANCE else ".")
             self.kind.append(row)
 
     def qclear(self, i, j, qi, qj):
@@ -2580,7 +2597,7 @@ class LevelGround:
             return False
         if self.clear is None:
             return not (di and dj) or (self.ok(i + di, j, large) and self.ok(i, j + dj, large))
-        r = LARGE_CLEARANCE if large else SMALL_CLEARANCE
+        r = self.large_r if large else SMALL_CLEARANCE
         a = 1 if di > 0 else 0   # this cell's quad column (row) facing the neighbour
         b = 1 if dj > 0 else 0
         if di and dj:
@@ -3257,6 +3274,15 @@ def check_pack(ref, data):
                 k = ground.index(l["center"][0], l["center"][2])
                 if k is None or ground.kind[k[1]][k[0]] == "#":
                     err(f"{p}.spawnLines", f"spawn line {l['name']} is off the map")
+            if l["flying"] and lv.get("base") == "flat" and lv.get("terrain"):
+                # On a flat field the fliers' surface covers the field only: a flier spawned further out starts at
+                # its edge (the game moves it there), not on the line. `palace.py paths` measures it in game ("air").
+                T = Terrain(lv["terrain"])
+                x0, z0, x1, z1 = T.ox, T.oz, T.ox + T.w * T.cell, T.oz + T.h * T.cell
+                off = max(math.hypot(max(x0 - x, 0, x - x1), max(z0 - z, 0, z - z1)) for x, _, z in (l["points"] or [l["center"]]))
+                if off > 30:   # the maps' own flier lines sit up to ~15 m out; that only shifts where fliers appear
+                    warn(f"{p}.spawnLines", f"flier line {l['name']} reaches {off:.0f} m beyond the field: fliers can only fly over "
+                                            "the field, so they start at its edge; move the line over the field")
         if castle in slots:
             for r in offline_routes(ref, data, lv, slots, castle):
                 if not r["reachable"]:
@@ -3835,10 +3861,11 @@ def reference_markdown(ref):
         c = m["castle"]["pos"]
         x0, x1 = g["origin"][0] + 12, g["origin"][0] + g["size"][0] * g["cell"] - 12
         z0, z1 = g["origin"][1] + 12, g["origin"][1] + g["size"][1] * g["cell"] - 12
+        large_r, slope = host_graphs(ref, name)
         heads.append(f"| {name} | {x1 - x0:.0f} x {z1 - z0:.0f} | {c[0] - x0:.0f} / {x1 - c[0]:.0f} / {c[2] - z0:.0f} / {z1 - c[2]:.0f} | "
-                     f"{c[1]:.1f} | {Terrain.max_world(c[1]) - c[1]:+.1f} / {Terrain.MIN_Y - c[1]:+.1f} |")
-    L.append("\n| Host | Playable rectangle (m) | Castle to west / east / south / north edge (m) | Castle y | Terrain headroom up / down from the castle (m) |")
-    L.append("|---|---|---|---|---|")
+                     f"{c[1]:.1f} | {Terrain.max_world(c[1]) - c[1]:+.1f} / {Terrain.MIN_Y - c[1]:+.1f} | {large_r:g} | {slope:g} |")
+    L.append("\n| Host | Playable rectangle (m) | Castle to west / east / south / north edge (m) | Castle y | Terrain headroom up / down from the castle (m) | Large-enemy clearance (m) | Walkable slope (°) |")
+    L.append("|---|---|---|---|---|---|---|")
     L += heads
     L.append("")
 
@@ -4057,6 +4084,18 @@ def cmd_check(env, args):
     if args.live:
         g = Game(env)
         result["game"] = g.agent(f"validate {data['id']}" + (f" {args.level}" if args.level else ""))
+        # The level loaded in the game: what its last pathfinding rescan left wrong (an empty graph, a ground line
+        # with no route to the castle, a flier line off the fliers' graph). The game logs these as warnings too.
+        try:
+            status = g.agent("status")
+            loaded = (status.get("session") or {}).get("level")
+            if loaded and (not args.level or loaded == args.level) and any(l["id"] == loaded for l in data.get("levels", [])):
+                problems = g.agent("paths").get("problems") or []
+                result["game"]["pathProblems"] = {"level": loaded, "problems": problems}
+                if problems:
+                    result["game"]["ok"] = False
+        except Fail:
+            pass
     result["ok"] = not any(i["severity"] == "error" for i in issues) and (not args.live or result["game"].get("ok", False))
     out(result)
     if not result["ok"]:

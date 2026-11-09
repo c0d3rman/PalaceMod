@@ -180,6 +180,8 @@ namespace PalaceMod.Builder
             go.name = $"{baseUnit.Prefab.name} [{pack.Id}/{def.Id}]";
             var notes = new List<string>();
             Apply(go, pack, def, [], notes, inPlace: false);
+            // Behaviour engine: clones register as entities of this template (BuilderEntity.Start).
+            (go.GetComponent<Logic.BuilderEntity>() ?? go.AddComponent<Logic.BuilderEntity>()).TemplateId = def.Id;
             Log.For<BuilderManager>().Debug($"Built {pack.Id}/{def.Id} from {baseUnit.Id}: {Describe(go)}" + (notes.Count > 0 ? $" ({string.Join("; ", notes)})" : ""));
             return go;
         }

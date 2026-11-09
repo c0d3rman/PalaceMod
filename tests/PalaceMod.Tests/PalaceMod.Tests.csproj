@@ -61,6 +61,9 @@
     <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Terrain/TerrainBrushes.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Level/UnitSpread.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Studio/Enemies/EnemyMath.cs" />
+    <!-- Behaviour engine core (L1): the pure files of Logic/Runtime; the Unity side is excluded. -->
+    <Compile Include="../../src/PalaceMod/Features/Builder/Logic/Runtime/*.cs"
+             Exclude="../../src/PalaceMod/Features/Builder/Logic/Runtime/LogicGame.cs;../../src/PalaceMod/Features/Builder/Logic/Runtime/LogicGameWorld.cs;../../src/PalaceMod/Features/Builder/Logic/Runtime/BuilderEntity.cs;../../src/PalaceMod/Features/Builder/Logic/Runtime/LogicManager*.cs;../../src/PalaceMod/Features/Builder/Logic/Runtime/Game*.cs" />
     <EmbeddedResource Include="../../src/PalaceMod/Assets/builder-sample.json" LogicalName="builder-sample.json" />
     <EmbeddedResource Include="../../src/PalaceMod/Assets/builder-presets.json" LogicalName="builder-presets.json" />
   </ItemGroup>

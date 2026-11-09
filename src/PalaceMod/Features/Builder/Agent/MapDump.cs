@@ -22,6 +22,7 @@ using static PalaceMod.Builder.Agent.AgentCommands;
       base64; -32768 = no ground) and walkability per cell as a row string per z (row 0 = smallest z):
       '#' no ground, '.' ground enemies can't walk, 's' small enemies only, 'w' every ground enemy.
     - scenery: the map's own scenery meshes (prop bases "mesh:<name>").
+    - graphs: each recast graph's agent settings by name (radius, climb, height, slope, cell; they differ per map).
     - camera: the player's screen "north" and "right" on the ground, so a picture can be turned like the game's view.
 */
 namespace PalaceMod.Builder.Agent
@@ -77,6 +78,17 @@ namespace PalaceMod.Builder.Agent
                 ["size"] = PropSize(p),
             }));
             root["grid"] = Grid(cell);
+            // The pathfinding graphs' agent settings, which differ per map (the large enemies' radius is 1.5-4 m, the
+            // walkable slope 20-50 degrees): the offline route model uses them.
+            var graphs = new JObject();
+            if (AstarPath.active != null)
+                foreach (var g in AstarPath.active.data.graphs.OfType<RecastGraph>())
+                    graphs[g.name] = new JObject
+                    {
+                        ["radius"] = R(g.characterRadius), ["climb"] = R(g.walkableClimb), ["height"] = R(g.walkableHeight),
+                        ["slope"] = R(g.maxSlope), ["cell"] = R(g.cellSize),
+                    };
+            root["graphs"] = graphs;
             return root;
         }
 

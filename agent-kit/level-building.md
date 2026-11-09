@@ -247,8 +247,11 @@ kept. Ids everywhere: 1-64 characters of `a-z 0-9 . _ -`, starting with a letter
 ```
 
 - Match units to the line: flyers from a line with `flying: true`, ground enemies from `ground: true`, large ones
-  (`Large` in reference.md) from `large: true`. Pure flyer lines can sit off the ground (over water, cliffs); ground
-  lines must be on walkable ground with a route to the castle.
+  (`Large` in reference.md) from `large: true`. Pure flyer lines can sit off the ground (over water, cliffs), but
+  only over the fliers' surface: the host's own (roughly where its own flyer lines are and the land between) or, on
+  a `flat` base, the field. A flier spawned beyond it starts at the surface's nearest edge, not on the line (`paths`
+  lists each flier line's distance under `air`; `check` warns for a flat field). Ground lines must be on walkable
+  ground with a route to the castle.
 - Each night needs at least one spawn. A spawn group from a line whose route is blocked never reaches anything and
   the night never ends: `check` and `paths` catch that.
 
@@ -343,7 +346,7 @@ library's Enemies tab, or from a level in the Studio), so keep them in the libra
 | `enemy <id> [--difficulty D] [--elite] [--studio] [--fight N] [--portrait]` | a library enemy's numbers (offline: HP, damage per hit/second against buildings, the king and troops, troops' time to kill it); with the game: open it in the Enemy Studio, fight N copies in its arena, save its portrait |
 | `spawn <unit> [count] [--elite] [--line L \| --at X Z]` | spawn enemies now |
 | `cheat god\|invulnerable\|infinitegold [on\|off]`, `cheat gold N`, `cheat speed X`, `cheat kill`, `cheat heal`, `cheat endnight`, `cheat teleport X,Z` (or `X Z`; negatives are fine) | test helpers |
-| `paths [--rescan] [--points]` | the game's own route from every ground line to the castle, on the graph its enemies use (`Enemy Units L` if the line spawns large ones): `length` m from the line itself, `at` (the line's middle), `start` (where that lands on walkable ground), `snap` (m between them) and a `warning` when the line is over 10 m off walkable ground; `--points` adds the waypoints `[[x, z], ...]` |
+| `paths [--rescan] [--points]` | the game's own route from every ground line to the castle, on the graph its enemies use (`Enemy Units L` if the line spawns large ones): `length` m from the line itself, `at` (the line's middle), `start` (where that lands on walkable ground), `snap` (m between them) and a `warning` when the line is over 10 m off walkable ground; `--points` adds the waypoints `[[x, z], ...]`. `air`: each flier line's distance from the fliers' surface (at its worst point) and where its fliers start; `problems`: what the last rescan left wrong (an empty graph, a ground line with no route, a flier line off the surface; the game also logs these as a warning, and `check --live` fails on them while the level is loaded) |
 | `paths --between X1 Z1 X2 Z2` | whether each ground graph (small enemies, large enemies, the king's `Player Units S`) connects two points, and how far each point is from walkable ground |
 | `report` | the current or last night's report |
 | `game cmd "savestate save <name>"` / `"savestate load <name\|last\|quick>"` / `"savestate list"` / `"savestate dump"` / `"retrynight load"` | savestates of the level being played (`play`, `test`, `sandbox`): capture a moment (e.g. the dawn before the finale) and load it back to retest from there without replaying the run. Filed per level, not per host map. A load reloads the level (about a second; `dump` says `restoring=False` when done) with its terrain, layout, custom enemies and night progress. It refuses if the level's night count or build slots changed since the save; other edits (later nights' enemies, props, terrain) load |
@@ -478,29 +481,34 @@ and digging work as well as raising); untouched cells stay the host's own.
   (a few cm off where the host's ground is uneven). `check`/`render` don't model sculpted host ground yet: confirm
   routes with `paths` in game. Fliers fly over the host's own flier surface there, not over raised ground.
 - Heights: `terrain` with `set` (flat plateau/basin to a height), `raise`/`lower` (add), `smooth`; `ramp` for slopes.
-  Ground steeper than the graphs' max slope (30°) is a cliff: unwalkable for ground units **and the king** (it's
-  walled off for him too, so he can't slide down a face he can't climb back up), drawn as rock. A plateau with one
-  ramp is a choke point; fliers ignore it. In the Studio the Ramp brush is dragged from the top to the bottom: the
-  ground previews while you drag and the guide turns red past 30°.
+  Ground steeper than the host's walkable slope is a cliff: unwalkable for ground units **and the king** (it's
+  walled off for him too, so he can't slide down a face he can't climb back up), drawn as rock. The slope is the
+  host's own (reference.md, "What the host decides": 20° on Frostsee, 30° on Nordfels, 40-50° elsewhere), so the
+  same ramp can be a road on Totend and a cliff on Frostsee. A plateau with one ramp is a choke point; fliers ignore
+  it. In the Studio the Ramp brush is dragged from the top to the bottom: the ground previews while you drag and the
+  guide turns red past the host's slope.
 - **Width matters.** The game paths ground units on two graphs: small enemies and the king keep 0.5 m from any
   obstacle, large enemies (ogres, rams, big spiders; every spawn line with `large: true` is path-checked for them)
-  keep 4 m. Water and blocked cells, cliff faces steeper than 30° and the field's edge are obstacles, and a dug water
-  edge is a slope too, so a causeway needs more width than a ramp. Measured in game (`paths --between`), by the
-  `width` of the op's shape:
+  keep the host's large-enemy clearance: **2 m on most hosts, 4 m on Nordfels, 1.5 m on Durststein** (reference.md,
+  "What the host decides"). Water and blocked cells, every cliff face (up or down: a raised ramp's drop-offs count
+  like the cliffs of a cut) and the field's edge are obstacles, and a dug water edge is a slope too. Measured in game
+  (`paths --between`), by the `width` of the op's shape (`falloff` 0 or 1; flat field):
 
-  | Passage | Small enemies, king | Large enemies |
-  |---|---|---|
-  | Water causeway, straight (along x or z) | closed ≤ 3, open from 6 (4-5 depends on the grid) | closed ≤ 9, open from 12 (10-11 depends on the grid) |
-  | Water causeway, diagonal | closed ≤ 5, open from 6 | closed ≤ 11, open from 14 (12-13 depends on the grid) |
-  | Ramp between cliffs, straight | open from 4 | closed ≤ 9, open from 11 (10 depends on the grid) |
-  | Ramp between cliffs, diagonal | open from 4 | closed ≤ 8, open from 11 (9-10 depends on the grid) |
+  | Passage | Small enemies, king | Large, clearance 2 m | Large, clearance 4 m (Nordfels) |
+  |---|---|---|---|
+  | Ramp (raised strip, or cut into a plateau), straight | open from 4 | closed ≤ 6, open from 8 | closed ≤ 10, open from 12 |
+  | Water causeway, straight (along x or z) | closed ≤ 3, open from 4 | closed ≤ 6, open from 8 | closed ≤ 10, open from 12 |
+  | Water causeway, diagonal | closed ≤ 6, open from 8 | closed ≤ 6, open from 8 (offline says 10) | closed ≤ 12, open from 14 |
 
-  Causeways: a water ring (dug, the default), then `water` `on: false` along a `line` of that width (it raises the
-  dug ground back to height 0, like a `terrain` `set` 0 over the same line). Ramps: a 6 m plateau (`falloff` 1) and a `ramp` (`falloff` 1). "Depends on the grid": shapes fill
-  whole 2 m cells, so where the edges fall on the grid moves the threshold. For a lane only small enemies use, make
-  it 6-8 m wide; for one everyone uses, 14 m+. `check` and `render` model the same rules offline (they agreed with
-  the game on 140 of 144 measured passages, and erred towards "closed"); confirm with `paths` or
-  `paths --between X1 Z1 X2 Z2` in game.
+  On Durststein (1.5 m) a 4 m ramp already lets large enemies up. Causeways: a moat (dug, the default), then
+  `water` `on: false` along a `line` of that width. Shapes fill whole 2 m cells, so where the edges fall on the grid
+  can move a threshold by a cell. For a lane only small enemies use, make it 4-6 m wide; for one everyone uses, 8 m+
+  (Nordfels 14 m+). **A ramp has to run into its terrace**: one laid along a cliff face, meeting the terrace only at
+  its tip, opens onto it through a gap no wider than the strip where the two heights match (a 12 m ramp beside a
+  face had a 4 m junction: closed to large enemies). End it on the terrace, or give its top a landing (`terrain`
+  `set` the terrace height over the ramp's last 8-10 m and the gap to the face). `check` and `render` model the same
+  rules offline with the host's clearance and slope (they agreed with the game on 53 of 54 measured passages,
+  erring towards "closed"); confirm with `paths` or `paths --between X1 Z1 X2 Z2` in game.
 - Example (tested): `{"op": "terrain", "mode": "set", "height": 6, "circle": {"center": [-4, 1], "radius": 22},
   "falloff": 1}` then `{"op": "ramp", "from": [-4, -18], "to": [-4, -40], "width": 14, "fromHeight": 6, "toHeight": 0,
   "falloff": 1}` on a flat Nordfels: a castle mesa with one southern ramp.
