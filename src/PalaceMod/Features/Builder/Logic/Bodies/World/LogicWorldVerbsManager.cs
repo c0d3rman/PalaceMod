@@ -5,6 +5,7 @@ using PalaceMod.Builder;
 using PalaceMod.Builder.Logic;
 using PalaceMod.Builder.Logic.Bodies;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
 /*
     The behaviour engine's World and Show actions (docs/builder-engine.md, "Actions": World, Show; workstream L2):
@@ -24,6 +25,12 @@ namespace PalaceMod
             WaveVerbs.Register();
             ShowVerbs.Register();
             LevelHud.Register();
+            // Status visuals (`visual.fx`) use the same catalog as the `effect` action, parented to the carrier.
+            StatusVisuals.SpawnFx = (id, parent) =>
+            {
+                var fx = GameFx.FindEffect(id) ?? throw new LogicError($"no game effect \"{id}\"{WorldCommon.Near(GameFx.Effects.Keys, id)}");
+                return parent == null ? null : Object.Instantiate(fx.Prefab, parent.position, fx.Prefab.transform.rotation, parent);
+            };
             LogicSaveState.Register("world", _ => new JObject
             {
                 ["buildings"] = WorldVerbs.Capture(),
