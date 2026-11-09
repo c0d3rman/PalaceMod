@@ -67,7 +67,14 @@ namespace PalaceMod.Builder.Logic.Bodies
                 body.transform.SetPositionAndRotation(start.position, start.rotation);
             }
             decks.Add(d);
-            RequestScan();
+            // Off the map: its own space graphs (fast); on the map: the host graphs' one coalesced scan.
+            var center = d.Ghosts.Count > 0 ? d.Ghosts.Values.First().ghost.transform.position : body.transform.position;
+            if (Spaces.Outside(center))
+            {
+                foreach (var g in d.Ghosts.Values) Spaces.Add(BodyVisual.Bounds(g.ghost));
+                if (d.Ghosts.Count == 0) Spaces.Add(new Bounds(body.transform.position + Vector3.up * body.Height, new Vector3(size.x, 1f, size.z) * body.transform.lossyScale.x));
+            }
+            else RequestScan();
             Refresh(d);
         }
 
@@ -101,6 +108,12 @@ namespace PalaceMod.Builder.Logic.Bodies
         /// <summary>Once a frame: the coalesced scan, after the level's walkable bodies exist.</summary>
         public static void Tick()
         {
+            long spaceMs = Spaces.Tick();
+            if (spaceMs >= 0)
+            {
+                Log.For<LogicBodiesManager>().Info($"spaces: {Spaces.Describe()}, scan {spaceMs} ms");
+                foreach (var d in decks) Refresh(d);
+            }
             if (!scanPending || AstarPath.active == null) return;
             scanPending = false;
             long ms = GroundGraphs.Scan();
@@ -113,6 +126,9 @@ namespace PalaceMod.Builder.Logic.Bodies
         {
             if (d.Body == null) return;
             bool on = d.Body.isActiveAndEnabled;
+            var mask = BodyNav.GroundMask();
+            d.Hide.graphMask = mask;
+            foreach (var g in d.Ghosts.Values) g.hide.graphMask = mask;
             if (d.Ghosts.Count == 0) { d.Hide.enabled = !on; return; }
             // A posed mover: the live deck is never cut (it's off the graph while moving, units wait); the ghost of
             // the current pose shows, every other ghost is hidden.
