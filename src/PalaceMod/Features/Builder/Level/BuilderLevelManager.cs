@@ -26,6 +26,7 @@ namespace PalaceMod
         public override void Update()
         {
             if (LevelOverlay.ScanAfterFrame >= 0 && Time.frameCount >= LevelOverlay.ScanAfterFrame) ScanAfterLevelStart();
+            GroundGraphs.RunPendingScan();
         }
 
         // Once per custom level start, after Start has run (slots placed, removed ones gone): rebuild the graphs with
