@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using PalaceMod.Builder.Model.Logic;
 
 /*
     The Builder's design format (see docs/builder-design.md, "Data model"). Everything a player makes is a DesignPack:
@@ -17,7 +18,7 @@ namespace PalaceMod.Builder.Model
     public sealed class DesignPack
     {
         public const string FormatName = "palace-builder";
-        public const int CurrentVersion = 2;
+        public const int CurrentVersion = 3;
 
         [JsonProperty("format", Order = -10)] public string Format { get; set; } = FormatName;
         [JsonProperty("version", Order = -9)] public int Version { get; set; } = CurrentVersion;
@@ -36,12 +37,20 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("units")] public List<UnitDef> Units { get; set; } = [];
         [JsonProperty("waveSets")] public List<WaveSetDef> WaveSets { get; set; } = [];
         [JsonProperty("levels")] public List<LevelDef> Levels { get; set; } = [];
+        /// <summary>Non-unit templates: props, projectiles, areas, pickups, logic objects (docs/builder-engine.md).</summary>
+        [JsonProperty("entities")] public List<EntityDef> Entities { get; set; }
+        [JsonProperty("statuses")] public List<StatusDef> Statuses { get; set; }
+        /// <summary>Pack-local presets (built-in ones are referenced by id; export copies used library ones in).</summary>
+        [JsonProperty("presets")] public List<PresetDef> Presets { get; set; }
 
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
 
         public UnitDef FindUnit(string id) => Units?.Find(u => u.Id == id);
         public WaveSetDef FindWaveSet(string id) => WaveSets?.Find(w => w.Id == id);
         public LevelDef FindLevel(string id) => Levels?.Find(l => l.Id == id);
+        public EntityDef FindEntity(string id) => Entities?.Find(e => e.Id == id);
+        public StatusDef FindStatus(string id) => Statuses?.Find(s => s.Id == id);
+        public PresetDef FindPreset(string id) => Presets?.Find(p => p.Id == id);
     }
 
     public sealed class Requirements

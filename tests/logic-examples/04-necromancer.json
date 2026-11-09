@@ -1,0 +1,97 @@
+{
+ "example": 4,
+ "title": "Necromancer: a foe dying within 12 m may rise as a skeleton",
+ "doc": "Expressiveness check 4",
+ "pack": {
+  "format": "palace-builder",
+  "version": 3,
+  "id": "fixture.ex04",
+  "name": "Example 4: Necromancer",
+  "units": [
+   {
+    "id": "necromancer",
+    "base": "vanilla:E Flying Wizzard",
+    "name": "Necromancer",
+    "rules": [
+     {
+      "when": {
+       "on": "death",
+       "of": "foe and unit",
+       "range": 12
+      },
+      "if": "chance(0.3)",
+      "do": [
+       {
+        "do": "spawn",
+        "entity": "skeleton",
+        "at": "subject"
+       },
+       {
+        "do": "effect",
+        "fx": "summon",
+        "at": "subject"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "id": "skeleton",
+    "base": "vanilla:E Melee",
+    "name": "Skeleton",
+    "visuals": {
+     "tint": "#e8e4d0"
+    }
+   }
+  ],
+  "levels": [
+   {
+    "id": "ex04",
+    "name": "Example 4: Necromancer",
+    "host": "Nordfels",
+    "logic": {
+     "seed": 4
+    }
+   }
+  ]
+ },
+ "play": {
+  "steps": [
+   {
+    "cmd": "night"
+   },
+   {
+    "do": [
+     {
+      "do": "spawn",
+      "entity": "necromancer",
+      "at": "vec(-4, -14)"
+     },
+     {
+      "do": "spawn",
+      "entity": "vanilla:P Melee",
+      "count": 12,
+      "at": "vec(-4, -14)",
+      "spread": 3,
+      "team": "player"
+     }
+    ]
+   },
+   {
+    "wait": 1
+   },
+   {
+    "do": [
+     {
+      "do": "kill",
+      "target": "all('player and unit and not king', 10)"
+     }
+    ]
+   },
+   {
+    "expect": "count('is:skeleton') >= 1",
+    "within": 5
+   }
+  ]
+ }
+}

@@ -436,8 +436,8 @@ which accepts an entity or a position.
 | | `enable` / `disable` / `toggle` | the entity's rules, components (its solid cut and hittability too) and visibility; on a spawn line, pauses or resumes its spawning (the night's schedule waits for it) |
 | | `wait` | `seconds`: the rest of the list resumes later (min 0.05 s) |
 | | `if` | `cond`, `then`, `else` |
-| | `repeat` | `times` (≤ 100), `every` (seconds, 0 = now), `do` (with `event.value` = the iteration) |
-| | `forEach` | `in` (a set), `do` (with `it`), `limit` |
+| | `repeat` | `times` (≤ 100), `every` (seconds, 0 = now), `actions` (with `event.value` = the iteration; not `do`, which names the action) |
+| | `forEach` | `in` (a set), `actions` (with `it`), `limit` |
 | | `choose` | `options: [{ "weight": 2, "do": [...] }, ...]` |
 | | `stop` | ends this action list |
 | **World** | `gold` | `amount` (negative takes, floored at 0), `at` (shows the coin effect there) |
