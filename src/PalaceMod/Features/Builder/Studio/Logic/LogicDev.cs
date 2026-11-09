@@ -131,31 +131,46 @@ namespace PalaceMod.Builder.Studio.Logic
 
         private static string Plain(string s) => System.Text.RegularExpressions.Regex.Replace(s ?? "", "<[^>]+>", "").Trim();
 
-        /// <summary>Clicks the first row or tile whose text starts with (else contains) the given text, rule editor first.</summary>
+        /// <summary>Clicks the first row or tile whose text is (else starts with, else contains) the given text, rule
+        /// editor first. A row's lines read as "first / second"; its first line alone also counts as exact.</summary>
         private static string Press(string text)
         {
-            foreach (bool start in new[] { true, false })
+            RuleEditor.Tick();
+            static string Norm(string s) => Plain(s).Replace("\n", " / ");
+            for (int pass = 0; pass < 3; pass++)
             {
-                bool Match(string s) => start ? s.StartsWith(text, StringComparison.OrdinalIgnoreCase) : s.Contains(text, StringComparison.OrdinalIgnoreCase);
+                bool Match(string s)
+                {
+                    string n = Norm(s);
+                    return pass switch
+                    {
+                        0 => n.Equals(text, StringComparison.OrdinalIgnoreCase) || n.Split(new[] { " / " }, StringSplitOptions.None)[0].Trim().Equals(text, StringComparison.OrdinalIgnoreCase),
+                        1 => n.StartsWith(text, StringComparison.OrdinalIgnoreCase),
+                        _ => n.IndexOf(text, StringComparison.OrdinalIgnoreCase) >= 0,
+                    };
+                }
                 foreach (var b in Buttons())
                 {
                     var t = b.GetComponent<TMPro.TextMeshProUGUI>();
-                    if (t == null || !b.gameObject.activeInHierarchy || !Match(Plain(t.text))) continue;
+                    if (t == null || !b.gameObject.activeInHierarchy || !Match(t.text)) continue;
                     b.onApply?.Invoke();
-                    return "pressed row " + Plain(t.text).Replace("\n", " / ");
+                    return "pressed row " + Norm(t.text);
                 }
                 foreach (var tile in Roots().SelectMany(r => r.GetComponentsInChildren<ModTile>()).Concat(UnityEngine.Object.FindObjectsOfType<ModTile>()).Distinct())
                 {
                     if (!tile.gameObject.activeInHierarchy) continue;
-                    string label = tile.Label != null ? Plain(tile.Label.text) : tile.name;
+                    string label = tile.Label != null ? tile.Label.text : tile.name;
                     if (!Match(label)) continue;
                     tile.Press();
-                    return "pressed tile " + label;
+                    return "pressed tile " + Norm(label);
                 }
             }
             throw new ArgumentException($"nothing showing \"{text}\"");
         }
 
-        private static string Rows() => string.Join("\n", Buttons().Where(b => b.gameObject.activeInHierarchy).Select(b => Plain(b.GetComponent<TMPro.TextMeshProUGUI>()?.text).Replace("\n", " / ")).Take(80));
+        private static string Rows() { RuleEditor.Tick(); return RowsNow(); }
+
+        private static string RowsNow() => string.Join("\n", Buttons().Where(b => b.gameObject.activeInHierarchy).Select(b => Plain(b.GetComponent<TMPro.TextMeshProUGUI>()?.text).Replace("\n", " / "))
+            .Concat(Roots().SelectMany(r => r.GetComponentsInChildren<ModTile>()).Where(t => t.gameObject.activeInHierarchy && t.Label != null).Select(t => "[" + Plain(t.Label.text) + "]")).Take(160));
     }
 }

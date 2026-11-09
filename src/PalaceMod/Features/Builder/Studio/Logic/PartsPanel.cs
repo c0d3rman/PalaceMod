@@ -333,7 +333,9 @@ namespace PalaceMod.Builder.Studio.Logic
         private static void MeshRow(ModPage page, LogicOwner owner, PartSpec spec)
         {
             string mesh = (string)Get(owner, "visual")?["mesh"];
-            page.Row("Model", mesh == null ? Dim("none") : Esc(mesh), "Click to pick a model.", () => LogicStudio.OpenSide("Model…", p => MeshPicker(p, owner)));
+            string shown = mesh == null ? null : mesh.Substring(mesh.IndexOf(':') + 1);
+            if (shown != null && shown.Length > 16) shown = shown.Substring(0, 15) + "…";
+            page.Row("Model", shown == null ? Dim("none") : Esc(shown), () => (mesh ?? "No model") + "\nClick to pick a model.", () => LogicStudio.OpenSide("Model…", p => MeshPicker(p, owner)));
         }
 
         private static string meshFilter = "";
@@ -418,7 +420,8 @@ namespace PalaceMod.Builder.Studio.Logic
             foreach (var prop in poses?.Properties().ToList() ?? [])
             {
                 string name = prop.Name;
-                LogicFields.Action(page, Esc(name), () => EditPart(owner, "mover", $"Remove pose {name}", m => (m[key] as JObject)?.Remove(name)), $"Signal \"{name}\" moves it here. Click to remove it.", "×");
+                var head = page.Row("Pose " + Esc(name), null, $"Signal \"{name}\" moves it here.");
+                StudioDock.Compact(head, false, 10f, page.Size.x);
                 LogicFields.NumberField(page, "   Turn (°)", N("rotY", "Turn", "Its turn in this pose."), () => (Get(owner, "mover")?[key] as JObject)?[name]?["rotY"],
                     (v, l) => EditPart(owner, "mover", l, m => SetPath(m, $"{key}.{name}.rotY", v), $"pose.{name}.rotY"), scope, "Its turn in this pose, degrees.");
                 string[] axes = ["x", "y", "z"];
@@ -428,6 +431,7 @@ namespace PalaceMod.Builder.Studio.Logic
                     LogicFields.NumberField(page, $"   Offset {axes[i]} (m)", N(axes[i], "Offset", "Moved from its placed position."), () => (Get(owner, "mover")?[key] as JObject)?[name]?["offset"]?[ax],
                         (v, l) => EditPart(owner, "mover", l, m => SetPath(m, $"{key}.{name}.offset.{ax}", v), $"pose.{name}.offset{ax}"), scope, "Moved from where it's placed, metres (y is up).");
                 }
+                LogicFields.Action(page, Dim($"   Remove pose {Esc(name)}"), () => EditPart(owner, "mover", $"Remove pose {name}", m => (m[key] as JObject)?.Remove(name)), null, "×");
             }
             page.TextInput("+ pose", () => "", v =>
             {
