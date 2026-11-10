@@ -13,6 +13,9 @@ using UnityEngine;
     - Hits: anything matching `hits` within `hitRadius` of the flight segment (each thing once); `pierce` extra
       targets (-1 = all); the ground per `onGround` (impact | stick | bounce | pass); `range` metres, then `expire`.
     - Each hit raises `impact` (other = what it hit; none for the ground; event.pos) and runs the launch's `onImpact`.
+    - Looks: `impactFx` plays an effect (GameFx) at every impact; `warn` draws a landing marker (a ring with a disc that
+      fills as the shot comes down) at the aim point while it flies. A lobbed shot (gravity or arc) gets both by
+      default ("dust_small", a ring of hitRadius + 0.5 m); `"impactFx": "none"` / `"warn": 0` turn them off.
 */
 namespace PalaceMod.Builder.Logic.Bodies
 {
@@ -23,6 +26,10 @@ namespace PalaceMod.Builder.Logic.Bodies
         public float Speed = 12f, Accel, Homing = 1f, Arc, Gravity, HitRadius = 1f, Range = 60f;
         public Vector3 Spin;
         public string Face = "travel", Hits = "foe", OnGround = "impact";
+        /// <summary>Effect at each impact (null = the default: dust_small for a lobbed shot; "none" = off).</summary>
+        public string ImpactFx;
+        /// <summary>Landing-marker radius (-1 = the default: hitRadius + 0.5 for a lobbed shot; 0 = off).</summary>
+        public float Warn = -1f;
         public int Pierce;
         // flight
         public LogicEntity Target;
@@ -63,7 +70,12 @@ namespace PalaceMod.Builder.Logic.Bodies
             Face = (string)p["face"] ?? Face;
             Hits = (string)p["hits"] ?? Hits;
             OnGround = (string)p["onGround"] ?? OnGround;
+            ImpactFx = (string)p["impactFx"] ?? ImpactFx;
+            if (p["warn"] is JToken w)
+                Warn = w.Type == JTokenType.Boolean ? ((bool)w ? -1f : 0f) : w.Type is JTokenType.Integer or JTokenType.Float ? Mathf.Max(0f, (float)w) : Warn;
         }
+
+        private bool Lobbed => Gravity > 0f || Arc > 0f;
 
         private static float F(JObject p, string k, float d) => p[k] is JToken t && t.Type is JTokenType.Integer or JTokenType.Float ? (float)t : d;
 
@@ -85,7 +97,18 @@ namespace PalaceMod.Builder.Logic.Bodies
             hitsLeft = Pierce < 0 ? int.MaxValue : Pierce + 1;
             launched = true;
             Live.Add(this);
+            flightTime = Gravity > 0f
+                ? new Vector2(AimPoint.x - from.x, AimPoint.z - from.z).magnitude / Mathf.Max(0.1f, Speed)
+                : plannedDistance / Mathf.Max(0.1f, Speed);
+            flown = 0f;
+            float warn = Warn >= 0f ? Warn : Lobbed ? HitRadius + 0.5f : 0f;
+            if (warn > 0f && marker == null) marker = LandingMarker.Make(AimPoint, warn);
         }
+
+        private float flightTime, flown;
+        private LandingMarker marker;
+
+        private void OnDestroy() { if (marker != null) Destroy(marker.gameObject); }
 
         private static Vector3 AimOf(LogicEntity t)
         {
@@ -104,6 +127,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             if (dt <= 0f) return;
             if (stuck) return;
             Speed = Mathf.Max(0f, Speed + Accel * dt);
+            flown += dt;
             float speedStat = Stat("projectileSpeed", 1f);
             float step = Speed * speedStat * dt;
 
@@ -144,6 +168,11 @@ namespace PalaceMod.Builder.Logic.Bodies
                 Ground(new Vector3(next.x, groundY, next.z));
             if (!done && travelled >= Range) { done = true; BodyEnd.Expire(Entity, gameObject); }
             last = transform.position;
+            if (marker != null)
+            {
+                if (done) DropMarker();
+                else marker.Track(AimPoint, flightTime > 0f ? flown / flightTime : 1f);
+            }
         }
 
         private float Stat(string stat, float fallback)
@@ -223,7 +252,23 @@ namespace PalaceMod.Builder.Logic.Bodies
             while (LastImpacts.Count > 12) LastImpacts.Dequeue();
             BodyDev.Raise("impact", Entity, other, 0, at.ToVec());
             OnImpact?.Invoke(other, at);
+            ImpactLook(at);
             if (--hitsLeft <= 0) Finish();
+        }
+
+        /// <summary>The impact effect (impactFx, or the lobbed default) at a point.</summary>
+        private void ImpactLook(Vector3 at)
+        {
+            string fx = ImpactFx ?? (Lobbed ? "dust_small" : null);
+            if (string.IsNullOrEmpty(fx) || fx == "none") return;
+            ShowVerbs.PlayEffect(fx, at, 1f, out _);
+        }
+
+        private void DropMarker()
+        {
+            if (marker == null) return;
+            Destroy(marker.gameObject);
+            marker = null;
         }
 
         private void Ground(Vector3 at)
@@ -236,6 +281,8 @@ namespace PalaceMod.Builder.Logic.Bodies
                 case "stick":
                     BodyDev.Raise("impact", Entity, null, 0, at.ToVec());
                     OnImpact?.Invoke(null, at);
+                    ImpactLook(at);
+                    DropMarker();
                     transform.position = at;
                     stuck = true;
                     return;
@@ -244,6 +291,8 @@ namespace PalaceMod.Builder.Logic.Bodies
                     {
                         BodyDev.Raise("impact", Entity, null, 0, at.ToVec());
                         OnImpact?.Invoke(null, at);
+                        ImpactLook(at);
+                        DropMarker();
                         verticalSpeed = -verticalSpeed * 0.5f;
                         linear.y = at.y + 0.01f;
                         return;
@@ -263,6 +312,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             if (done) return;
             done = true;
             Live.Remove(this);
+            DropMarker();
             BodyEnd.Retire(gameObject);
         }
 
@@ -277,6 +327,48 @@ namespace PalaceMod.Builder.Logic.Bodies
             travelled = 0f;
             plannedDistance = Mathf.Max(0.1f, Vector3.Distance(linear, AimPoint));
             struck.Clear();
+            flightTime = flown + plannedDistance / Mathf.Max(0.1f, Speed);
+        }
+    }
+
+    /// <summary>
+    /// A projectile's landing warning: a ring on the ground at the aim point and a disc inside it that grows to the
+    /// ring as the shot comes down (AreaDraw looks, in a warning orange-red).
+    /// </summary>
+    internal sealed class LandingMarker : MonoBehaviour
+    {
+        private static readonly Color Colour = new(1f, 0.32f, 0.12f, 1f);
+        private Transform fill;
+
+        public static LandingMarker Make(Vector3 at, float radius)
+        {
+            var go = new GameObject("PalaceBuilder Landing Marker");
+            if (UnityEngine.SceneManagement.SceneManager.GetActiveScene().IsValid())
+                UnityEngine.SceneManagement.SceneManager.MoveGameObjectToScene(go, UnityEngine.SceneManagement.SceneManager.GetActiveScene());
+            var m = go.AddComponent<LandingMarker>();
+            m.Place(at);
+            var shape = new AreaShape { Radius = radius };
+            AreaDraw.Make(go.transform, shape, Colour, false).name = "Ring";
+            var holder = new GameObject("Fill");
+            holder.transform.SetParent(go.transform, false);
+            AreaDraw.Make(holder.transform, shape, Colour, true);
+            m.fill = holder.transform;
+            m.fill.localScale = new Vector3(0.05f, 1f, 0.05f);
+            return m;
+        }
+
+        private void Place(Vector3 at)
+        {
+            float y = BodyGround.Below(at, out float g) ? g : at.y;
+            transform.position = new Vector3(at.x, y, at.z);
+        }
+
+        /// <summary>Follows the aim point; progress 0..1 of the flight sets the inner disc.</summary>
+        public void Track(Vector3 aim, float progress)
+        {
+            if ((new Vector2(aim.x - transform.position.x, aim.z - transform.position.z)).sqrMagnitude > 0.01f) Place(aim);
+            float s = Mathf.Lerp(0.05f, 1f, Mathf.Clamp01(progress));
+            if (fill != null) fill.localScale = new Vector3(s, 1f, s);
         }
     }
 

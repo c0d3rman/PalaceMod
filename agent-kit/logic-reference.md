@@ -824,7 +824,7 @@ What each JSON block accepts (a field not listed draws an "unknown field" warnin
 - **place**: `id`, `entity`, `preset`, `with`, `pos`, `rotY`, `scale`, `active`, `points`, `kind`, `name`, `description`, `visual`, `body`, `team`, `countsAsEnemy`, `labels`, `vars`, `lifetime`, `maxAlive`, `projectile`, `mover`, `area`, `pickup`, `interact`, `light`, `parts`, `attacks`, `targeting`, `movement`, `rings`, `statuses`, `rules`, `_preset` (blocks: `visual` → visual, `body` → body, `projectile` → projectile, `mover` → mover, `area` → area, `pickup` → pickup, `interact` → interact, `attacks[]` → attack, `movement` → movement, `parts[]` → part, `light` → light)
 - **visual**: `icon`, `tint`, `colors`, `scale`, `mesh`, `meshScale`, `meshRotY`, `meshRotX`, `meshRotZ`, `meshOffset`, `meshLook`, `motion`, `texture`, `sounds`
 - **body**: `radius`, `height`, `box`, `solid`, `walkable`, `hittable`, `hp`, `flying`, `tags`
-- **projectile**: `speed`, `accel`, `homing`, `arc`, `gravity`, `spin`, `face`, `hits`, `hitRadius`, `pierce`, `onGround`, `range`
+- **projectile**: `speed`, `accel`, `homing`, `arc`, `gravity`, `spin`, `face`, `hits`, `hitRadius`, `pierce`, `onGround`, `range`, `impactFx`, `warn`
 - **mover**: `path`, `mode`, `speed`, `wait`, `spin`, `swing`, `running`, `pose`, `poses`, `turnSpeed` (blocks: `swing` → swing, `pose{}` → pose, `poses{}` → pose)
 - **swing**: `angle`, `speed`
 - **pose**: `offset`, `pos`, `rotY`, `scale`

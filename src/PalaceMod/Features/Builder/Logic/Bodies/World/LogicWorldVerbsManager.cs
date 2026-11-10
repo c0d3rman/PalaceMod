@@ -51,7 +51,7 @@ namespace PalaceMod
                 TerrainVerbs.Restore(state?["terrain"]);
                 BuildingMover.Restore(state?["moved"]);
             });
-            DevCommands.Register("logic-world", "logic-world status | fx | sounds | hud | terrain   world and show actions (L2): state, the effect and sound catalogs", args =>
+            DevCommands.Register("logic-world", "logic-world status | fx | sounds | hud | terrain | standin <alias>   world and show actions (L2): state, the effect and sound catalogs", args =>
             {
                 WorldSession.Sync();
                 return (args.FirstOrDefault() ?? "status") switch
@@ -62,12 +62,23 @@ namespace PalaceMod
                     "terrain" => TerrainVerbs.Status(),
                     "slots" => WorldVerbs.DescribeSlots(),
                     "gallery" => ShowVerbs.Gallery(),
+                    "standin" => StandIn(args.ElementAtOrDefault(1)),
                     _ => $"world={(LogicWorld.Current != null ? "yes" : "no")} groups={WaveVerbs.Groups.Count} (left {WaveVerbs.Groups.Sum(g => g.Left)}) " +
                          $"hpScaled={WaveVerbs.HpMult.Count} locked={WorldVerbs.Locked.Count} {ShowVerbs.Status()}" +
                          (EnemySpawner.instance != null ? $" wave={EnemySpawner.instance.Wavenumber}/{EnemySpawner.instance.WaveCount} spawning={EnemySpawner.instance.SpawningInProgress} " +
                              $"next=[{NightSummary(EnemySpawner.instance.Wavenumber + (WorldCommon.IsNight ? 0 : 1))}]" : ""),
                 };
             });
+        }
+
+        /// <summary>Dev: plays an alias's built-in stand-in (FallbackFx) at the king, as on a map without its prefab.</summary>
+        private static string StandIn(string alias)
+        {
+            var t = FallbackFx.Template(alias ?? "") ?? throw new System.ArgumentException("aliases: " + string.Join(", ", FallbackFx.Specs.Keys));
+            var king = PlayerMovement.instance != null ? PlayerMovement.instance.transform.position : Vector3.zero;
+            var go = Object.Instantiate(t, king, t.transform.rotation);
+            Object.Destroy(go, 10f);
+            return $"{go.name} at {king} active={go.activeInHierarchy}";
         }
 
         private static string NightSummary(int idx)

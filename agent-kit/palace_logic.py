@@ -2099,12 +2099,19 @@ class _LevelCtx:
 
 _ID_MSG = "must be 1-64 characters of a-z, 0-9, '.', '_' or '-'"
 
+# The effect aliases (GameFx.Aliases in the mod's Runtime/Catalog.cs). They play on every map (the game's prefab where
+# it's loaded, else a built-in stand-in), so they're always valid, whatever map the ref cache's catalog was built on.
+EFFECT_ALIASES = ["smoke", "dust_small", "dust_large", "explosion", "burst", "summon", "spikes", "slash", "hit", "fire_small",
+                  "ward", "coins", "blood", "impact", "goo", "ally_death"]
+
 
 class _Walker:
     def __init__(self, original: dict, pack: dict, issues: list, schema: Schema, names: Optional[dict] = None):
         self.original, self.pack, self.issues, self.schema = original, pack, issues, schema
         # ILogicNamesContext: the game's effect and sound names (from the ref cache), or None (unknown: not checked).
         self.effects = (names or {}).get("effects")
+        if self.effects is not None:
+            self.effects = list(self.effects) + [a for a in EFFECT_ALIASES if a not in self.effects]
         self.sounds = (names or {}).get("sounds")
         self.units = _OSet()
         self.entities = _OSet()
@@ -3037,6 +3044,15 @@ class _Walker:
             self.num(_lnum(pr.get("range")), p + ".projectile.range", scope, 0, 1000)
             self.enum(_s(pr, "face"), p + ".projectile.face", ["travel", "fixed", "spin"])
             self.enum(_s(pr, "onGround"), p + ".projectile.onGround", ["impact", "stick", "bounce", "pass"])
+            warn = pr.get("warn")
+            if warn is not None and not (isinstance(warn, bool) or (isinstance(warn, (int, float)) and 0 <= warn <= 50)):
+                self.error(p + ".projectile.warn", "must be a radius (0..50 m) or true/false")
+            ifx = pr.get("impactFx")
+            if ifx is not None:
+                if not isinstance(ifx, str) or not ifx.strip():
+                    self.error(p + ".projectile.impactFx", 'must be an effect name or "none"')
+                elif ifx != "none" and self.effects is not None and not any(k.lower() == ifx.lower() for k in self.effects):
+                    self.error(p + ".projectile.impactFx", f'no game effect "{ifx}"' + suggest(ifx, self.effects) + " (`palace.py ref effects` lists them)")
             if _s(pr, "hits") is not None:
                 self.filter_string(_s(pr, "hits"), p + ".projectile.hits", scope)
             pi = _int(pr, "pierce")

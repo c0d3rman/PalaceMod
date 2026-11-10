@@ -4311,9 +4311,12 @@ def cmd_ref(env, args):
         # The names the `effect` / `sound` actions take (check validates against this list).
         items = ref.catalog.get(args.what) or []
         names = [x["id"] if isinstance(x, dict) else x for x in items]
+        if args.what == "effects":
+            # The aliases play on every map (a built-in stand-in where the game's prefab isn't loaded).
+            names += [a for a in logic_module().EFFECT_ALIASES if a not in names]
         if args.name:
             names = [n for n in names if args.name.lower() in n.lower()]
-        out({args.what: names, "note": "effect aliases (smoke, explosion, hit...) are listed too" if args.what == "effects" else
+        out({args.what: names, "note": "the aliases (smoke, explosion, summon, fire_small...) play on every map; other names only where the game has them loaded" if args.what == "effects" else
              'also "asset:<key>" for a sound file in the pack'})
     elif args.what == "doc":
         path = Path(args.out or env.ref / "reference.md")
