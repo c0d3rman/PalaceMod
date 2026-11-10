@@ -200,6 +200,9 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("once")] public bool? Once { get; set; }
         [JsonProperty("cooldown")] public double? Cooldown { get; set; }
         [JsonProperty("note")] public string Note { get; set; }
+        /// <summary>The aura ring this rule implies: false hides it, true shows it on any rule, or { show, color,
+        /// style (ring | soft | line), kind (buff | harm | neutral), radius, on (auto | self | target) }.</summary>
+        [JsonProperty("ring")] public JToken Ring { get; set; }
         /// <summary>A preset to expand here instead of a rule (its rules, vars and components are added).</summary>
         [JsonProperty("preset")] public string Preset { get; set; }
         [JsonProperty("with")] public JObject With { get; set; }
@@ -320,6 +323,9 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("attacks")] public List<AttackDef> Attacks { get; set; }
         [JsonProperty("targeting")] public List<TargetingDef> Targeting { get; set; }
         [JsonProperty("movement")] public MovementDef Movement { get; set; }
+        /// <summary>Aura rings: false hides the ones its rules imply (and ones other rules put on it); a list of
+        /// { radius, color, style, kind, during } adds rings of its own.</summary>
+        [JsonProperty("rings")] public JToken Rings { get; set; }
         /// <summary>Statuses it starts with.</summary>
         [JsonProperty("statuses")] public List<string> Statuses { get; set; }
         [JsonProperty("rules")] public List<RuleDef> Rules { get; set; }
@@ -395,6 +401,11 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("onGround")] public string OnGround { get; set; }
         /// <summary>Metres travelled before "expire".</summary>
         [JsonProperty("range")] public LNum Range { get; set; }
+        /// <summary>An effect played at each impact; "none" = off (a lobbed shot's default is "dust_small").</summary>
+        [JsonProperty("impactFx")] public string ImpactFx { get; set; }
+        /// <summary>Landing marker at the aim point while it flies: a radius in metres, true (default size) or false/0
+        /// (off). Lobbed shots (gravity or arc) have one by default.</summary>
+        [JsonProperty("warn")] public JToken Warn { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 
@@ -743,6 +754,9 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("tint")] public string Tint { get; set; }
         [JsonProperty("fx")] public string Fx { get; set; }
         [JsonProperty("glow")] public string Glow { get; set; }
+        /// <summary>A small ring under the carrier: true, false or a colour. Default: shown when the status has no
+        /// tint and no fx.</summary>
+        [JsonProperty("marker")] public JToken Marker { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 

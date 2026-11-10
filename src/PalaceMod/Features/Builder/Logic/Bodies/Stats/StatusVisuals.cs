@@ -1,12 +1,15 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 
 /*
     A status's `visual`: a tint over the carrier's renderers (tinted material clones, swapped back when it ends) and an
     effect parented to it while the status lasts. Several tinted statuses: the latest one shows; when it ends the
-    previous one comes back.
+    previous one comes back. `marker`: a small ring under the carrier (AuraRings' look), by default on a status that
+    changes something (mods or flags) but has no tint and no fx, so an aura's effect shows on whoever has it; true,
+    false or a colour. Its default colour is the aura colours': harm for a status that hinders, else buff.
 */
 namespace PalaceMod.Builder.Logic.Bodies
 {
@@ -17,6 +20,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             public LogicEntity E;
             public Color? Tint;
             public GameObject Fx;
+            public GameObject Marker;
         }
 
         /// <summary>
@@ -28,11 +32,13 @@ namespace PalaceMod.Builder.Logic.Bodies
         private static readonly Dictionary<LogicEntity, List<Applied>> tints = [];
         private static readonly int BaseColor = Shader.PropertyToID("_BaseColor"), ColorId = Shader.PropertyToID("_Color"), ColorDim = Shader.PropertyToID("_ColorDim");
 
-        public static Applied Apply(LogicEntity e, JObject visual)
+        public static Applied Apply(LogicEntity e, JObject visual, JObject def = null)
         {
             var go = e.Go();
-            if (go == null || visual == null) return null;
+            if (go == null) return null;
             var a = new Applied { E = e };
+            if (MarkerColor(visual, def) is Color mc) a.Marker = AuraRings.Make(go.transform, MarkerRadius(go), mc, "ring");
+            if (visual == null) return a.Marker != null ? a : null;
             if ((string)visual["tint"] is { } hex && WorldCommon.TryColor(hex, out var c)) a.Tint = c;
             if ((string)visual["fx"] is { Length: > 0 } fx)
             {
@@ -52,11 +58,46 @@ namespace PalaceMod.Builder.Logic.Bodies
         {
             if (a == null) return;
             if (a.Fx != null) UnityEngine.Object.Destroy(a.Fx);
+            if (a.Marker != null) UnityEngine.Object.Destroy(a.Marker);
             if (!a.Tint.HasValue || !tints.TryGetValue(a.E, out var list)) return;
             list.Remove(a);
             if (list.Count == 0) tints.Remove(a.E);
             var go = a.E.Go();
             if (go != null) Paint(go, list.Count > 0 ? list[list.Count - 1].Tint : null);
+        }
+
+        private static readonly string[] Hindering = ["stunned", "disarmed", "rooted", "silenced", "noIncome"];
+
+        /// <summary>The marker's colour, or null for none (see the header).</summary>
+        private static Color? MarkerColor(JObject visual, JObject def)
+        {
+            var m = visual?["marker"];
+            if (m is JValue { Type: JTokenType.String } ms && WorldCommon.TryColor((string)ms, out var mc)) return mc;
+            bool on = m is JValue { Type: JTokenType.Boolean } mb
+                ? (bool)mb
+                : visual?["tint"] == null && visual?["fx"] == null && (def?["mods"] is JObject { Count: > 0 } || def?["flags"] is JArray { Count: > 0 });
+            if (!on) return null;
+            return Hinders(def) ? AuraRings.Harm : AuraRings.Buff;
+        }
+
+        private static bool Hinders(JObject def)
+        {
+            if (def?["flags"] is JArray flags && flags.Any(f => Array.IndexOf(Hindering, (string)f) >= 0)) return true;
+            if (def?["mods"] is not JObject mods) return false;
+            foreach (var p in mods.Properties())
+            {
+                if (p.Value is not JObject mo || mo["mult"] is not JValue { Type: JTokenType.Integer or JTokenType.Float } mult) continue;
+                double x = (double)mult;
+                if (p.Name is "damageTaken" or "attackCooldown" ? x > 1 : x < 1) return true;
+            }
+            return false;
+        }
+
+        private static float MarkerRadius(GameObject go)
+        {
+            var cc = go.GetComponentInChildren<CharacterController>();
+            float r = cc != null ? cc.radius * Mathf.Abs(cc.transform.lossyScale.x) : 0.6f;
+            return Mathf.Clamp(r + 0.35f, 0.6f, 3f);
         }
 
         public static void Clear()

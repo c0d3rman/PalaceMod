@@ -171,11 +171,18 @@ Component fields are literals by default. A string field starting with `=` is an
   "hitRadius": 1.0,
   "pierce": 0,                        // extra targets it passes through (-1 = all)
   "onGround": "impact",               // "impact" | "stick" (stays until its lifetime ends) | "bounce" | "pass"
-  "range": 40                         // m travelled before "expire"
+  "range": 40,                        // m travelled before "expire"
+  "impactFx": "explosion",            // an effect at every impact; "none" = off
+  "warn": 3                           // landing marker at the aim point while it flies: radius in m, true, or false/0
 }
 ```
 
 Events: `impact` (`other` is what it hit, or none for ground; `event.pos`), `expire`.
+
+A lobbed shot (`gravity` or `arc`) shows where it will land and that it landed by default: a warning ring of
+`hitRadius` + 0.5 m at the aim point, with a disc inside it that fills as the shot comes down (it follows a moving
+target), and `dust_small` at each impact. Straight shots have neither unless they set `warn`/`impactFx`. A damaging
+area left behind (`spawn` an area in the `impact` rule) is drawn by its own `area.show`.
 
 **`mover`**: moving platforms, rotating walls, patrols and gates.
 
@@ -358,7 +365,7 @@ never opened a route.
 "area": { "shape": { "circle": { "radius": 6 } },   // or rect {size: [w, d]}, polygon {points}, sector {radius, angle}
                                                      // (a cone along its facing), relative to its position and heading
           "watch": "unit",                           // filter of what it reports (default: units and the king)
-          "show": "outline", "color": "#d04040",     // "none" | "outline" | "fill"
+          "show": "outline", "color": "#d04040",     // "none" | "outline" | "fill" (default outline; none with `surface`)
           "tick": 1 }                                // seconds between "inside" events (null = no inside events)
 ```
 
@@ -373,6 +380,36 @@ frame's attacks; before, a tower could land a shot in the gap). `inside` first f
 Areas watch everything the selectors see,
 including projectiles in flight (the game's own arrows too, see "Projectiles in flight"), so a field that slows,
 bends or turns arrows is an area plus `setStat timeScale`, `drift` or `taunt`.
+An area is drawn by default (`show` unset means `outline`), except one with a `surface`, which only marks walkable
+ground; `"show": "none"` hides one.
+
+**Aura rings.** Whatever acts over a radius gets a ground ring by default, in the game's own tower-range look (its
+`RangeIndicatorHandler` sphere, whose intersection shader draws the ring where it meets the ground, so it hugs
+slopes), parented to its source so it follows it (`Bodies/World/AuraRings.cs`, `Runtime/AuraScan.cs`):
+
+- A rule that runs on its own (`every` or `near`) and picks things within a fixed radius anchored at `self`
+  (`all('ally and unit', 6)`, `count('#lantern', 8)`, any of `all count nearest farthest weakest strongest random
+  best` with a number literal, or `near`'s `range`) draws that radius round its owner. One-shot rules (`once`, or
+  ones that `destroy` their owner, like a kamikaze's blast) and event rules (`death`, `hit`, ...) don't, unless
+  their `ring` says so. The radius must be 0.5-60 m.
+- When the owner is a unit and the filter names a label or template (`#lantern`, `is:totem`), the ring goes on the
+  things it names instead: the lantern ghost's `count('#lantern', 8)` puts an 8 m ring on every lantern, placed or
+  spawned later.
+- Colour by kind: harm (red; the rule deals `damage`/`kill`/`stun` or its filter has `foe`), buff (blue; `heal` or
+  `ally`), else neutral (warm gold). The ring shows while its owner is alive and enabled, its rule enabled (not a
+  fired `once`) and its `during` holds; a status's rules draw theirs only while the status lasts.
+- Author control. On a rule, `"ring": false` hides its ring; `"ring": true` shows one on any rule; or `"ring": {
+  "show", "color": "#rrggbb", "style": "ring" | "soft" (the game's lighter preview ring) | "line" (a thin flat
+  line), "kind": "buff" | "harm" | "neutral", "radius" (when the radius isn't a literal), "on": "auto" | "self" |
+  "target" }`. On a template, unit or place, `"rings": false` drops every ring on it (its own and those others put
+  on it), and `"rings": [{ "radius": 10, "color", "style", "kind", "during" }]` adds rings of its own.
+- Statuses: a status that changes something (`mods` or `flags`) but has no `visual.tint` and no `visual.fx` gets
+  a small ring under each carrier (red if it hinders: stun-like flags, a `damageTaken`/`attackCooldown` mult over 1
+  or another stat's under 1; else blue). `visual.marker`: `true`, `false` or a colour.
+- Cost: one cloned indicator per ring with one shared material per (style, colour); rings are rebuilt only when an
+  entity's rules change (`LogicWorld.RulesChanged`, applied once per drain) and the 10 Hz poll only flips
+  visibility and follows `scale`. Dev: `dev.py cmd "logic-rings [entity|template]"` lists every ring (owner, radius,
+  world radius, position, active, rule, colour); `logic-rings prefabs` dumps the game's indicator prefabs.
 
 **`pickup`**: `{ "by": "king", "radius": 1.5, "magnet": 4 }` (`by` is a filter: `"king"`, `"player and unit"`).
 It fires `pickup` (`other` is the collector), then destroys itself unless `"consume": false` (then a rule decides,
@@ -838,7 +875,11 @@ World and Show details (as built, `Logic/Bodies/World/`):
   on the running night drops pending groups too.
 - `effect` ids are the game's effect prefabs (`builder dump` → `effects`) plus short aliases: `smoke`, `dust_small`,
   `dust_large`, `explosion`, `burst`, `summon`, `spikes`, `slash`, `hit`, `fire_small`, `ward`, `coins`, `blood`,
-  `impact`, `goo`, `ally_death`. `sound` ids are the game's AudioSet clips in camelCase (`builder dump` → `sounds`).
+  `impact`, `goo`, `ally_death`. The game's prefabs are only in memory while something that uses them is (an enemy's
+  death puff, a weapon's impact, the loadout's weapons), so a prefab name works on some maps and not others; the
+  aliases work on every map: the game's prefab where it's loaded, else a built-in particle stand-in in the alias's
+  colours (`Runtime/FallbackFx.cs`; `logic-world standin <alias>` plays one). `palace.py check` always accepts the
+  aliases. An `effect`, `impactFx` or status `visual.fx` that resolves to nothing logs a warning and plays nothing. `sound` ids are the game's AudioSet clips in camelCase (`builder dump` → `sounds`).
   Status `visual.fx` uses the same catalog, parented to the carrier.
 - `setVisual`: `tint`/`glow` paint the model (FlatKit lit and shaded colours); `glow` is a colour, `true` (gold) or
   0..1; `scale` multiplies the original scale; `mesh` takes the `visuals.mesh` forms. With `for`, all of it reverts.

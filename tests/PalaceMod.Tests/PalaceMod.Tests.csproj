@@ -50,6 +50,7 @@
     <Compile Include="../../src/PalaceMod/Features/Builder/Library/AssetFileReader.cs" />
     <Compile Include="../../src/PalaceMod/Features/Builder/Library/SceneryCatalog.cs" />
     <Compile Include="../../src/PalaceMod/Features/Economy/EconomyModel.cs" />
+    <Compile Include="../../src/PalaceMod/Features/Builder/Logic/Runtime/AuraScan.cs" />
     <Compile Include="../../src/PalaceMod/Features/Economy/PlannerStore.cs" />
     <Compile Include="../../src/PalaceMod/Features/Economy/PlannerReach.cs" />
     <Compile Include="../../src/PalaceMod/Core/UI/NumberMath.cs" />

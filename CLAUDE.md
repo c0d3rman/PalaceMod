@@ -11,11 +11,14 @@ python3 scripts/dev.py run           # build -> stop game -> install -> launch -
 python3 scripts/dev.py logs --errors # unique errors with stack traces from the current game session
 python3 scripts/dev.py logs --feature Savestates --level warn  # one feature's lines at a level or worse
 python3 scripts/dev.py screenshot    # in-game frame capture (works while unfocused); prints the PNG path
+python3 scripts/dev.py install       # build -> install into your instance (or --real), without launching
 python3 scripts/dev.py stop          # quit your game and release your pool instance (or the --real lease)
 python3 scripts/dev.py cmd "<command>"  # drive a dev launch: load levels, start nights, fake input, open/navigate menus
 python3 scripts/dev.py config get|set <Section>.<Key> [value]  # read/edit PalaceMod.cfg; the game reloads it live
 python3 scripts/dev.py land --body-file pr.md  # merge origin/main, push, open and merge the PR (see Landing)
 ```
+
+`run` and `install` build the `--configuration` they install (Debug by default; `--configuration Release` for a Release build) first, so they never install a stale DLL.
 
 Dev launches are windowed, muted (`--sound` to keep audio) and hand focus back to the app that was in front (`--focus` lets the game keep it). Don't launch `--fullscreen` unless you need to: it switches the user to a new Space.
 

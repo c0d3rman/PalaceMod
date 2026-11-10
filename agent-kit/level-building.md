@@ -953,7 +953,7 @@ ground (the touched cells are then drawn by the terrain). Savestates keep the ch
 | `body` | any | `radius` or `box: [w, d]` (w across its facing, d along it; turns with `rotY`), `height`, `solid` (blocks ground units: a cut in the ground pathfinding, also when spawned at runtime, ~0.25 s to update; units on it are pushed out), `walkable` (a bridge or raft top), `hittable` + `hp` (at 0 hp it's destroyed: `death` fires, it can't be revived), `flying`, `tags` (game tags for a hittable body: `["Building"]` makes vanilla enemies attack it like a building; without tags they ignore it unless `setTargeting` points them at it) |
 | `team` | any | `player`, `enemy`, `neutral` (vanilla AI ignores it), `owner` (the spawner's). `countsAsEnemy: true` keeps a hittable enemy-team entity holding the night open |
 | `lifetime`, `maxAlive` | any | seconds before `expire` + destroy; cap on live copies |
-| `projectile` | flying things | `speed`, `homing` 0..1, `arc`, `gravity`, `spin`, `face`, `hits` (filter), `hitRadius`, `pierce`, `onGround`, `range`; events `impact`, `expire` |
+| `projectile` | flying things | `speed`, `homing` 0..1, `arc`, `gravity`, `spin`, `face`, `hits` (filter), `hitRadius`, `pierce`, `onGround`, `range`, `impactFx` (effect at each impact, `"none"` = off), `warn` (landing ring at the aim point while it flies: radius m, or false); lobbed shots (`gravity`/`arc`) get a ring and a `dust_small` puff by default; events `impact`, `expire` |
 | `mover` | moving props | `path` (`@path` or points), `mode` loop/pingpong/once, `speed`, `wait`, `spin`, `swing`, `running`, `pose` (or `poses`) {name: {`offset` [x,y,z] or world `pos`, `rotY`}}, `turnSpeed` (deg/s, 90); inputs `start stop reverse goto` and each pose's name; events `arrive`, `end`. A walkable mover snaps between poses |
 | `area` | zones | `shape` (`circle {radius}` / `rect {size: [w, d]}` / `polygon {points}` / `sector {radius, angle}`: a cone along its facing), `watch` (filter), `show`, `color`, `tick`, `surface` (below); events `enter exit inside empty occupied`; filters `in:@area`, `in:@<area template>`. `enter` comes in the same frame as the entry (spawned into it, the area laid under it, or walked in), so a status applied on `enter` is on before any tower's next shot; `inside` first fires one full `tick` later, so a "while in the zone" status is applied on `enter` and refreshed on `inside`. A thing is inside when its **centre** is: a big unit whose body overlaps the edge isn't. A trigger meant to catch everything walking a lane (a pressure plate in a gap) must span the whole opening plus a margin, not sit inside it: enemies spawn spread across their spawn line's width and walk their own straight-ish lane, so a 6 m plate in a 7 m gap misses about half of them |
 | `light` | anything that shines | `color`, `range` (m it lights), `intensity` (1), `cone` (degrees: a beam along its facing; none = all round), `aim`, `height` (3; lower = longer beam), `flicker`, `on`; also on units (`unit` op) and attaches (12.7a) |
@@ -1014,6 +1014,23 @@ for a deck at offset y 3); teleport them off to let them walk again.
 **Surfaces follow their area**: one placed `"active": false` and enabled later starts stopping units then, disabled it
 stops, and a moved or turned area re-tags where it is (`paths` and `paths --between` don't model surfaces; test them
 with a walking unit).
+
+**Aura rings (shown by default).** Players see what acts over a radius as a ring on the ground, in the game's
+tower-range look, following its source:
+
+- A rule on `every` or `near` with a fixed radius anchored at self (`all('ally and unit', 6)`, `count('#x', 8)`,
+  `nearest('foe', 10)`, `near`'s `range`) rings its owner: red for harm (`damage`, `foe`), blue for buffs (`heal`,
+  `ally`), gold otherwise. A unit's rule whose filter names a label or template (`count('#lantern', 8)` on a ghost)
+  rings the named things instead (every lantern). One-shot rules (`once`, or a rule that destroys its owner) and
+  event rules get none unless asked.
+- Areas are drawn by default (`show` unset = `outline`; `"show": "none"` hides; an area with `surface` stays hidden).
+- A status with `mods` or `flags` but no `visual.tint`/`visual.fx` puts a small ring under each carrier
+  (`visual.marker`: `true`, `false` or `"#rrggbb"`).
+- Control: on a rule `"ring": false` (hide), `"ring": true` (show on any rule), or `"ring": {"color": "#rrggbb",
+  "style": "ring" | "soft" | "line", "kind": "buff" | "harm" | "neutral", "radius": 6, "on": "self" | "target"}`
+  (`radius` when it isn't a literal, e.g. `self.$range`). On a template, unit or place: `"rings": false` (none on
+  it), or `"rings": [{"radius": 10, "color": "#ffd890", "style": "soft", "during": "night"}]` to add its own.
+- Check them in a running game with `game cmd "logic-rings"` (each ring's owner, radius, position and whether it shows).
 
 ### 12.7a Light, darkness, facing and shape at runtime
 
@@ -1307,6 +1324,7 @@ and to break it `{"do": "kill", "target": "all('unit and in:self')"}` then `thaw
 
 **Aura**: a status `{"id": "warded", "duration": 1.2, "mods": {"damageTaken": {"mult": 0.7}}}` and on the bearer
 `{"when": {"on": "every", "seconds": 1}, "do": [{"do": "applyStatus", "status": "warded", "target": "all('ally and unit', 6)"}]}`.
+The bearer gets a 6 m ring on the ground automatically (see "Aura rings" in 12.7).
 
 **Kamikaze**: `"targeting": [{"filter": "king"}], "movement": {"mode": "direct"}` and `{"when": {"on": "near", "filter":
 "king", "range": 2}, "do": [{"do": "damage", "target": "all('foe', 3)", "amount": 40}, {"do": "destroy", "drops": true}]}`.
