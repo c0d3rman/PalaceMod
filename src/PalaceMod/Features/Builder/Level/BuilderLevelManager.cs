@@ -51,6 +51,22 @@ namespace PalaceMod
             }
         }
 
+        // Islands stay pruned through navmesh cuts (a building placed, upgraded or destroyed rebuilds its tiles from the
+        // scan's mesh, islands included): see GroundGraphs.RepruneTiles. The prefix keeps the tiles the rebuild clears.
+        [HarmonyLib.HarmonyPatch(typeof(Pathfinding.Graphs.Navmesh.NavmeshUpdates.NavmeshUpdateSettings), nameof(Pathfinding.Graphs.Navmesh.NavmeshUpdates.NavmeshUpdateSettings.ReloadDirtyTilesImmediately))]
+        private static class CutReload_Patch
+        {
+            private static void Prefix(Pathfinding.NavmeshBase ___graph, List<Vector2Int> ___dirtyTileCoordinates, out Vector2Int[] __state)
+            {
+                __state = GroundGraphs.HasIslands(___graph) && ___dirtyTileCoordinates.Count > 0 ? ___dirtyTileCoordinates.ToArray() : null;
+            }
+
+            private static void Postfix(Pathfinding.NavmeshBase ___graph, Vector2Int[] __state)
+            {
+                if (__state != null) GroundGraphs.RepruneTiles(___graph, __state);
+            }
+        }
+
         public override void Update()
         {
             if (LevelOverlay.ScanAfterFrame >= 0 && Time.frameCount >= LevelOverlay.ScanAfterFrame) ScanAfterLevelStart();
@@ -110,7 +126,7 @@ namespace PalaceMod
         private void RegisterDevCommand()
         {
             DevCommands.Register("builder-level",
-                "builder-level paths | graphs | enemies | spike ... | buildings [kind] | mines | <any builder-studio subcommand>   level tools (editing: see builder-studio)", args =>
+                "builder-level paths | graphs | enemies | islands [on|off] | spike ... | buildings [kind] | mines | <any builder-studio subcommand>   level tools (editing: see builder-studio)", args =>
             {
                 string sub = args.FirstOrDefault()?.ToLowerInvariant();
                 switch (sub)
@@ -148,6 +164,10 @@ namespace PalaceMod
                         System.IO.File.WriteAllText(args[2], sb.ToString());
                         return $"{n} triangles of {g.name} -> {args[2]}";
                     }
+                    case "islands":
+                        // islands [on|off]: walkable island nodes per ground graph; on/off switches the re-prune after cuts (dev A/B).
+                        if (args.Length > 1) GroundGraphs.RepruneOff = args[1].Equals("off", StringComparison.OrdinalIgnoreCase);
+                        return $"\nre-prune after cuts {(GroundGraphs.RepruneOff ? "off" : "on")}\n" + GroundGraphs.DescribeIslands();
                     case "spike":
                         return LevelSpike.Run(args.Length > 1 ? args[1] : "");
                     case "mines":
