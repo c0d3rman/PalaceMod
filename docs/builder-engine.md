@@ -229,6 +229,12 @@ the scan; switched off, its footprint is a hole unless its deck is higher than a
   - the king passes the opened walls while he stands on the deck (`Physics.IgnoreCollision` per frame), and the
     rails and ramps of a still deck have colliders. A posed mover's ghosts get rails and ramps for the graphs only.
   - After a scan, a deck that isn't on the castle's ground on the small enemies' graph is a warning in the log.
+  - Terrain water and blocked cells close an edge (`GroundLayer.ClosedCell`). Their columns reach above the graphs,
+    so the obstacle probe's ray started inside them and missed, and the edge got a ramp down to the moat's bed; recast
+    sees only a column's sides (no top or bottom inside the graphs' bounds), so the ramps and the bed between the
+    row walls were walkable beside the bridge. The probe's ray now also starts above every column.
+  - A deck with a `visual.mesh` is clipped to the mesh's footprint in the body's frame (`Walkables.ClipToVisual`,
+    logged): Example 07's 10 m box under a 3.6 m bridge had units walking on the water either side of it.
   Verified on Nordfels (`logic-l2 nav path`, `builder-level navdump`): a 24 x 10 m deck over the west river and a
   10 x 16 m one 1 m above the south bank both reach the castle's area on `Enemy Units S`, `Player Units S` and
   `Enemy Units L`; E Melee, E Archer and E Ogre walk onto the deck mid-river, the king walks across and back and is

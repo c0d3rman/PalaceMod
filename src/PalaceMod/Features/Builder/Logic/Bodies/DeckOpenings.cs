@@ -33,6 +33,7 @@ namespace PalaceMod.Builder.Logic.Bodies
         private const float RampSlope = 25f;   // degrees (the graphs' max slope is 30)
         private const float Probe = 0.75f;     // m outside an edge where the ground is tested
         private const float BakeTolerance = 0.4f;
+        private const float RayTop = 1000f;    // obstacle probes start above every column (they reach above the graphs)
         private const float RailHigh = 1.5f, RailThick = 0.2f, RailOverlap = 0.5f;
         private const int ObstacleLayer = 7, GroundLayerIndex = 6;
 
@@ -318,8 +319,12 @@ namespace PalaceMod.Builder.Logic.Bodies
         private static EdgeKind Classify(Vector3 probe, float top, out float step)
         {
             step = 0f;
-            // Anything solid there (a terrain column, a cliff wall, a tree's collider) closes the edge.
-            if (Physics.Raycast(new Vector3(probe.x, top + 40f, probe.z), Vector3.down, out _, 40f + Climb, 1 << ObstacleLayer, QueryTriggerInteraction.Ignore))
+            // The terrain's water and blocked cells close the edge. Their columns reach above the graphs, so the ray below
+            // started inside them and missed: a bridge's sides over a moat got ramps down to its bed, walkable beside it.
+            if (GroundLayer.ClosedCell(probe)) return EdgeKind.Rail;
+            // Anything else solid there (a cliff wall, a tree's collider) closes it too; the ray starts above every column.
+            float from = Mathf.Max(top + 40f, RayTop);
+            if (Physics.Raycast(new Vector3(probe.x, from, probe.z), Vector3.down, out _, from - top + Climb, 1 << ObstacleLayer, QueryTriggerInteraction.Ignore))
                 return EdgeKind.Rail;
             float ground;
             if (GroundGraphs.OnBake(probe, BakeTolerance, out float baked)) ground = baked;

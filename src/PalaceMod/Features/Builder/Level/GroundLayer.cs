@@ -276,6 +276,13 @@ namespace PalaceMod.Builder.Level
             return true;
         }
 
+        /// <summary>
+        /// The point is over one of the terrain's blocked or open-water cells. Their columns reach above the graphs, so a
+        /// physics ray starting inside one misses it, and recast sees only their sides (a column has no top or bottom
+        /// inside the graphs' bounds): ask the grid instead.
+        /// </summary>
+        public static bool ClosedCell(Vector3 p) => Active && Grid.CellAt(p.x, p.z, out int cx, out int cz) && IsBlocked(Grid, cx, cz);
+
         /// <summary>Where a ray from the camera meets the terrain's own ground (exact over cliffs, unlike a ground-plane
         /// guess), when it does.</summary>
         public static bool TryRaycast(Ray ray, out Vector3 point)
