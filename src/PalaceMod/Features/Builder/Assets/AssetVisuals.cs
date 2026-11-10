@@ -90,8 +90,24 @@ namespace PalaceMod.Builder.Assets
             public Bounds RootBounds;     // in the unit root's local space
         }
 
-        /// <summary>Visible mesh renderers of the model (not ones on objects the prefab keeps switched off).</summary>
+        /// <summary>Visible mesh renderers of the model (not ones on objects the prefab keeps switched off), measured at
+        /// full size: a live unit that was just spawned (convert's keepLook) is still shrunk by the game's
+        /// UnitSpawnAppear, whose Awake sets its target's scale to 0 before growing it to 1, and measuring that would fit
+        /// the new model to nothing.</summary>
         private static List<Part> ModelParts(GameObject go)
+        {
+            var grown = new List<(Transform t, Vector3 scale)>();
+            foreach (var appear in go.GetComponentsInChildren<UnitSpawnAppear>(true))
+                if (appear.enabled && appear.target != null && appear.target.localScale != Vector3.one)
+                {
+                    grown.Add((appear.target, appear.target.localScale));
+                    appear.target.localScale = Vector3.one;
+                }
+            try { return MeasureParts(go); }
+            finally { foreach (var (t, scale) in grown) t.localScale = scale; }
+        }
+
+        private static List<Part> MeasureParts(GameObject go)
         {
             var root = go.transform;
             var parts = new List<Part>();
