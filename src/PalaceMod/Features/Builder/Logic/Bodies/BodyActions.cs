@@ -41,7 +41,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             if (go.activeSelf != e.Enabled) go.SetActive(e.Enabled);
         }
 
-        // spawn: entity, count, at, spread, team, elite, facing, then
+        // spawn: entity, count, at, spread, team, elite, facing, for (SpawnLives), then
         private static void Spawn(LogicContext ctx, ActionParams p)
         {
             string template = p.Template("entity") ?? throw new LogicError("spawn: no entity");
@@ -52,6 +52,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             if (team == "owner") team = ctx.Self?.Team;
             float facing = (float)p.Number("facing", ctx.Self?.Body?.Facing ?? 0f);
             var then = p.Actions("then");
+            var lasts = Until.From(p, ctx.World);
             for (int i = 0; i < count; i++)
             {
                 var pos = at;
@@ -67,6 +68,7 @@ namespace PalaceMod.Builder.Logic.Bodies
                 try { e = BodyLaunch.SpawnVia(template, pos, facing, team, ctx.Self, ctx); }
                 finally { EntityFactory.PendingElite = false; EntityFactory.PendingNeutral = false; }
                 if (e == null) continue;
+                SpawnLives.Mark(e, lasts);
                 if (then != null && then.Count > 0) ctx.With(spawned: e).Run(then);
             }
         }

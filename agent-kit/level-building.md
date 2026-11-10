@@ -887,7 +887,7 @@ runs once per member and the other params are evaluated per member with `it` bou
 
 | Group | Actions |
 |---|---|
-| Make | `spawn` (any template; `then` runs with `spawned`), `launch` (a projectile template toward a target; `onImpact`), `spawnGroup` (a wave-style group that counts toward the night), `replace` (morph into another template) |
+| Make | `spawn` (any template; `then` runs with `spawned`; `for` makes them temporary, below), `launch` (a projectile template toward a target; `onImpact`), `spawnGroup` (a wave-style group that counts toward the night), `replace` (morph into another template) |
 | Health | `damage` (`amount`, `source` credited, `types` like `["fire"]`), `heal`, `kill`, `revive`, `setHp` |
 | Stats | `setStat` (`stat`, one of `value`/`add`/`mult`, `for` seconds or `"night"`/`"day"`), `applyStatus`, `removeStatus`, `setWeapon` (below) |
 | Team, move | `convert` (switch side), `teleport`, `push` (knockback), `drift` (continuous pull/wind), `moveTo`, `setMovement`, `setTargeting` (`prepend`, `remove`, `for`), `taunt`, `command` (player units: follow/hold/home), `turn` (`facing`/`by`/`toward`, `speed`: aim a beam, a turret, an area), `setShape` (an area's shape or size, a body's footprint, at runtime) |
@@ -896,6 +896,17 @@ runs once per member and the other params are evaluated per member with `it` bou
 | World | `terrain` (change the ground during play, below), `gold` (give/take), `dropCoins`, `building` (build, upgrade, knockOut, repair, demolish, lock, unlock, setCost, setIncome a slot: `slot` is any expression giving a building or slot entity, `@name`, `it`, `$var`, `it.$slot`, `nearest('unbuilt and type:House')`, or a Studio key `"add:h1"`; without `slot` it acts on each `target`), `waves` (addSpawn, removeUnit, scaleCount, scaleHp, clearRemaining, startNight, endNight, skipNight), `endLevel` |
 | Show | `effect`, `sound`, `message`, `floatText`, `setVisual`, `hud`, `shake`, `marker`, `lighting` (darken or tint the level: an eclipse, day made night), `setLight` (a light that follows anything: a torch on the king) |
 | End | `destroy` (`drops`, `effects`, `silent`): removes anything; a unit the logic spawned is removed outright, one of the game's own player troops is knocked out for good (no revive at dawn); buildings, the castle and the king are only knocked out |
+
+**How long spawned things stay.** What `spawn` makes stays until something removes it, so units the level hands out
+build up night after night. Add `"for"` to make them temporary: seconds, `"night"` (until the next dawn) or `"day"`
+(until the next dusk). When the time is up each one leaves, alive or dead: `expire` fires on it, then it's removed
+without death effects, coins or a `death` event (so `death` rules, a necromancer's for example, don't fire). A
+temporary player unit that dies stays down and never revives. Call-to-arms militia for one night:
+`{"do": "spawn", "entity": "vanilla:P Melee", "count": 6, "at": "pointNear(king, 2)", "spread": 1.5, "team":
+"player", "for": "night"}`. A spawned player unit without `for` that dies is knocked out like the game's own troops
+and, by default, revives at dawn; the game rule `spawnedDead: "remove"` (12.9) keeps them dead instead (removed at
+dawn), so losses are permanent. To remove spawned things at a moment of your own, `destroy` them from a rule (label
+them in `then`, then `{"do": "destroy", "target": "all('#militia', 999)", "silent": true, "effects": false}`).
 
 **`setWeapon`** gives units, towers and the king another weapon: `"weapon": "vanilla:<weapon>"` (or
 `"=other.weapon"`), `"=other"` (copy that entity's weapon with its range and keep distance), `"none"` (its attacks
@@ -1098,6 +1109,7 @@ frame, so rules switch with a variable (`"combat": "isNight or $flipped"`); enum
 | `combat` | `isNight` | A condition: when vanilla attacks (units, towers, the king) happen and the player's side can be hurt. `"true"`: fighting by day too; `"false"`: never. |
 | `build` | `isDay` | A condition: when the king can build and upgrade (the prompts open). `"true"`: at night too. |
 | `dayLength` | `0` | Seconds of day before night falls by itself (0: the player calls it). |
+| `spawnedDead` | `revive` | Player units the logic spawned without `for` that die: `revive` (they come back at dawn, like the game's own troops) or `remove` (they stay dead and are removed at dawn). Temporary units (`spawn` `for`) never revive. |
 
 Recipes: a custom win (hold a hill, escort a wagon): `victory: rules` + a rule that does `endLevel win`, and one that
 does `endLevel lose` on `waveCleared` of the last night if the goal wasn't met. A different vital object: `defeat:

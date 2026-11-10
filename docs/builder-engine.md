@@ -635,7 +635,7 @@ keep rules readable.
 | `after` | `seconds` | once, that long after spawn | |
 | `near` | `filter`, `range`, `edge` (`enter`/`exit`/`both`) | a matching entity comes within or leaves the range | the entity |
 | `enter` / `exit` / `inside` / `empty` / `occupied` | | (areas) see "area" | entity |
-| `impact` / `expire` | | (projectiles, or anything with a lifetime) | hit entity / — |
+| `impact` / `expire` | | (projectiles, anything with a lifetime, or spawned with `for` when its time is up) | hit entity / — |
 | `arrive` / `end` | | (movers, path followers, `moveTo`) | — / point index |
 | `bump` | | (units) a knockback (`push`, or the game's own) was stopped short by something solid: a wall, a building, a solid body, a cliff, the map's edge | the building or body it hit (none for terrain) / metres of push left; `event.pos` where it stopped |
 | `pickup` / `interact` | | (pickups, interactables) | collector / king |
@@ -744,7 +744,7 @@ which accepts an entity or a position.
 
 | Group | Action | Key params |
 |---|---|---|
-| **Make** | `spawn` | `entity` (template), `count`, `at`, `spread`, `team` (default: the template's; `owner`), `elite` (`inherit`/bool), `facing`, `then` (actions with `spawned` bound) |
+| **Make** | `spawn` | `entity` (template), `count`, `at`, `spread`, `team` (default: the template's; `owner`), `elite` (`inherit`/bool), `facing`, `for` (temporary: seconds, `"night"`/`"day"` = until the next dawn/dusk; see "Spawned lifetimes"), `then` (actions with `spawned` bound) |
 | | `launch` | `entity`, `from`, `toward` (entity or position), the `projectile` fields as overrides, `onImpact` (actions; the template's `impact` rules also run), `then` |
 | | `spawnGroup` | `unit`, `count`, `interval`, `line` (a spawn line) or `at`, `elite`, `gold`: a wave-style group now (enemies count toward the night) |
 | | `replace` | `with` (template), `keep` (`hp`, `vars`, `statuses`, `labels`): swaps the entity for another in place (morph, shapeshift) |
@@ -812,6 +812,21 @@ World and Show details (as built, `Logic/Bodies/World/`):
   night). A night that is running counts as `"current"`. `addSpawn` defaults: `count` 1, `interval` 0.5, `line` the
   night's first line. `endNight` removes the remaining enemies without coins or death events; `skipNight` works by
   day only and skips the coming night (not the last). Future-night edits are replayed after a savestate load.
+- **Spawned lifetimes** (`Logic/Bodies/SpawnLives.cs`). What `spawn` makes is persistent by default, so a level
+  can let units build up across nights. `for` makes it temporary: when the time is up (seconds, polled at 10 Hz;
+  `"night"` in a `DayNightCycle.DawnCallBeforeSunrise` prefix, `"day"` in a `DuskCall` prefix) each one leaves, alive
+  or dead: `expire` is raised on it, then `Despawn` removes it with no death effects, coins or `death` event. Dawn
+  runs before sunrise, so a temporary unit is gone before `Hp.ReviveAllKnockedOutPlayerUnitsAndBuildings` would
+  revive it. A persistent spawned player unit that dies is knocked out (`Hp.getsKnockedOutInsteadOfDying`), and by
+  default the game revives it at dawn with its own troops; `logic.game.spawnedDead: "remove"` removes dead spawned
+  player units at dawn instead (same prefix). Lifetimes ride savestates (part `lifetimes`). The alternative, a dawn
+  rule that `destroy`s labelled units, also works; `for` is the one-field form.
+- Spawned and converted player units show their own icon (`Runtime/UnitIcons.cs`): the game serializes the marker
+  icon (`ScreenMarkerIcon.sprite`: pause-menu unit list, `marker`/`hud` icons) and the type badge over the head
+  (`UnitTypeDisplay.icon`, shown while the command key is held) per prefab, and P Melee, a troop no vanilla building
+  trains, has no marker icon and P Archer's badge. The catalog gives a player unit without a marker icon its enemy
+  twin's (E Melee's), and every unit the Builder makes (`spawn`, `convert`, custom-unit templates, whose `visuals.icon`
+  now sets the badge too) gets it on both.
 - `spawnGroup` spawns like the game's death spawns (Instantiate + `Spawn.AdjustEnemyParametersAfterSpawn`), `interval`
   default 0.5, coins spread over the group; at night the night stays open until the group is done. `clearRemaining`
   on the running night drops pending groups too.
@@ -949,6 +964,7 @@ action per rule. Without the block every patch is a no-op (`Logic/Bodies/World/L
 | `combat` (bool) | `isNight` | `AutoAttack*.Update` and `ManualAttack.TryToAttack` run with the day/night state switched to what the rule wants (`GamePhase.Switch`, restored in a finalizer; `isNight` still reads the truth meanwhile). By day the dawn's `SetAllUnitsWithTagInvulnerable(true)` is skipped, and toggled when the rule flips mid-day. |
 | `build` (bool) | `isDay` | `BuildingInteractor.UpdateInteractionState` runs switched likewise; the dusk's forced "no prompt" is redone after `OnDusk`; prompts refresh when the rule flips. |
 | `dayLength` (number) | `0` | Night falls that many seconds after sunrise (not after the last night). |
+| `spawnedDead` (`revive` \| `remove`) | `revive` | Player units the logic spawned (without `for`) that are knocked out: `revive` leaves them to the game's dawn revive; `remove` despawns them in the `DawnCallBeforeSunrise` prefix (`SpawnLives.Dawn`). |
 
 `logic-game` (dev command; `palace.py game cmd logic-game`) prints the rules as evaluated now; `logic-game castle`
 lists what still draws near the castle.

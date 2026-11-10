@@ -118,6 +118,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             pos = BodyNav.UnitGround(pos);
             var go = Object.Instantiate(prefab, pos, Quaternion.Euler(0f, rotY, 0f));
             go.name = go.name.Replace("(Clone)", "").Trim();
+            UnitIcons.Repair(go, go.name);
             bool enemySide = go.GetComponentInChildren<TaggedObject>()?.Tags.Contains(TagManager.ETag.EnemyOwned) == true;
             string side = enemySide ? "enemy" : "player";
             if (enemySide) Spawn.AdjustEnemyParametersAfterSpawn(go, PendingElite);

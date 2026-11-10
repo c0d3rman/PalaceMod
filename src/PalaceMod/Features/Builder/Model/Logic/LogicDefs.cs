@@ -96,6 +96,7 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("combat")] public JToken Combat { get; set; }
         [JsonProperty("build")] public JToken Build { get; set; }
         [JsonProperty("dayLength")] public JToken DayLength { get; set; }
+        [JsonProperty("spawnedDead")] public JToken SpawnedDead { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 

@@ -128,6 +128,11 @@ namespace PalaceMod.Builder
                 if (!string.IsNullOrEmpty(troopName) && (unit.DisplayName == Humanize(id) || buildings.Contains(unit.DisplayName))) unit.DisplayName = troopName;
             }
 
+            // A troop without a marker icon (P Melee, which no vanilla building trains) takes its enemy twin's (E Melee),
+            // so spawned and converted copies show one of their own (UnitIcons).
+            foreach (var u in unitList.Where(u => u.Side == UnitSide.Player && u.Icon == null))
+                u.Icon = unitList.FirstOrDefault(t => t.Side == UnitSide.Enemy && t.Icon != null && Humanize(t.Id) == Humanize(u.Id))?.Icon;
+
             // Two prefabs can share a player-facing name (E Melee and E Defensive Melee Variant are both "Swordsman"):
             // tell them apart by the words their ids don't share.
             foreach (var group in unitList.GroupBy(u => (u.Side, u.DisplayName)).Where(g => g.Count() > 1).ToList())

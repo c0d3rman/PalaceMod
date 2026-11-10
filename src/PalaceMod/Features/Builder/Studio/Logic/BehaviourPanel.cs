@@ -243,7 +243,7 @@ namespace PalaceMod.Builder.Studio.Logic
         {
             ["victory"] = "Win by", ["defeat"] = "Lose by", ["castle"] = "Castle", ["holdNight"] = "Night lasts while",
             ["endNight"] = "Night ends when", ["survivors"] = "Enemies left then", ["combat"] = "Fighting when",
-            ["build"] = "Building when", ["dayLength"] = "Day length (s)",
+            ["build"] = "Building when", ["dayLength"] = "Day length (s)", ["spawnedDead"] = "Dead spawned troops",
         };
 
         /// <summary>The game's own rules: win and lose, the castle, night flow, when fighting and building happen.</summary>

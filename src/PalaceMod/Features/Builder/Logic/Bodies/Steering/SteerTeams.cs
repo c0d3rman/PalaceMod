@@ -122,6 +122,7 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
 
             var made = Object.Instantiate(prefab, pos, r);
             made.name = made.name.Replace("(Clone)", "").Trim();
+            UnitIcons.Repair(made, made.name);
             if (!made.activeSelf) made.SetActive(true);   // Builder templates are kept inactive
             if (team == "enemy") Spawn.AdjustEnemyParametersAfterSpawn(made, false);
             if (statsFrom != null)
