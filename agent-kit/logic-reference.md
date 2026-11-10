@@ -216,6 +216,7 @@ Each action is `{"do": "<name>", ...params}`. `target` (where listed) is a selec
 - `team` (enum; one of player, enemy, neutral, owner): Its team (default: the template's; owner = the spawner's).
 - `elite` (enum; default "false"; one of inherit, true, false): Whether spawned enemies are elite; inherit copies the spawner's.
 - `facing` (number): Yaw in degrees (default: the spawner's facing).
+- `for` (for): Makes them temporary: seconds, or "night" (until the next dawn) / "day" (until the next dusk). Then each one leaves, alive or dead: `expire` on it, and it's removed without death effects, coins or a `death` event (a dead player unit doesn't revive). Omit to keep them.
 - `then` (actions; binds `spawned`): Run for each new entity, with `spawned` bound.
 
   `{ "do": "spawn", "entity": "=self.template", "count": 2, "at": "self", "spread": 1.5 }`
@@ -856,7 +857,7 @@ What each JSON block accepts (a field not listed draws an "unknown field" warnin
 - **kingAction**: `id`, `name`, `icon`, `when`, `cooldown`, `uses` (blocks: `uses` → uses)
 - **uses**: `count`, `per`
 - **caps**: `entities`, `units`, `projectiles`, `perTemplate`, `firingsPerFrame`, `actionsPerFrame`
-- **game**: `victory`, `defeat`, `castle`, `holdNight`, `endNight`, `survivors`, `combat`, `build`, `dayLength`
+- **game**: `victory`, `defeat`, `castle`, `holdNight`, `endNight`, `survivors`, `combat`, `build`, `dayLength`, `spawnedDead`
 
 ## Stats
 
@@ -966,6 +967,7 @@ Per level in `logic.game` (op `{"op": "logic", "game": {...}}`): the game's own 
 | `combat` | bool | `"isNight"` | When vanilla fighting happens: units', towers' and the king's attacks, and hits on the player's side. Vanilla: "isNight". "true": by day too. |
 | `build` | bool | `"isDay"` | When the king can build and upgrade. Vanilla: "isDay". "true": at night too. |
 | `dayLength` | number | `0` | Seconds of day before night falls by itself (0: the player calls the night). |
+| `spawnedDead` | enum (revive / remove) | `"revive"` | Player units the logic spawned (without spawn `for`) that die. revive: they come back at dawn like the game's own troops (vanilla). remove: they stay dead and are removed at dawn. |
 
 ## Built-in presets
 

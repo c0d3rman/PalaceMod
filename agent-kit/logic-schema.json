@@ -905,6 +905,11 @@
           "description": "Yaw in degrees (default: the spawner's facing)."
         },
         {
+          "name": "for",
+          "type": "for",
+          "description": "Makes them temporary: seconds, or \"night\" (until the next dawn) / \"day\" (until the next dusk). Then each one leaves, alive or dead: `expire` on it, and it's removed without death effects, coins or a `death` event (a dead player unit doesn't revive). Omit to keep them."
+        },
+        {
           "name": "then",
           "type": "actions",
           "binds": "spawned",
@@ -4845,7 +4850,8 @@
         "survivors",
         "combat",
         "build",
-        "dayLength"
+        "dayLength",
+        "spawnedDead"
       ],
       "children": {}
     }
@@ -4947,6 +4953,16 @@
       "default": 0,
       "min": 0.0,
       "description": "Seconds of day before night falls by itself (0: the player calls the night)."
+    },
+    {
+      "name": "spawnedDead",
+      "type": "enum",
+      "default": "revive",
+      "options": [
+        "revive",
+        "remove"
+      ],
+      "description": "Player units the logic spawned (without spawn `for`) that die. revive: they come back at dawn like the game's own troops (vanilla). remove: they stay dead and are removed at dawn."
     }
   ],
   "presets": [

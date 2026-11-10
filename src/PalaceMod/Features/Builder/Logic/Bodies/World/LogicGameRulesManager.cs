@@ -28,6 +28,7 @@ using Object = UnityEngine.Object;
       what the rule wants (GamePhase.Switch). The player's side is made invulnerable at dawn by the game; with combat
       by day that is skipped (and undone/redone when the rule changes during the day).
     - dayLength: night falls by itself that many seconds into the day.
+    - spawnedDead: whether dead logic-spawned player units revive at dawn (SpawnLives, in the bodies manager).
 
     Without logic.game (or outside a logic session) every patch is a no-op.
 */
@@ -360,7 +361,7 @@ namespace PalaceMod.Builder.Logic.Bodies
                 + castleRoot.GetComponentsInChildren<GPUInstanced>(false).Count(g => g.enabled);
             return $"victory={Enum("victory", "lastNight")} defeat={Enum("defeat", "castle")} castle={Enum("castle", "shown")}{(hidden != null ? " (hidden)" : "")} castleDrawn={drawn} " +
                 $"holdNight={HoldNight} endNight={(Has("endNight") ? Bool("endNight", false).ToString() : "-")} survivors={Enum("survivors", "stay")} " +
-                $"combat={Combat?.ToString() ?? "game"} build={Build?.ToString() ?? "game"} dayLength={Number("dayLength", 0):0.#} " +
+                $"combat={Combat?.ToString() ?? "game"} build={Build?.ToString() ?? "game"} dayLength={Number("dayLength", 0):0.#} spawnedDead={Enum("spawnedDead", "revive")} " +
                 $"night={GamePhase.IsNight} dayFor={(dayStartedAt >= 0 ? Time.time - dayStartedAt : 0):0.#}";
         }
     }

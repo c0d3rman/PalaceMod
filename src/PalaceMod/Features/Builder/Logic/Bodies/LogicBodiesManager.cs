@@ -34,6 +34,7 @@ namespace PalaceMod
             LogicWorld.Started += w => { if (w.Templates.Values.Any(t => (t?["body"] as Newtonsoft.Json.Linq.JObject)?.Value<bool?>("walkable") == true)) Walkables.PrepareRuntimeDecks(); };
             BodyActions.Register();
             LogicSaveState.Register("bodies", BodySave.Capture, BodySave.Restore);
+            LogicSaveState.Register("lifetimes", SpawnLives.Capture, SpawnLives.Restore);
             DevCommands.Register("logic-l2", "logic-l2 status | nav ... | act <action> [json] [self=<role>] [other=<role>] | build <template> <x> <z> [rotY] | signal <entity> <input> [value] | interact <entity> [frames] | choices | pick <n>   bodies (L2): spikes, actions with literal params, entities", args =>
             {
                 string sub = args.FirstOrDefault() ?? "";
@@ -95,6 +96,7 @@ namespace PalaceMod
             AreaPoller.Step(time);
             foreach (var p in BuilderPickup.All.ToList()) if (p != null) p.Poll();
             BodyDev.FieldStep();
+            SpawnLives.Poll(LogicWorld.Current);
         }
 
         private bool cleared;
@@ -113,6 +115,7 @@ namespace PalaceMod
             VanillaProjectiles.Clear();
             Drifts.Clear();
             BodyFilter.ClearCache();
+            SpawnLives.Clear();
             pollTimer = 0f;
             pollTime = 0;
         }
@@ -147,6 +150,21 @@ namespace PalaceMod
                 __result = key;
                 return false;
             }
+        }
+
+        // ---- spawn lifetimes (SpawnLives) -----------------------------------------------------------------------
+
+        /// <summary>Before sunrise, so a unit that leaves at dawn is gone before the game revives knocked-out troops.</summary>
+        [HarmonyPatch(typeof(DayNightCycle), "DawnCallBeforeSunrise")]
+        private static class SpawnDawn
+        {
+            private static void Prefix() { if (LogicWorld.Current != null) SpawnLives.Dawn(LogicWorld.Current); }
+        }
+
+        [HarmonyPatch(typeof(DayNightCycle), "DuskCall")]
+        private static class SpawnDusk
+        {
+            private static void Prefix() { if (LogicWorld.Current != null) SpawnLives.Dusk(LogicWorld.Current); }
         }
 
         // ---- surfaces ------------------------------------------------------------------------------------------

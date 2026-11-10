@@ -68,7 +68,7 @@ namespace PalaceMod
         private static void RegisterDevCommands()
         {
             DevCommands.Register("builder-assets",
-                "builder-assets check <pack>|status|inspect <vanilla unit>|show <pack> <unit>...|sounds|gltf <file or folder>|gltf result   Builder asset import tools", args =>
+                "builder-assets check <pack>|status|inspect [live] <vanilla unit>|show <pack> <unit>...|sounds|gltf <file or folder>|gltf result   Builder asset import tools", args =>
             {
                 if (args.Length == 0) throw new ArgumentException("usage: builder-assets check <pack>|status|inspect <unit>|gltf <file>");
                 switch (args[0].ToLowerInvariant())
@@ -166,10 +166,15 @@ namespace PalaceMod
         /// <summary>A vanilla unit's renderers, materials and shaders (what a mesh or texture swap works with).</summary>
         private static string Inspect(string id)
         {
+            // "live <name>": the first unit of that name in the scene (a barracks troop, a spawned unit) instead of the prefab.
+            bool live = id.StartsWith("live ");
+            if (live) id = id.Substring(5);
             var unit = BuilderServices.Catalog.FindUnit(id) ?? throw new ArgumentException($"no vanilla unit \"{id}\"");
-            var lines = new List<string> { $"{unit.Id} ({unit.Side}):" };
-            var root = unit.Prefab.transform;
-            foreach (var t in unit.Prefab.GetComponentsInChildren<Transform>(true))
+            var prefab = !live ? unit.Prefab : Resources.FindObjectsOfTypeAll<Hp>().Select(h => h.gameObject)
+                .Where(g => g.scene.IsValid() && TroopIndex.TroopId(g) == unit.Id).OrderByDescending(g => g.activeInHierarchy).FirstOrDefault() ?? throw new ArgumentException($"no live \"{id}\" in the scene");
+            var lines = new List<string> { $"{unit.Id} ({unit.Side}{(live ? ", live " + prefab.GetInstanceID() : "")}{(prefab.transform.parent != null ? ", under " + prefab.transform.root.name : "")}):" };
+            var root = prefab.transform;
+            foreach (var t in prefab.GetComponentsInChildren<Transform>(true))
             {
                 int depth = 0;
                 for (var p = t; p != root; p = p.parent) depth++;
@@ -182,6 +187,8 @@ namespace PalaceMod
                     line += $" mesh={mesh?.name} b={mesh?.bounds.size} uv={(mesh != null && mesh.isReadable ? mesh.uv.Length.ToString() : "?")} " +
                         $"mats=[{string.Join(",", r.sharedMaterials.Select(m => m == null ? "null" : $"{m.name}/{m.shader.name}{(m.HasProperty("_BaseMap") ? $" baseMap={m.GetTexture("_BaseMap")?.name ?? "none"}" : "")} kw={string.Join("+", m.shaderKeywords)}"))}] enabled={r.enabled}";
                 }
+                if (t.GetComponent<MPUIKIT.MPImageBasic>() is { sprite: { } sprite }) line += $" sprite={sprite.name}";
+                if (t.GetComponent<ScreenMarkerIcon>() is { } marker) line += $" marker={marker.sprite?.name ?? "none"}";
                 lines.Add(line);
             }
             return string.Join("\n", lines);

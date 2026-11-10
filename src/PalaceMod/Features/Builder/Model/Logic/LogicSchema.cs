@@ -298,6 +298,7 @@ namespace PalaceMod.Builder.Model.Logic
                 P("team", "enum", "Its team (default: the template's; owner = the spawner's).", opts: ["player", "enemy", "neutral", "owner"]),
                 P("elite", "enum", "Whether spawned enemies are elite; inherit copies the spawner's.", def: "false", opts: ["inherit", "true", "false"]),
                 P("facing", "number", "Yaw in degrees (default: the spawner's facing)."),
+                P("for", "for", "Makes them temporary: seconds, or \"night\" (until the next dawn) / \"day\" (until the next dusk). Then each one leaves, alive or dead: `expire` on it, and it's removed without death effects, coins or a `death` event (a dead player unit doesn't revive). Omit to keep them."),
                 P("then", "actions", "Run for each new entity, with `spawned` bound.", binds: "spawned"),
             ], owner: "L2", example: "{ \"do\": \"spawn\", \"entity\": \"=self.template\", \"count\": 2, \"at\": \"self\", \"spread\": 1.5 }");
             Act("launch", "Make", "Fires an entity as a projectile from the owner toward a target (it uses the template's projectile block).",
@@ -599,6 +600,7 @@ namespace PalaceMod.Builder.Model.Logic
                 P("combat", "bool", "When vanilla fighting happens: units', towers' and the king's attacks, and hits on the player's side. Vanilla: \"isNight\". \"true\": by day too.", def: "isNight"),
                 P("build", "bool", "When the king can build and upgrade. Vanilla: \"isDay\". \"true\": at night too.", def: "isDay"),
                 P("dayLength", "number", "Seconds of day before night falls by itself (0: the player calls the night).", def: 0, min: 0),
+                P("spawnedDead", "enum", "Player units the logic spawned (without spawn `for`) that die. revive: they come back at dawn like the game's own troops (vanilla). remove: they stay dead and are removed at dawn.", def: "revive", opts: ["revive", "remove"]),
             });
 
             // ---- Properties -----------------------------------------------------------------------------------

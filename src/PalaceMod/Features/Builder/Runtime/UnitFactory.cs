@@ -178,6 +178,7 @@ namespace PalaceMod.Builder
 
             var go = Object.Instantiate(baseUnit.Prefab, Root());
             go.name = $"{baseUnit.Prefab.name} [{pack.Id}/{def.Id}]";
+            UnitIcons.Repair(go, baseUnit.Id);
             var notes = new List<string>();
             Apply(go, pack, def, [], notes, inPlace: false);
             // Behaviour engine: clones register as entities of this template (BuilderEntity.Start).
@@ -313,12 +314,7 @@ namespace PalaceMod.Builder
                 var entry = findPack(pack.Id);
                 var sprite = entry != null ? BuilderServices.Assets.GetSprite(entry, v.Icon) : null;
                 if (sprite == null) notes.Add($"icon {v.Icon} not available, kept the base icon");
-                else
-                {
-                    var icon = go.GetComponent<ScreenMarkerIcon>();
-                    if (icon != null) icon.sprite = sprite;
-                    if (icon is ScreenMarkerIconArachnophobia spider) spider.defaultSprite = spider.arachnophobiaModeSprite = sprite;
-                }
+                else UnitIcons.Apply(go, sprite);
             }
             // Imported mesh, skin texture and sounds (WP5). Before the tint, so the tint colours an imported mesh too.
             PalaceMod.Builder.Assets.AssetVisuals.Apply(go, findPack(pack.Id), v, notes, owned);
