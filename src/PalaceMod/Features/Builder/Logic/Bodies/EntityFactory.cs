@@ -155,7 +155,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             float scale = def.Value<float?>("scale") ?? 1f;
             go.transform.localScale = Vector3.one * scale;
 
-            string note = BodyVisual.Build(go, def["visual"] as JObject, PackEntry);
+            string note = BodyVisual.Build(go, def["visual"] as JObject ?? DefaultInteractVisual(def), PackEntry);
             if (note != null) Log.For<LogicBodiesManager>().Warn($"{e.Template ?? e.Id}: {note}");
 
             var body = def["body"] as JObject;
@@ -177,6 +177,18 @@ namespace PalaceMod.Builder.Logic.Bodies
             LogicGame.Register(e, go);
             BodyEvents.RaiseEntityBuilt(e, go);
             return true;
+        }
+
+        /// <summary>
+        /// The look of something the king has to find and use (an `interact`) that has no `visual` of its own, such as an
+        /// interactable logic object: a plain post (the lever preset's), so it's never an invisible spot on the ground.
+        /// An area drawn with `show` is already visible and keeps no post.
+        /// </summary>
+        private static JObject DefaultInteractVisual(JObject def)
+        {
+            if (def["interact"] is not JObject) return null;
+            if (def["area"] is JObject area && (string)area["show"] is "outline" or "fill") return null;
+            return new JObject { ["mesh"] = "mesh:Graveyard Wall Post" };
         }
 
         /// <summary>An attach (slot, prop, line, castle) got its entity: add the components its attach JSON carries.</summary>
