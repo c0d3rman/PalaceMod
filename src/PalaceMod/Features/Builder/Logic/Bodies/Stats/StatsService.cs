@@ -251,7 +251,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             var world = LogicWorld.Current;
             if (def["rules"] is JArray rules && rules.Count > 0 && world != null)
                 ext.RulesHandle = world.AttachRules(s.E, ScopeRules(rules, st.Id), $"statuses.{st.Id}.rules");
-            if (def["visual"] is JObject vis) ext.Visual = StatusVisuals.Apply(s.E, vis);
+            ext.Visual = StatusVisuals.Apply(s.E, def["visual"] as JObject, def);
         }
 
         private void EndStatus(Sheet s, StatusState st, bool raise, bool write, LogicContext ctx = null, int endedStacks = 0)
