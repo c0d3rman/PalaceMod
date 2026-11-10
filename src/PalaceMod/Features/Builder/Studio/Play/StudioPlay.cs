@@ -23,9 +23,9 @@ using UnityEngine.SceneManagement;
     Every switch stops the music first, and runs under shortened clouds (cloudFadeInTime/OutTime at 0.12 s, put back
     once the transition is over). Times are logged ("play ready in ... ms").
 
-    Leaving play another way also comes back here: the pause menu's Back to Map and the end screen's Continue (both
-    relabelled "Back to the Studio" in StudioPlayManager) turn into ReturnToEdit, so a test never drops the player out
-    of the editor. Try Again on the end screen restarts play as the game does.
+    Leaving play another way also comes back here: the game's Back to Map (hidden from the pause menu in test play, which
+    has "Back to the Studio" instead) and the end screen's Continue (relabelled "Back to the Studio") turn into
+    ReturnToEdit in StudioPlayManager, so a test never drops the player out of the editor. Try Again on the end screen restarts play as the game does.
 */
 namespace PalaceMod.Builder.Studio.Play
 {
