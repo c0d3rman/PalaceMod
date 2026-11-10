@@ -30,8 +30,9 @@ namespace PalaceMod
         private string thumbScene;
         private float thumbAt;
 
-        // A main map seen as it is (the Studio on a map as it is, or a normal run) gets its start-popup thumbnail once,
-        // a few seconds after it loaded.
+        // A main map seen in a normal run gets its start-popup thumbnail once, a few seconds after it loaded. Never while a
+        // custom level is open: levels without their own snapshot show this picture, so one level's props in it would
+        // show on every level built on that map.
         public override void Update()
         {
             var scene = SceneManager.GetActiveScene().name;
@@ -41,8 +42,7 @@ namespace PalaceMod
             if (!Catalog.GameReady) { thumbAt = UnityEngine.Time.unscaledTime + 2f; return; }
             thumbAt = -1f;
             if (scene.Contains(' ') || Builder.Studio.Start.Thumbnails.Has(scene) || !Builder.Studio.Start.StartPopup.Maps().Any(h => h.Scene == scene)) return;
-            var level = Studio.Running ? Studio.Level : BuilderServices.Sessions.Current?.Level;
-            if (level?.Base != null) return;
+            if (Studio.Running || BuilderServices.Sessions.Current?.Level != null) return;
             Builder.Studio.Start.Thumbnails.Capture(scene);
         }
 
