@@ -60,6 +60,12 @@
           "target": "spawned",
           "name": "gen",
           "value": "self.$gen + 1"
+         },
+         {
+          "do": "setStat",
+          "target": "spawned",
+          "stat": "scale",
+          "value": "self.scale * 0.75"
          }
         ]
        }

@@ -5830,7 +5830,7 @@
                   "do": "setStat",
                   "target": "spawned",
                   "stat": "scale",
-                  "mult": "{shrink}"
+                  "value": "self.scale * {shrink}"
                 }
               ]
             }
