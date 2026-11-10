@@ -293,7 +293,9 @@ namespace PalaceMod.Tests
             w.Raise("death", near, null, 0, null, null);
             w.Raise("death", far, null, 0, null, null);
             w.Raise("death", ally, null, 0, null, null);
+            Assert.Equal(true, w.DeathPending, "an undelivered death holds the night");
             w.Tick(0.016);
+            Assert.Equal(false, w.DeathPending, "delivered: the night may end");
             Assert.Equal(1.0, w.GetVar(necro, "raised").Num, "only the foe in range");
             Assert.Equal(1, w.Entities.Count(e => e.Template == "skeleton"), "one skeleton");
             Assert.Equal(5f, w.Entities.First(e => e.Template == "skeleton").Position.X, "at the subject");
