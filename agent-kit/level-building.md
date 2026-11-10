@@ -1283,8 +1283,11 @@ lever beside it on the castle bank: `{"op": "place", "id": "lever", "preset": "l
 "to": "@bridge"}, "at": [x, z]}` (the preset has a model; a bare `logic` place with `interact` is a plain post); and
 on the bridge `{"when": "dusk", "do": [{"do": "signal", "name": "down", "to": "self"}]}`. For a
 crossing over water, give the bridge `"body": {"box": [12, 14], "height": 0.4, "walkable": true}` (long enough to
-overlap each bank by a metre or more) and switch it with `enable`/`disable`: on, it opens the route over the moat; off,
-the route goes round (and a rule can `kill` `all('enemy and unit and in:@deck')` first).
+overlap each bank by a metre or more: a dug moat's banks slope down over the cell beside the water, so count those
+cells as gap) and switch it with `enable`/`disable`: on, it opens the route over the moat; off,
+the route goes round (and a rule can `kill` `all('enemy and unit and in:@deck')` first). With a `visual.mesh`, the
+walkable deck is no bigger than the mesh seen from above (the box is clipped to it, logged): size the mesh with
+`meshScale` so it spans the gap, and match the box to it.
 
 **What changes where units can go at runtime**: `terrain` (heights, block, water, ice, water level), solid bodies
 (`enable`/`disable`, `teleport`, movers), walkable bodies (`enable`/`disable`, spawned or destroyed) and area surfaces

@@ -222,7 +222,7 @@ namespace PalaceMod.Builder.Logic.Bodies
 
         /// <summary>
         /// A deck is no wider or longer than the mesh that shows it: a body box larger than the visual (a 10 m box under
-        /// a 6 m bridge) made walkable ground over the water either side of the bridge, where units then walked. The
+        /// a 3.6 m bridge) made walkable ground over the water either side of the bridge, where units then walked. The
         /// footprint is clipped to the visual's bounds in the body's frame; returns the clipped deck's middle (x, z).
         /// Only for an explicit `visual.mesh` (an interactable's default marker isn't the deck's shape).
         /// </summary>
@@ -255,7 +255,7 @@ namespace PalaceMod.Builder.Logic.Bodies
                 return Vector2.zero;
             }
             if (size.x - (x1 - x0) < Slack && size.z - (z1 - z0) < Slack) return Vector2.zero;
-            Log.For<LogicBodiesManager>().Info($"walkable {body.name}: body box {size.x:0.0} x {size.z:0.0} m is larger than its visual ({maxX - minX:0.0} x {maxZ - minZ:0.0} m); deck clipped to {x1 - x0:0.0} x {z1 - z0:0.0} m");
+            Log.For<LogicBodiesManager>().Info($"walkable {body.name}: body box {size.x:0.0} x {size.z:0.0} m is larger than its visual (x {minX:0.0}..{maxX:0.0}, z {minZ:0.0}..{maxZ:0.0} m in its frame); deck clipped to {x1 - x0:0.0} x {z1 - z0:0.0} m, centred at ({(x0 + x1) / 2f:0.0}, {(z0 + z1) / 2f:0.0})");
             size = new Vector3(x1 - x0, size.y, z1 - z0);
             return new Vector2((x0 + x1) / 2f, (z0 + z1) / 2f);
         }
