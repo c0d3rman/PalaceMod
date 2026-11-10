@@ -1058,7 +1058,7 @@ for agents), `reference.md` and a test that every entry has a runtime handler al
 | `death`/`repaired` (buildings) | a building's `Hp` knock-out (it has `getsKnockedOutInsteadOfDying`) / `Hp.Revive` postfix |
 | `goldChanged` | `PlayerInteraction.onBalanceGain` / `onBalanceSpend` |
 | `near`, areas | the world's spatial poller (below) |
-| `interact` | `BuilderInteractor : InteractorBase` on the interactor layer |
+| `interact` | `BuilderInteractor : InteractorBase` on the interactor layer; an entity with no `visual` (and no area drawn with `show`) gets a plain post, `mesh:Graveyard Wall Post` (`EntityFactory.DefaultInteractVisual`), so the king can find it |
 | `kingAction` | the three level keybinds |
 | `levelStart`/`levelEnd` | the session's overlay-applied hook / `TransitionFromGameplayToEndScreen` prefix |
 
