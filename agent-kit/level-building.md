@@ -681,7 +681,9 @@ stat, flag, filter term and built-in preset with its parameters. `palace.py logi
 - **Entities** are the things the engine knows: units (vanilla and custom), buildings, the king, the castle, coins, and
   Builder objects: props, projectiles, areas, pickups, logic objects, paths and points.
 - **Templates** make entities. A custom unit (`units[]`) is a template; non-unit templates live in `entities[]` with
-  a `kind`: `prop`, `projectile`, `area`, `pickup` or `logic` (invisible, just carries rules).
+  a `kind`: `prop`, `projectile`, `area`, `pickup` or `logic` (invisible, just carries rules). Anything the king
+  has to find and use (an `interact`) needs a `visual`: give it one, or place the `lever` preset or a prop template
+  with a model. One without a visual gets a plain stone post from the game, and `check` warns.
 - **Rules** live on templates and placed objects: `when` an event happens (to the owner, or with `of` to others), `if`
   conditions hold, `do` actions run in order.
 - Every rule sees **roles**: `self` (the owner; the level in the level script), `subject` (who the event happened to),
@@ -1274,9 +1276,12 @@ is:spore') < 40", "do": [{"do": "spawn", "entity": "=self.template", "at": "poin
             "do": [{"do": "damage", "target": "all('unit and in:@plate1')", "amount": 30}, {"do": "effect", "fx": "spikes", "at": "self"}]}]}
 ```
 
-**Drawbridge on a lever**: a prop template with `"mover": {"pose": {"up": {"offset": [0, 4, 0]}, "down": {}}}` placed as
-`bridge`; a lever: `{"op": "place", "id": "lever", "preset": "lever", "with": {"signal": "up", "to": "@bridge"}, "at":
-[14, -6]}`; and on the bridge `{"when": "dusk", "do": [{"do": "signal", "name": "down", "to": "self"}]}`. For a
+**Drawbridge on a lever**: it has to cross something, so first dig the gap it spans (a `water` moat, with a way
+round so enemies still have a route while it's up) and check both routes with `paths` before and after. A prop
+template with `"mover": {"pose": {"up": {"offset": [0, 4, 0]}, "down": {}}}` placed as `bridge` over the gap; a
+lever beside it on the castle bank: `{"op": "place", "id": "lever", "preset": "lever", "with": {"signal": "up",
+"to": "@bridge"}, "at": [x, z]}` (the preset has a model; a bare `logic` place with `interact` is a plain post); and
+on the bridge `{"when": "dusk", "do": [{"do": "signal", "name": "down", "to": "self"}]}`. For a
 crossing over water, give the bridge `"body": {"box": [12, 14], "height": 0.4, "walkable": true}` (long enough to
 overlap each bank by a metre or more) and switch it with `enable`/`disable`: on, it opens the route over the moat; off,
 the route goes round (and a rule can `kill` `all('enemy and unit and in:@deck')` first).

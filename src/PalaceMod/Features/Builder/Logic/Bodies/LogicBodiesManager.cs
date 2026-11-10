@@ -35,7 +35,7 @@ namespace PalaceMod
             BodyActions.Register();
             LogicSaveState.Register("bodies", BodySave.Capture, BodySave.Restore);
             LogicSaveState.Register("lifetimes", SpawnLives.Capture, SpawnLives.Restore);
-            DevCommands.Register("logic-l2", "logic-l2 status | nav ... | act <action> [json] [self=<role>] [other=<role>] | build <template> <x> <z> [rotY] | signal <entity> <input> [value] | interact <entity> [frames] | choices | pick <n>   bodies (L2): spikes, actions with literal params, entities", args =>
+            DevCommands.Register("logic-l2", "logic-l2 status | nav ... | act <action> [json] [self=<role>] [other=<role>] | build <template> <x> <z> [rotY] | look [filter] | signal <entity> <input> [value] | interact <entity> [frames] | choices | pick <n>   bodies (L2): spikes, actions with literal params, entities", args =>
             {
                 string sub = args.FirstOrDefault() ?? "";
                 return sub switch
@@ -49,6 +49,7 @@ namespace PalaceMod
                     "vp" => BodyDev.Vanilla(args.Skip(1).ToArray()),
                     "interact" => BodyDev.Interact(args.Skip(1).ToArray()),
                     "focus" => BodyDev.Focus(),
+                    "look" => BodyDev.Look(args.ElementAtOrDefault(1)),
                     "choices" => BodyChoices.Shown(),
                     "pick" => BodyChoices.Pick(int.Parse(args.ElementAtOrDefault(1) ?? "0")),
                     _ => "logic-l2 status | nav ... | act ... | build ... | signal ...",

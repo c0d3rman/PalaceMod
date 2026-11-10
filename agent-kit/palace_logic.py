@@ -2960,6 +2960,21 @@ class _Walker:
             if do is not None:
                 self.actions(do, ap + ".do", self.scope(owner, self.schema.events["attack"]), owner, set())
 
+    def check_hidden_interact(self, pl: dict, p: str, ent: Optional[str], pkind: Optional[str]):
+        """A place the king must walk up to and use, with nothing to see: the game draws a plain post for it."""
+        tmpl = next((x for x in self.pack.get("entities") or [] if isinstance(x, dict) and x.get("id") == ent), None) if ent else None
+        merged = dict(tmpl or {})
+        merged.update(pl)
+        if _dict(merged.get("interact")) is None or _dict(merged.get("visual")) is not None:
+            return
+        kind = _s(merged, "kind") or pkind
+        if kind == "unit" or (ent is not None and tmpl is None):
+            return
+        if kind == "area" and _s(_dict(merged.get("area")) or {}, "show") in ("outline", "fill"):
+            return
+        self.warn(p + ".interact", "the king has to find and use this, but it has no visual: the game stands a plain "
+                  "post there. Give it a \"visual\" (e.g. the lever preset's mesh:Graveyard Wall Post) or place an entity with one")
+
     def check_template_fields(self, e: dict, p: str, vars_, level: Optional[_LevelCtx], place: bool):
         kind = _s(e, "kind")
         if not place and kind is None:
@@ -3278,6 +3293,7 @@ class _Walker:
             elif pkind is None and "_preset" not in pl:
                 self.error(pp, 'needs "entity" (a template), "preset", or an inline "kind"')
             self.check_template_fields(pl, pp, vars_, lv, place=True)
+            self.check_hidden_interact(pl, pp, ent, pkind)
         for key, a in (_dict(logic.get("attach")) or {}).items():
             ap = f'{p}.attach["{key}"]'
             if not isinstance(a, dict):

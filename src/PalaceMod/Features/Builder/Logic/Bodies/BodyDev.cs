@@ -18,6 +18,66 @@ namespace PalaceMod.Builder.Logic.Bodies
             $"pickups {BuilderPickup.All.Count}; {Surfaces.Describe()}; {Walkables.Describe()}; {Spaces.Describe()}; drifts {(Drifts.Any ? Drifts.Drifting.Count() : 0)}; " +
             $"last impacts: {string.Join(" ", BuilderProjectile.LastImpacts)}";
 
+        /// <summary>`logic-l2 look [filter]`: every live unit entity (id, template or object name containing filter) and
+        /// how it would draw: active, layer (and whether the main camera culls it), scale, and each renderer's state,
+        /// materials and bounds. For checking looks headless, where no pixels are drawn.</summary>
+        public static string Look(string filter)
+        {
+            var world = LogicWorld.Current;
+            if (world == null) return "no logic world";
+            var cam = Camera.main;
+            bool Seen(int layer) => cam == null || (cam.cullingMask & (1 << layer)) != 0;
+            var sb = new System.Text.StringBuilder();
+            int n = 0;
+            foreach (var e in world.Entities.ToList())
+            {
+                var go = e.Go();
+                if (e.Kind != "unit" || go == null) continue;
+                if (filter != null && !(e.Id ?? "").Contains(filter) && !(e.Template ?? "").Contains(filter) && !go.name.Contains(filter)) continue;
+                n++;
+                sb.Append($"{e.Id} [{e.Template}] \"{go.name}\" active={go.activeInHierarchy} layer={LayerMask.LayerToName(go.layer)}{(Seen(go.layer) ? "" : "(culled)")} " +
+                          $"scale={go.transform.lossyScale.x:0.##} pos={go.transform.position}\n");
+                foreach (Transform t in go.GetComponentsInChildren<Transform>(true))
+                    if (t.name.StartsWith("PalaceBuilder"))
+                        sb.Append($"  [{t.name}] localPos={t.localPosition} localScale={t.localScale} lossy={t.lossyScale}\n");
+                foreach (var r in go.GetComponentsInChildren<Renderer>(true))
+                {
+                    if (r is not (MeshRenderer or SkinnedMeshRenderer)) continue;
+                    string mats = string.Join(",", r.sharedMaterials.Select(m => m == null ? "null" : m.name + "#" + m.GetInstanceID() + (m.shader == null ? "/noshader" : "")));
+                    sb.Append($"  {r.name}: {(r.enabled ? "on" : "OFF")} {(r.gameObject.activeInHierarchy ? "active" : "INACTIVE")} " +
+                              $"layer={LayerMask.LayerToName(r.gameObject.layer)}{(Seen(r.gameObject.layer) ? "" : "(culled)")} " +
+                              $"forceOff={r.forceRenderingOff} mats=[{mats}] bounds={r.bounds.center} size {r.bounds.size}{Instanced(r)}\n");
+                }
+            }
+            return n == 0 ? "no matching unit" : sb.ToString();
+        }
+
+        /// <summary>A GPUInstanced renderer (the game draws unit pieces through GPUInstancingManager, with the renderer
+        /// itself off): the material it thinks it's drawn with, and the (mesh, material) entries its transform is in.</summary>
+        private static string Instanced(Renderer r)
+        {
+            var gi = r.GetComponent<GPUInstanced>();
+            if (gi == null) return "";
+            var t = HarmonyLib.Traverse.Create(gi);
+            var mat = t.Field("mat").GetValue<Material>();
+            string where = "no manager";
+            if (GPUInstancingManager.Instance != null &&
+                HarmonyLib.Traverse.Create(GPUInstancingManager.Instance).Field("matMeshPairToRenderersDictionary").GetValue() is System.Collections.IDictionary dict)
+            {
+                var hits = new System.Collections.Generic.List<string>();
+                foreach (System.Collections.DictionaryEntry kv in dict)
+                {
+                    var list = HarmonyLib.Traverse.Create(kv.Value).Field("transforms").GetValue<System.Collections.Generic.List<Transform>>();
+                    if (list == null || !list.Contains(r.transform)) continue;
+                    var m = HarmonyLib.Traverse.Create(kv.Key).Field("material").GetValue<Material>();
+                    hits.Add(m == null ? "null" : $"{m.name}#{m.GetInstanceID()}{(m.enableInstancing ? "" : "(no instancing)")}");
+                }
+                where = hits.Count == 0 ? "NOT REGISTERED" : string.Join(",", hits);
+            }
+            return $" gpui[started={t.Field("started").GetValue<bool>()} enabled={t.Field("eenabled").GetValue<bool>()} " +
+                   $"mat={(mat == null ? "null" : mat.name + "#" + mat.GetInstanceID())} in={where}]";
+        }
+
         public static string Build(string[] a)
         {
             if (a.Length < 3) return "build <template|{json}> <x> <z> [rotY] [id]";
