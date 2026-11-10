@@ -653,6 +653,22 @@ namespace PalaceMod.Builder.Logic
             Drain();
         }
 
+        /// <summary>
+        /// A `death` not yet delivered: raised by a game hook (a tower's or the king's hit, in the game's Update) and
+        /// waiting for this frame's Tick, or cut off by the firing budget. Its rules may still spawn (a slime's split),
+        /// so the night must not end on the frame the last enemy died (LogicManager.NightEnemies_Patch).
+        /// </summary>
+        public bool DeathPending
+        {
+            get
+            {
+                if (queue.Count == 0 && deferred.Count == 0) return false;
+                foreach (var e in queue) if (e.Name == "death") return true;
+                foreach (var e in deferred) if (e.Name == "death") return true;
+                return false;
+            }
+        }
+
         private readonly Queue<(ActionList list, LogicContext ctx, Action action)> deferredRuns = new();
 
         /// <summary>
