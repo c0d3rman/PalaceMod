@@ -597,6 +597,8 @@ namespace PalaceMod.Builder.Studio
             if (play == null) { Notify.Show("Test play isn't available", NotifyKind.Warning, 3f, "builder-studio"); return; }
             if (TransitionRunning) return;
             if (!play.CanSwap(out string why)) { Notify.Show("Can't play: " + why, NotifyKind.Warning, 4f, "builder-studio"); return; }
+            // The cursor on a panel or the Play button isn't a point on the map (its ray lands far past the level).
+            if (fromCursor && (pointer.OverUI || pointer.Ground == null)) fromCursor = false;
             Studio.View = CaptureViewNow();
             try { play.EnterPlay(fromCursor); }
             catch (Exception e) { Log.For<BuilderManager>().Error("Studio: entering play failed", e); }

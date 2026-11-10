@@ -203,7 +203,7 @@
       "rules": [ { "id": "split", "when": "death", "if": "self.$gen < {depth}", "do": [
         { "do": "spawn", "entity": "{into}", "count": "{count}", "at": "self", "spread": 1.5, "elite": "inherit",
           "then": [ { "do": "setVar", "target": "spawned", "name": "gen", "value": "self.$gen + 1" },
-                    { "do": "setStat", "target": "spawned", "stat": "scale", "mult": "{shrink}" } ] } ] } ]
+                    { "do": "setStat", "target": "spawned", "stat": "scale", "value": "self.scale * {shrink}" } ] } ] } ]
     },
     {
       "id": "spawn-on-death", "name": "Spawn on death", "category": "Enemy",
