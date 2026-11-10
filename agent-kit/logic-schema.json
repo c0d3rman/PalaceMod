@@ -4437,7 +4437,9 @@
         "hitRadius",
         "pierce",
         "onGround",
-        "range"
+        "range",
+        "impactFx",
+        "warn"
       ],
       "children": {}
     },

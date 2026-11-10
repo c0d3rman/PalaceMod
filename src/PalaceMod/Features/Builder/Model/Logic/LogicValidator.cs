@@ -874,6 +874,15 @@ namespace PalaceMod.Builder.Model.Logic
                     if (pr.Hits != null) FilterString(pr.Hits, p + ".projectile.hits", scope);
                     if (pr.Pierce is int pi && pi < -1) Error(p + ".projectile.pierce", "must be -1 (all) or more");
                     if (pr.Spin != null && pr.Spin.Length != 3) Error(p + ".projectile.spin", "must be [x, y, z] degrees per second");
+                    if (pr.Warn is { } warn && !(warn.Type == JTokenType.Boolean || warn.Type is JTokenType.Integer or JTokenType.Float && (float)warn >= 0 && (float)warn <= 50))
+                        Error(p + ".projectile.warn", "must be a radius (0..50 m) or true/false");
+                    if (pr.ImpactFx is { } ifx)
+                    {
+                        var known = names?.Effects;
+                        if (string.IsNullOrWhiteSpace(ifx)) Error(p + ".projectile.impactFx", "must be an effect name or \"none\"");
+                        else if (ifx != "none" && known != null && !known.Any(k => string.Equals(k, ifx, StringComparison.OrdinalIgnoreCase)))
+                            Error(p + ".projectile.impactFx", $"no game effect \"{ifx}\"" + ExprChecker.Suggest(ifx, known) + " (`palace.py ref effects` lists them)");
+                    }
                 }
                 if (e.Mover is { } mv)
                 {

@@ -395,6 +395,11 @@ namespace PalaceMod.Builder.Model.Logic
         [JsonProperty("onGround")] public string OnGround { get; set; }
         /// <summary>Metres travelled before "expire".</summary>
         [JsonProperty("range")] public LNum Range { get; set; }
+        /// <summary>An effect played at each impact; "none" = off (a lobbed shot's default is "dust_small").</summary>
+        [JsonProperty("impactFx")] public string ImpactFx { get; set; }
+        /// <summary>Landing marker at the aim point while it flies: a radius in metres, true (default size) or false/0
+        /// (off). Lobbed shots (gravity or arc) have one by default.</summary>
+        [JsonProperty("warn")] public JToken Warn { get; set; }
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }
 

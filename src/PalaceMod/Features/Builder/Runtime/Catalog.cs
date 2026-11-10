@@ -347,6 +347,9 @@ namespace PalaceMod.Builder
         }
 
         private static Dictionary<string, Fx> effects;
+
+        // A new map has other prefabs loaded: index again (an alias may now have its game prefab instead of a stand-in).
+        static GameFx() => UnityEngine.SceneManagement.SceneManager.sceneLoaded += (_, _) => effects = null;
         private static Dictionary<string, Func<AudioSet, object>> sounds;
         private static int builtFrame = -1;
 
@@ -422,7 +425,9 @@ namespace PalaceMod.Builder
             return true;
         }
 
-        /// <summary>Short generic names for the most useful effects (the names the design doc's examples use).</summary>
+        /// <summary>Short generic names for the most useful effects (the names the design doc's examples use). Each one
+        /// resolves on every map: to its game prefab when that's loaded, else to FallbackFx's stand-in (so keep a spec
+        /// there for every alias here).</summary>
         public static readonly (string alias, string target)[] Aliases =
         [
             ("smoke", "Enemy Death FX"), ("dust_small", "Enemy Death FX Small"), ("dust_large", "Enemy Death FX Very Large"),
@@ -480,8 +485,12 @@ namespace PalaceMod.Builder
                 for (int n = 2; effects.ContainsKey(id); n++) id = $"{pair.Key.name} #{n}";
                 effects[id] = new Fx { Id = id, Prefab = pair.Key, Source = pair.Value };
             }
+            // Every alias exists on every map: the game's prefab where it's loaded, else a built-in stand-in (FallbackFx).
             foreach (var (alias, target) in Aliases)
+            {
                 if (effects.TryGetValue(target, out var t)) effects[alias] = new Fx { Id = alias, Prefab = t.Prefab, Source = "alias of " + target };
+                else if (FallbackFx.Template(alias) is { } stand) effects[alias] = new Fx { Id = alias, Prefab = stand, Source = $"alias of {target} (not on this map: built-in stand-in)" };
+            }
         }
 
         /// <summary>Dev: every effect with the game scripts it carries.</summary>

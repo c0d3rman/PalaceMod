@@ -171,11 +171,18 @@ Component fields are literals by default. A string field starting with `=` is an
   "hitRadius": 1.0,
   "pierce": 0,                        // extra targets it passes through (-1 = all)
   "onGround": "impact",               // "impact" | "stick" (stays until its lifetime ends) | "bounce" | "pass"
-  "range": 40                         // m travelled before "expire"
+  "range": 40,                        // m travelled before "expire"
+  "impactFx": "explosion",            // an effect at every impact; "none" = off
+  "warn": 3                           // landing marker at the aim point while it flies: radius in m, true, or false/0
 }
 ```
 
 Events: `impact` (`other` is what it hit, or none for ground; `event.pos`), `expire`.
+
+A lobbed shot (`gravity` or `arc`) shows where it will land and that it landed by default: a warning ring of
+`hitRadius` + 0.5 m at the aim point, with a disc inside it that fills as the shot comes down (it follows a moving
+target), and `dust_small` at each impact. Straight shots have neither unless they set `warn`/`impactFx`. A damaging
+area left behind (`spawn` an area in the `impact` rule) is drawn by its own `area.show`.
 
 **`mover`**: moving platforms, rotating walls, patrols and gates.
 
@@ -832,7 +839,11 @@ World and Show details (as built, `Logic/Bodies/World/`):
   on the running night drops pending groups too.
 - `effect` ids are the game's effect prefabs (`builder dump` → `effects`) plus short aliases: `smoke`, `dust_small`,
   `dust_large`, `explosion`, `burst`, `summon`, `spikes`, `slash`, `hit`, `fire_small`, `ward`, `coins`, `blood`,
-  `impact`, `goo`, `ally_death`. `sound` ids are the game's AudioSet clips in camelCase (`builder dump` → `sounds`).
+  `impact`, `goo`, `ally_death`. The game's prefabs are only in memory while something that uses them is (an enemy's
+  death puff, a weapon's impact, the loadout's weapons), so a prefab name works on some maps and not others; the
+  aliases work on every map: the game's prefab where it's loaded, else a built-in particle stand-in in the alias's
+  colours (`Runtime/FallbackFx.cs`; `logic-world standin <alias>` plays one). `palace.py check` always accepts the
+  aliases. An `effect`, `impactFx` or status `visual.fx` that resolves to nothing logs a warning and plays nothing. `sound` ids are the game's AudioSet clips in camelCase (`builder dump` → `sounds`).
   Status `visual.fx` uses the same catalog, parented to the carrier.
 - `setVisual`: `tint`/`glow` paint the model (FlatKit lit and shaded colours); `glow` is a colour, `true` (gold) or
   0..1; `scale` multiplies the original scale; `mesh` takes the `visuals.mesh` forms. With `for`, all of it reverts.

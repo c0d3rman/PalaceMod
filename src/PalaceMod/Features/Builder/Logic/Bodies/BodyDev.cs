@@ -52,6 +52,47 @@ namespace PalaceMod.Builder.Logic.Bodies
             return n == 0 ? "no matching unit" : sb.ToString();
         }
 
+        /// <summary>`logic-l2 bodies [filter]`: every live non-unit entity (projectiles, areas, props...) with its position,
+        /// visible renderers and what it draws (area look, landing marker), then every live particle effect in the scene
+        /// (playing, particles, position). For checking flights and effects headless, where no pixels are drawn.</summary>
+        public static string Bodies(string filter)
+        {
+            var world = LogicWorld.Current;
+            var sb = new System.Text.StringBuilder();
+            sb.Append($"t={Time.time:0.00}\n");
+            if (world != null)
+                foreach (var e in world.Entities.ToList())
+                {
+                    var go = e.Go();
+                    if (e.Kind == "unit" || go == null) continue;
+                    if (filter != null && !(e.Id ?? "").Contains(filter) && !(e.Template ?? "").Contains(filter)) continue;
+                    var rs = go.GetComponentsInChildren<Renderer>(false);
+                    int on = rs.Count(r => r.enabled);
+                    string parts = string.Join(",", go.transform.Cast<Transform>().Where(t => t.gameObject.activeSelf).Select(t => t.name.Replace("PalaceBuilder ", "")));
+                    var p = go.transform.position;
+                    var size = on > 0 ? BodyVisual.Bounds(go).size : Vector3.zero;
+                    sb.Append($"{e.Id} [{e.Kind} {e.Template}] active={go.activeInHierarchy} pos=({p.x:0.0},{p.y:0.0},{p.z:0.0}) renderers {on}/{rs.Length} size={size.x:0.0#}x{size.y:0.0#}x{size.z:0.0#} children=[{parts}]\n");
+                }
+            foreach (var m in Object.FindObjectsOfType<LandingMarker>())
+            {
+                var p = m.transform.position;
+                var fill = m.transform.Find("Fill");
+                int on = m.GetComponentsInChildren<Renderer>().Count(r => r.enabled);
+                sb.Append($"  landing marker pos=({p.x:0.0},{p.y:0.0},{p.z:0.0}) renderers {on} fill={(fill != null ? fill.localScale.x : 0f):0.00}\n");
+            }
+            foreach (var ps in Object.FindObjectsOfType<ParticleSystem>())
+            {
+                if (ps.transform.parent != null && ps.transform.parent.GetComponentInParent<ParticleSystem>() != null) continue;   // roots only
+                string root = ps.transform.root.name;
+                if (!root.Contains("(Clone)") && !root.StartsWith("PalaceBuilder") && !root.StartsWith("PalaceMod")) continue;   // spawned effects, not the map's own
+                var p = ps.transform.position;
+                var r = ps.GetComponent<ParticleSystemRenderer>();
+                sb.Append($"  fx \"{root}\"/{ps.name} playing={ps.isPlaying} alive={ps.IsAlive(true)} particles={ps.particleCount} " +
+                          $"renderer={(r == null ? "none" : r.enabled ? "on" : "OFF")} pos=({p.x:0.0},{p.y:0.0},{p.z:0.0})\n");
+            }
+            return sb.ToString();
+        }
+
         /// <summary>A GPUInstanced renderer (the game draws unit pieces through GPUInstancingManager, with the renderer
         /// itself off): the material it thinks it's drawn with, and the (mesh, material) entries its transform is in.</summary>
         private static string Instanced(Renderer r)

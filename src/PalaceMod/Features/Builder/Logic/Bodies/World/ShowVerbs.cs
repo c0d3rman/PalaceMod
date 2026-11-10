@@ -59,9 +59,25 @@ namespace PalaceMod.Builder.Logic.Bodies
         private static void Effect(LogicContext ctx, ActionParams p)
         {
             string id = p.Text("fx") ?? throw new LogicError("effect: needs \"fx\"");
-            var fx = GameFx.FindEffect(id) ?? throw new LogicError($"effect: no game effect \"{id}\"{WorldCommon.Near(GameFx.Effects.Keys, id)} (`builder dump` lists them)");
             var at = WorldCommon.At(ctx, p) ?? throw new LogicError("effect: needs \"at\"");
-            float scale = (float)p.Number("scale", 1);
+            if (PlayEffect(id, at, (float)p.Number("scale", 1), out string why) == null) throw new LogicError("effect: " + why);
+        }
+
+        /// <summary>
+        /// Plays a GameFx effect at a point (the `effect` action, projectiles' impactFx). An id that resolves to
+        /// nothing is logged as a warning (once per id and map) and returns null with the reason.
+        /// </summary>
+        public static GameObject PlayEffect(string id, Vector3 at, float scale, out string why)
+        {
+            why = null;
+            var fx = GameFx.FindEffect(id);
+            if (fx == null)
+            {
+                why = $"no game effect \"{id}\" on this map{WorldCommon.Near(GameFx.Effects.Keys, id)} (`builder dump` lists them)";
+                string scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
+                if (warnedFx.Add(scene + "|" + id)) WorldCommon.log.Warn($"Effect \"{id}\" resolves to nothing on {scene}, so nothing plays: {why}");
+                return null;
+            }
             var go = Object.Instantiate(fx.Prefab, at, fx.Prefab.transform.rotation);
             if (!Mathf.Approximately(scale, 1f))
             {
@@ -73,7 +89,10 @@ namespace PalaceMod.Builder.Logic.Bodies
                 }
             }
             Object.Destroy(go, 10f);
+            return go;
         }
+
+        private static readonly HashSet<string> warnedFx = [];
 
         private static void Sound(LogicContext ctx, ActionParams p)
         {
