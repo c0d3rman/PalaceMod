@@ -279,7 +279,7 @@ namespace PalaceMod.Builder.Studio
             x += 116f;
             problemsTile = Button(body, "Problems", new Vector2(90f, h), Icon("warning"), "", () => StudioMenus.OpenProblems(problemsTile.Rect), "Problems", () => "What's wrong with this level.");
             problemsTile.Place(new Vector2(x, 0f));
-            playTile = Button(body, "Play", new Vector2(190f, h), Icon("play"), "Play", () => StudioShell.Play(true), "Play", () => $"{StudioKeys.Label(StudioKeys.Play)} from the cursor · {StudioKeys.Label(StudioKeys.PlayStart)} from the start");
+            playTile = Button(body, "Play", new Vector2(190f, h), Icon("play"), "Play", () => StudioShell.Play(false), "Play", () => $"From the start (the king at the castle) · {StudioKeys.Label(StudioKeys.Play)} from the cursor");
             var pr = playTile.Rect;
             pr.anchorMin = pr.anchorMax = pr.pivot = new Vector2(1f, 1f);
             pr.anchoredPosition = Vector2.zero;

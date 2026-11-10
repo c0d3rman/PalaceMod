@@ -58,7 +58,8 @@ namespace PalaceMod
         }
 
         // Once per custom level start, after Start has run (slots placed, removed ones gone): rebuild the graphs with
-        // the new props, check every ground spawn line still reaches the castle, and put unit homes on walkable ground.
+        // the new props, check every ground spawn line still reaches the castle, and put unit homes and the king's start
+        // on walkable ground.
         private static void ScanAfterLevelStart()
         {
             LevelOverlay.ScanAfterFrame = -1;
@@ -71,7 +72,9 @@ namespace PalaceMod
                 var routes = PathCheck.Check(scene);
                 // On the graphs the level plays on: barracks units standing in water or on a cliff get walkable homes.
                 UnitHomes.Settle(scene);
-                Log.For<BuilderManager>().Info($"level start rescan took {ms} ms; paths: {PathCheck.Describe(routes)}; {UnitHomes.LastSettle}");
+                // The king's start likewise (a field or prop over the host's spot).
+                KingStart.Settle(scene);
+                Log.For<BuilderManager>().Info($"level start rescan took {ms} ms; paths: {PathCheck.Describe(routes)}; {UnitHomes.LastSettle}; {KingStart.LastSettle}");
                 var blocked = routes.Where(r => !r.Reachable).Select(r => r.Line).ToList();
                 int standing = PathCheck.BuiltCutters(scene);
                 if (blocked.Count > 0 && standing > 0)

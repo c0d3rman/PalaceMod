@@ -476,7 +476,15 @@ base's activator, which is removed on an empty map, so it would never appear: `L
    popup.
 3. It reloads the host in **play** state through the fast swap (below). The overlay is applied as for a real run.
 4. On load, the king is teleported to the stored cursor point (`PlayerMovement.TeleportTo`, as Teleporters do,
-   `TeleporterManager.cs:201`), unless Shift+F5 started it normally. The sandbox panel opens and unlimited gold is on.
+   `TeleporterManager.cs:201`), unless Shift+F5 or the top bar's Play button started it normally. The sandbox panel
+   opens and unlimited gold is on.
+   - **King start** (`Level/KingStart.cs`): the drop waits for the level-start rescan and goes to the nearest walkable
+     ground ("Player Units S") within 3 m of the point; a point with none (off the map's graphs, water, a cliff top)
+     leaves him at the start, with a notice. F5 with the pointer on a panel, and the Play button, play from the start:
+     the cursor there isn't on the map (its ray through the top-right button landed ~165 m off Nordfels).
+   - The start itself (every Builder level with edits, library play too): after the rescan, a host start left off
+     walkable ground or cut off from the castle moves to the nearest walkable spot on the castle's side (along the
+     line to the castle), and `startPosition` (where he respawns after a fall) moves with it.
 5. **F5** in play (or the pause menu's first mod row "Back to the Studio", or the end screen's "Back to the Studio")
    stops the music, then reloads the host in **edit** state and restores the stored editor state.
    - The game's own exits come back too: in Studio play, `TransitionFromLevelToLevelSelect` (pause menu Back to Map,

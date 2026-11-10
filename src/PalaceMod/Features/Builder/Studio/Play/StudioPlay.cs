@@ -14,8 +14,9 @@ using UnityEngine.SceneManagement;
     which keeps the session (no Ended, the editor's return point stays) and only swaps what the load is for:
     - Play: a test pack built in memory from the draft (this level, its wave set, the units that set uses; nothing
       saved). Studio.NextLoad = Play, so the shell doesn't claim the load and the overlay is applied as for a real run.
-      Once the level has started, the king is dropped at the point that was under the cursor (F5) or left at the castle
-      (Shift+F5), and the sandbox panel shows.
+      Once the level has started, the king is dropped at the point that was under the cursor (F5; the nearest walkable
+      ground within a few metres, else he stays at the start) or left at the castle (Shift+F5 or the Play button), and
+      the sandbox panel shows.
     - Edit: the level alone, without its wave set (as the shell opens it). Studio.NextLoad = Edit, and Studio.View
       holds the editor state captured before play, which the shell restores (camera, selection, tool, panels). The
       draft and its undo history never leave memory.
@@ -51,6 +52,9 @@ namespace PalaceMod.Builder.Studio.Play
         private bool launching;
 
         private const float FastCloud = 0.12f;
+
+        /// <summary>How far (metres across) the king may land from the chosen spot: the nearest walkable ground.</summary>
+        private const float MaxDropOffset = 3f;
 
         private static SessionLauncher Launcher => BuilderManager.Launcher;
 
@@ -180,7 +184,9 @@ namespace PalaceMod.Builder.Studio.Play
         {
             if (savedCloudIn != null && !TransitionRunning) RestoreClouds();
 
-            if (arrivePending && Time.frameCount >= loadedFrame + 3 && PlayerInteraction.instance != null && DebugActions.InLevel) Arrive();
+            // After the level-start rescan (the graphs the spot is checked on), or a second at most.
+            bool scanned = Level.LevelOverlay.ScanAfterFrame < 0 || Time.frameCount > loadedFrame + 60;
+            if (arrivePending && Time.frameCount >= loadedFrame + 3 && scanned && PlayerInteraction.instance != null && DebugActions.InLevel) Arrive();
 
             if (phase == Phase.Playing && readyMs < 0 && !TransitionRunning)
             {
@@ -203,8 +209,18 @@ namespace PalaceMod.Builder.Studio.Play
             arrivePending = false;
             if (teleportOnArrive && spot is Vector3 at)
             {
-                try { SandboxActions.Teleport(Level.LayoutScene.Ground(at), followers: false); }
-                catch (Exception e) { Log.For<BuilderManager>().Warn($"Couldn't drop the king at {at}: {e.Message}"); }
+                // Only onto walkable ground near the spot; anywhere else (off the map, in water, on a cliff top) the
+                // king keeps his start by the castle.
+                if (Level.KingStart.Walkable(at, MaxDropOffset) is Vector3 ground)
+                {
+                    try { SandboxActions.Teleport(Level.LayoutScene.Ground(ground), followers: false); }
+                    catch (Exception e) { Log.For<BuilderManager>().Warn($"Couldn't drop the king at {at}: {e.Message}"); }
+                }
+                else
+                {
+                    Log.For<BuilderManager>().Info($"Studio: {at} isn't walkable ground; the king starts at the castle");
+                    Notify.Show("No walkable ground there: starting from the castle", NotifyKind.Warning, 4f, "builder-play");
+                }
             }
             teleportOnArrive = false;
             TipManager.instance?.UpdateTipRaw("", "");
