@@ -51,6 +51,9 @@ namespace PalaceMod.Builder.Logic
         /// raised here are delivered in the same drain.</summary>
         public static event Action<LogicWorld> Settled;
 
+        /// <summary>An entity's rules changed (registered, rules attached or detached): the aura rings resync it.</summary>
+        public static event Action<LogicEntity> RulesChanged;
+
         internal static void RaiseStarted(LogicWorld w) => Started?.Invoke(w);
         internal static void RaiseEnding(LogicWorld w) => Ending?.Invoke(w);
 
@@ -211,6 +214,15 @@ namespace PalaceMod.Builder.Logic
 
         private readonly Dictionary<LogicEntity, JObject> pendingPlace = [];
 
+        /// <summary>A template's compiled rules (compiled once, as its first copy would).</summary>
+        internal List<CompiledRule> TemplateRules(string template)
+        {
+            if (template == null || !Templates.TryGetValue(template, out var tdef)) return [];
+            if (!templateRules.TryGetValue(template, out var rules))
+                templateRules[template] = rules = RuleCompiler.CompileAll(tdef["rules"] as JArray, $"{(string)tdef["_path"] ?? $"templates.{template}"}.rules", Presets, CompileErrors);
+            return rules;
+        }
+
         public bool IsUnitTemplate(string template) => Templates.TryGetValue(template, out var d) && (string)d["kind"] is null or "unit";
 
         /// <summary>
@@ -259,6 +271,7 @@ namespace PalaceMod.Builder.Logic
             if (place?["rules"] is JArray pr) AttachRules(e, pr, $"{ppath}.rules");
 
             if (e.Spawned) { liveSpawned++; CountCap(e, +1); }
+            RulesChanged?.Invoke(e);
             Raise("spawn", e, e.Owner, 0, null, null, 0);
         }
 
@@ -271,6 +284,7 @@ namespace PalaceMod.Builder.Logic
             if (rules == null || rules.Count == 0) return null;
             var handle = new object();
             foreach (var r in RuleCompiler.CompileAll(rules, path, Presets, CompileErrors)) AddInstance(e, r, handle);
+            RulesChanged?.Invoke(e);
             return handle;
         }
 
@@ -278,6 +292,7 @@ namespace PalaceMod.Builder.Logic
         {
             if (handle == null) return;
             foreach (var ri in e.Rules.Where(r => r.AttachedBy == handle).ToList()) RemoveInstance(ri);
+            RulesChanged?.Invoke(e);
         }
 
         private void AddInstance(LogicEntity e, CompiledRule r, object handle)

@@ -359,7 +359,7 @@ never opened a route.
 "area": { "shape": { "circle": { "radius": 6 } },   // or rect {size: [w, d]}, polygon {points}, sector {radius, angle}
                                                      // (a cone along its facing), relative to its position and heading
           "watch": "unit",                           // filter of what it reports (default: units and the king)
-          "show": "outline", "color": "#d04040",     // "none" | "outline" | "fill"
+          "show": "outline", "color": "#d04040",     // "none" | "outline" | "fill" (default outline; none with `surface`)
           "tick": 1 }                                // seconds between "inside" events (null = no inside events)
 ```
 
@@ -374,6 +374,36 @@ frame's attacks; before, a tower could land a shot in the gap). `inside` first f
 Areas watch everything the selectors see,
 including projectiles in flight (the game's own arrows too, see "Projectiles in flight"), so a field that slows,
 bends or turns arrows is an area plus `setStat timeScale`, `drift` or `taunt`.
+An area is drawn by default (`show` unset means `outline`), except one with a `surface`, which only marks walkable
+ground; `"show": "none"` hides one.
+
+**Aura rings.** Whatever acts over a radius gets a ground ring by default, in the game's own tower-range look (its
+`RangeIndicatorHandler` sphere, whose intersection shader draws the ring where it meets the ground, so it hugs
+slopes), parented to its source so it follows it (`Bodies/World/AuraRings.cs`, `Runtime/AuraScan.cs`):
+
+- A rule that runs on its own (`every` or `near`) and picks things within a fixed radius anchored at `self`
+  (`all('ally and unit', 6)`, `count('#lantern', 8)`, any of `all count nearest farthest weakest strongest random
+  best` with a number literal, or `near`'s `range`) draws that radius round its owner. One-shot rules (`once`, or
+  ones that `destroy` their owner, like a kamikaze's blast) and event rules (`death`, `hit`, ...) don't, unless
+  their `ring` says so. The radius must be 0.5-60 m.
+- When the owner is a unit and the filter names a label or template (`#lantern`, `is:totem`), the ring goes on the
+  things it names instead: the lantern ghost's `count('#lantern', 8)` puts an 8 m ring on every lantern, placed or
+  spawned later.
+- Colour by kind: harm (red; the rule deals `damage`/`kill`/`stun` or its filter has `foe`), buff (blue; `heal` or
+  `ally`), else neutral (warm gold). The ring shows while its owner is alive and enabled, its rule enabled (not a
+  fired `once`) and its `during` holds; a status's rules draw theirs only while the status lasts.
+- Author control. On a rule, `"ring": false` hides its ring; `"ring": true` shows one on any rule; or `"ring": {
+  "show", "color": "#rrggbb", "style": "ring" | "soft" (the game's lighter preview ring) | "line" (a thin flat
+  line), "kind": "buff" | "harm" | "neutral", "radius" (when the radius isn't a literal), "on": "auto" | "self" |
+  "target" }`. On a template, unit or place, `"rings": false` drops every ring on it (its own and those others put
+  on it), and `"rings": [{ "radius": 10, "color", "style", "kind", "during" }]` adds rings of its own.
+- Statuses: a status that changes something (`mods` or `flags`) but has no `visual.tint` and no `visual.fx` gets
+  a small ring under each carrier (red if it hinders: stun-like flags, a `damageTaken`/`attackCooldown` mult over 1
+  or another stat's under 1; else blue). `visual.marker`: `true`, `false` or a colour.
+- Cost: one cloned indicator per ring with one shared material per (style, colour); rings are rebuilt only when an
+  entity's rules change (`LogicWorld.RulesChanged`, applied once per drain) and the 10 Hz poll only flips
+  visibility and follows `scale`. Dev: `dev.py cmd "logic-rings [entity|template]"` lists every ring (owner, radius,
+  world radius, position, active, rule, colour); `logic-rings prefabs` dumps the game's indicator prefabs.
 
 **`pickup`**: `{ "by": "king", "radius": 1.5, "magnet": 4 }` (`by` is a filter: `"king"`, `"player and unit"`).
 It fires `pickup` (`other` is the collector), then destroys itself unless `"consume": false` (then a rule decides,

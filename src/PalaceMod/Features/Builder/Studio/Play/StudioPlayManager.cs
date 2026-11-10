@@ -15,8 +15,9 @@ using UnityEngine.SceneManagement;
     that make play feel like the Studio's and not a normal level:
     - unlimited gold (spending gives the coin back; SandboxActions keeps the balance topped up);
     - no in-level tips (formations, zoom, sprint, "hold to preview"...) in any Studio load, edit or play;
-    - leaving play by the game's own exits (pause menu Back to Map, end screen Continue) comes back to the Studio, and
-      those rows say so; the pause menu gets "Back to the Studio" as its first mod row.
+    - leaving play by the game's own exits (Back to Map from the resign popup, end screen Continue) comes back to the
+      Studio, and the end screen's row says so; the pause menu's own Back to Map is hidden in test play and "Back to
+      the Studio" (its first mod row) is the one exit there.
     Part of the Builder feature (its keys are in the Builder section); every patch is a no-op outside a Studio session.
 */
 namespace PalaceMod
@@ -129,6 +130,20 @@ namespace PalaceMod
                 if (!StudioPlay.InPlay || !Feature<BuilderManager>.On || __instance.SceneTransitionIsRunning) return true;
                 StudioPlay.Instance.ReturnToEdit();
                 return false;
+            }
+        }
+
+        // In test play the pause menu has one exit, "Back to the Studio": the game's Back to Map (which the patch above
+        // would send to the Studio anyway) is hidden, and shown again on every other open. Done before the frame
+        // collects its elements, so navigation skips it like the game's own hidden rows.
+        [HarmonyPatch(typeof(UIFrame), nameof(UIFrame.Activate))]
+        private static class PauseBack_Patch
+        {
+            private static void Prefix(UIFrame __instance)
+            {
+                if (__instance != GameWidgets.PauseFrame) return;
+                var back = GameWidgets.PauseHelper?.backToMenuElement;
+                if (back != null) back.gameObject.SetActive(!StudioPlay.InPlay);
             }
         }
 

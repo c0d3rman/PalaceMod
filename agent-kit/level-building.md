@@ -1015,6 +1015,23 @@ for a deck at offset y 3); teleport them off to let them walk again.
 stops, and a moved or turned area re-tags where it is (`paths` and `paths --between` don't model surfaces; test them
 with a walking unit).
 
+**Aura rings (shown by default).** Players see what acts over a radius as a ring on the ground, in the game's
+tower-range look, following its source:
+
+- A rule on `every` or `near` with a fixed radius anchored at self (`all('ally and unit', 6)`, `count('#x', 8)`,
+  `nearest('foe', 10)`, `near`'s `range`) rings its owner: red for harm (`damage`, `foe`), blue for buffs (`heal`,
+  `ally`), gold otherwise. A unit's rule whose filter names a label or template (`count('#lantern', 8)` on a ghost)
+  rings the named things instead (every lantern). One-shot rules (`once`, or a rule that destroys its owner) and
+  event rules get none unless asked.
+- Areas are drawn by default (`show` unset = `outline`; `"show": "none"` hides; an area with `surface` stays hidden).
+- A status with `mods` or `flags` but no `visual.tint`/`visual.fx` puts a small ring under each carrier
+  (`visual.marker`: `true`, `false` or `"#rrggbb"`).
+- Control: on a rule `"ring": false` (hide), `"ring": true` (show on any rule), or `"ring": {"color": "#rrggbb",
+  "style": "ring" | "soft" | "line", "kind": "buff" | "harm" | "neutral", "radius": 6, "on": "self" | "target"}`
+  (`radius` when it isn't a literal, e.g. `self.$range`). On a template, unit or place: `"rings": false` (none on
+  it), or `"rings": [{"radius": 10, "color": "#ffd890", "style": "soft", "during": "night"}]` to add its own.
+- Check them in a running game with `game cmd "logic-rings"` (each ring's owner, radius, position and whether it shows).
+
 ### 12.7a Light, darkness, facing and shape at runtime
 
 - **Darkness.** `{"do": "lighting", "brightness": 0.15, "fade": 3, "for": 25}` darkens the whole level (an eclipse by
@@ -1304,6 +1321,7 @@ and to break it `{"do": "kill", "target": "all('unit and in:self')"}` then `thaw
 
 **Aura**: a status `{"id": "warded", "duration": 1.2, "mods": {"damageTaken": {"mult": 0.7}}}` and on the bearer
 `{"when": {"on": "every", "seconds": 1}, "do": [{"do": "applyStatus", "status": "warded", "target": "all('ally and unit', 6)"}]}`.
+The bearer gets a 6 m ring on the ground automatically (see "Aura rings" in 12.7).
 
 **Kamikaze**: `"targeting": [{"filter": "king"}], "movement": {"mode": "direct"}` and `{"when": {"on": "near", "filter":
 "king", "range": 2}, "do": [{"do": "damage", "target": "all('foe', 3)", "amount": 40}, {"do": "destroy", "drops": true}]}`.

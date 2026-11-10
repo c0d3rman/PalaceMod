@@ -34,6 +34,8 @@ namespace PalaceMod.Builder.Logic
         public float NearRange;
         public string NearEdge;              // enter | exit | both
         public double Pct = -1;
+        /// <summary>Aura rings the rule implies (AuraScan), or null.</summary>
+        public List<RingSpec> Rings;
 
         /// <summary>"rules[i]": the index in its owner's own rules list as written (the trace's Rule; Path is exact).</summary>
         public string Label => $"rules[{Index}]";
@@ -139,6 +141,7 @@ namespace PalaceMod.Builder.Logic
                         break;
                 }
                 r.Do = ActionCompiler.CompileList(json["do"] as JArray, path + ".do");
+                r.Rings = AuraScan.FromRule(json, r.Event, r.When);
             }
             catch (Exception e) when (e is LogicError or FormatException or ArgumentException or InvalidCastException)
             {
