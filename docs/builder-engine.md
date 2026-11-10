@@ -570,8 +570,8 @@ working. A ranged enemy that kites and prefers towers is just `targeting` plus `
   "do": [                             // actions, run in order
     { "do": "spawn", "entity": "=self.template", "count": 2, "at": "self", "spread": 1.5,
       "then": [ { "do": "setVar", "target": "spawned", "name": "gen", "value": "self.$gen + 1" },
-                { "do": "setStat", "target": "spawned", "stat": "scale", "mult": 0.75 } ] }
-  ],
+                { "do": "setStat", "target": "spawned", "stat": "scale", "value": "self.scale * 0.75" } ] }
+  ],                                  // a copy starts at its template's size; `self.scale` (the parent) compounds
   "enabled": true,                    // false: off until "enableRule"
   "once": false,                      // fire at most once per owner (per run)
   "cooldown": 0,                      // seconds before this rule can fire again for the same owner
@@ -970,7 +970,8 @@ weapon; `PlayerOwned`: an enemy one; else `isPlayerWeapon`, which towers' weapon
   "vars": { "gen": 0 },
   "rules": [ { "when": "death", "if": "self.$gen < {depth}", "do": [
       { "do": "spawn", "entity": "{into}", "count": "{count}", "at": "self", "spread": 1.5,
-        "then": [ { "do": "setVar", "target": "spawned", "name": "gen", "value": "self.$gen + 1" } ] } ] } ]
+        "then": [ { "do": "setVar", "target": "spawned", "name": "gen", "value": "self.$gen + 1" },
+                  { "do": "setStat", "target": "spawned", "stat": "scale", "value": "self.scale * 0.75" } ] } ] } ]
 }]
 ```
 
@@ -1051,7 +1052,7 @@ for agents), `reference.md` and a test that every entry has a runtime handler al
 | `healed` | `Hp.Heal` postfix |
 | `attack` | `AutoAttack.OnAttack` postfix and the overrides (`AutoAttackTower`, `...WithKnockback`, `...WithWarning`), `ManualAttack` (the king), and `BuilderAttack` |
 | `dusk`/`dawn`/`day` | one `DayNightCycle.IDaytimeSensitive` registered by the world |
-| `nightStart`, `waveCleared` | `EnemySpawner.StartSpawning` postfix; polled: `SpawningInProgress` false and no `EnemyOwned` object left, once per night |
+| `nightStart`, `waveCleared` | `EnemySpawner.StartSpawning` postfix; polled: `SpawningInProgress` false and no `EnemyOwned` object left, once per night. Night end: an `EnemySpawner.Update` postfix keeps its enemy count at 1 or more while a `death` is undelivered (`LogicWorld.DeathPending`), since a game hit kills in Update and its death rules run in LateUpdate: the enemies they spawn (a split) hold the night like wave enemies instead of the night ending on that frame |
 | `lineSpawn` | `Spawn.Update` (the spawning group) around `TagManager.AddTaggedObject` |
 | `coinDrop` / `coinPickup` | `Coin.Start` postfix / `PlayerInteraction.AddCoin` inside `Coin.Update` |
 | `built`/`upgraded` | `BuildSlot.OnUpgradeChoiceComplete` prefix/postfix (level before and after), so every slot counts, whenever it was made; not `ForceManualUpgradeWithoutFeedbackEffects` (loads, previews) nor slots whose level follows their activator |

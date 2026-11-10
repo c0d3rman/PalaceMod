@@ -144,6 +144,29 @@ namespace PalaceMod.Builder.Logic
             }
         }
 
+        /// <summary>
+        /// Logic-spawned enemies hold the night like wave enemies. The game ends a night in DayNightCycle.Update once
+        /// spawning is done and EnemySpawner's enemy count (refreshed in its own Update) is 0. A game hit that kills
+        /// the last enemy runs in Update, but its `death` rules (a split, a necromancer's raise) only run in this
+        /// frame's LateUpdate Tick, so for that one frame the map looked empty and dawn began while the spawned
+        /// enemies kept fighting into the day. While a death is undelivered the count reads at least 1; the spawned
+        /// enemies are EnemyOwned and counted from the next Update on. (The field is set after EnemySpawner.Update,
+        /// not in its getter, which the JIT may inline into DayNightCycle.Update.)
+        /// </summary>
+        [HarmonyPatch(typeof(EnemySpawner), "Update")]
+        private static class NightEnemies_Patch
+        {
+            private static readonly AccessTools.FieldRef<EnemySpawner, int> Count =
+                AccessTools.FieldRefAccess<EnemySpawner, int>("numberOfEnemiesOnTheMap");
+
+            private static void Postfix(EnemySpawner __instance)
+            {
+                if (World is not { DeathPending: true }) return;
+                ref int n = ref Count(__instance);
+                if (n <= 0) n = 1;
+            }
+        }
+
         // ------------------------------------------------------------------ damage, death, heal, revive
 
         private struct DamageState { public float Hp; public bool Active; }
