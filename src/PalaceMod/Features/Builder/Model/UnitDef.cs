@@ -55,6 +55,8 @@ namespace PalaceMod.Builder.Model
         [JsonProperty("light")] public LightDef Light { get; set; }
         /// <summary>When / If / Then rules (and preset uses). Replaces version 2's "behaviours".</summary>
         [JsonProperty("rules")] public List<RuleDef> Rules { get; set; }
+        /// <summary>Aura rings (as an entity's `rings`): false hides them, a list adds some.</summary>
+        [JsonProperty("rings")] public JToken Rings { get; set; }
 
         [JsonExtensionData] public IDictionary<string, JToken> Extra { get; set; }
     }

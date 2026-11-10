@@ -4270,7 +4270,8 @@
         "parts",
         "counterpart",
         "light",
-        "rules"
+        "rules",
+        "rings"
       ],
       "children": {
         "movement": "movement",
@@ -4324,6 +4325,7 @@
         "attacks",
         "targeting",
         "movement",
+        "rings",
         "statuses",
         "rules"
       ],
@@ -4373,6 +4375,7 @@
         "attacks",
         "targeting",
         "movement",
+        "rings",
         "statuses",
         "rules",
         "_preset"
@@ -4713,7 +4716,8 @@
       "fields": [
         "tint",
         "fx",
-        "glow"
+        "glow",
+        "marker"
       ],
       "children": {}
     },
@@ -4744,6 +4748,7 @@
         "attacks",
         "targeting",
         "movement",
+        "rings",
         "statuses"
       ],
       "children": {

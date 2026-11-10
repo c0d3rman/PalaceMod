@@ -17,6 +17,8 @@ namespace PalaceMod.Builder.Logic.Bodies
         public LogicEntity Entity;
         public string Watch = "unit or king";
         public float Tick = -1f;
+        /// <summary>none | outline | fill; unset: outline, except on an area that only marks walkable ground
+        /// (`surface`), which stays hidden.</summary>
         public string Show = "none";
         public Color Color = new(0.82f, 0.25f, 0.25f, 1f);
         public AreaShape Shape;
@@ -32,7 +34,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             Shape = AreaShape.Parse(a["shape"] as JObject) ?? new AreaShape { Radius = 3f };
             Watch = (string)a["watch"] ?? Watch;
             Tick = a["tick"] is JToken t && t.Type is JTokenType.Integer or JTokenType.Float ? Mathf.Max(0.1f, (float)t) : -1f;
-            Show = (string)a["show"] ?? Show;
+            Show = (string)a["show"] ?? (a["surface"] is JToken sf && sf.Type != JTokenType.Null ? "none" : "outline");
             if ((string)a["color"] is { } c && WorldCommon.TryColor(c, out var col)) Color = col;
             if (a["surface"] is JToken surface && surface.Type != JTokenType.Null) Surfaces.Add(this, surface);
         }
