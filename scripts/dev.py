@@ -2008,6 +2008,7 @@ def main():
     elif args.command == "build":
         build(args.configuration)
     elif args.command == "install":
+        build(args.configuration)  # never install a stale DLL left from an older build of this configuration
         if real:
             with real_lease("install"):
                 install(game, args.configuration)
