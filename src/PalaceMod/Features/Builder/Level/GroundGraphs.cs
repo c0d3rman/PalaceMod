@@ -331,15 +331,7 @@ namespace PalaceMod.Builder.Level
         private static void PruneIslands()
         {
             var astar = AstarPath.active;
-            var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
-            var anchors = new List<Vector3>();
-            var castle = CastleCenter.instance != null ? CastleCenter.instance.transform.position : PathCheck.Castle(scene);
-            if (castle != null) anchors.Add(castle.Value);
-            // On the host's ground a spawn point lies just off the walkable area, and its nearest node can be a rock top:
-            // there the bake's areas say what's real. On a flat field the lines' areas count.
-            if (GroundLayer.Flat)
-                foreach (var line in LayoutScene.Lines(scene).Where(LayoutScene.IsGroundLine))
-                    anchors.Add(LayoutScene.LineCenter(line.transform));
+            var anchors = Anchors();
             if (astar == null || anchors.Count == 0) return;
             var drop = new List<GraphNode>();
             LastPrune = "";
@@ -347,28 +339,8 @@ namespace PalaceMod.Builder.Level
             {
                 // Off-map spaces (Logic/Bodies/Spaces.cs) have no castle or spawn of their own: keep them whole.
                 if (g == null || g.name == "Enemy Units Air" || g.name.StartsWith(Logic.Bodies.Spaces.Prefix)) continue;
-                var nn = NearestNodeConstraint.Walkable;
-                nn.graphMask = GraphMask.FromGraph(g);
-                var keep = new HashSet<uint>();
-                foreach (var p in anchors)
-                {
-                    var hit = astar.GetNearest(p, nn);
-                    if (hit.node != null) keep.Add(hit.node.Area);
-                }
-                // The bake's own areas, unless the host's ground is replaced.
-                int matched = 0, total = 0;
-                float far = 0f;
-                if (!GroundLayer.Flat && baked.TryGetValue(g.name, out var points))
-                    foreach (var p in points)
-                    {
-                        total++;
-                        var hit = astar.GetNearest(p, nn);
-                        if (hit.node == null) continue;
-                        float d = (hit.position - p).sqrMagnitude;
-                        if (d < 4f) { keep.Add(hit.node.Area); matched++; }
-                        else far = Mathf.Max(far, d);
-                    }
-                LastPrune += $"{g.name}: anchors {anchors.Count}, baked {matched}/{total} (worst miss {Mathf.Sqrt(far):0.0} m), areas kept {keep.Count}; ";
+                var keep = KeptAreas(g, anchors, out int matched, out int total, out float far);
+                LastPrune += $"{g.name}: anchors {anchors.Count}, baked {matched}/{total} (worst miss {far:0.0} m), areas kept {keep.Count}; ";
                 g.GetNodes(n => { if (n.Walkable && !keep.Contains(n.Area)) drop.Add(n); });
             }
             if (drop.Count == 0) return;
@@ -379,6 +351,60 @@ namespace PalaceMod.Builder.Level
             }));
             astar.FlushWorkItems();
             Log.For<BuilderManager>().Debug($"pruned {drop.Count} island nodes after the rescan");
+        }
+
+        /// <summary>The areas of a ground graph that are the map's real ground (what <see cref="PruneIslands"/> keeps),
+        /// or null when every area counts: no rescan in this scene (the bake has no islands), the fliers' graph,
+        /// off-map spaces, nothing to anchor on. A navmesh cut update (a building going up) rebuilds its tiles from
+        /// the last scan's mesh, islands included, so pruned rock and wall tops are walkable again until the next
+        /// scan; whatever places things on the graph checks this instead of trusting the nearest node.</summary>
+        public static HashSet<uint> RealAreas(NavGraph g)
+        {
+            if (g == null || AstarPath.active == null || g.name == AirGraph || g.name.StartsWith(Logic.Bodies.Spaces.Prefix)) return null;
+            if (bakedScene != UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle) return null;
+            var anchors = Anchors();
+            return anchors.Count == 0 ? null : KeptAreas(g, anchors, out _, out _, out _);
+        }
+
+        private static List<Vector3> Anchors()
+        {
+            var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            var anchors = new List<Vector3>();
+            var castle = CastleCenter.instance != null ? CastleCenter.instance.transform.position : PathCheck.Castle(scene);
+            if (castle != null) anchors.Add(castle.Value);
+            // On the host's ground a spawn point lies just off the walkable area, and its nearest node can be a rock top:
+            // there the bake's areas say what's real. On a flat field the lines' areas count.
+            if (GroundLayer.Flat)
+                foreach (var line in LayoutScene.Lines(scene).Where(LayoutScene.IsGroundLine))
+                    anchors.Add(LayoutScene.LineCenter(line.transform));
+            return anchors;
+        }
+
+        private static HashSet<uint> KeptAreas(NavGraph g, List<Vector3> anchors, out int matched, out int total, out float far)
+        {
+            var astar = AstarPath.active;
+            var nn = NearestNodeConstraint.Walkable;
+            nn.graphMask = GraphMask.FromGraph(g);
+            var keep = new HashSet<uint>();
+            foreach (var p in anchors)
+            {
+                var hit = astar.GetNearest(p, nn);
+                if (hit.node != null) keep.Add(hit.node.Area);
+            }
+            // The bake's own areas, unless the host's ground is replaced.
+            matched = 0; total = 0; far = 0f;
+            if (!GroundLayer.Flat && baked.TryGetValue(g.name, out var points))
+                foreach (var p in points)
+                {
+                    total++;
+                    var hit = astar.GetNearest(p, nn);
+                    if (hit.node == null) continue;
+                    float d = (hit.position - p).sqrMagnitude;
+                    if (d < 4f) { keep.Add(hit.node.Area); matched++; }
+                    else far = Mathf.Max(far, d);
+                }
+            far = Mathf.Sqrt(far);
+            return keep;
         }
 
         private static void ShowForScan(MeshRenderer r, List<System.Action> restore)

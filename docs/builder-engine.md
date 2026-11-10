@@ -1117,6 +1117,12 @@ Synchronous modifiers (not rules) run inside the game's own calls:
 - **Spawning enemies.** `spawn` and `spawnGroup` of enemy units go through `Spawn.AdjustEnemyParametersAfterSpawn`
   (perks, difficulty, elite) and the template-aware path that exists today, so they count toward the night like wave
   enemies.
+- **Where a spawned unit stands.** A unit from `spawn` stands on the nearest free node of its own graphs within 20 m
+  of `at` (`BodyNav.UnitGround`), and a `path` movement's waypoints snap the same way. Free: in one of the map's real
+  areas (`GroundGraphs.RealAreas`, what the post-scan island prune keeps) and not inside an Obstacle-layer collider. A
+  building's navmesh cut rebuilds its tiles from the last scan's mesh, so pruned rock, wall and boundary-wall islands
+  come back walkable until the next scan; without the check a point just off the map snapped onto one and the unit was
+  stuck inside the wall.
 
 ### Safety and performance limits
 

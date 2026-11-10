@@ -167,11 +167,9 @@ namespace PalaceMod.Builder.Logic.Bodies.Steering
                     var seeker = st.Go != null ? st.Go.GetComponent<Pathfinding.Seeker>() : null;
                     if (seeker != null && AstarPath.active != null)
                     {
-                        var nn = Pathfinding.NearestNodeConstraint.Walkable;
-                        nn.graphMask = seeker.graphMask;
                         for (int i = 0; i < st.PathPoints.Count; i++)
                         {
-                            var hit = AstarPath.active.GetNearest(st.PathPoints[i], nn);
+                            var hit = BodyNav.NearestFree(st.PathPoints[i], seeker.graphMask);
                             if (hit.node != null) st.PathPoints[i] = hit.position;
                         }
                     }
