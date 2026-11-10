@@ -119,6 +119,7 @@ namespace PalaceMod.Builder.Level
             var astar = AstarPath.active;
             if (astar == null) return -1;
             RememberBake();
+            islands.Clear(); // the rescan's own prune records them again
             var sw = Stopwatch.StartNew();
             long prepared = 0, ground = 0, airMs = 0, pruned = 0;
             var restore = new List<System.Action>();
@@ -174,6 +175,7 @@ namespace PalaceMod.Builder.Level
             var astar = AstarPath.active;
             if (astar == null) return -1;
             RememberBake();
+            ForgetIslands(areas); // the tiles it rebuilds: the update's own prune records them again
             var sw = Stopwatch.StartNew();
             long prepared = 0, updated = 0, pruned = 0;
             var restore = new List<System.Action>();
@@ -344,6 +346,13 @@ namespace PalaceMod.Builder.Level
                 g.GetNodes(n => { if (n.Walkable && !keep.Contains(n.Area)) drop.Add(n); });
             }
             if (drop.Count == 0) return;
+            foreach (var n in drop)
+            {
+                if (n is not TriangleMeshNode t) continue;
+                if (!islands.TryGetValue(n.GraphIndex, out var set)) islands[n.GraphIndex] = set = new IslandTris();
+                set.Add((Vector3)t.GetVertex(0), (Vector3)t.GetVertex(1), (Vector3)t.GetVertex(2));
+            }
+            islandScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle;
             astar.AddWorkItem(new AstarWorkItem(ctx =>
             {
                 foreach (var n in drop) n.Walkable = false;
@@ -353,11 +362,156 @@ namespace PalaceMod.Builder.Level
             Log.For<BuilderManager>().Debug($"pruned {drop.Count} island nodes after the rescan");
         }
 
+        /*
+            Keeping islands pruned through navmesh cuts. A building's NavmeshCut (placed, upgraded, destroyed; also the
+            Builder's own cuts) makes NavmeshUpdates rebuild its tiles from the tile's pre-cut copy of the scan's mesh,
+            which still has the islands, so every rebuilt node on a rock or wall top was walkable again. The prune
+            records the triangles it dropped; after each cut rebuild (BuilderLevelManager.CutReload_Patch, inside the
+            rebuild's work item) the rebuilt tiles' nodes whose centre lies on one are made unwalkable again. A cut only
+            splits or removes triangles, so a rebuilt island node always lies on a recorded one, and a node of the real
+            ground never does. Only after a prune in this scene (Builder levels; vanilla maps keep their bake, which has
+            no islands, and never prune).
+        */
+        private sealed class IslandTris
+        {
+            private const float Cell = 4f;
+            private readonly List<(Vector3 a, Vector3 b, Vector3 c)> tris = [];
+            private readonly Dictionary<long, List<int>> grid = [];
+            public int Count => tris.Count;
+
+            private static long Key(int x, int z) => ((long)x << 32) ^ (uint)z;
+
+            public void Add(Vector3 a, Vector3 b, Vector3 c)
+            {
+                int i = tris.Count;
+                tris.Add((a, b, c));
+                var min = Vector3.Min(a, Vector3.Min(b, c));
+                var max = Vector3.Max(a, Vector3.Max(b, c));
+                for (int x = Mathf.FloorToInt(min.x / Cell); x <= Mathf.FloorToInt(max.x / Cell); x++)
+                    for (int z = Mathf.FloorToInt(min.z / Cell); z <= Mathf.FloorToInt(max.z / Cell); z++)
+                    {
+                        long k = Key(x, z);
+                        if (!grid.TryGetValue(k, out var list)) grid[k] = list = [];
+                        list.Add(i);
+                    }
+            }
+
+            /// <summary>Whether p lies on a recorded triangle (in XZ, and within 1 m of its height).</summary>
+            public bool Contains(Vector3 p)
+            {
+                if (!grid.TryGetValue(Key(Mathf.FloorToInt(p.x / Cell), Mathf.FloorToInt(p.z / Cell)), out var list)) return false;
+                foreach (int i in list)
+                {
+                    var (a, b, c) = tris[i];
+                    float den = (b.z - c.z) * (a.x - c.x) + (c.x - b.x) * (a.z - c.z);
+                    if (Mathf.Abs(den) < 1e-6f) continue;
+                    float u = ((b.z - c.z) * (p.x - c.x) + (c.x - b.x) * (p.z - c.z)) / den;
+                    float v = ((c.z - a.z) * (p.x - c.x) + (a.x - c.x) * (p.z - c.z)) / den;
+                    float w = 1f - u - v;
+                    const float eps = -1e-3f;
+                    if (u < eps || v < eps || w < eps) continue;
+                    if (Mathf.Abs(u * a.y + v * b.y + w * c.y - p.y) < 1f) return true;
+                }
+                return false;
+            }
+
+            /// <summary>Drops the triangles whose centre is in one of these tiles.</summary>
+            public void Forget(NavmeshBase graph, List<IntRect> rects)
+            {
+                var kept = tris.Where(t =>
+                {
+                    var c = graph.GetTileCoordinates((t.a + t.b + t.c) / 3f);
+                    return !rects.Any(r => r.Contains(c.x, c.y));
+                }).ToList();
+                tris.Clear();
+                grid.Clear();
+                foreach (var (a, b, c) in kept) Add(a, b, c);
+            }
+        }
+
+        /// <summary>Before a recast graph update: forget the recorded islands of the tiles it rebuilds (its prune finds
+        /// them again there; elsewhere they are unwalkable already, so it wouldn't).</summary>
+        private static void ForgetIslands(Bounds[] areas)
+        {
+            if (AstarPath.active == null) return;
+            foreach (var g in AstarPath.active.data.graphs.OfType<RecastGraph>())
+            {
+                if (!islands.TryGetValue(g.graphIndex, out var set)) continue;
+                if (!g.useTiles || g.tileXCount * g.tileZCount <= 1) { islands.Remove(g.graphIndex); continue; }
+                float border = Traverse.Create(g).Property("TileBorderSizeInWorldUnits").GetValue<float>();
+                set.Forget(g, areas.Select(b => g.GetTouchingTiles(b, border)).ToList());
+            }
+        }
+
+        private static readonly Dictionary<uint, IslandTris> islands = [];
+        private static int islandScene = -1;
+
+        /// <summary>Re-prunes after cut rebuilds (dev): how many ran, nodes dropped by the last one, its cost.</summary>
+        public static int Reprunes, LastRepruneDropped;
+        public static double LastRepruneMs, MaxRepruneMs;
+
+        /// <summary>Dev A/B (`builder-level islands off`): cut rebuilds leave the islands walkable, as before.</summary>
+        public static bool RepruneOff;
+
+        /// <summary>Whether a cut rebuild of this graph needs re-pruning (the last prune in this scene dropped islands on it).</summary>
+        internal static bool HasIslands(NavmeshBase graph) =>
+            graph != null && islands.Count > 0 && islands.ContainsKey(graph.graphIndex)
+            && islandScene == UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle;
+
+        /// <summary>After a navmesh cut rebuilt these tiles of the graph (inside its work item): the nodes on recorded
+        /// islands go unwalkable again.</summary>
+        internal static void RepruneTiles(NavmeshBase graph, Vector2Int[] tiles)
+        {
+            if (RepruneOff || tiles == null || tiles.Length == 0 || !HasIslands(graph) || AstarPath.active == null || AstarPath.active.isScanning) return;
+            var set = islands[graph.graphIndex];
+            var sw = Stopwatch.StartNew();
+            int dropped = 0;
+            foreach (var c in tiles)
+            {
+                var tile = graph.GetTile(c.x, c.y);
+                if (tile?.nodes == null) continue;
+                foreach (var n in tile.nodes)
+                    if (n != null && n.Walkable && set.Contains((Vector3)n.position)) { n.Walkable = false; dropped++; }
+            }
+            sw.Stop();
+            Reprunes++;
+            LastRepruneDropped = dropped;
+            LastRepruneMs = sw.Elapsed.TotalMilliseconds;
+            MaxRepruneMs = System.Math.Max(MaxRepruneMs, LastRepruneMs);
+            Log.For<BuilderManager>().Debug($"navmesh cut rebuilt {tiles.Length} tile(s) of {graph.name}: {dropped} island nodes pruned again in {LastRepruneMs:0.00} ms");
+        }
+
+        /// <summary>Dev (`builder-level islands`): per ground graph, walkable nodes outside the real ground
+        /// (<see cref="RealAreas"/>) and on recorded islands.</summary>
+        public static string DescribeIslands()
+        {
+            var astar = AstarPath.active;
+            if (astar == null) return "no pathfinding";
+            var parts = new List<string>();
+            foreach (var g in astar.data.graphs)
+            {
+                if (g == null) continue;
+                var real = RealAreas(g);
+                if (real == null) continue;
+                islands.TryGetValue(g.graphIndex, out var set);
+                int walkable = 0, outside = 0, onIsland = 0;
+                g.GetNodes(n =>
+                {
+                    if (!n.Walkable) return;
+                    walkable++;
+                    if (!real.Contains(n.Area)) outside++;
+                    if (set != null && set.Contains((Vector3)n.position)) onIsland++;
+                });
+                parts.Add($"{g.name}: walkable {walkable}, outside real areas {outside}, on recorded islands {onIsland} (recorded {set?.Count ?? 0})");
+            }
+            return string.Join("\n", parts) + $"\nreprunes {Reprunes}, last dropped {LastRepruneDropped} in {LastRepruneMs:0.00} ms, max {MaxRepruneMs:0.00} ms";
+        }
+
         /// <summary>The areas of a ground graph that are the map's real ground (what <see cref="PruneIslands"/> keeps),
         /// or null when every area counts: no rescan in this scene (the bake has no islands), the fliers' graph,
         /// off-map spaces, nothing to anchor on. A navmesh cut update (a building going up) rebuilds its tiles from
-        /// the last scan's mesh, islands included, so pruned rock and wall tops are walkable again until the next
-        /// scan; whatever places things on the graph checks this instead of trusting the nearest node.</summary>
+        /// the last scan's mesh, islands included; <see cref="RepruneTiles"/> prunes them again in the same work item,
+        /// and whatever places things on the graph still checks this rather than trusting the nearest node.</summary>
         public static HashSet<uint> RealAreas(NavGraph g)
         {
             if (g == null || AstarPath.active == null || g.name == AirGraph || g.name.StartsWith(Logic.Bodies.Spaces.Prefix)) return null;

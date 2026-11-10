@@ -462,12 +462,22 @@ namespace PalaceMod.Builder.Logic
                 w.Raise("dusk", w.Level, null, instance.game.Night, null, null);
             }
 
-            public void OnDawn_BeforeSunrise() { }
+            // The day starts at BeforeSunrise (the game is in its day state from then); dawn and day rules run at
+            // AfterSunrise, sunriseTime later. Night has to count the coming night from the start, or for those seconds a
+            // day's per-day king action uses were still the previous day's (its period is Night and IsNight).
+            private int ended = -1;
+
+            public void OnDawn_BeforeSunrise()
+            {
+                ended = instance.game.Night;
+                instance.game.NightRunning = false;
+            }
 
             public void OnDawn_AfterSunrise()
             {
                 var w = World;
-                int ended = instance.game.Night;
+                int ended = this.ended >= 0 ? this.ended : instance.game.Night;
+                this.ended = -1;
                 instance.game.NightRunning = false;
                 if (w == null) return;
                 // Dawn order: income is paid (buildings' own dawn callbacks run before ours), then `dawn` rules.
