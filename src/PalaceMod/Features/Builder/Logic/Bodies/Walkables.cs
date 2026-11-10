@@ -30,6 +30,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             public NavmeshCut Hide;           // hides the deck's triangles while switched off
             public readonly Dictionary<string, (GameObject ghost, NavmeshCut hide)> Ghosts = [];
             public Vector3 Size;
+            public Vector2 Center;            // the deck's middle in the body's frame (x, z): off zero when clipped to its visual
             public string Pose;
             public bool InSpace;              // off the map: its own space graphs, no walls to open
             public bool Riding;               // a moving linked part: off the graphs (the parent walks under it)
@@ -128,9 +129,10 @@ namespace PalaceMod.Builder.Logic.Bodies
         public static void Add(BuilderBody body, BuilderMover mover)
         {
             var size = body.Box is Vector2 b ? new Vector3(b.x, 0.3f, b.y) : new Vector3(body.Radius * 2f, 0.3f, body.Radius * 2f);
-            var d = new Deck { Body = body, Size = size };
-            if (mover == null || mover.Poses.Count == 0) LiftOutOfGround(body, size);
-            d.Proxy = MakeDeck(body.transform, size, body.Height, collider: true);
+            var center = ClipToVisual(body, ref size);
+            var d = new Deck { Body = body, Size = size, Center = center };
+            if (mover == null || mover.Poses.Count == 0) LiftOutOfGround(body, size, center);
+            d.Proxy = MakeDeck(body.transform, size, center, body.Height, collider: true);
             d.Hide = MakeHide(d.Proxy, size);
             d.Hide.enabled = !body.isActiveAndEnabled;
             if (mover != null)
@@ -141,7 +143,7 @@ namespace PalaceMod.Builder.Logic.Bodies
                     var root = new GameObject($"PalaceBuilder pose {kv.Key} of {body.name}");
                     root.transform.SetPositionAndRotation(at, Quaternion.Euler(0f, rotY ?? body.transform.eulerAngles.y, 0f));
                     root.transform.localScale = body.transform.lossyScale;
-                    var ghost = MakeDeck(root.transform, size, body.Height, collider: false);
+                    var ghost = MakeDeck(root.transform, size, center, body.Height, collider: false);
                     var hide = MakeHide(ghost, size);
                     d.Ghosts[kv.Key] = (root, hide);
                     d.Tops.Add(new DeckOpenings.Top { Mesh = ghost });
@@ -160,12 +162,12 @@ namespace PalaceMod.Builder.Logic.Bodies
             decks.Add(d);
             DeckCarrier.Ensure();
             // Off the map: its own space graphs (fast); on the map: the host graphs' one coalesced scan.
-            var center = d.Ghosts.Count > 0 ? d.Ghosts.Values.First().ghost.transform.position : body.transform.position;
-            if (Spaces.Outside(center))
+            var where = d.Ghosts.Count > 0 ? d.Ghosts.Values.First().ghost.transform.position : body.transform.position;
+            if (Spaces.Outside(where))
             {
                 d.InSpace = true;
                 foreach (var g in d.Ghosts.Values) Spaces.Add(BodyVisual.Bounds(g.ghost));
-                if (d.Ghosts.Count == 0) Spaces.Add(new Bounds(body.transform.position + Vector3.up * body.Height, new Vector3(size.x, 1f, size.z) * body.transform.lossyScale.x));
+                if (d.Ghosts.Count == 0) Spaces.Add(new Bounds(d.Proxy.transform.TransformPoint(Vector3.up * 0.5f), new Vector3(size.x, 1f, size.z) * body.transform.lossyScale.x));
             }
             else if (settled && AstarPath.active != null) pendingAreas.Add(AreaOf(d));
             else RequestScan();
@@ -178,7 +180,7 @@ namespace PalaceMod.Builder.Logic.Bodies
         /// see a wall where it meets the bank. Such a deck is raised so its top is on the highest ground under it, which
         /// is how a bridge rests on its banks. Decks wholly over water or lower ground keep their height.
         /// </summary>
-        private static void LiftOutOfGround(BuilderBody body, Vector3 size)
+        private static void LiftOutOfGround(BuilderBody body, Vector3 size, Vector2 center)
         {
             var t = body.transform;
             float top = t.position.y + body.Height * t.lossyScale.y, highest = float.MinValue;
@@ -188,7 +190,7 @@ namespace PalaceMod.Builder.Logic.Bodies
             for (int i = 0; i <= nx; i++)
                 for (int j = 0; j <= nz; j++)
                 {
-                    var p = t.TransformPoint(new Vector3(-hx + size.x * i / nx, 0f, -hz + size.z * j / nz));
+                    var p = t.TransformPoint(new Vector3(center.x - hx + size.x * i / nx, 0f, center.y - hz + size.z * j / nz));
                     int n = Physics.RaycastNonAlloc(new Vector3(p.x, top + 40f, p.z), Vector3.down, hits, 120f, 1 << 6, QueryTriggerInteraction.Ignore);
                     for (int k = 0; k < n; k++)
                     {
@@ -218,11 +220,51 @@ namespace PalaceMod.Builder.Logic.Bodies
             return area;
         }
 
-        private static GameObject MakeDeck(Transform parent, Vector3 size, float top, bool collider)
+        /// <summary>
+        /// A deck is no wider or longer than the mesh that shows it: a body box larger than the visual (a 10 m box under
+        /// a 6 m bridge) made walkable ground over the water either side of the bridge, where units then walked. The
+        /// footprint is clipped to the visual's bounds in the body's frame; returns the clipped deck's middle (x, z).
+        /// Only for an explicit `visual.mesh` (an interactable's default marker isn't the deck's shape).
+        /// </summary>
+        private static Vector2 ClipToVisual(BuilderBody body, ref Vector3 size)
+        {
+            if (body.Entity?.Def?["visual"] is not Newtonsoft.Json.Linq.JObject v || string.IsNullOrEmpty((string)v["mesh"])) return Vector2.zero;
+            var vis = body.transform.Find(BodyVisual.ChildName);
+            if (vis == null) return Vector2.zero;
+            var t = body.transform;
+            float minX = float.MaxValue, maxX = float.MinValue, minZ = float.MaxValue, maxZ = float.MinValue;
+            foreach (var mf in vis.GetComponentsInChildren<MeshFilter>(true))
+            {
+                if (mf.sharedMesh == null) continue;
+                var mb = mf.sharedMesh.bounds;
+                for (int i = 0; i < 8; i++)
+                {
+                    var c = mb.center + Vector3.Scale(mb.extents, new Vector3((i & 1) == 0 ? -1 : 1, (i & 2) == 0 ? -1 : 1, (i & 4) == 0 ? -1 : 1));
+                    var l = t.InverseTransformPoint(mf.transform.TransformPoint(c));
+                    minX = Mathf.Min(minX, l.x); maxX = Mathf.Max(maxX, l.x);
+                    minZ = Mathf.Min(minZ, l.z); maxZ = Mathf.Max(maxZ, l.z);
+                }
+            }
+            if (minX > maxX) return Vector2.zero;
+            float x0 = Mathf.Max(-size.x / 2f, minX), x1 = Mathf.Min(size.x / 2f, maxX);
+            float z0 = Mathf.Max(-size.z / 2f, minZ), z1 = Mathf.Min(size.z / 2f, maxZ);
+            const float Slack = 0.25f, MinSide = 1f;
+            if (x1 - x0 < MinSide || z1 - z0 < MinSide)
+            {
+                Log.For<LogicBodiesManager>().Warn($"walkable {body.name}: its visual ({maxX - minX:0.0} x {maxZ - minZ:0.0} m) hardly overlaps its body box ({size.x:0.0} x {size.z:0.0} m); the deck keeps the box");
+                return Vector2.zero;
+            }
+            if (size.x - (x1 - x0) < Slack && size.z - (z1 - z0) < Slack) return Vector2.zero;
+            Log.For<LogicBodiesManager>().Info($"walkable {body.name}: body box {size.x:0.0} x {size.z:0.0} m is larger than its visual ({maxX - minX:0.0} x {maxZ - minZ:0.0} m); deck clipped to {x1 - x0:0.0} x {z1 - z0:0.0} m");
+            size = new Vector3(x1 - x0, size.y, z1 - z0);
+            return new Vector2((x0 + x1) / 2f, (z0 + z1) / 2f);
+        }
+
+        private static GameObject MakeDeck(Transform parent, Vector3 size, Vector2 center, float top, bool collider)
         {
             var go = new GameObject(LayoutScene.AddedPrefix + "walkable deck") { layer = 6 };
             go.transform.SetParent(parent, false);
-            go.transform.localPosition = new Vector3(0f, top - size.y / 2f, 0f);
+            go.transform.localPosition = new Vector3(center.x, top - size.y / 2f, center.y);
             go.transform.localScale = size;
             go.AddComponent<MeshFilter>().sharedMesh = Box();
             go.AddComponent<MeshRenderer>().forceRenderingOff = true;   // enabled for the graphs, never drawn
