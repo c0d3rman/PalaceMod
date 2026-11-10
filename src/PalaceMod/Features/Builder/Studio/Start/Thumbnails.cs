@@ -8,8 +8,8 @@ using UnityEngine;
 
 /*
     Map thumbnails for the start popup. A map that isn't loaded can't be pictured, and LevelInfo has no preview
-    picture, so each map's thumbnail is captured from above around its castle the first time the Studio opens it
-    (LevelCapture, before the empty base hides anything only on maps as they are) and cached as
+    picture, so each map's thumbnail is captured from above around its castle the first time it's played without a custom
+    level (LevelCapture) and cached as
     BepInEx/PalaceBuilder/cache/thumbs/<scene>.png. Maps without one show their name only.
 */
 namespace PalaceMod.Builder.Studio.Start
